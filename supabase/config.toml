@@ -1,0 +1,20 @@
+# Config minimale pour le déploiement des Edge Functions.
+# JWT projet en ES256 : la passerelle refusait les appels avec
+# UNAUTHORIZED_UNSUPPORTED_TOKEN_ALGORITHM tant que verify_jwt était true (défaut).
+# L’auth reste appliquée dans chaque fonction (Bearer + getUser + ownership).
+project_id = "gswtsnhmwjwhwjdiijbs"
+
+[functions.process-memory]
+verify_jwt = false
+
+[functions.delete-memory-assets]
+verify_jwt = false
+
+[functions.init-export]
+verify_jwt = false
+
+[functions.crm-prefill]
+verify_jwt = false
+
+[functions.crm-marketing-opt-in]
+verify_jwt = false

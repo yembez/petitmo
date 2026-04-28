@@ -1,0 +1,619 @@
+import type { Express, Request, Response } from 'express';
+import rateLimit from 'express-rate-limit';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { verifyExportTicket, type VerifiedExportTicket } from '../auth/exportPdfTicket';
+import { buildBookHtml } from '../pdf/htmlBook';
+import { countRenderedBookPages } from '../pdf/bookPageCount';
+import { htmlToDigitalPdfBuffer, htmlToPdfBuffer } from '../pdf/renderPdf';
+import { saveBookPdfAndSign, saveBookPdfForExportRequest } from '../pdf/pdfStorage';
+import { prepareQrTokensForBook, prepareQrTokensForExportRequest } from '../pdf/prepareQrForBook';
+import type { MemoryRow, ChildRow } from '../pdf/memoryRow';
+import type {
+  GenerateBookPdfPayload,
+  GenerateBookPdfResponse,
+  GuestMemoryForPdfPayload,
+} from '../types/contracts';
+
+const pdfLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 12,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many PDF requests' },
+});
+
+function getBearerToken(req: Request): string | null {
+  const h = req.headers.authorization;
+  if (!h || !/^Bearer\s+/i.test(h)) return null;
+  const t = h.replace(/^Bearer\s+/i, '').trim();
+  return t || null;
+}
+
+function isGuestMemoryList(x: unknown): x is GuestMemoryForPdfPayload[] {
+  if (!Array.isArray(x)) return false;
+  for (const i of x) {
+    if (!i || typeof i !== 'object') return false;
+    const o = i as Record<string, unknown>;
+    if (typeof o.id !== 'string' || !o.id.trim()) return false;
+    if (o.type !== 'voice' && o.type !== 'video' && o.type !== 'photo' && o.type !== 'text') return false;
+  }
+  return true;
+}
+
+function isGuestChild(x: unknown): x is { name: string; photo_url?: string | null } {
+  if (!x || typeof x !== 'object') return false;
+  const o = x as Record<string, unknown>;
+  return typeof o.name === 'string' && o.name.trim().length > 0;
+}
+
+function isPayload(body: unknown): body is GenerateBookPdfPayload {
+  if (!body || typeof body !== 'object') return false;
+  const b = body as Record<string, unknown>;
+  const guestMemOk = b.guestMemories === undefined || isGuestMemoryList(b.guestMemories);
+  const guestChildOk = b.guestChild === undefined || isGuestChild(b.guestChild);
+  return (
+    typeof b.bookId === 'string' &&
+    typeof b.childId === 'string' &&
+    typeof b.coverTitle === 'string' &&
+    typeof b.coverYearLabel === 'string' &&
+    typeof b.chapterTitle === 'string' &&
+    typeof b.qrBaseUrl === 'string' &&
+    (b.exportMode === 'digital' || b.exportMode === 'print') &&
+    (b.subscriptionTier === 'free' || b.subscriptionTier === 'premium') &&
+    Array.isArray(b.pages) &&
+    guestMemOk &&
+    guestChildOk
+  );
+}
+
+const PLACEHOLDER_CHILD_UUID = '00000000-0000-4000-8000-000000000001';
+
+function mapGuestMemories(list: GuestMemoryForPdfPayload[], exportRequestId: string): Map<string, MemoryRow> {
+  const map = new Map<string, MemoryRow>();
+  const now = new Date().toISOString();
+  for (const g of list) {
+    map.set(g.id, {
+      id: g.id,
+      child_id: PLACEHOLDER_CHILD_UUID,
+      user_id: exportRequestId,
+      type: g.type,
+      content: g.content ?? null,
+      media_url: g.media_url ?? null,
+      media_path: g.media_path ?? null,
+      edited_media_url: g.edited_media_url ?? null,
+      duration: g.duration ?? null,
+      thumbnail_url: g.thumbnail_url ?? null,
+      display_url: g.display_url ?? null,
+      print_url: g.print_url ?? null,
+      poster_url: g.poster_url ?? null,
+      poster_print_url: g.poster_print_url ?? null,
+      created_at: now,
+    });
+  }
+  return map;
+}
+
+export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient): void {
+  app.post('/v1/books/generate-pdf', pdfLimiter, async (req: Request, res: Response) => {
+    const body = req.body;
+    if (!isPayload(body)) {
+      res.status(400).json({ error: 'Invalid payload' });
+      return;
+    }
+
+    const bearer = getBearerToken(req);
+    if (!bearer) {
+      res.status(401).json({ error: 'Missing or invalid Authorization header' });
+      return;
+    }
+
+    const ticket = await verifyExportTicket(bearer);
+
+    if (ticket?.kind === 'pdf') {
+      await handleTicketPdf(res, supabase, body, ticket);
+      return;
+    }
+    if (ticket?.kind === 'print') {
+      await handleTicketPrintPdf(res, supabase, body, ticket);
+      return;
+    }
+
+    const { data: userData, error: authErr } = await supabase.auth.getUser(bearer);
+    if (authErr || !userData.user) {
+      res.status(401).json({ error: 'Invalid session' });
+      return;
+    }
+    const userId = userData.user.id;
+
+    if (body.exportMode === 'print') {
+      res.status(400).json({
+        error:
+          'Le mode impression (154×216 mm, fond perdu) n’est pas encore pris en charge sur cette route avec session. Utilise le flux commande imprimé (ticket export_print).',
+        code: 'PRINT_MODE_NOT_SUPPORTED_SESSION',
+      });
+      return;
+    }
+
+    if (body.subscriptionTier === 'free' && !body.digitalExportPaid) {
+      res.status(402).json({
+        error: 'Export digital : Petitmo+ ou achat à l’acte requis.',
+        code: 'EXPORT_PAYMENT_REQUIRED',
+      });
+      return;
+    }
+
+    const { childId } = body;
+    const { data: child, error: childErr } = await supabase
+      .from('children')
+      .select('id, user_id, name, photo_url')
+      .eq('id', childId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (childErr) {
+      console.error('[generate-pdf] child', childErr.message);
+      res.status(500).json({ error: 'Database error' });
+      return;
+    }
+    if (!child) {
+      res.status(403).json({ error: 'Child not found or access denied' });
+      return;
+    }
+
+    const memoryIds = [
+      ...new Set(
+        body.pages.flatMap((p): string[] => (typeof p.memoryId === 'string' && p.memoryId ? [p.memoryId] : []))
+      ),
+    ];
+
+    let memoriesById = new Map<string, MemoryRow>();
+
+    if (memoryIds.length > 0) {
+      const { data: memories, error: memErr } = await supabase
+        .from('memories')
+        .select(
+          'id, child_id, user_id, type, content, media_url, media_path, edited_media_url, duration, thumbnail_url, display_url, print_url, poster_url, poster_print_url, created_at'
+        )
+        .eq('child_id', childId)
+        .in('id', memoryIds);
+
+      if (memErr) {
+        console.error('[generate-pdf] memories', memErr.message);
+        res.status(500).json({ error: 'Database error' });
+        return;
+      }
+
+      const rows = (memories ?? []) as MemoryRow[];
+      memoriesById = new Map(rows.map(m => [m.id, m]));
+
+      for (const id of memoryIds) {
+        const m = memoriesById.get(id);
+        if (!m || m.user_id !== userId) {
+          res.status(400).json({ error: 'Unknown or inaccessible memory', memoryId: id });
+          return;
+        }
+      }
+    }
+
+    const qrResult = await prepareQrTokensForBook(supabase, {
+      userId,
+      childId,
+      bookId: body.bookId,
+      pages: body.pages,
+      memoriesById,
+      subscriptionTier: body.subscriptionTier,
+    });
+
+    if (!qrResult.ok) {
+      res.status(qrResult.status).json({ error: qrResult.message });
+      return;
+    }
+
+    const expectedPages = countRenderedBookPages(body.pages, memoriesById);
+    if (expectedPages < 1) {
+      res.status(400).json({ error: 'Aucune page livre à rendre (pages vides ou souvenirs manquants).' });
+      return;
+    }
+
+    const html = buildBookHtml({
+      coverTitle: body.coverTitle,
+      coverYearLabel: body.coverYearLabel,
+      chapterTitle: body.chapterTitle,
+      qrBaseUrl: body.qrBaseUrl,
+      exportMode: 'digital',
+      pages: body.pages,
+      child: child as ChildRow,
+      coverPhotoUrl: body.coverPhotoUrl ?? null,
+      memoriesById,
+      qrTokensByMemoryId: qrResult.tokensByMemoryId,
+    });
+
+    try {
+      const pdf = await htmlToDigitalPdfBuffer(html, expectedPages);
+      const saved = await saveBookPdfAndSign(supabase, {
+        userId,
+        childId,
+        bookId: body.bookId,
+        exportMode: 'digital',
+        subscriptionTier: body.subscriptionTier,
+        pdfBytes: pdf,
+      });
+      const out: GenerateBookPdfResponse = {
+        pdfUrlSigned: saved.pdfUrlSigned,
+        pdfStoragePath: saved.pdfStoragePath,
+      };
+      res.status(200).json(out);
+    } catch (e) {
+      console.error('[generate-pdf]', e);
+      res.status(500).json({ error: 'PDF generation or storage failed' });
+    }
+  });
+}
+
+type ExportRow = {
+  id: string;
+  crm_contact_id: string;
+  type: string;
+  export_mode: string;
+  status: string;
+  book_id: string;
+  subscription_tier: string;
+};
+
+async function handleTicketPdf(
+  res: Response,
+  supabase: SupabaseClient,
+  body: GenerateBookPdfPayload,
+  ticket: VerifiedExportTicket & { kind: 'pdf' }
+): Promise<void> {
+  if (!body.guestChild || !isGuestChild(body.guestChild)) {
+    res.status(400).json({ error: 'guestChild required for export ticket' });
+    return;
+  }
+  if (!body.guestMemories || !isGuestMemoryList(body.guestMemories)) {
+    res.status(400).json({ error: 'guestMemories required for export ticket' });
+    return;
+  }
+
+  if (body.bookId !== ticket.book_id) {
+    res.status(403).json({ error: 'bookId does not match ticket' });
+    return;
+  }
+
+  const { data: erow, error: exErr } = await supabase
+    .from('export_requests')
+    .select('id, crm_contact_id, type, export_mode, status, book_id, subscription_tier')
+    .eq('id', ticket.export_request_id)
+    .maybeSingle();
+
+  if (exErr) {
+    console.error('[generate-pdf] export_requests', exErr.message);
+    res.status(500).json({ error: 'Database error' });
+    return;
+  }
+
+  const row = erow as ExportRow | null;
+  if (!row || row.type !== 'pdf_export') {
+    res.status(404).json({ error: 'Export request not found' });
+    return;
+  }
+
+  if (row.crm_contact_id !== ticket.crm_contact_id || row.book_id !== ticket.book_id) {
+    res.status(403).json({ error: 'Ticket does not match export request' });
+    return;
+  }
+
+  if (row.export_mode !== body.exportMode) {
+    res.status(400).json({ error: 'exportMode does not match export request' });
+    return;
+  }
+
+  const tierOk =
+    (row.subscription_tier === 'paid' && body.subscriptionTier === 'premium') ||
+    (row.subscription_tier === 'free' && body.subscriptionTier === 'free');
+  if (!tierOk) {
+    res.status(400).json({ error: 'subscriptionTier does not match export request' });
+    return;
+  }
+
+  if (row.subscription_tier === 'free' && !body.digitalExportPaid) {
+    res.status(402).json({
+      error: 'Export digital : Petitmo+ ou achat à l’acte requis.',
+      code: 'EXPORT_PAYMENT_REQUIRED',
+    });
+    return;
+  }
+
+  if (row.status !== 'created') {
+    res.status(409).json({ error: 'Export request already used or in progress', code: 'EXPORT_STATE' });
+    return;
+  }
+
+  const memoryIds = [
+    ...new Set(
+      body.pages.flatMap((p): string[] => (typeof p.memoryId === 'string' && p.memoryId ? [p.memoryId] : []))
+    ),
+  ];
+
+  const memoriesById = mapGuestMemories(body.guestMemories, ticket.export_request_id);
+  for (const id of memoryIds) {
+    if (!memoriesById.has(id)) {
+      res.status(400).json({ error: 'guestMemories missing entry', memoryId: id });
+      return;
+    }
+  }
+
+  const expectedPagesTicket = countRenderedBookPages(body.pages, memoriesById);
+  if (expectedPagesTicket < 1) {
+    res.status(400).json({ error: 'Aucune page livre à rendre (pages vides ou souvenirs manquants).' });
+    return;
+  }
+
+  const { data: lockRows, error: lockErr } = await supabase
+    .from('export_requests')
+    .update({ status: 'rendering' })
+    .eq('id', ticket.export_request_id)
+    .eq('status', 'created')
+    .select('id');
+
+  if (lockErr) {
+    console.error('[generate-pdf] export lock', lockErr.message);
+    res.status(500).json({ error: 'Database error' });
+    return;
+  }
+  if (!lockRows?.length) {
+    res.status(409).json({ error: 'Export request already used or in progress', code: 'EXPORT_STATE' });
+    return;
+  }
+
+  const qrTier = row.subscription_tier === 'paid' ? 'premium' : 'free';
+  const qrResult = await prepareQrTokensForExportRequest(supabase, {
+    exportRequestId: ticket.export_request_id,
+    bookId: body.bookId,
+    pages: body.pages,
+    memoriesById,
+    subscriptionTier: qrTier,
+  });
+
+  if (!qrResult.ok) {
+    await supabase
+      .from('export_requests')
+      .update({ status: 'failed', last_error: qrResult.message.slice(0, 2000) })
+      .eq('id', ticket.export_request_id);
+    res.status(qrResult.status).json({ error: qrResult.message });
+    return;
+  }
+
+  const child: ChildRow = {
+    id: body.childId,
+    user_id: ticket.export_request_id,
+    name: body.guestChild.name,
+    photo_url: body.guestChild.photo_url ?? null,
+  };
+
+  const html = buildBookHtml({
+    coverTitle: body.coverTitle,
+    coverYearLabel: body.coverYearLabel,
+    chapterTitle: body.chapterTitle,
+    qrBaseUrl: body.qrBaseUrl,
+    exportMode: body.exportMode,
+    pages: body.pages,
+    child,
+    coverPhotoUrl: body.coverPhotoUrl ?? null,
+    memoriesById,
+    qrTokensByMemoryId: qrResult.tokensByMemoryId,
+  });
+
+  try {
+    const pdf =
+      body.exportMode === 'digital'
+        ? await htmlToDigitalPdfBuffer(html, expectedPagesTicket)
+        : await htmlToPdfBuffer(html);
+    const saved = await saveBookPdfForExportRequest(supabase, {
+      exportRequestId: ticket.export_request_id,
+      bookId: body.bookId,
+      exportMode: body.exportMode,
+      subscriptionPaid: row.subscription_tier === 'paid',
+      pdfBytes: pdf,
+    });
+
+    await supabase
+      .from('export_requests')
+      .update({
+        status: 'done',
+        pdf_storage_path: saved.pdfStoragePath,
+        last_error: null,
+      })
+      .eq('id', ticket.export_request_id);
+
+    const out: GenerateBookPdfResponse = {
+      pdfUrlSigned: saved.pdfUrlSigned,
+      pdfStoragePath: saved.pdfStoragePath,
+    };
+    res.status(200).json(out);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'PDF generation or storage failed';
+    console.error('[generate-pdf] ticket path', e);
+    await supabase
+      .from('export_requests')
+      .update({ status: 'failed', last_error: msg.slice(0, 2000) })
+      .eq('id', ticket.export_request_id);
+    res.status(500).json({ error: 'PDF generation or storage failed' });
+  }
+}
+
+/** Ticket `export_print` : PDF livre mode impression (fond perdu) pour commande `print_order`. */
+async function handleTicketPrintPdf(
+  res: Response,
+  supabase: SupabaseClient,
+  body: GenerateBookPdfPayload,
+  ticket: VerifiedExportTicket & { kind: 'print' }
+): Promise<void> {
+  if (!body.guestChild || !isGuestChild(body.guestChild)) {
+    res.status(400).json({ error: 'guestChild required for export ticket' });
+    return;
+  }
+  if (!body.guestMemories || !isGuestMemoryList(body.guestMemories)) {
+    res.status(400).json({ error: 'guestMemories required for export ticket' });
+    return;
+  }
+
+  if (body.bookId !== ticket.book_id) {
+    res.status(403).json({ error: 'bookId does not match ticket' });
+    return;
+  }
+
+  if (body.exportMode !== 'print') {
+    res.status(400).json({ error: 'exportMode must be print for print_order ticket' });
+    return;
+  }
+
+  const { data: erow, error: exErr } = await supabase
+    .from('export_requests')
+    .select('id, crm_contact_id, type, export_mode, status, book_id, subscription_tier')
+    .eq('id', ticket.export_request_id)
+    .maybeSingle();
+
+  if (exErr) {
+    console.error('[generate-pdf] export_requests', exErr.message);
+    res.status(500).json({ error: 'Database error' });
+    return;
+  }
+
+  const row = erow as ExportRow | null;
+  if (!row || row.type !== 'print_order') {
+    res.status(404).json({ error: 'Export request not found' });
+    return;
+  }
+
+  if (row.crm_contact_id !== ticket.crm_contact_id || row.book_id !== ticket.book_id) {
+    res.status(403).json({ error: 'Ticket does not match export request' });
+    return;
+  }
+
+  if (row.export_mode !== 'print') {
+    res.status(400).json({ error: 'export_mode does not match export request' });
+    return;
+  }
+
+  const tierOk =
+    (row.subscription_tier === 'paid' && body.subscriptionTier === 'premium') ||
+    (row.subscription_tier === 'free' && body.subscriptionTier === 'free');
+  if (!tierOk) {
+    res.status(400).json({ error: 'subscriptionTier does not match export request' });
+    return;
+  }
+
+  if (row.status !== 'created') {
+    res.status(409).json({ error: 'Export request already used or in progress', code: 'EXPORT_STATE' });
+    return;
+  }
+
+  const memoryIds = [
+    ...new Set(
+      body.pages.flatMap((p): string[] => (typeof p.memoryId === 'string' && p.memoryId ? [p.memoryId] : []))
+    ),
+  ];
+
+  const memoriesById = mapGuestMemories(body.guestMemories, ticket.export_request_id);
+  for (const id of memoryIds) {
+    if (!memoriesById.has(id)) {
+      res.status(400).json({ error: 'guestMemories missing entry', memoryId: id });
+      return;
+    }
+  }
+
+  if (countRenderedBookPages(body.pages, memoriesById) < 1) {
+    res.status(400).json({ error: 'Aucune page livre à rendre (pages vides ou souvenirs manquants).' });
+    return;
+  }
+
+  const { data: lockRows, error: lockErr } = await supabase
+    .from('export_requests')
+    .update({ status: 'rendering' })
+    .eq('id', ticket.export_request_id)
+    .eq('status', 'created')
+    .select('id');
+
+  if (lockErr) {
+    console.error('[generate-pdf] export lock (print)', lockErr.message);
+    res.status(500).json({ error: 'Database error' });
+    return;
+  }
+  if (!lockRows?.length) {
+    res.status(409).json({ error: 'Export request already used or in progress', code: 'EXPORT_STATE' });
+    return;
+  }
+
+  const qrTier = row.subscription_tier === 'paid' ? 'premium' : 'free';
+  const qrResult = await prepareQrTokensForExportRequest(supabase, {
+    exportRequestId: ticket.export_request_id,
+    bookId: body.bookId,
+    pages: body.pages,
+    memoriesById,
+    subscriptionTier: qrTier,
+  });
+
+  if (!qrResult.ok) {
+    await supabase
+      .from('export_requests')
+      .update({ status: 'failed', last_error: qrResult.message.slice(0, 2000) })
+      .eq('id', ticket.export_request_id);
+    res.status(qrResult.status).json({ error: qrResult.message });
+    return;
+  }
+
+  const child: ChildRow = {
+    id: body.childId,
+    user_id: ticket.export_request_id,
+    name: body.guestChild.name,
+    photo_url: body.guestChild.photo_url ?? null,
+  };
+
+  const html = buildBookHtml({
+    coverTitle: body.coverTitle,
+    coverYearLabel: body.coverYearLabel,
+    chapterTitle: body.chapterTitle,
+    qrBaseUrl: body.qrBaseUrl,
+    exportMode: 'print',
+    pages: body.pages,
+    child,
+    coverPhotoUrl: body.coverPhotoUrl ?? null,
+    memoriesById,
+    qrTokensByMemoryId: qrResult.tokensByMemoryId,
+  });
+
+  try {
+    const pdf = await htmlToPdfBuffer(html);
+    const saved = await saveBookPdfForExportRequest(supabase, {
+      exportRequestId: ticket.export_request_id,
+      bookId: body.bookId,
+      exportMode: 'print',
+      subscriptionPaid: true,
+      pdfBytes: pdf,
+    });
+
+    await supabase
+      .from('export_requests')
+      .update({
+        status: 'done',
+        pdf_storage_path: saved.pdfStoragePath,
+        last_error: null,
+      })
+      .eq('id', ticket.export_request_id);
+
+    const out: GenerateBookPdfResponse = {
+      pdfUrlSigned: saved.pdfUrlSigned,
+      pdfStoragePath: saved.pdfStoragePath,
+    };
+    res.status(200).json(out);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'PDF generation or storage failed';
+    console.error('[generate-pdf] ticket print path', e);
+    await supabase
+      .from('export_requests')
+      .update({ status: 'failed', last_error: msg.slice(0, 2000) })
+      .eq('id', ticket.export_request_id);
+    res.status(500).json({ error: 'PDF generation or storage failed' });
+  }
+}

@@ -1,0 +1,263 @@
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  TextInput,
+  Image,
+  KeyboardAvoidingView,
+  ScrollView,
+  Platform,
+  Alert,
+  ActivityIndicator,
+  useWindowDimensions,
+} from 'react-native';
+import { useState } from 'react';
+import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ImageIcon } from 'lucide-react-native';
+import * as ImagePicker from 'expo-image-picker';
+import { scale, verticalScale } from '@/utils/responsive';
+import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
+import { THEME } from '@/constants/theme';
+import { createChild, setSelectedChild } from '@/services/children';
+import DatePicker from '@/components/DatePicker';
+import PetitmoLogoManuscrit from '@/components/PetitmoLogoManuscrit';
+
+export default function CreateChildScreen() {
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { height: windowH } = useWindowDimensions();
+  const [childName, setChildName] = useState('');
+  const [birthDate, setBirthDate] = useState('');
+  const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
+
+  const handlePhotoUpload = async () => {
+    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (permissionResult.granted === false) {
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [4, 5],
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      setPhotoUri(result.assets[0].uri);
+    }
+  };
+
+  const handleContinue = async () => {
+    if (!childName.trim()) return;
+
+    try {
+      setIsCreating(true);
+
+      const child = await createChild(childName.trim(), birthDate, photoUri || undefined);
+
+      if (child) {
+        await setSelectedChild(child.id);
+        router.replace('/(tabs)');
+      } else {
+        Alert.alert('Erreur', 'Impossible de créer le profil de l\'enfant');
+      }
+    } catch (error) {
+      console.error('Error creating child:', error);
+      Alert.alert('Erreur', 'Une erreur est survenue');
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  return (
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={styles.container}
+    >
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={[
+          styles.scrollContent,
+          {
+            paddingTop: insets.top + verticalScale(20),
+            paddingBottom: Math.max(insets.bottom, verticalScale(16)) + verticalScale(32),
+            minHeight: windowH - insets.top - insets.bottom,
+          },
+        ]}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.logoContainer}>
+          <PetitmoLogoManuscrit width={scale(132)} height={scale(40)} />
+        </View>
+
+        <Text style={styles.title}>Créer le profil de votre enfant</Text>
+
+        <View style={styles.photoSection}>
+          {photoUri ? (
+            <TouchableOpacity onPress={handlePhotoUpload} activeOpacity={0.8}>
+              <Image source={{ uri: photoUri }} style={styles.photoPreview} />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              onPress={handlePhotoUpload}
+              style={styles.photoPlaceholder}
+              activeOpacity={0.8}
+            >
+              <ImageIcon size={ICON_SIZES.xl} color="#B8B2A8" strokeWidth={2} />
+            </TouchableOpacity>
+          )}
+
+          <TouchableOpacity onPress={handlePhotoUpload} activeOpacity={0.7}>
+            <Text style={styles.addPhotoText}>Ajouter une photo</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.formSection}>
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Prénom de l'enfant</Text>
+            <TextInput
+              style={styles.input}
+              value={childName}
+              onChangeText={setChildName}
+              placeholder="Prénom"
+              placeholderTextColor="#B8B2A8"
+              autoCapitalize="words"
+              autoCorrect={false}
+            />
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Date de naissance (optionnelle)</Text>
+            <DatePicker
+              value={birthDate}
+              onChange={setBirthDate}
+              placeholder="JJ/MM/AAAA"
+            />
+          </View>
+        </View>
+
+        <TouchableOpacity
+          style={[styles.ctaButton, (!childName.trim() || isCreating) && styles.ctaButtonDisabled]}
+          onPress={handleContinue}
+          disabled={!childName.trim() || isCreating}
+          activeOpacity={0.9}
+        >
+          {isCreating ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <Text style={[styles.ctaButtonText, !childName.trim() && styles.ctaButtonTextDisabled]}>
+              Continuer
+            </Text>
+          )}
+        </TouchableOpacity>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#fffffc',
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: SPACING.lg,
+    paddingBottom: verticalScale(40),
+  },
+  logoContainer: {
+    alignItems: 'center',
+    marginBottom: verticalScale(32),
+  },
+  title: {
+    fontSize: FONT_SIZES.xl,
+    fontWeight: '600',
+    color: '#5E7C88',
+    textAlign: 'center',
+    marginBottom: verticalScale(32),
+  },
+  photoSection: {
+    alignItems: 'center',
+    marginBottom: verticalScale(32),
+  },
+  photoPlaceholder: {
+    width: scale(112),
+    height: scale(112),
+    borderRadius: scale(56),
+    backgroundColor: THEME.bgScreen,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: verticalScale(16),
+  },
+  photoPreview: {
+    width: scale(112),
+    height: scale(112),
+    borderRadius: scale(56),
+    marginBottom: verticalScale(16),
+  },
+  addPhotoText: {
+    fontSize: FONT_SIZES.sm,
+    color: '#5E7C88',
+    fontWeight: '500',
+    marginBottom: verticalScale(8),
+  },
+  laterText: {
+    fontSize: scale(13),
+    color: '#B8B2A8',
+  },
+  formSection: {
+    marginBottom: verticalScale(48),
+  },
+  inputGroup: {
+    marginBottom: verticalScale(20),
+  },
+  label: {
+    fontSize: scale(13),
+    color: '#5E7C88',
+    fontWeight: '500',
+    marginBottom: verticalScale(8),
+  },
+  input: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+    borderRadius: scale(100),
+    paddingHorizontal: SPACING.md,
+    paddingVertical: verticalScale(14),
+    fontSize: FONT_SIZES.md,
+    color: '#5E7C88',
+  },
+  ctaButton: {
+    width: '100%',
+    backgroundColor: THEME.accent,
+    borderRadius: scale(100),
+    paddingVertical: verticalScale(16),
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  ctaButtonDisabled: {
+    backgroundColor: THEME.accent,
+    opacity: 0.4,
+  },
+  ctaButtonText: {
+    fontSize: FONT_SIZES.md,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  ctaButtonTextDisabled: {
+    color: '#FFFFFF',
+  },
+});

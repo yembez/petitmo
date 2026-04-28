@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <title>%WEB_TITLE%</title>
+    <!-- Fond immédiat : limite le flash blanc avant le JS (FOUC) -->
+    <style id="petitmo-boot">
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background-color: #f5f0ea;
+      }
+      body {
+        overflow: hidden;
+      }
+      #root {
+        display: flex;
+        height: 100%;
+        flex: 1;
+        background-color: #f5f0ea;
+      }
+    </style>
+    <!-- Reset recommandé react-native-web (aligné sur le template Expo) -->
+    <style id="expo-reset">
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        overflow: hidden;
+      }
+      #root {
+        display: flex;
+        height: 100%;
+        flex: 1;
+      }
+    </style>
+  </head>
+  <body>
+    <noscript>Activez JavaScript pour utiliser Petitmo.</noscript>
+    <!-- Obligatoire pour Expo / registerRootComponent sur le web -->
+    <div id="root"></div>
+  </body>
+</html>

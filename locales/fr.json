@@ -1,0 +1,8 @@
+{
+  "ios": {
+    "CFBundleDisplayName": "Petitmo"
+  },
+  "android": {
+    "app_name": "Petitmo"
+  }
+}

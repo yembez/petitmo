@@ -1,0 +1,15 @@
+# Railway : Root Directory = server/
+#
+# Variables :
+#   SUPABASE_URL
+#   SUPABASE_SERVICE_ROLE_KEY
+#   TRUST_PROXY=true (recommandé derrière le proxy Railway)
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "node dist/index.js"
+healthcheckPath = "/health"
+restartPolicyType = "ON_FAILURE"

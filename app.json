@@ -1,0 +1,84 @@
+{
+  "expo": {
+    "name": "Petitmo",
+    "slug": "petitmo",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/Logo_icon_heart_petitmo_squared.png",
+    "scheme": "petitmo",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/Splash_petitmo_2.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#D4784A"
+    },
+    "locales": {
+      "fr": "./locales/fr.json"
+    },
+    "ios": {
+      "bundleIdentifier": "com.petitmo.app",
+      "supportsTablet": true,
+      "infoPlist": {
+        "CFBundleAllowMixedLocalizations": true,
+        "CFBundleDevelopmentRegion": "fr",
+        "NSCameraUsageDescription": "Petitmo a besoin d'accéder à votre caméra pour capturer des photos et vidéos de vos moments précieux.",
+        "NSMicrophoneUsageDescription": "Petitmo a besoin d'accéder à votre microphone pour enregistrer la voix de votre enfant.",
+        "NSPhotoLibraryUsageDescription": "Petitmo a besoin d'accéder à vos photos pour importer des souvenirs existants.",
+        "NSLocationWhenInUseUsageDescription": "Petitmo utilise votre position pour enregistrer la ville ou la région avec chaque souvenir."
+      }
+    },
+    "android": {
+      "package": "com.petitmo.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/Logo_icon_1_transp_2.png",
+        "backgroundColor": "#D4784A"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-web-browser",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Petitmo a besoin d'accéder à votre caméra pour capturer des photos et vidéos de vos moments précieux."
+        }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Petitmo a besoin d'accéder à votre microphone pour enregistrer la voix de votre enfant."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Petitmo a besoin d'accéder à vos photos pour importer des souvenirs existants."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Petitmo utilise votre position pour enregistrer la ville ou la région avec chaque souvenir."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
