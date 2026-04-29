@@ -12,6 +12,10 @@ export async function resolveServerPdfEntitlements(): Promise<{
   subscriptionTier: SubscriptionTier;
   digitalExportPaid: boolean;
 }> {
+  // Dev ergonomics: permettre de tester l'export serveur (Hetzner) sans paywall / achat.
+  if (__DEV__) {
+    return { subscriptionTier: 'premium', digitalExportPaid: true };
+  }
   const tier = await getUserTier();
   if (tier === 'paid') {
     return { subscriptionTier: 'premium', digitalExportPaid: true };

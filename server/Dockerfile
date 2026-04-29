@@ -8,7 +8,8 @@ COPY src ./src
 RUN npm run build
 
 # Image Playwright : Chromium + dépendances système
-FROM mcr.microsoft.com/playwright:v1.49.1-jammy
+# Doit matcher la version Playwright du package.json pour que l'exécutable Chromium soit présent.
+FROM mcr.microsoft.com/playwright:v1.59.1-jammy
 WORKDIR /app
 ENV NODE_ENV=production
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \

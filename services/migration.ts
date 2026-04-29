@@ -256,7 +256,11 @@ async function legacyPatchMediaUrl(memory: Memory): Promise<void> {
   }
 }
 
-async function upgradeSingleMemory(memory: Memory): Promise<void> {
+/**
+ * Pousse un souvenir local vers Supabase (insert/merge + upload Storage) au besoin.
+ * Ne modifie pas le tier utilisateur : utile pour préparer un export livre.
+ */
+export async function ensureMemoryUploadedForCloud(memory: Memory): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return;
 
@@ -313,7 +317,7 @@ export async function upgradeToFullCloud(onProgress?: ProgressCallback): Promise
     });
 
     try {
-      await upgradeSingleMemory(memory);
+      await ensureMemoryUploadedForCloud(memory);
     } catch {
       /* on continue */
     }

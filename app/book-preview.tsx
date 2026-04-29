@@ -40,10 +40,11 @@ import {
   generateBookPdfViaServerAsGuest,
   isBookPdfServerConfigured,
   isInitExportConfigured,
-  validateGuestExportMedia,
 } from '@/services/bookPdfServer';
 import { GuestPdfExportModal } from '@/components/GuestPdfExportModal';
 import { parseFavoritePhotoUrls, mapPhotoUrlToThumb, getAllPhotoUrls } from '@/utils/memoryPhotos';
+import { runBookExportPrepInBackground } from '@/services/bookExportPrep';
+import { getBookExportPrepIssues } from '@/services/bookExportPrep';
 
 import type { Child, Memory } from '@/types/local';
 import { getUserTier } from '@/lib/userTier';
@@ -212,6 +213,13 @@ export default function BookPreviewScreen() {
     if (!child) return [];
     return buildBookPages(child, bookMemories);
   }, [child, bookMemories]);
+
+  // Préparation best-effort en fond: pousse les médias nécessaires + déclenche les dérivés pour l’export serveur.
+  useEffect(() => {
+    if (!isBookPdfServerConfigured()) return;
+    if (!child || pages.length === 0) return;
+    void runBookExportPrepInBackground({ pages, localEdits });
+  }, [child, localEdits, pages]);
 
   const pageRows = useMemo(
     () => pages.map((page, i) => ({ page, pageNum: i + 1 })),
@@ -793,13 +801,16 @@ export default function BookPreviewScreen() {
     async (exportMode: 'screen' | 'print') => {
       if (exporting || guestExportModalVisible || pages.length === 0 || !child) return;
       if (isBookPdfServerConfigured()) {
-        const can = await canExportBookPdfViaServer();
-        if (!can) {
-          router.push({
-            pathname: '/paywall',
-            params: { context: 'EXPORT_DIGITAL_PDF', childName: child.name },
-          });
-          return;
+        // En dev, on n'applique pas le paywall pour pouvoir tester l'export serveur (Hetzner).
+        if (!__DEV__) {
+          const can = await canExportBookPdfViaServer();
+          if (!can) {
+            router.push({
+              pathname: '/paywall',
+              params: { context: 'EXPORT_DIGITAL_PDF', childName: child.name },
+            });
+            return;
+          }
         }
       } else if (!__DEV__) {
         const tier = await getUserTier();
@@ -928,15 +939,22 @@ export default function BookPreviewScreen() {
           return;
         }
 
-        try {
-          validateGuestExportMedia({
-            pages,
-            localEdits: textEditsForPdf,
-            coverPhotoUrl,
-            child,
-          });
-        } catch (ve) {
-          Alert.alert('Export sans compte', ve instanceof Error ? ve.message : 'Médias non prêts');
+        const issues = getBookExportPrepIssues({
+          pages,
+          localEdits: textEditsForPdf,
+          coverPhotoUrl,
+          child,
+        });
+        // Session sans compte + photos: les photos locales seront uploadées via le serveur PDF après obtention du ticket.
+        // Donc on ne bloque ici que les cas audio/vidéo (QR) ou vignettes vidéo.
+        const blocking = issues.filter(i => i.kind === 'video_thumb_https' || i.kind === 'av_media_missing');
+        if (blocking.length > 0) {
+          void runBookExportPrepInBackground({ pages, localEdits: textEditsForPdf });
+          const detail = __DEV__ ? `\n\n(dev) blocage: ${blocking.map(b => b.kind).join(', ')}` : '';
+          Alert.alert(
+            'Export sans compte',
+            `Préparation des médias en cours.\n\nAttends quelques secondes puis réessaie. Si ça ne progresse pas, connecte-toi pour activer la synchronisation.${detail}`
+          );
           return;
         }
         if (!isInitExportConfigured()) {
@@ -1064,8 +1082,12 @@ export default function BookPreviewScreen() {
     router,
   ]);
 
-  const handleExportPdf = useCallback(() => {
+  const goToBookOrderPrint = useCallback(() => {
     if (exporting || guestExportSubmitting || !child) return;
+    const textEditsForPdf: Record<string, Partial<Memory>> = {};
+    for (const [id, e] of Object.entries(localEdits)) {
+      if (e.content !== undefined) textEditsForPdf[id] = { content: e.content };
+    }
     const memoryPageCountForOrder = pages.filter(
       p =>
         p.type === 'photo-full' ||
@@ -1075,30 +1097,54 @@ export default function BookPreviewScreen() {
         p.type === 'video'
     ).length;
     const avPageCountForOrder = pages.filter(p => p.type === 'audio' || p.type === 'video').length;
+    void setPendingBookOrderPdfPayload({
+      bookId: bookId ?? `draft-${child.id}`,
+      childId: child.id,
+      child,
+      coverPhotoUrl,
+      coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
+      coverYearLabel,
+      chapterTitle: chapterTitleLine ?? 'Notre histoire',
+      pages,
+      rotations,
+      photoCrops,
+      localEdits: textEditsForPdf,
+      exportMode: 'print',
+    });
+    router.push({
+      pathname: '/book-order',
+      params: {
+        bookId: bookId ?? `draft-${child.id}`,
+        childId: child.id,
+        memoryPageCount: String(memoryPageCountForOrder),
+        avPageCount: String(avPageCountForOrder),
+        exportMode: 'print',
+      },
+    });
+  }, [
+    bookId,
+    child,
+    chapterTitleLine,
+    coverPhotoUrl,
+    coverTitleLine,
+    coverYearLabel,
+    exporting,
+    guestExportSubmitting,
+    localEdits,
+    pages,
+    photoCrops,
+    rotations,
+    router,
+  ]);
+
+  const handleExportBook = useCallback(() => {
+    if (exporting || guestExportSubmitting || !child) return;
     Alert.alert('Exporter', 'Choisis un format.', [
       { text: 'Annuler', style: 'cancel' },
-      { text: 'PDF', onPress: () => void doExportPdf('screen') },
-      { text: 'PDF impression', onPress: () => void doExportPdf('print') },
-      {
-        text: 'Commander le PDF (formulaire)',
-        onPress: () => goToBookOrderPdf(),
-      },
-      {
-        text: 'Commander l’imprimé',
-        onPress: () =>
-          router.push({
-            pathname: '/book-order',
-            params: {
-              bookId: bookId ?? `draft-${child.id}`,
-              childId: child.id,
-              memoryPageCount: String(memoryPageCountForOrder),
-              avPageCount: String(avPageCountForOrder),
-              exportMode: 'print',
-            },
-          }),
-      },
+      { text: 'Livre PDF', onPress: () => goToBookOrderPdf() },
+      { text: 'Livre imprimé', onPress: () => goToBookOrderPrint() },
     ]);
-  }, [bookId, child?.id, doExportPdf, exporting, goToBookOrderPdf, guestExportSubmitting, pages, router]);
+  }, [child, exporting, goToBookOrderPdf, goToBookOrderPrint, guestExportSubmitting]);
 
   const onGuestExportSubmit = useCallback(
     async ({ email, marketingOptIn }: { email: string; marketingOptIn: boolean }) => {
@@ -1135,7 +1181,14 @@ export default function BookPreviewScreen() {
         await setLastGuestExportEmail(email);
         await shareBookPdf(localUri);
       } catch (e) {
-        Alert.alert('Erreur', e instanceof Error ? e.message : 'Export impossible');
+        if (e instanceof Error && e.message === 'PREP_NOT_READY') {
+          Alert.alert(
+            'Préparation des médias',
+            'Certains médias ne sont pas encore prêts pour l’export serveur.\n\nAttends quelques secondes puis réessaie. Si ça ne progresse pas, connecte-toi pour activer la synchronisation.'
+          );
+        } else {
+          Alert.alert('Erreur', e instanceof Error ? e.message : 'Export impossible');
+        }
       } finally {
         setGuestExportSubmitting(false);
         setExportProgress('');
@@ -1234,14 +1287,14 @@ export default function BookPreviewScreen() {
           {child.name} · {pages.length} pages
         </Text>
         <Pressable
-          onPress={() => void handleExportPdf()}
+          onPress={() => void handleExportBook()}
           hitSlop={12}
           style={[styles.headerCta, (exporting || guestExportSubmitting) && { opacity: 0.5 }]}
           disabled={exporting || guestExportSubmitting}
           accessibilityRole="button"
         >
           <Text style={[styles.headerCtaText, dm700 && { fontFamily: dm700 }]}>
-            {exporting || guestExportSubmitting ? 'Export…' : 'Exporter PDF'}
+            {exporting || guestExportSubmitting ? 'Export…' : 'Exporter'}
           </Text>
         </Pressable>
       </View>

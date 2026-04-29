@@ -25,8 +25,8 @@ import { initPrintOrderExport } from '@/services/printBookOrder';
 import { fetchCrmPrefillByEmail } from '@/services/crmEdge';
 import {
   generateBookPdfViaServerAsGuest,
-  validateGuestExportMedia,
 } from '@/services/bookPdfServer';
+import { getBookExportPrepIssues, runBookExportPrepInBackground } from '@/services/bookExportPrep';
 import {
   clearPendingBookOrderPdfPayload,
   getPendingBookOrderPdfPayload,
@@ -108,6 +108,7 @@ export default function BookOrderScreen() {
   const [pdfEntitled, setPdfEntitled] = useState({ premium: false, digitalPaid: false });
   const [blockedEmptyMemories, setBlockedEmptyMemories] = useState(false);
   const emptyBookAlertShownRef = useRef(false);
+  const [prepHint, setPrepHint] = useState<string | null>(null);
 
   const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');
@@ -318,6 +319,7 @@ export default function BookOrderScreen() {
 
     // PDF
     setSubmitting(true);
+    setPrepHint(null);
     try {
       const payload = await getPendingBookOrderPdfPayload();
       if (!payload) {
@@ -325,12 +327,27 @@ export default function BookOrderScreen() {
         return;
       }
 
-      validateGuestExportMedia({
+      // Préparation: si certains médias ne sont pas encore accessibles côté serveur, on déclenche une préparation
+      // best-effort (upload + dérivés) et on demande de réessayer.
+      const issues = getBookExportPrepIssues({
         pages: payload.pages,
         localEdits: payload.localEdits,
         coverPhotoUrl: payload.coverPhotoUrl,
         child: payload.child,
       });
+      // Session sans compte + photos: les photos locales seront uploadées via le serveur PDF après obtention du ticket.
+      // Donc on ne bloque ici que les cas audio/vidéo (QR) ou vignettes vidéo.
+      const blocking = issues.filter(i => i.kind === 'video_thumb_https' || i.kind === 'av_media_missing');
+      if (blocking.length > 0) {
+        setPrepHint('Préparation des médias en cours… (synchronisation)');
+        await runBookExportPrepInBackground({ pages: payload.pages, localEdits: payload.localEdits });
+        if (__DEV__) {
+          const kinds = blocking.map(b => b.kind).join(', ');
+          throw new Error(`PREP_NOT_READY: ${kinds}`);
+        }
+        throw new Error('PREP_NOT_READY');
+      }
+      setPrepHint(null);
 
       const wasEntitled = await canExportBookPdfViaServer();
       const pricePaid = wasEntitled ? 0 : DIGITAL_EXPORT_PDF_EUR;
@@ -357,6 +374,13 @@ export default function BookOrderScreen() {
     } catch (e) {
       if (e instanceof Error && e.message === 'EXPORT_PAYMENT_REQUIRED') {
         setFieldErrors({ submit: 'Achat requis (export PDF) ou compte non éligible.' });
+      } else if (e instanceof Error && (e.message === 'PREP_NOT_READY' || e.message.startsWith('PREP_NOT_READY:'))) {
+        setFieldErrors({
+          submit:
+            __DEV__ && e.message.startsWith('PREP_NOT_READY:')
+              ? `Préparation des médias requise (${e.message.replace('PREP_NOT_READY:', '').trim()}).\n\nTu m’as dit “photos only” : si tu vois av_media_missing ici, c’est qu’une page audio/vidéo est encore dans le livre.`
+              : 'Préparation des médias en cours. Attends quelques secondes puis réessaie (ou connecte-toi si la synchronisation est désactivée).',
+        });
       } else {
         setFieldErrors({ submit: e instanceof Error ? e.message : 'Export impossible.' });
       }
@@ -434,7 +458,7 @@ export default function BookOrderScreen() {
         </Pressable>
 
         <Text style={styles.title}>
-          {exportMode === 'print' ? 'Livre imprimé' : 'PDF numérique'}
+          {exportMode === 'print' ? 'Livre imprimé' : 'Livre PDF'}
         </Text>
         <Text style={styles.sub}>
           {bookTitle || 'Ton livre'} · {child?.name ?? 'Enfant'}
@@ -463,7 +487,7 @@ export default function BookOrderScreen() {
           </View>
         ) : (
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Export PDF (serveur)</Text>
+            <Text style={styles.cardTitle}>Livre PDF</Text>
             <Text style={styles.rowMuted}>
               {pdfEntitled.premium || pdfEntitled.digitalPaid
                 ? 'Inclus dans ton forfait ou achat actuel.'
@@ -472,6 +496,7 @@ export default function BookOrderScreen() {
             <Text style={styles.price}>
               {displayPriceEuros.toFixed(2).replace('.', ',')} € TTC
             </Text>
+            {prepHint ? <Text style={[styles.rowMuted, { marginTop: 8, color: '#B91C1C' }]}>{prepHint}</Text> : null}
           </View>
         )}
 
