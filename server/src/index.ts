@@ -5,6 +5,7 @@ import { registerQrRoutes } from './routes/qr';
 import { registerGeneratePdfRoute } from './routes/generatePdf';
 import { registerUploadGuestAssetsRoutes } from './routes/uploadGuestAssets';
 import { registerUploadGuestAssetRoute } from './routes/uploadGuestAsset';
+import { registerPublicMediaRoutes } from './routes/publicMedia';
 
 function main(): void {
   const env = loadEnv();
@@ -35,6 +36,7 @@ function main(): void {
 
   const supabase = createSupabaseAdmin(env.supabaseUrl, env.supabaseServiceRoleKey);
   registerQrRoutes(app, supabase);
+  registerPublicMediaRoutes(app, supabase);
   registerGeneratePdfRoute(app, supabase);
   registerUploadGuestAssetsRoutes(app, supabase);
   registerUploadGuestAssetRoute(app, supabase);

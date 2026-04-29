@@ -327,26 +327,14 @@ export default function BookOrderScreen() {
         return;
       }
 
-      // Préparation: si certains médias ne sont pas encore accessibles côté serveur, on déclenche une préparation
-      // best-effort (upload + dérivés) et on demande de réessayer.
-      const issues = getBookExportPrepIssues({
+      // Le flux guest gère désormais photo + audio + vidéo via upload vers le serveur PDF (ticket),
+      // donc on ne bloque plus ici sur des médias locaux (préparation best-effort uniquement).
+      void getBookExportPrepIssues({
         pages: payload.pages,
         localEdits: payload.localEdits,
         coverPhotoUrl: payload.coverPhotoUrl,
         child: payload.child,
       });
-      // Session sans compte + photos: les photos locales seront uploadées via le serveur PDF après obtention du ticket.
-      // Donc on ne bloque ici que les cas audio/vidéo (QR) ou vignettes vidéo.
-      const blocking = issues.filter(i => i.kind === 'video_thumb_https' || i.kind === 'av_media_missing');
-      if (blocking.length > 0) {
-        setPrepHint('Préparation des médias en cours… (synchronisation)');
-        await runBookExportPrepInBackground({ pages: payload.pages, localEdits: payload.localEdits });
-        if (__DEV__) {
-          const kinds = blocking.map(b => b.kind).join(', ');
-          throw new Error(`PREP_NOT_READY: ${kinds}`);
-        }
-        throw new Error('PREP_NOT_READY');
-      }
       setPrepHint(null);
 
       const wasEntitled = await canExportBookPdfViaServer();
@@ -375,12 +363,7 @@ export default function BookOrderScreen() {
       if (e instanceof Error && e.message === 'EXPORT_PAYMENT_REQUIRED') {
         setFieldErrors({ submit: 'Achat requis (export PDF) ou compte non éligible.' });
       } else if (e instanceof Error && (e.message === 'PREP_NOT_READY' || e.message.startsWith('PREP_NOT_READY:'))) {
-        setFieldErrors({
-          submit:
-            __DEV__ && e.message.startsWith('PREP_NOT_READY:')
-              ? `Préparation des médias requise (${e.message.replace('PREP_NOT_READY:', '').trim()}).\n\nTu m’as dit “photos only” : si tu vois av_media_missing ici, c’est qu’une page audio/vidéo est encore dans le livre.`
-              : 'Préparation des médias en cours. Attends quelques secondes puis réessaie (ou connecte-toi si la synchronisation est désactivée).',
-        });
+        setFieldErrors({ submit: 'Préparation des médias en cours. Attends quelques secondes puis réessaie.' });
       } else {
         setFieldErrors({ submit: e instanceof Error ? e.message : 'Export impossible.' });
       }

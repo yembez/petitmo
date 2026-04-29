@@ -6,7 +6,7 @@ import { buildBookHtml } from '../pdf/htmlBook';
 import { countRenderedBookPages } from '../pdf/bookPageCount';
 import { htmlToDigitalPdfBuffer, htmlToPdfBuffer } from '../pdf/renderPdf';
 import { saveBookPdfAndSign, saveBookPdfForExportRequest } from '../pdf/pdfStorage';
-import { prepareQrTokensForBook, prepareQrTokensForExportRequest } from '../pdf/prepareQrForBook';
+import { preparePublicTokensForBook, preparePublicTokensForExportRequest } from '../pdf/preparePublicTokens';
 import type { MemoryRow, ChildRow } from '../pdf/memoryRow';
 import type {
   GenerateBookPdfPayload,
@@ -195,7 +195,8 @@ export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient)
       }
     }
 
-    const qrResult = await prepareQrTokensForBook(supabase, {
+    const qrResult = await preparePublicTokensForBook({
+      supabase,
       userId,
       childId,
       bookId: body.bookId,
@@ -367,7 +368,8 @@ async function handleTicketPdf(
   }
 
   const qrTier = row.subscription_tier === 'paid' ? 'premium' : 'free';
-  const qrResult = await prepareQrTokensForExportRequest(supabase, {
+  const qrResult = await preparePublicTokensForExportRequest({
+    supabase,
     exportRequestId: ticket.export_request_id,
     bookId: body.bookId,
     pages: body.pages,
@@ -546,7 +548,8 @@ async function handleTicketPrintPdf(
   }
 
   const qrTier = row.subscription_tier === 'paid' ? 'premium' : 'free';
-  const qrResult = await prepareQrTokensForExportRequest(supabase, {
+  const qrResult = await preparePublicTokensForExportRequest({
+    supabase,
     exportRequestId: ticket.export_request_id,
     bookId: body.bookId,
     pages: body.pages,

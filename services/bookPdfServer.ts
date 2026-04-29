@@ -4,10 +4,11 @@
  */
 import { downloadAsync, documentDirectory, makeDirectoryAsync } from 'expo-file-system/legacy';
 import { readAsStringAsync, EncodingType } from 'expo-file-system/legacy';
+import { uploadAsync as uploadAsyncLegacy } from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { Platform } from 'react-native';
-import * as FileSystem from 'expo-file-system';
 import * as VideoThumbnails from 'expo-video-thumbnails';
+import { getInfoAsync } from 'expo-file-system/legacy';
 import type { BookPage } from '@/src/book/BookEngine';
 import type { Child, Memory } from '@/types/local';
 import type {
@@ -17,12 +18,18 @@ import type {
 } from '@/types/shared';
 import { supabase } from '@/lib/supabase';
 import { resolveServerPdfEntitlements } from '@/lib/digitalExportPurchase';
-import { isInitExportConfigured, postInitExport } from '@/services/initExportApi';
+import { isInitExportConfigured, postInitExport, postGuestUploadUrls } from '@/services/initExportApi';
 
 function pdfServerBaseUrl(): string | null {
   const raw = process.env.EXPO_PUBLIC_PDF_SERVER_URL?.trim();
   if (!raw) return null;
   return raw.replace(/\/$/, '');
+}
+
+function publicMediaBaseUrl(): string {
+  const raw = process.env.EXPO_PUBLIC_PUBLIC_MEDIA_BASE_URL?.trim();
+  const base = raw ? raw.replace(/\/$/, '') : 'https://petitmo.app/m';
+  return base;
 }
 
 export function isBookPdfServerConfigured(): boolean {
@@ -142,14 +149,23 @@ async function uploadGuestAssetMultipart(params: {
   localUri: string;
   filename: string;
 }): Promise<{ url: string; path: string }> {
-  // Expo SDK versions differ: `uploadAsync` expects an uploadType, but the enum is not always exported.
-  // Use a resilient value that works at runtime; TS is satisfied via `unknown` cast (no `any`).
-  const multipartUploadType =
-    (FileSystem as unknown as { FileSystemUploadType?: { MULTIPART?: unknown } }).FileSystemUploadType?.MULTIPART ??
-    'multipart';
-  const res = await FileSystem.uploadAsync(`${params.base}/v1/books/upload-guest-asset`, params.localUri, {
+  if (params.kind === 'video' || params.kind === 'audio') {
+    try {
+      const info = await getInfoAsync(params.localUri);
+      const size = info.exists && typeof (info as { size?: unknown }).size === 'number' ? (info as { size: number }).size : 0;
+      // Garde-fou UX: au-delà, on risque de timeouts + RAM côté serveur (memoryStorage).
+      const MAX = params.kind === 'video' ? 240 * 1024 * 1024 : 40 * 1024 * 1024;
+      if (size > MAX) {
+        throw new Error(params.kind === 'video' ? 'GUEST_VIDEO_TOO_LARGE' : 'GUEST_AUDIO_TOO_LARGE');
+      }
+    } catch (e) {
+      if (e instanceof Error) throw e;
+    }
+  }
+  // Expo SDK 54+: prefer legacy API to avoid deprecation warning in runtime.
+  const res = await uploadAsyncLegacy(`${params.base}/v1/books/upload-guest-asset`, params.localUri, {
     httpMethod: 'POST',
-    uploadType: multipartUploadType as unknown as number,
+    uploadType: 1 as unknown as number, // MULTIPART (legacy enum value)
     headers: {
       Authorization: `Bearer ${params.pdfTicket}`,
     },
@@ -171,6 +187,23 @@ async function uploadGuestAssetMultipart(params: {
   const j = JSON.parse(res.body || '{}') as { url?: string; path?: string };
   if (!j.url || !j.path) throw new Error('GUEST_UPLOAD_FAILED (invalid response)');
   return { url: j.url, path: j.path };
+}
+
+async function uploadFileToSignedUrl(params: {
+  signedUrl: string;
+  localUri: string;
+  mimeType: string;
+}): Promise<void> {
+  const res = await uploadAsyncLegacy(params.signedUrl, params.localUri, {
+    httpMethod: 'PUT',
+    uploadType: 0 as unknown as number, // BINARY_CONTENT (legacy enum value)
+    headers: {
+      'Content-Type': params.mimeType,
+    },
+  });
+  if (res.status < 200 || res.status >= 300) {
+    throw new Error(`SIGNED_UPLOAD_FAILED (${res.status}) ${res.body || ''}`.trim());
+  }
 }
 
 function httpsOrNull(u: string | null | undefined): string | null {
@@ -209,11 +242,9 @@ export function validateGuestExportMedia(params: {
       if (thumb && !isHttps(thumb)) {
         throw new Error('PREP_NOT_READY');
       }
-      const hasMedia = !!(m.media_path?.trim() || isHttps(m.media_url));
-      if (!hasMedia) throw new Error('PREP_NOT_READY');
+      // Export PDF non-bloquant AV: la page vidéo nécessite la vignette https, le média peut arriver plus tard.
     } else if (p.type === 'audio') {
-      const hasMedia = !!(m.media_path?.trim() || isHttps(m.media_url));
-      if (!hasMedia) throw new Error('PREP_NOT_READY');
+      // Export PDF non-bloquant AV: on n'exige pas que l'audio soit déjà uploadé.
     } else {
       const main = photoMainForGuest(m);
       if (main && !isHttps(main)) {
@@ -338,7 +369,8 @@ export async function generateBookPdfViaServer(input: GenerateBookPdfServerInput
     coverTitle: input.coverTitle,
     coverYearLabel: input.coverYearLabel,
     chapterTitle: input.chapterTitle,
-    qrBaseUrl: base,
+    // QR stable public : `https://petitmo.app/m/{token}` (pas le serveur PDF).
+    qrBaseUrl: publicMediaBaseUrl(),
     exportMode: input.exportMode === 'print' ? 'print' : 'digital',
     pages: mapBookPagesToServerPayload(
       input.pages,
@@ -451,7 +483,17 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
     throw new Error('Réponse init-export invalide (ticket manquant).');
   }
 
-  // Cover: si locale, uploader via route multipart guest et injecter l'URL https.
+  type SignedUploadRow = {
+    kind: 'cover' | 'photo' | 'audio' | 'video' | 'video_thumb';
+    memoryId: string | null;
+    bucket: string;
+    path: string;
+    signedUrl: string;
+    token?: string;
+    publicUrl?: string;
+  };
+
+  // Cover: si locale, upload direct Supabase (`media`) via signed URL et injecter l'URL publique.
   let coverPhotoUrlOut: string | null = input.coverPhotoUrl ?? null;
   const coverLocal = (coverPhotoUrlOut ?? '').trim();
   if (coverLocal && !isHttps(coverLocal) && Platform.OS !== 'web') {
@@ -461,15 +503,18 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
         [{ resize: { width: 1600 } }],
         { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG }
       );
-      const up = await uploadGuestAssetMultipart({
-        base,
-        pdfTicket,
-        kind: 'cover',
-        memoryId: 'cover',
-        localUri: manipulated?.uri || coverLocal,
-        filename: 'cover.jpg',
-      });
-      coverPhotoUrlOut = up.url;
+      const { status, json } = await postGuestUploadUrls({ pdfTicket, assets: [{ kind: 'cover' }] });
+      const row = (json as any)?.uploads?.[0] as SignedUploadRow | undefined;
+      if (status === 200 && row?.signedUrl && row.publicUrl) {
+        await uploadFileToSignedUrl({
+          signedUrl: row.signedUrl,
+          localUri: manipulated?.uri || coverLocal,
+          mimeType: 'image/jpeg',
+        });
+        coverPhotoUrlOut = row.publicUrl;
+      } else {
+        coverPhotoUrlOut = null;
+      }
     } catch {
       // fallback: pas de cover (placeholder)
       coverPhotoUrlOut = null;
@@ -482,24 +527,26 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
     memories.map(async m => {
       const g = memoryToGuestPayload(m);
       if (m.type === 'voice') {
-        const media = (m.media_url ?? '').trim();
-        if (media && isHttps(media)) return g;
+        // PDF non-bloquant audio: on peut uploader raw en fond pour le QR, sinon on laisse vide.
         const local = (m.local_original_path ?? m.local_media_path ?? '').trim();
-        if (!local) throw new Error('PREP_NOT_READY');
-        const up = await uploadGuestAssetMultipart({
-          base,
-          pdfTicket,
-          kind: 'audio',
-          memoryId: m.id,
-          localUri: local,
-          filename: 'audio.m4a',
-        });
-        return { ...g, media_url: up.url, media_path: up.path };
+        if (!local) return g;
+        try {
+          const { status, json } = await postGuestUploadUrls({
+            pdfTicket,
+            assets: [{ kind: 'audio', memoryId: m.id }],
+          });
+          const row = (json as any)?.uploads?.[0] as SignedUploadRow | undefined;
+          if (status === 200 && row?.signedUrl) {
+            await uploadFileToSignedUrl({ signedUrl: row.signedUrl, localUri: local, mimeType: 'audio/mp4' });
+            return { ...g, media_path: row.path };
+          }
+        } catch {
+          /* ignore */
+        }
+        return g;
       }
       if (m.type === 'video') {
-        const media = (m.media_url ?? '').trim();
         const local = (m.local_original_path ?? m.local_media_path ?? '').trim();
-        if (!local && !isHttps(media)) throw new Error('PREP_NOT_READY');
 
         // Thumbnail: générer si absent, puis upload
         let thumbLocal = (m.thumbnail_url ?? m.poster_url ?? '').trim();
@@ -507,46 +554,54 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
           // ok
         } else if (Platform.OS !== 'web') {
           try {
-            const { uri: t } = await VideoThumbnails.getThumbnailAsync(local || media, { time: 0, quality: 0.7 });
+            const { uri: t } = await VideoThumbnails.getThumbnailAsync(local, { time: 0, quality: 0.7 });
             thumbLocal = t;
           } catch {
             thumbLocal = '';
           }
         }
-        let thumbUp: { url: string; path: string } | null = null;
-        if (thumbLocal && !isHttps(thumbLocal)) {
-          const manipulated = await ImageManipulator.manipulateAsync(
-            thumbLocal,
-            [{ resize: { width: 1200 } }],
-            { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG }
-          );
-          thumbUp = await uploadGuestAssetMultipart({
-            base,
-            pdfTicket,
-            kind: 'video_thumb',
-            memoryId: m.id,
-            localUri: manipulated?.uri || thumbLocal,
-            filename: 'thumb.jpg',
-          });
+
+        // PDF: on a besoin d'une vignette https. Le fichier vidéo raw est optionnel (QR async).
+        let thumbPublicUrl: string | null = isHttps(thumbLocal) ? thumbLocal : null;
+        try {
+          const assets: Array<{ kind: string; memoryId?: string }> = [];
+          if (thumbLocal && !isHttps(thumbLocal)) assets.push({ kind: 'video_thumb', memoryId: m.id });
+          if (local) assets.push({ kind: 'video', memoryId: m.id });
+          if (assets.length) {
+            const { status, json } = await postGuestUploadUrls({ pdfTicket, assets });
+            const uploads = ((json as any)?.uploads ?? []) as SignedUploadRow[];
+            const thumbRow = uploads.find(u => u.kind === 'video_thumb');
+            const vidRow = uploads.find(u => u.kind === 'video');
+            if (status === 200 && thumbRow?.signedUrl && thumbRow.publicUrl && thumbLocal && !isHttps(thumbLocal)) {
+              const manipulated = await ImageManipulator.manipulateAsync(
+                thumbLocal,
+                [{ resize: { width: 1200 } }],
+                { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG }
+              );
+              await uploadFileToSignedUrl({
+                signedUrl: thumbRow.signedUrl,
+                localUri: manipulated?.uri || thumbLocal,
+                mimeType: 'image/jpeg',
+              });
+              thumbPublicUrl = thumbRow.publicUrl;
+            }
+            if (status === 200 && vidRow?.signedUrl && local) {
+              await uploadFileToSignedUrl({ signedUrl: vidRow.signedUrl, localUri: local, mimeType: 'video/mp4' });
+              return {
+                ...g,
+                thumbnail_url: thumbPublicUrl ?? g.thumbnail_url ?? null,
+                poster_url: thumbPublicUrl ?? g.poster_url ?? null,
+                media_path: vidRow.path,
+              };
+            }
+          }
+        } catch {
+          /* ignore */
         }
-        // Video: upload
-        if (media && isHttps(media) && m.media_path?.trim()) {
-          return { ...g, ...(thumbUp ? { thumbnail_url: thumbUp.url, poster_url: thumbUp.url } : {}) };
-        }
-        if (!local) throw new Error('PREP_NOT_READY');
-        const up = await uploadGuestAssetMultipart({
-          base,
-          pdfTicket,
-          kind: 'video',
-          memoryId: m.id,
-          localUri: local,
-          filename: 'video.mp4',
-        });
         return {
           ...g,
-          media_url: up.url,
-          media_path: up.path,
-          ...(thumbUp ? { thumbnail_url: thumbUp.url, poster_url: thumbUp.url } : {}),
+          thumbnail_url: thumbPublicUrl ?? g.thumbnail_url ?? null,
+          poster_url: thumbPublicUrl ?? g.poster_url ?? null,
         };
       }
       if (m.type !== 'photo') return g;
@@ -563,15 +618,18 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
         [{ resize: { width: 1600 } }],
         { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG }
       );
-      const up = await uploadGuestAssetMultipart({
-        base,
+      const { status, json } = await postGuestUploadUrls({
         pdfTicket,
-        kind: 'photo',
-        memoryId: m.id,
-        localUri: manipulated?.uri || local,
-        filename: 'photo.jpg',
+        assets: [{ kind: 'photo', memoryId: m.id }],
       });
-      return { ...g, print_url: up.url, display_url: up.url, media_url: up.url, media_path: up.path };
+      const row = (json as any)?.uploads?.[0] as SignedUploadRow | undefined;
+      if (status !== 200 || !row?.signedUrl || !row.publicUrl) throw new Error('PREP_NOT_READY');
+      await uploadFileToSignedUrl({
+        signedUrl: row.signedUrl,
+        localUri: manipulated?.uri || local,
+        mimeType: 'image/jpeg',
+      });
+      return { ...g, print_url: row.publicUrl, display_url: row.publicUrl, media_url: row.publicUrl, media_path: row.path };
     })
   );
   const payload: GenerateBookPdfPayload = {
@@ -581,7 +639,7 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
     coverTitle: input.coverTitle,
     coverYearLabel: input.coverYearLabel,
     chapterTitle: input.chapterTitle,
-    qrBaseUrl: base,
+    qrBaseUrl: publicMediaBaseUrl(),
     exportMode: input.exportMode === 'print' ? 'print' : 'digital',
     pages: mapBookPagesToServerPayload(
       input.pages,

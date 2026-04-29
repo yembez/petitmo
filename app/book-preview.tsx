@@ -939,24 +939,8 @@ export default function BookPreviewScreen() {
           return;
         }
 
-        const issues = getBookExportPrepIssues({
-          pages,
-          localEdits: textEditsForPdf,
-          coverPhotoUrl,
-          child,
-        });
-        // Session sans compte + photos: les photos locales seront uploadées via le serveur PDF après obtention du ticket.
-        // Donc on ne bloque ici que les cas audio/vidéo (QR) ou vignettes vidéo.
-        const blocking = issues.filter(i => i.kind === 'video_thumb_https' || i.kind === 'av_media_missing');
-        if (blocking.length > 0) {
-          void runBookExportPrepInBackground({ pages, localEdits: textEditsForPdf });
-          const detail = __DEV__ ? `\n\n(dev) blocage: ${blocking.map(b => b.kind).join(', ')}` : '';
-          Alert.alert(
-            'Export sans compte',
-            `Préparation des médias en cours.\n\nAttends quelques secondes puis réessaie. Si ça ne progresse pas, connecte-toi pour activer la synchronisation.${detail}`
-          );
-          return;
-        }
+        // Le flux guest gère désormais photo + audio + vidéo via upload vers le serveur PDF (ticket),
+        // donc on ne bloque plus ici sur des médias locaux.
         if (!isInitExportConfigured()) {
           Alert.alert(
             'Connexion ou configuration',

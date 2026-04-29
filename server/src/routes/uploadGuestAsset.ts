@@ -5,7 +5,9 @@ import { verifyExportTicket } from '../auth/exportPdfTicket';
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 110 * 1024 * 1024 }, // 110MB
+  // NOTE: memoryStorage charge le fichier en RAM. On limite quand même pour éviter OOM.
+  // Les vidéos trop lourdes doivent être refusées côté app (message UX) et/ou compressées.
+  limits: { fileSize: 260 * 1024 * 1024 }, // 260MB
 });
 
 function getBearerToken(req: Request): string | null {
@@ -36,7 +38,16 @@ function extFor(kind: AssetKind, originalName: string): { ext: string; contentTy
 }
 
 export function registerUploadGuestAssetRoute(app: Express, supabase: SupabaseClient): void {
-  app.post('/v1/books/upload-guest-asset', upload.single('file'), async (req: Request, res: Response) => {
+  app.post('/v1/books/upload-guest-asset', (req: Request, res: Response) => {
+    upload.single('file')(req, res, async err => {
+      if (err) {
+        if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+          res.status(413).json({ error: 'FILE_TOO_LARGE' });
+          return;
+        }
+        res.status(400).json({ error: 'UPLOAD_FAILED' });
+        return;
+      }
     const bearer = getBearerToken(req);
     if (!bearer) {
       res.status(401).json({ error: 'Missing or invalid Authorization header' });
@@ -100,6 +111,7 @@ export function registerUploadGuestAssetRoute(app: Express, supabase: SupabaseCl
       const msg = e instanceof Error ? e.message : 'Upload failed';
       res.status(500).json({ error: msg });
     }
+    });
   });
 }
 

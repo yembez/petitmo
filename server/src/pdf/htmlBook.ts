@@ -15,7 +15,7 @@ export type BuildBookHtmlInput = {
   child: ChildRow;
   coverPhotoUrl?: string | null;
   memoriesById: Map<string, MemoryRow>;
-  /** memoryId → token ; QR = `${qrBaseUrl}/q/${token}`. */
+  /** memoryId → token ; QR = `${qrBaseUrl}/${token}` (ex: https://petitmo.app/m/{token}). */
   qrTokensByMemoryId: Map<string, string>;
 };
 
@@ -353,12 +353,12 @@ function renderPage(page: BookPageServer, input: BuildBookHtmlInput, pageNum: nu
           return pageQuote(m, pageNum);
         case 'audio': {
           const tok = qrTokensByMemoryId.get(id) ?? '';
-          const qrTarget = tok ? `${qrBaseUrl}/q/${tok}` : '';
+          const qrTarget = tok ? `${qrBaseUrl}/${tok}` : '';
           return pageAudio(m, qrTarget, pageNum);
         }
         case 'video': {
           const tok = qrTokensByMemoryId.get(id) ?? '';
-          const qrTarget = tok ? `${qrBaseUrl}/q/${tok}` : '';
+          const qrTarget = tok ? `${qrBaseUrl}/${tok}` : '';
           return pageVideo(m, qrTarget, pageNum);
         }
         default:

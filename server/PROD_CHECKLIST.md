@@ -96,6 +96,40 @@ Attendu :
 - `pdfUrlSigned` (URL signée Supabase Storage)
 - `pdfStoragePath` (peut être `null` si fichier non persistant)
 
+#### 4.2bis) (Optionnel) Signer des URLs d’upload direct Storage (Edge `guest-upload-urls`)
+
+Pré-requis :
+
+- Déployer l’Edge Function `guest-upload-urls`
+- Dans Supabase: `verify_jwt = false` (dans `supabase/config.toml`)
+- Variables Edge:
+  - `EXPORT_PDF_JWT_SECRET`
+  - `SUPABASE_URL`
+  - `SUPABASE_SERVICE_ROLE_KEY`
+
+```bash
+curl -sS "<SUPABASE_URL>/functions/v1/guest-upload-urls" \\
+  -H "content-type: application/json" \\
+  -H "authorization: Bearer <SUPABASE_ANON_KEY>" \\
+  -H "apikey: <SUPABASE_ANON_KEY>" \\
+  --data '{
+    "pdfTicket":"<pdfTicket>",
+    "assets":[
+      { "kind":"cover" },
+      { "kind":"photo", "memoryId":"mem-1" },
+      { "kind":"audio", "memoryId":"mem-2" },
+      { "kind":"video_thumb", "memoryId":"mem-3" },
+      { "kind":"video", "memoryId":"mem-3" }
+    ]
+  }'
+```
+
+Attendu :
+
+- `uploads[]` avec `signedUrl` + `bucket` + `path`
+- Pour `cover/photo/video_thumb` : `publicUrl` (bucket `media`)
+- Pour `audio/video` : `token` (stable pour QR) + `path` raw (bucket `qr-media`)
+
 #### 4.3) Télécharger le PDF et vérifier qu’il s’ouvre
 
 ```bash

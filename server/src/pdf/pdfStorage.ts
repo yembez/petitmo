@@ -70,7 +70,9 @@ export type SaveExportRequestPdfParams = {
 };
 
 /**
- * PDF pour une ligne `export_requests` : chemin `exports/{id}/…` si payé, sinon `_tmp/exports/…`.
+ * PDF pour une ligne `export_requests`.
+ * - Si payé: chemin persistant par livre `books/{bookId}/pdf/{mode}.pdf`
+ * - Sinon: chemin temporaire `_tmp/exports/...`
  */
 export async function saveBookPdfForExportRequest(
   supabase: SupabaseClient,
@@ -83,7 +85,7 @@ export async function saveBookPdfForExportRequest(
   let persistentPath: string | null;
 
   if (subscriptionPaid) {
-    storagePath = `exports/${exportRequestId}/${modeSeg}.pdf`;
+    storagePath = `books/${bookId}/pdf/${modeSeg}.pdf`;
     persistentPath = storagePath;
   } else {
     storagePath = `_tmp/exports/${exportRequestId}/${bookId}-${modeSeg}-${randomUUID()}.pdf`;

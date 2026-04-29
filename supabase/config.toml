@@ -13,6 +13,9 @@ verify_jwt = false
 [functions.init-export]
 verify_jwt = false
 
+[functions.guest-upload-urls]
+verify_jwt = false
+
 [functions.crm-prefill]
 verify_jwt = false
 
