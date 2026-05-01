@@ -4,3 +4,10 @@
  */
 export const DIGITAL_PAGE_WIDTH_MM = 148;
 export const DIGITAL_PAGE_HEIGHT_MM = 210;
+
+/** Impression : fond perdu 3 mm autour du fond de coupe 154×216 mm. */
+export const PRINT_BLEED_MM = 3;
+export const PRINT_TRIM_WIDTH_MM = 154;
+export const PRINT_TRIM_HEIGHT_MM = 216;
+export const PRINT_PAGE_WIDTH_MM = PRINT_TRIM_WIDTH_MM + 2 * PRINT_BLEED_MM;
+export const PRINT_PAGE_HEIGHT_MM = PRINT_TRIM_HEIGHT_MM + 2 * PRINT_BLEED_MM;

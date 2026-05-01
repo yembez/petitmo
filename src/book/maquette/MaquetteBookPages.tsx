@@ -20,11 +20,7 @@ import { EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
 import { Video, ResizeMode } from 'expo-av';
 import type { BookPage } from '@/src/book/BookEngine';
 import type { Child, Memory } from '@/types/local';
-import PetitmoLogoManuscrit, {
-  PETITMO_LOGO_VIEWBOX,
-} from '@/components/PetitmoLogoManuscrit';
 import { formatDuration } from '@/utils/date';
-import { scale } from '@/utils/responsive';
 import { splitPhotoNoteTitleBody, splitVideoTitleBody } from '@/src/book/bookTextParts';
 import type { PhotoCrop } from '@/src/book/photoCrop';
 import {
@@ -414,9 +410,6 @@ function MaquetteCover({
   const y = new Date().getFullYear();
   const periodLine = bookYearLabel || `${y - 1} – ${y}`;
 
-  const footerLogoW = Math.min(scale(39), width * 0.182);
-  const footerLogoH = footerLogoW * (PETITMO_LOGO_VIEWBOX.height / PETITMO_LOGO_VIEWBOX.width);
-
   const canPickCover = !!onPressCoverPhoto;
   const canCropCover = !!onRequestBookCrop && !!photoUri;
 
@@ -460,10 +453,6 @@ function MaquetteCover({
         </Pressable>
         <Text style={[styles.coverYears, dm400 && { fontFamily: dm400 }]}>{periodLine}</Text>
         <View style={styles.coverHairline} />
-        <View style={styles.coverFooterRow}>
-          <Text style={[styles.coverFooter, dm400 && { fontFamily: dm400 }]}>Créé avec </Text>
-          <PetitmoLogoManuscrit width={footerLogoW} height={footerLogoH} color={INK} />
-        </View>
       </View>
     </View>
   );
@@ -503,7 +492,7 @@ function MaquettePhotoSimple({
   garamondIt?: string;
 }) {
   const uri = getPrimaryPhotoUriForBookPreview(memory);
-  const title = (memory.content ?? '').trim() || 'Sans titre';
+  const caption = (memory.content ?? '').trim();
   const imgH = height * 0.82;
 
   return (
@@ -536,15 +525,17 @@ function MaquettePhotoSimple({
         accessibilityRole="button"
       >
         <Text style={[styles.photoDate, dm400 && { fontFamily: dm400 }]}>{dateFrCaps(memory.created_at)}</Text>
-        <Text
-          style={[
-            styles.photoCaption,
-            garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
-          ]}
-          numberOfLines={3}
-        >
-          {romanParagraphs(title)}
-        </Text>
+        {caption.length > 0 ? (
+          <Text
+            style={[
+              styles.photoCaption,
+              garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
+            ]}
+            numberOfLines={3}
+          >
+            {romanParagraphs(caption)}
+          </Text>
+        ) : null}
       </Pressable>
       <Folio n={pageNum} dm400={dm400} />
     </View>
@@ -751,56 +742,56 @@ function MaquetteQuote({
       onPress={onRequestTextEdit}
       accessibilityRole="button"
     >
-      <View style={[styles.quoteHeader, { paddingHorizontal: pad }]}>
-        <View style={styles.quoteHeaderLeft}>
-          <View style={styles.sageDot} />
-          <Text style={[styles.quoteLabel, dm600 ? { fontFamily: dm600 } : { fontWeight: '600' }]}>
-            Petits mots
+      <View style={[styles.quoteScreenCol, { paddingHorizontal: pad }]}>
+        <View style={styles.quoteHeader}>
+          <View style={styles.quoteHeaderLeft}>
+            <View style={styles.sageDot} />
+            <Text style={[styles.quoteLabel, dm600 ? { fontFamily: dm600 } : { fontWeight: '600' }]}>
+              Petits mots
+            </Text>
+          </View>
+        </View>
+        <View style={styles.quoteMid}>
+          <Text
+            style={[
+              styles.quoteMark,
+              fitLevel === 2 ? styles.quoteMarkFit2 : fitLevel === 1 ? styles.quoteMarkFit1 : null,
+              garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
+            ]}
+          >
+            {'\u201C'}
+          </Text>
+          <View
+            style={{
+              paddingHorizontal: 8,
+              overflow: 'hidden',
+            }}
+          >
+            <Text
+              style={[
+                bodyStyle,
+                garamondIt ? { fontFamily: garamondIt } : dmItalic ? { fontFamily: dmItalic } : { fontStyle: 'italic' },
+              ]}
+            >
+              {romanParagraphs(body)}
+            </Text>
+          </View>
+        </View>
+        <View style={styles.quoteFooter}>
+          <View style={styles.quoteRuleRow}>
+            <View style={styles.quoteRuleSeg} />
+            <View style={styles.quoteRuleDot} />
+            <View style={styles.quoteRuleSeg} />
+          </View>
+          <Text style={[styles.quoteTime, dm400 && { fontFamily: dm400 }]}>
+            {new Date(memory.created_at).toLocaleDateString('fr-FR', {
+              day: 'numeric',
+              month: 'long',
+              year: 'numeric',
+            })}{' '}
+            · {time}
           </Text>
         </View>
-      </View>
-      <Text
-        style={[
-          styles.quoteMark,
-          fitLevel === 2 ? styles.quoteMarkFit2 : fitLevel === 1 ? styles.quoteMarkFit1 : null,
-          garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
-        ]}
-      >
-        {'\u201C'}
-      </Text>
-      <View
-        style={{
-          flex: 1,
-          justifyContent: 'flex-start',
-          paddingHorizontal: pad + 8,
-          paddingRight: pad,
-          paddingTop: fitLevel === 2 ? 6 : fitLevel === 1 ? 10 : 14,
-          overflow: 'hidden',
-        }}
-      >
-        <Text
-          style={[
-            bodyStyle,
-            garamondIt ? { fontFamily: garamondIt } : dmItalic ? { fontFamily: dmItalic } : { fontStyle: 'italic' },
-          ]}
-        >
-          {romanParagraphs(body)}
-        </Text>
-      </View>
-      <View style={[styles.quoteFooter, { paddingHorizontal: pad }]}>
-        <View style={styles.quoteRuleRow}>
-          <View style={styles.quoteRuleSeg} />
-          <View style={styles.quoteRuleDot} />
-          <View style={styles.quoteRuleSeg} />
-        </View>
-        <Text style={[styles.quoteTime, dm400 && { fontFamily: dm400 }]}>
-          {new Date(memory.created_at).toLocaleDateString('fr-FR', {
-            day: 'numeric',
-            month: 'long',
-            year: 'numeric',
-          })}{' '}
-          · {time}
-        </Text>
       </View>
       <Folio n={pageNum} dm400={dm400} />
     </Pressable>
@@ -834,7 +825,7 @@ function MaquetteAudio({
   const totalSec = memory.duration ?? 0;
   const durLabel = formatDuration(Math.max(0, Math.floor(totalSec)));
   const waveW = BAR_COUNT * BAR_W + (BAR_COUNT - 1) * BAR_GAP;
-  const title = (memory.content ?? '').trim() || 'Sans titre';
+  const titleRaw = (memory.content ?? '').trim();
   const qrSize = Math.min(120, width * 0.28);
   const coverUri = getVoiceCoverUriForBookPreview(memory);
 
@@ -880,16 +871,18 @@ function MaquetteAudio({
             <Text style={[styles.audioDur, dm400 && { fontFamily: dm400 }]}>0:00</Text>
             <Text style={[styles.audioDur, dm400 && { fontFamily: dm400 }]}>{durLabel}</Text>
           </View>
-          <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
-            <Text
-              style={[
-                styles.audioTitle,
-                garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
-              ]}
-            >
-              {romanParagraphs(title)}
-            </Text>
-          </Pressable>
+          {titleRaw.length > 0 ? (
+            <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
+              <Text
+                style={[
+                  styles.audioTitle,
+                  garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
+                ]}
+              >
+                {romanParagraphs(titleRaw)}
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
       </View>
       <View style={styles.audioQrBlock}>
@@ -1016,19 +1009,6 @@ const styles = StyleSheet.create({
     backgroundColor: LINE,
     width: '100%',
   },
-  coverFooter: {
-    fontSize: 11,
-    color: MUTED,
-  },
-  coverFooterRow: {
-    width: '100%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    flexWrap: 'wrap',
-    marginTop: 12,
-    gap: scale(4),
-  },
   chapterCenter: {
     flex: 1,
     justifyContent: 'center',
@@ -1130,11 +1110,24 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     textAlign: 'justify' as const,
   },
+  quoteScreenCol: {
+    flex: 1,
+    flexDirection: 'column',
+    minHeight: 0,
+    width: '100%',
+  },
   quoteHeader: {
     flexDirection: 'row',
     justifyContent: 'flex-start',
     alignItems: 'center',
     paddingTop: 16,
+    flexShrink: 0,
+  },
+  quoteMid: {
+    flex: 1,
+    justifyContent: 'center',
+    minHeight: 0,
+    overflow: 'hidden',
   },
   quoteHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   sageDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: SAGE },
@@ -1175,7 +1168,7 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     textAlign: 'justify' as const,
   },
-  quoteFooter: { width: '100%', paddingBottom: 36 },
+  quoteFooter: { width: '100%', paddingBottom: 36, flexShrink: 0, marginTop: 'auto' },
   quoteRuleRow: {
     flexDirection: 'row',
     alignItems: 'center',

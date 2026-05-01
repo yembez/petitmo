@@ -1,4 +1,10 @@
-import { DIGITAL_PAGE_HEIGHT_MM, DIGITAL_PAGE_WIDTH_MM } from '../constants/pdfDigitalSpec';
+import {
+  DIGITAL_PAGE_HEIGHT_MM,
+  DIGITAL_PAGE_WIDTH_MM,
+  PRINT_PAGE_HEIGHT_MM,
+  PRINT_PAGE_WIDTH_MM,
+  PRINT_BLEED_MM,
+} from '../constants/pdfDigitalSpec';
 import type { BookPageServer } from '../types/contracts';
 import { splitVideoTitleBody } from './bookTextParts';
 import type { ChildRow, MemoryRow } from './memoryRow';
@@ -9,7 +15,6 @@ import {
   normalizeQuoteBodyLikeMaquette,
   quoteFitLevelFromBody,
 } from './maquetteAlign';
-import { PETITMO_LOGO_MANUSCRIT_XML_INK } from './petitmoLogoManuscritInk';
 
 const EM = '\u2003';
 
@@ -128,31 +133,19 @@ function photoMainUrl(m: MemoryRow): string {
   ).trim();
 }
 
-function embedLogoSvgInk(widthMm: string, heightMm: string): string {
-  let s = PETITMO_LOGO_MANUSCRIT_XML_INK.replace(/^\s*<\?xml[^>]*>\s*/i, '');
-  s = s.replace(/<svg(\s[^>]*)?>/i, (_m, attrs = '') => {
-    const a = String(attrs)
-      .replace(/\s+width="[^"]*"/gi, '')
-      .replace(/\s+height="[^"]*"/gi, '');
-    return `<svg${a} width="${widthMm}mm" height="${heightMm}mm" style="display:block;flex-shrink:0;">`;
-  });
-  return s;
-}
-
 function pageCover(
   child: ChildRow,
   coverPhotoUrl: string | null | undefined,
   title: string,
   yearLabel: string,
   crop: PhotoCrop | undefined,
-  pageWmm: number
+  printBleed: boolean
 ): string {
-  const logoW = (pageWmm * 0.182).toFixed(2);
-  const logoH = (pageWmm * 0.182 * (181.79358 / 319.62595)).toFixed(2);
   const explicit = (coverPhotoUrl ?? '').trim();
   const src = explicit ? imgAttr(explicit) : imgAttr(child.photo_url);
+  const bleedCls = printBleed ? ' bleed-x' : '';
   return `<div class="page cover">
-  <div class="cover-photo">
+  <div class="cover-photo${bleedCls}">
     ${
       src
         ? `<div class="crop-frame" style="width:100%;height:100%;"><img class="crop-img" src="${src}" alt="" style="${cropCss(crop)}" /></div>`
@@ -163,10 +156,6 @@ function pageCover(
     <div class="cover-title">${esc(title)}</div>
     <div class="cover-period">${esc(yearLabel)}</div>
     <div class="cover-hairline"></div>
-    <div class="cover-footer-row">
-      <span class="cover-footer-text">Créé avec </span>
-      ${embedLogoSvgInk(logoW, logoH)}
-    </div>
   </div>
 </div>`;
 }
@@ -183,13 +172,14 @@ function pageChapter(month: string, chapterNum: number, chapterTitle: string, pa
 </div>`;
 }
 
-function pagePhotoFull(m: MemoryRow, rot: number, pageNum: number, crop: PhotoCrop | undefined, _printBleed: boolean): string {
+function pagePhotoFull(m: MemoryRow, rot: number, pageNum: number, crop: PhotoCrop | undefined, printBleed: boolean): string {
   const src = imgAttr(photoMainUrl(m));
-  const title = sanitizeText((m.content ?? '').trim()) || 'Sans titre';
+  const captionRaw = sanitizeText((m.content ?? '').trim());
   const rotCss = rot ? `transform: rotate(${rot}deg); transform-origin: center;` : '';
-  const captionHtml = romanHtml(title);
+  const captionHtml = captionRaw ? romanHtml(captionRaw) : '';
+  const imgCls = printBleed ? 'pf-image bleed-x' : 'pf-image';
   return `<div class="page photo-full-stack">
-  <div class="pf-image">
+  <div class="${imgCls}">
     ${
       src
         ? `<div class="crop-frame" style="width:100%;height:100%;"><img class="crop-img" src="${src}" alt="" style="${cropCss(crop)}${rotCss}" /></div>`
@@ -198,18 +188,19 @@ function pagePhotoFull(m: MemoryRow, rot: number, pageNum: number, crop: PhotoCr
   </div>
   <div class="pf-footer">
     <div class="pf-meta">${esc(dateFrCaps(m.created_at))}</div>
-    <div class="pf-caption body">${captionHtml}</div>
+    ${captionHtml ? `<div class="pf-caption body">${captionHtml}</div>` : ''}
   </div>
   <div class="folio">${pageNum}</div>
 </div>`;
 }
 
-function pagePhotoNote(m: MemoryRow, rot: number, pageNum: number, crop?: PhotoCrop): string {
+function pagePhotoNote(m: MemoryRow, rot: number, pageNum: number, crop: PhotoCrop | undefined, printBleed: boolean): string {
   const src = imgAttr(photoMainUrl(m));
   const legend = clampWithEllipsis(sanitizeText((m.content ?? '').trim()), 420);
   const rotCss = rot ? `transform: rotate(${rot}deg); transform-origin: center;` : '';
+  const pnCls = printBleed ? 'pn-image bleed-x' : 'pn-image';
   return `<div class="page photo-note">
-  <div class="pn-image">
+  <div class="${pnCls}">
     ${src
       ? `<div class="crop-frame" style="width:100%;height:100%;"><img class="crop-img" src="${src}" alt="" style="${cropCss(crop)}${rotCss}" /></div>`
       : '<div class="placeholder" style="width:100%;height:100%;"></div>'}
@@ -234,23 +225,27 @@ function pageQuote(m: MemoryRow, pageNum: number): string {
       <span class="dot sage"></span>
       <span class="label" style="color:#6B8F7E;text-transform:none;">Petits mots</span>
     </div>
-    <div class="quote-mark">\u201C</div>
-    <div class="body quote-body">${romanHtml(body)}</div>
-    <div class="quote-rule">
-      <div class="quote-rule-seg"></div>
-      <div class="quote-rule-dot"></div>
-      <div class="quote-rule-seg"></div>
+    <div class="quote-mid">
+      <div class="quote-mark">\u201C</div>
+      <div class="body quote-body">${romanHtml(body)}</div>
     </div>
-    <div class="label" style="text-align:right;margin-top:6pt;">${esc(dateLabel)}</div>
+    <div class="quote-footer-block">
+      <div class="quote-rule">
+        <div class="quote-rule-seg"></div>
+        <div class="quote-rule-dot"></div>
+        <div class="quote-rule-seg"></div>
+      </div>
+      <div class="label quote-date-label">${esc(dateLabel)}</div>
+    </div>
   </div>
   <div class="folio">${pageNum}</div>
 </div>`;
 }
 
 function pageAudio(m: MemoryRow, qrUrl: string, pageNum: number): string {
-  const title = sanitizeText((m.content ?? '').trim()) || 'Sans titre';
+  const titleRaw = sanitizeText((m.content ?? '').trim());
   const dur = fmtDuration(m.duration);
-  const titleHtml = romanHtml(title);
+  const titleHtml = titleRaw ? romanHtml(titleRaw) : '';
   const coverUrl = imgAttr(m.voice_cover_url);
   const coverBlock = coverUrl
     ? `<div class="audio-cover-bg"><img src="${coverUrl}" alt="" /></div><div class="audio-cover-scrim"></div>`
@@ -275,7 +270,7 @@ function pageAudio(m: MemoryRow, qrUrl: string, pageNum: number): string {
           <span class="label audio-dur-side">0:00</span>
           <span class="label audio-dur-side">${esc(dur)}</span>
         </div>
-        <div class="subtitle audio-title-maquette">${titleHtml}</div>
+        ${titleHtml ? `<div class="subtitle audio-title-maquette">${titleHtml}</div>` : ''}
       </div>
     </div>
     <div class="audio-qr">
@@ -287,14 +282,15 @@ function pageAudio(m: MemoryRow, qrUrl: string, pageNum: number): string {
 </div>`;
 }
 
-function pageVideo(m: MemoryRow, qrUrl: string, pageNum: number): string {
+function pageVideo(m: MemoryRow, qrUrl: string, pageNum: number, printBleed: boolean): string {
   const raw = sanitizeText((m.content ?? '').trim());
   const { title: videoTitleRaw, body: videoBodyRaw } = splitVideoTitleBody(raw);
   const vTitle = (videoTitleRaw || 'Vidéo').trim();
   const sub = videoBodyRaw.trim() ? videoBodyRaw : 'Regarde ce moment en vidéo.';
   const thumbUrl = imgAttrFirst([m.thumbnail_url, m.poster_url]);
+  const vtCls = printBleed ? 'video-thumb bleed-x' : 'video-thumb';
   return `<div class="page video">
-  <div class="video-thumb">
+  <div class="${vtCls}">
     ${thumbUrl ? `<img src="${thumbUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;" />` : '<div class="placeholder" style="width:100%;height:100%;"></div>'}
   </div>
   <div class="inner video-text-block">
@@ -321,13 +317,13 @@ function pageBackCover(pageNum: number): string {
 </div>`;
 }
 
-function renderPage(page: BookPageServer, input: BuildBookHtmlInput, pageNum: number, pageWmm: number): string {
+function renderPage(page: BookPageServer, input: BuildBookHtmlInput, pageNum: number, _pageWmm: number): string {
   const { child, coverTitle, coverYearLabel, chapterTitle, qrBaseUrl, coverPhotoUrl, memoriesById, qrTokensByMemoryId } =
     input;
   const printBleed = input.exportMode === 'print';
   switch (page.type) {
     case 'cover':
-      return pageCover(child, coverPhotoUrl, coverTitle, coverYearLabel, page.crop, pageWmm);
+      return pageCover(child, coverPhotoUrl, coverTitle, coverYearLabel, page.crop, printBleed);
     case 'chapter':
       return pageChapter(page.month ?? '', page.chapterNum ?? 0, chapterTitle, pageNum);
     case 'photo-full':
@@ -346,7 +342,7 @@ function renderPage(page: BookPageServer, input: BuildBookHtmlInput, pageNum: nu
         case 'photo-full':
           return pagePhotoFull(m, rot, pageNum, crop, printBleed);
         case 'photo-note':
-          return pagePhotoNote(m, rot, pageNum, crop);
+          return pagePhotoNote(m, rot, pageNum, crop, printBleed);
         case 'quote':
           return pageQuote(m, pageNum);
         case 'audio': {
@@ -357,7 +353,7 @@ function renderPage(page: BookPageServer, input: BuildBookHtmlInput, pageNum: nu
         case 'video': {
           const tok = qrTokensByMemoryId.get(id) ?? '';
           const qrTarget = tok ? `${qrBaseUrl}/${tok}` : '';
-          return pageVideo(m, qrTarget, pageNum);
+          return pageVideo(m, qrTarget, pageNum, printBleed);
         }
         default:
           return '';
@@ -370,11 +366,19 @@ function renderPage(page: BookPageServer, input: BuildBookHtmlInput, pageNum: nu
   }
 }
 
-function buildHtmlDocument(title: string, pagesHtml: string, pageWmm: number, pageHmm: number): string {
+function buildHtmlDocument(
+  title: string,
+  pagesHtml: string,
+  pageWmm: number,
+  pageHmm: number,
+  isPrint: boolean
+): string {
+  const bleedMm = isPrint ? PRINT_BLEED_MM : 0;
   const pnImgHmm = (pageHmm * 0.6).toFixed(2);
   const coverPhotoHmm = (pageHmm * 0.68).toFixed(2);
   const pfImgHmm = (pageHmm * 0.82).toFixed(2);
   const videoThumbHmm = (pageHmm * 0.42).toFixed(2);
+  const bodyClass = isPrint ? ' class="print-bleed"' : '';
   return `<!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -391,10 +395,13 @@ function buildHtmlDocument(title: string, pagesHtml: string, pageWmm: number, pa
 :root {
   --page-w:${pageWmm}mm;
   --page-h:${pageHmm}mm;
+  --bleed:${bleedMm}mm;
   --pn-img-h:${pnImgHmm}mm;
   --cover-photo-h:${coverPhotoHmm}mm;
   --pf-img-h:${pfImgHmm}mm;
   --video-thumb-h:${videoThumbHmm}mm;
+  --pad-x:15mm;
+  --pad-x-safe:calc(15mm + var(--bleed));
 }
 html { margin:0; padding:0; background:#fff; }
 body {
@@ -426,10 +433,14 @@ img { display:block; }
 
 .inner {
   display:flex; flex-direction:column;
-  padding:18mm 15mm;
+  padding:18mm var(--pad-x);
   width:100%; flex:1;
   min-height:0;
   overflow:hidden;
+}
+body.print-bleed .inner {
+  padding-left:var(--pad-x-safe);
+  padding-right:var(--pad-x-safe);
 }
 
 .label {
@@ -468,24 +479,26 @@ img { display:block; }
 .cover-placeholder { width:100%; height:100%; background:#E8E8ED; }
 .cover-text {
   flex:1; display:flex; flex-direction:column; justify-content:center;
-  padding:4mm 15mm 10mm;
+  padding:4mm var(--pad-x) 10mm;
+}
+body.print-bleed .cover-text {
+  padding-left:var(--pad-x-safe);
+  padding-right:var(--pad-x-safe);
 }
 .cover-title {
   font-family:'EB Garamond',serif; font-style:italic; font-size:22pt; color:#1C1C1E;
 }
 .cover-period { font-family:'DM Sans',sans-serif; font-size:11pt; color:#AEAEB2; margin-top:5pt; }
 .cover-hairline { height:.3pt; background:rgba(0,0,0,.08); margin-top:10pt; width:100%; }
-.cover-footer-row {
-  display:flex; flex-direction:row; align-items:center; justify-content:flex-end; flex-wrap:wrap;
-  gap:4pt; margin-top:8pt; width:100%;
-}
-.cover-footer-text {
-  font-family:'DM Sans',sans-serif; font-size:11pt; color:#AEAEB2;
-}
 
 .chapter-inner {
   flex:1; display:flex; flex-direction:column;
   align-items:center; justify-content:center; text-align:center;
+  padding:0 var(--pad-x);
+}
+body.print-bleed .chapter-inner {
+  padding-left:var(--pad-x-safe);
+  padding-right:var(--pad-x-safe);
 }
 .chapter-month { font-family:'DM Sans',sans-serif; font-size:9pt; color:#AEAEB2; letter-spacing:.6pt; }
 .chapter-title {
@@ -501,8 +514,12 @@ img { display:block; }
 }
 .pf-footer {
   flex:1; min-height:0; overflow:hidden;
-  padding:3.7mm 15mm 10mm;
+  padding:3.7mm var(--pad-x) 10mm;
   display:flex; flex-direction:column;
+}
+body.print-bleed .pf-footer {
+  padding-left:var(--pad-x-safe);
+  padding-right:var(--pad-x-safe);
 }
 .pf-meta {
   font-family:'DM Sans',sans-serif; font-size:7pt; font-weight:400;
@@ -515,21 +532,54 @@ img { display:block; }
 .pn-image { width:var(--page-w); height:var(--pn-img-h); flex-shrink:0; overflow:hidden; }
 .pn-text {
   flex:1; min-height:0; overflow:hidden;
-  padding:4mm 15mm 14mm;
+  padding:4mm var(--pad-x) 14mm;
+}
+body.print-bleed .pn-text {
+  padding-left:var(--pad-x-safe);
+  padding-right:var(--pad-x-safe);
+}
+
+body.print-bleed .bleed-x {
+  margin-left:calc(-1 * var(--bleed));
+  width:calc(var(--page-w) + 2 * var(--bleed));
+  max-width:none;
+  box-sizing:border-box;
 }
 
 .quote .inner { padding-top:14mm; padding-bottom:14mm; }
-.quote-inner { justify-content:flex-start; }
+.quote-inner {
+  justify-content:flex-start;
+  display:flex;
+  flex-direction:column;
+  flex:1;
+  min-height:0;
+}
 .quote-fit-1 { padding-top:12mm; padding-bottom:12mm; }
 .quote-fit-2 { padding-top:11mm; padding-bottom:11mm; }
 .quote-header {
-  display:flex; align-items:center; gap:4pt; margin-bottom:4mm;
+  display:flex; align-items:center; gap:4pt;
+  flex-shrink:0;
 }
+.quote-mid {
+  flex:1;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  padding:0 3mm;
+  overflow:hidden;
+}
+.quote-footer-block {
+  flex-shrink:0;
+  margin-top:auto;
+  padding-top:2mm;
+}
+.quote-date-label { text-align:right; margin-top:6pt; }
 .quote-mark {
   font-family:'EB Garamond',serif; font-style:italic;
   font-size:42pt; color:rgba(0,0,0,.06); line-height:1; margin-bottom:1.5mm; margin-left:5mm;
 }
-.quote-body { overflow:hidden; padding:0 3mm; text-align:left; }
+.quote-body { overflow:hidden; text-align:left; }
 .quote-fit-1 .quote-body { font-size:10.4pt; line-height:1.48; }
 .quote-fit-1 .quote-body p { margin:0 0 4pt; }
 .quote-fit-2 .quote-body { font-size:9.8pt; line-height:1.42; }
@@ -595,8 +645,12 @@ img { display:block; }
 .video-thumb { width:var(--page-w); height:var(--video-thumb-h); flex-shrink:0; overflow:hidden; }
 .video-text-block {
   flex:1; min-height:0; display:flex; flex-direction:column;
-  padding:5.3mm 15mm 0;
+  padding:5.3mm var(--pad-x) 0;
   overflow:hidden;
+}
+body.print-bleed .video-text-block {
+  padding-left:var(--pad-x-safe);
+  padding-right:var(--pad-x-safe);
 }
 .video-title-line {
   margin-top:2.6mm;
@@ -617,19 +671,26 @@ img { display:block; }
   align-items:center; justify-content:center; text-align:center;
   padding:0 30mm;
 }
+body.print-bleed .back-inner {
+  padding-left:calc(30mm + var(--bleed));
+  padding-right:calc(30mm + var(--bleed));
+}
+body.print-bleed .folio {
+  bottom:calc(8mm + var(--bleed));
+}
 
 </style>
 </head>
-<body>${pagesHtml}</body>
+<body${bodyClass}>${pagesHtml}</body>
 </html>`;
 }
 
 export function buildBookHtml(input: BuildBookHtmlInput): string {
-  const mode = input.exportMode;
-  const pageWmm = mode === 'print' ? 154 : DIGITAL_PAGE_WIDTH_MM;
-  const pageHmm = mode === 'print' ? 216 : DIGITAL_PAGE_HEIGHT_MM;
+  const isPrint = input.exportMode === 'print';
+  const pageWmm = isPrint ? PRINT_PAGE_WIDTH_MM : DIGITAL_PAGE_WIDTH_MM;
+  const pageHmm = isPrint ? PRINT_PAGE_HEIGHT_MM : DIGITAL_PAGE_HEIGHT_MM;
 
   const pagesHtml = input.pages.map((p, i) => renderPage(p, input, i + 1, pageWmm)).join('');
 
-  return buildHtmlDocument(input.coverTitle, pagesHtml, pageWmm, pageHmm);
+  return buildHtmlDocument(input.coverTitle, pagesHtml, pageWmm, pageHmm, isPrint);
 }
