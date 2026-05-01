@@ -20,7 +20,6 @@ import { supabase } from '@/lib/supabase';
 import { getCachedUserMode } from '@/lib/userMode';
 import { checkMemoryLimit } from '@/lib/limits';
 import { getOrSelectFirstChild } from '@/services/children';
-import { getApproximateLocationLabel } from '@/utils/memoryLocation';
 import { MAX_TEXT_CHARS, MAX_VISUAL_LINES, estimateVisualLines, clampText } from '@/utils/textLimits';
 import { upsertLocalMemory } from '@/lib/localDb';
 import { buildLocalTextMemory } from '@/services/localOnlyMemoryCapture';
@@ -171,14 +170,12 @@ export default function WriteScreen() {
         return;
       }
 
-      const locationLabel = await getApproximateLocationLabel();
-
       if ((await getCachedUserMode()) === 'local') {
         const mem = buildLocalTextMemory({
           childId,
           userId: user.id,
           content: content.trim(),
-          location: locationLabel,
+          location: null,
         });
         upsertLocalMemory(mem);
         DeviceEventEmitter.emit('petitmo:memories-inserted', { memories: [mem] });
@@ -190,7 +187,7 @@ export default function WriteScreen() {
             user_id: user.id,
             type: 'text',
             content: content.trim(),
-            location: locationLabel,
+            location: null,
             inserted_at: new Date().toISOString(),
           })
           .select('*')

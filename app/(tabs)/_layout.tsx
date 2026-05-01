@@ -1,7 +1,7 @@
 import { View, Text, StyleSheet } from 'react-native';
 import { Tabs } from 'expo-router';
 import type { LucideIcon } from 'lucide-react-native';
-import { BookOpenText, Heart, House, Plus } from 'lucide-react-native';
+import { BookOpenText, Heart, List, Plus } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { THEME } from '@/constants/theme';
 import { scale, verticalScale } from '@/utils/responsive';
@@ -88,9 +88,9 @@ export default function TabLayout() {
       <Tabs.Screen
         name="fil"
         options={{
-          title: 'Souvenirs',
+          title: 'Journal',
           tabBarIcon: ({ focused }) => (
-            <TabBarGlyph Icon={House} focused={focused} fillWhenFocused={false} />
+            <TabBarGlyph Icon={List} focused={focused} fillWhenFocused={false} />
           ),
         }}
       />

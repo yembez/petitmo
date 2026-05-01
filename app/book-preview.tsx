@@ -12,7 +12,6 @@ import {
   Modal,
   Image,
   RefreshControl,
-  type ViewToken,
   type ListRenderItem,
 } from 'react-native';
 import { useFonts, DMSans_400Regular, DMSans_500Medium, DMSans_600SemiBold, DMSans_700Bold } from '@expo-google-fonts/dm-sans';
@@ -444,16 +443,19 @@ export default function BookPreviewScreen() {
     }));
   }, []);
 
-  const onViewableItemsChanged = useRef(
-    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
-      const ix = viewableItems[0]?.index;
-      if (typeof ix === 'number') setCurrentPageIndex(ix);
-    }
-  ).current;
-
-  const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 55,
-  }).current;
+  /**
+   * Index barre du bas / actions : uniquement après fin de snap natif.
+   * `onViewableItemsChanged` déclenchait encore un setState pendant l’animation de paging → à-coup.
+   */
+  const onBookPagerMomentumEnd = useCallback(
+    (e: { nativeEvent: { contentOffset: { x: number } } }) => {
+      if (pageRows.length === 0) return;
+      const x = e.nativeEvent.contentOffset.x;
+      const ix = Math.max(0, Math.min(Math.round(x / screenWidth), pageRows.length - 1));
+      setCurrentPageIndex(prev => (prev === ix ? prev : ix));
+    },
+    [pageRows.length, screenWidth]
+  );
 
   const merge = useCallback((m: Memory) => mergeMemory(m, localEdits), [localEdits]);
 
@@ -1306,8 +1308,7 @@ export default function BookPreviewScreen() {
         decelerationRate="fast"
         disableIntervalMomentum
         showsHorizontalScrollIndicator={false}
-        onViewableItemsChanged={onViewableItemsChanged}
-        viewabilityConfig={viewabilityConfig}
+        onMomentumScrollEnd={onBookPagerMomentumEnd}
         // IMPORTANT perf: éviter un nouvel objet `extraData` à chaque render (a-coups).
         // Les items se rerender déjà via `renderItem`/closures quand l'écran rerender.
         style={styles.list}
@@ -1316,11 +1317,11 @@ export default function BookPreviewScreen() {
           offset: screenWidth * index,
           index,
         })}
-        initialNumToRender={3}
-        maxToRenderPerBatch={3}
-        windowSize={5}
+        initialNumToRender={4}
+        maxToRenderPerBatch={4}
+        windowSize={7}
         updateCellsBatchingPeriod={50}
-        removeClippedSubviews
+        removeClippedSubviews={false}
       />
 
       <View style={styles.bottomBar}>

@@ -6,7 +6,9 @@ import { pullMemoriesFromRemoteToLocal } from '@/services/memoriesLocalSync'
 export const FREE_TIER_LIMIT = 20
 export const FREE_TIER_VIDEO_LIMIT = 10
 export const FREE_TIER_VIDEO_MAX_DURATION = 30 // secondes
-export const FREE_TIER_VOICE_MAX_DURATION = 120 // secondes
+export const FREE_TIER_VOICE_MAX_DURATION = 120 // secondes (création de souvenirs audio)
+export const FREE_TIER_BOOK_VOICE_MAX_DURATION = 60 // secondes (livres : QR audio)
+export const FREE_TIER_BOOK_AUDIO_MAX_COUNT = 2
 
 export type LimitCheck = {
   canCreate: boolean

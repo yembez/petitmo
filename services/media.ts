@@ -14,7 +14,6 @@ import { pullMemoriesFromRemoteToLocal } from '@/services/memoriesLocalSync';
 import { checkMemoryLimit, checkVideoLimit } from '@/lib/limits';
 import { getUserTier } from '@/lib/userTier';
 import { deleteLocalMediaFiles } from '@/lib/localCleanup';
-import { getApproximateLocationLabel } from '@/utils/memoryLocation';
 import {
   clearFeedLocalThumbnails,
   clearFeedLocalVideo,
@@ -48,6 +47,8 @@ interface UploadMediaParams {
   duration?: number;
   /** Photo d’illustration optionnelle (souvenirs vocaux uniquement) */
   voiceCoverUri?: string | null;
+  /** Début de l’extrait (s) quand le fichier uploadé est la prise complète (pas de découpe native). */
+  voicePlaybackStartSec?: number | null;
   /** Date/heure de prise (ex. EXIF photothèque) — fixe `created_at` du souvenir */
   capturedAtIso?: string;
   /** Lieu issu des métadonnées (ex. EXIF + géocodage) ; sinon position actuelle ou null */
@@ -587,6 +588,7 @@ export async function uploadMedia({
   isPaid,
   duration,
   voiceCoverUri,
+  voicePlaybackStartSec,
   capturedAtIso,
   locationOverride,
   mimeType,
@@ -617,6 +619,7 @@ export async function uploadMedia({
         userId: user.id,
         duration,
         voiceCoverUri,
+        voicePlaybackStartSec,
         capturedAtIso,
         locationOverride,
       });
@@ -644,12 +647,8 @@ export async function uploadMedia({
     const memoryType = type === 'voice' ? 'voice' : type === 'video' ? 'video' : 'photo';
 
     /** Import photothèque : lieu EXIF (peut être null). Sinon position actuelle approximative. */
-    let locationLabel: string | null;
-    if (locationOverride !== undefined) {
-      locationLabel = locationOverride;
-    } else {
-      locationLabel = await getApproximateLocationLabel();
-    }
+    const locationLabel =
+      locationOverride !== undefined ? locationOverride : null;
 
     let voiceCoverPublicUrl: string | null = null;
     let voiceCoverPath: string | null = null;
@@ -679,6 +678,12 @@ export async function uploadMedia({
       location: locationLabel,
       voice_cover_url: voiceCoverPublicUrl,
       voice_cover_path: voiceCoverPath,
+      voice_playback_start_sec:
+        type === 'voice' &&
+        typeof voicePlaybackStartSec === 'number' &&
+        Number.isFinite(voicePlaybackStartSec)
+          ? voicePlaybackStartSec
+          : null,
       inserted_at: new Date().toISOString(),
     };
 
@@ -868,12 +873,8 @@ export async function uploadPhotoAlbum({
     const paths = results.map(r => r.path);
     const totalSize = results.reduce((s, r) => s + r.size, 0);
 
-    let locationLabel: string | null;
-    if (locationOverride !== undefined) {
-      locationLabel = locationOverride;
-    } else {
-      locationLabel = await getApproximateLocationLabel();
-    }
+    const locationLabel =
+      locationOverride !== undefined ? locationOverride : null;
 
     const extras = publicUrls.slice(1);
     const insertPayload: Database['public']['Tables']['memories']['Insert'] = {

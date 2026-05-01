@@ -330,29 +330,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  /** Favori sur photo / vidéo : disque fixe (pas une pilule). */
+  /** Favori sur photo / vidéo : disque fixe (plus compact que la ligne d’actions texte/vocal). */
   feedFavoriteMediaCircle: {
-    width: scale(48),
-    height: scale(48),
-    borderRadius: scale(24),
+    width: scale(32),
+    height: scale(32),
+    borderRadius: scale(16),
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(0,0,0,0.24)',
   },
   feedFavoriteMediaCircleActive: {
-    backgroundColor: THEME.feedFavoriteTerracottaSoftBg,
+    backgroundColor: 'rgba(255,255,255,0.72)',
   },
   /** Favori ligne d’actions (vocal / texte) : même disque, fond neutre sur blanc. */
   feedFavoriteActionCircle: {
-    width: scale(42),
-    height: scale(42),
-    borderRadius: scale(21),
+    width: scale(38),
+    height: scale(38),
+    borderRadius: scale(19),
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(0,0,0,0.05)',
   },
   feedFavoriteActionCircleActive: {
-    backgroundColor: THEME.feedFavoriteTerracottaSoftBg,
+    backgroundColor: 'rgba(255,255,255,0.72)',
   },
   capturedOverlayText: {
     fontSize: 11,
@@ -388,10 +388,10 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  /** Voile blanc sur la photo de fond du vocal (lisibilité du lecteur) */
+  /** Voile blanc sur la photo de fond du vocal (lisibilité du lecteur, volontairement léger) */
   voiceCoverScrim: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255,255,255,0.62)',
+    backgroundColor: 'rgba(255,255,255,0.38)',
   },
   audioForeground: {
     position: 'relative',
@@ -400,12 +400,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: verticalScale(12),
   },
-  /** Lecteur + onde collés au bas de la zone image (post vocal avec fond) */
+  /** Lecteur + onde au ras du bas de la photo (léger dépassement pour compacter le vide visuel) */
   audioForegroundCover: {
     position: 'absolute',
-    left: scale(12),
-    right: scale(12),
-    bottom: verticalScale(10),
+    left: scale(10),
+    right: scale(10),
+    bottom: -verticalScale(14),
     zIndex: 2,
     alignItems: 'stretch',
     gap: 0,

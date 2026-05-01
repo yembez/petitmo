@@ -1,7 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { deleteLocalBook, getLocalBook, listLocalBooks, upsertLocalBook, type LocalBookRow } from '@/lib/localDb';
+import { getLocalMemoryById } from '@/lib/localDb';
 import { getUserTier } from '@/lib/userTier';
 import { supabase } from '@/lib/supabase';
+import { FREE_TIER_BOOK_AUDIO_MAX_COUNT, FREE_TIER_BOOK_VOICE_MAX_DURATION } from '@/lib/limits';
 
 export type Book = {
   id: string;
@@ -201,6 +203,34 @@ export async function addMemoriesToBook(bookId: string, memoryIds: string[]): Pr
   const b = getLocalBook(bookId);
   if (!b) return null;
   if (ids.length === 0) return b;
+
+  // Garde-fou produit : sur le plan gratuit, on limite les médias QR dans un livre dès l’ajout.
+  const tier = await getUserTier();
+  if (tier === 'free') {
+    const existingIds = uniq(b.memoryIds ?? []);
+    const allIds = uniq([...existingIds, ...ids]);
+    const memories = allIds
+      .map(id => getLocalMemoryById(id))
+      .filter(Boolean) as Array<{ id: string; type: string; duration?: number | null }>;
+
+    if (memories.some(m => m.type === 'video')) {
+      throw new Error("Les vidéos ne sont pas disponibles dans les livres avec le plan gratuit.");
+    }
+
+    const audios = memories.filter(m => m.type === 'voice');
+    if (audios.length > FREE_TIER_BOOK_AUDIO_MAX_COUNT) {
+      throw new Error(
+        `Avec le plan gratuit, ce livre peut contenir au maximum ${FREE_TIER_BOOK_AUDIO_MAX_COUNT} souvenirs audio.`
+      );
+    }
+    const tooLong = audios.find(m => (m.duration ?? 0) > FREE_TIER_BOOK_VOICE_MAX_DURATION);
+    if (tooLong) {
+      throw new Error(
+        `Avec le plan gratuit, chaque souvenir audio est limité à ${FREE_TIER_BOOK_VOICE_MAX_DURATION} secondes.`
+      );
+    }
+  }
+
   const next: Book = { ...(normalizeBook(b) ?? b), memoryIds: uniq([...(b.memoryIds ?? []), ...ids]) };
   await upsertBook(next);
   return next;

@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Pressable,
   TouchableOpacity,
+  Alert,
   Platform,
   Modal,
   TextInput,
@@ -27,6 +28,7 @@ import PhotoMosaic from '@/components/PhotoMosaic';
 import AudioPlayer from '@/components/AudioPlayer';
 import EditTextModal from '@/components/EditTextModal';
 import { getMemoryById, updateMemoryContent } from '@/services/media';
+import { resolveChildProfileImageUri } from '@/utils/childPhotoUri';
 import { getChildren } from '@/services/children';
 import { getAllPhotoUrlsForDisplay, parseFavoritePhotoUrls } from '@/utils/memoryPhotos';
 import { formatDateLong, formatDuration, formatAgeAtMemory } from '@/utils/date';
@@ -121,7 +123,13 @@ export default function MemoryViewScreen() {
       const b = books.find(x => x.id === bookId);
       if (!b) return;
       if (b.memoryIds.includes(memoryId)) return;
-      const next = await addMemoryToBook(bookId, memoryId);
+      let next: Awaited<ReturnType<typeof addMemoryToBook>> = null;
+      try {
+        next = await addMemoryToBook(bookId, memoryId);
+      } catch (e) {
+        Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
+        return;
+      }
       if (!next) return;
       setBooks(prev => prev.map(x => (x.id === bookId ? next : x)));
       closeBookModal();
@@ -144,7 +152,13 @@ export default function MemoryViewScreen() {
   const createAndAddToNewBook = useCallback(async () => {
     if (!memoryId) return;
     const created = await createBook(newBookTitle);
-    const updated = await addMemoryToBook(created.id, memoryId);
+    let updated: Awaited<ReturnType<typeof addMemoryToBook>> = null;
+    try {
+      updated = await addMemoryToBook(created.id, memoryId);
+    } catch (e) {
+      Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
+      return;
+    }
     setBooks(prev => [updated ?? created, ...prev]);
     closeBookModal();
   }, [closeBookModal, memoryId, newBookTitle]);
@@ -172,7 +186,8 @@ export default function MemoryViewScreen() {
     (b: Book): string | null => {
       const direct = typeof b.coverPhotoUrl === 'string' ? b.coverPhotoUrl.trim() : '';
       if (direct) return direct;
-      return child?.photo_url?.trim() || null;
+      if (!child) return null;
+      return resolveChildProfileImageUri(child.local_photo_path, child.photo_url);
     },
     [child]
   );
@@ -338,6 +353,7 @@ export default function MemoryViewScreen() {
                     <AudioPlayer
                       uri={memory.media_url}
                       duration={memory.duration || 0}
+                      playbackStartSec={memory.voice_playback_start_sec ?? null}
                       variant={memory.voice_cover_url ? 'coverBottom' : 'default'}
                     />
                   </View>

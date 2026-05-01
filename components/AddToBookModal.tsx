@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Image,
   KeyboardAvoidingView,
   Modal,
@@ -127,7 +128,12 @@ export function AddToBookModal({
         setDidAdd(true);
         return;
       }
-      await addMemoriesToBook(bookId, toAdd);
+      try {
+        await addMemoriesToBook(bookId, toAdd);
+      } catch (e) {
+        Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
+        return;
+      }
       await refreshBooks();
       setAddedBookIds(prev => (prev.includes(bookId) ? prev : [...prev, bookId]));
       setDidAdd(true);
@@ -153,7 +159,13 @@ export function AddToBookModal({
 
   const createAndAddToNewBook = useCallback(async () => {
     const created = await createBook(newBookTitle);
-    const updated = await addMemoriesToBook(created.id, selectionMemoryIds);
+    let updated: Book | null = null;
+    try {
+      updated = await addMemoriesToBook(created.id, selectionMemoryIds);
+    } catch (e) {
+      Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
+      return;
+    }
     // Couverture par défaut: première photo sélectionnée (source, jamais un thumb).
     for (const id of selectionMemoryIds) {
       const m = getLocalMemoryById(id);

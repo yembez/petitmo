@@ -11,6 +11,8 @@ import type { Child } from '@/types/local';
 import { scale, verticalScale } from '@/utils/responsive';
 import { calculateAge } from '@/utils/date';
 import { getUserTier } from '@/lib/userTier';
+import { Image } from 'expo-image';
+import { resolveChildProfileImageUri } from '@/utils/childPhotoUri';
 
 export default function ParentSpaceScreen() {
   const router = useRouter();
@@ -54,7 +56,7 @@ export default function ParentSpaceScreen() {
             children.map((c) => (
               <Row
                 key={c.id}
-                icon={<AvatarFallback letter={(c.name ?? '?').charAt(0).toUpperCase()} />}
+                icon={<ChildRowAvatar child={c} />}
                 label={c.name ?? 'Sans nom'}
                 value={c.birthdate ? calculateAge(c.birthdate) : ''}
                 onPress={async () => {
@@ -143,6 +145,22 @@ function AvatarFallback({ letter }: { letter: string }) {
     <View style={styles.avatarFallback}>
       <Text style={styles.avatarFallbackText}>{letter}</Text>
     </View>
+  );
+}
+
+function ChildRowAvatar({ child }: { child: Child }) {
+  const uri = resolveChildProfileImageUri(child.local_photo_path, child.photo_url);
+  if (!uri) {
+    return <AvatarFallback letter={(child.name ?? '?').charAt(0).toUpperCase()} />;
+  }
+  return (
+    <Image
+      source={{ uri }}
+      style={styles.childRowAvatarImg}
+      contentFit="cover"
+      cachePolicy="memory-disk"
+      recyclingKey={child.id}
+    />
   );
 }
 
@@ -263,6 +281,12 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZES.base,
     color: '#3F4A5A',
     fontWeight: '600',
+  },
+  childRowAvatarImg: {
+    width: scale(34),
+    height: scale(34),
+    borderRadius: scale(17),
+    backgroundColor: '#E8E8ED',
   },
   avatarFallback: {
     width: scale(34),

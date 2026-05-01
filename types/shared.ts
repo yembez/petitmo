@@ -39,6 +39,8 @@ export type GuestMemoryForPdfPayload = {
   print_url?: string | null;
   poster_url?: string | null;
   poster_print_url?: string | null;
+  /** Photo de fond optionnelle sur une page vocal (aligné `voice_cover_url` / maquette). */
+  voice_cover_url?: string | null;
 };
 
 export type GenerateBookPdfPayload = {

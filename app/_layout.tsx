@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, AppState, AppStateStatus } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
@@ -12,6 +12,7 @@ import { initLocalDb } from '@/lib/localDb';
 import { resetUserTierForTesting } from '@/lib/userTier';
 import { cleanOrphanedLocalFiles } from '@/lib/localCleanup';
 import { getOrSelectFirstChild } from '@/services/children';
+import { processPendingGuestRawUploads } from '@/services/pendingRawGuestUploads';
 import {
   migrateBooksFromAsyncStorageToSqliteOnce,
   restoreBooksFromSupabaseIfPremium,
@@ -29,6 +30,15 @@ export default function RootLayout() {
     // Migration durable : livres AsyncStorage → SQLite (one-shot).
     void migrateBooksFromAsyncStorageToSqliteOnce();
     void runWeeklyCleanup();
+    void processPendingGuestRawUploads();
+
+    const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
+      if (next === 'active') {
+        void processPendingGuestRawUploads();
+      }
+    });
+
+    return () => sub.remove();
   }, []);
 
   async function runWeeklyCleanup(): Promise<void> {
@@ -159,6 +169,7 @@ export default function RootLayout() {
         <Stack.Screen name="memory-view" />
         <Stack.Screen name="book-preview" />
         <Stack.Screen name="book-order" />
+        <Stack.Screen name="book-finalize-media" />
         <Stack.Screen name="book-order-confirmation" />
         <Stack.Screen name="capture-wheel-mock" />
         <Stack.Screen name="capture-applelike-mock" />

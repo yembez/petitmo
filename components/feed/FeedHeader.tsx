@@ -13,6 +13,7 @@ import {
   styles,
 } from '@/components/feed/feedStyles';
 import { ColorMatrix, grayscale } from 'react-native-color-matrix-image-filters';
+import { resolveChildProfileImageUri } from '@/utils/childPhotoUri';
 
 export type FeedHeaderProps = {
   child: Child | null;
@@ -38,7 +39,7 @@ export const FeedHeader = memo(function FeedHeader({ child, paddingTop, onAddPre
     );
   }
 
-  const photoUri = child.photo_url?.trim() ?? '';
+  const photoUri = resolveChildProfileImageUri(child.local_photo_path, child.photo_url) ?? '';
   const firstName = child.name.trim().split(/\s+/)[0] || child.name;
   const agePresent = child.birthdate ? calculateAge(child.birthdate) : '';
 

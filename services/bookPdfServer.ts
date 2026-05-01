@@ -7,6 +7,11 @@ import { readAsStringAsync, EncodingType } from 'expo-file-system/legacy';
 import { uploadAsync as uploadAsyncLegacy } from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { Platform } from 'react-native';
+import {
+  isIosBackgroundSignedPutUploadAvailable,
+  uploadFileToSignedPutUrlIosBackground,
+} from '@/services/signedUrlIosBackgroundUpload';
+import { enqueueGuestRawUpload, markGuestRawUploadDone } from '@/services/pendingRawGuestUploads';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import { getInfoAsync } from 'expo-file-system/legacy';
 import type { BookPage } from '@/src/book/BookEngine';
@@ -17,6 +22,7 @@ import type {
   GuestMemoryForPdfPayload,
 } from '@/types/shared';
 import { supabase } from '@/lib/supabase';
+import { getLocalMemoryById } from '@/lib/localDb';
 import { resolveServerPdfEntitlements } from '@/lib/digitalExportPurchase';
 import { isInitExportConfigured, postInitExport, postGuestUploadUrls } from '@/services/initExportApi';
 
@@ -90,6 +96,7 @@ function memoryToGuestPayload(m: Memory): GuestMemoryForPdfPayload {
     print_url: m.print_url ?? null,
     poster_url: m.poster_url ?? null,
     poster_print_url: m.poster_print_url ?? null,
+    voice_cover_url: m.voice_cover_url ?? null,
   };
 }
 
@@ -194,6 +201,11 @@ async function uploadFileToSignedUrl(params: {
   localUri: string;
   mimeType: string;
 }): Promise<void> {
+  if (isIosBackgroundSignedPutUploadAvailable()) {
+    await uploadFileToSignedPutUrlIosBackground(params);
+    return;
+  }
+
   const res = await uploadAsyncLegacy(params.signedUrl, params.localUri, {
     httpMethod: 'PUT',
     uploadType: 0 as unknown as number, // BINARY_CONTENT (legacy enum value)
@@ -204,6 +216,115 @@ async function uploadFileToSignedUrl(params: {
   if (res.status < 200 || res.status >= 300) {
     throw new Error(`SIGNED_UPLOAD_FAILED (${res.status}) ${res.body || ''}`.trim());
   }
+}
+
+/** URI fichier local pour upload brut (sandbox / repli `file:` après JSON AsyncStorage). */
+function localUriForAvRawUpload(m: Memory, kind: 'audio' | 'video'): string {
+  const fromLocal = (m.local_original_path ?? m.local_media_path ?? '').trim();
+  if (fromLocal) return fromLocal;
+  const fallback = (m.media_url ?? m.edited_media_url ?? '').trim();
+  if (fallback.toLowerCase().startsWith('file:')) return fallback;
+  return '';
+}
+
+function mimeTypeForVideoUpload(uri: string): string {
+  const u = uri.toLowerCase();
+  if (u.endsWith('.mov') || u.includes('.mov?')) return 'video/quicktime';
+  return 'video/mp4';
+}
+
+/**
+ * Le payload commande passe par AsyncStorage : les champs locaux peuvent être incomplets.
+ * On réhydrate depuis SQLite quand c’est possible (native).
+ */
+function mergeMemoryWithLocalRowForAv(m: Memory): Memory {
+  if (m.type !== 'voice' && m.type !== 'video') return m;
+  const kind = m.type === 'voice' ? 'audio' : 'video';
+  if (localUriForAvRawUpload(m, kind)) return m;
+  if (Platform.OS === 'web') return m;
+  try {
+    const row = getLocalMemoryById(m.id);
+    if (!row) return m;
+    return {
+      ...m,
+      local_original_path: m.local_original_path ?? row.local_original_path ?? null,
+      local_media_path: m.local_media_path ?? row.local_media_path ?? null,
+      media_url: m.media_url ?? row.media_url ?? null,
+      edited_media_url: m.edited_media_url ?? row.edited_media_url ?? null,
+    };
+  } catch {
+    return m;
+  }
+}
+
+/** Dernier recours : vidéo déjà en HTTPS (ex. sync) → fichier temporaire puis PUT signé. */
+async function downloadHttpsVideoToTempIfNeeded(m: Memory): Promise<string | null> {
+  const direct = localUriForAvRawUpload(m, 'video');
+  if (direct) return direct;
+  const httpsUrl = httpsOrNull(m.media_url) ?? httpsOrNull(m.edited_media_url);
+  if (!httpsUrl || Platform.OS === 'web') return null;
+  const baseDir = documentDirectory ?? '';
+  if (!baseDir) return null;
+  const safeId = m.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80);
+  const dest = `${baseDir}petitmo-video-raw-${safeId}-${Date.now()}.mp4`;
+  try {
+    const dl = await downloadAsync(httpsUrl, dest);
+    if (dl.status !== 200) return null;
+    return dl.uri;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Archi cible : PDF immédiat (QR déjà créé côté serveur) ; fichiers audio/vidéo bruts uploadés après succès generate-pdf.
+ * Best-effort : ne bloque pas l’UX si échec réseau (le QR reste « en préparation » jusqu’au worker).
+ */
+async function guestAvRawUploadAfterPdf(params: { pdfTicket: string; memories: Memory[] }): Promise<void> {
+  const { pdfTicket, memories } = params;
+  const tasks: Promise<void>[] = [];
+
+  for (const m of memories) {
+    if (m.type === 'voice') {
+      const merged = mergeMemoryWithLocalRowForAv(m);
+      const local = localUriForAvRawUpload(merged, 'audio');
+      if (!local) {
+        if (__DEV__) console.warn('[guestAvRawUploadAfterPdf] audio: no uri', m.id);
+        continue;
+      }
+      tasks.push(
+        (async () => {
+          try {
+            const { status, json } = await postGuestUploadUrls({
+              pdfTicket,
+              assets: [{ kind: 'audio', memoryId: m.id }],
+            });
+            const row = (json as { uploads?: Array<{ signedUrl?: string }> })?.uploads?.[0];
+            if (status === 200 && row?.signedUrl) {
+              const key = `audio:${m.id}`;
+              await enqueueGuestRawUpload({
+                pdfTicket,
+                kind: 'audio',
+                memoryId: m.id,
+                localUri: local,
+                mimeType: 'audio/mp4',
+                policy: 'finalize_only',
+              });
+              // Ne force pas l’upload ici : le plan gratuit le fait à la finalisation de commande.
+              // Les plans payants peuvent toujours finaliser en arrière-plan via `processPendingGuestRawUploads`.
+            } else if (__DEV__) {
+              console.warn('[guestAvRawUploadAfterPdf] audio signed URL failed', m.id, status, json);
+            }
+          } catch (e) {
+            if (__DEV__) console.warn('[guestAvRawUploadAfterPdf] audio', m.id, e);
+          }
+        })()
+      );
+    }
+    // Vidéos : non prises en charge en QR médias sur le plan gratuit (et bloquées côté commande).
+  }
+
+  await Promise.all(tasks);
 }
 
 function httpsOrNull(u: string | null | undefined): string | null {
@@ -527,32 +648,44 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
     memories.map(async m => {
       const g = memoryToGuestPayload(m);
       if (m.type === 'voice') {
-        // PDF non-bloquant audio: on peut uploader raw en fond pour le QR, sinon on laisse vide.
-        const local = (m.local_original_path ?? m.local_media_path ?? '').trim();
-        if (!local) return g;
-        try {
-          const { status, json } = await postGuestUploadUrls({
-            pdfTicket,
-            assets: [{ kind: 'audio', memoryId: m.id }],
-          });
-          const row = (json as any)?.uploads?.[0] as SignedUploadRow | undefined;
-          if (status === 200 && row?.signedUrl) {
-            await uploadFileToSignedUrl({ signedUrl: row.signedUrl, localUri: local, mimeType: 'audio/mp4' });
-            return { ...g, media_path: row.path };
+        // PDF immédiat : pas d’upload du fichier audio avant generate-pdf.
+        // Photo de fond vocal (voice_cover) : même besoin que la vignette vidéo — petite image HTTPS pour Playwright.
+        const coverLocal = (m.voice_cover_path ?? '').trim();
+        let voiceCoverUrl: string | null = httpsOrNull(m.voice_cover_url);
+        if (!voiceCoverUrl && coverLocal && Platform.OS !== 'web') {
+          try {
+            const manipulated = await ImageManipulator.manipulateAsync(
+              coverLocal,
+              [{ resize: { width: 1600 } }],
+              { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG }
+            );
+            const { status, json } = await postGuestUploadUrls({
+              pdfTicket,
+              assets: [{ kind: 'photo', memoryId: m.id }],
+            });
+            const row = (json as any)?.uploads?.[0] as SignedUploadRow | undefined;
+            if (status === 200 && row?.signedUrl && row.publicUrl) {
+              await uploadFileToSignedUrl({
+                signedUrl: row.signedUrl,
+                localUri: manipulated?.uri || coverLocal,
+                mimeType: 'image/jpeg',
+              });
+              voiceCoverUrl = row.publicUrl;
+            }
+          } catch {
+            /* ignore */
           }
-        } catch {
-          /* ignore */
         }
-        return g;
+        return { ...g, voice_cover_url: voiceCoverUrl };
       }
       if (m.type === 'video') {
         const local = (m.local_original_path ?? m.local_media_path ?? '').trim();
 
-        // Thumbnail: générer si absent, puis upload
+        // Thumbnail: générer si absent, puis upload (seul prérequis lourd acceptable avant PDF pour Playwright).
         let thumbLocal = (m.thumbnail_url ?? m.poster_url ?? '').trim();
         if (thumbLocal && isHttps(thumbLocal)) {
           // ok
-        } else if (Platform.OS !== 'web') {
+        } else if (Platform.OS !== 'web' && local) {
           try {
             const { uri: t } = await VideoThumbnails.getThumbnailAsync(local, { time: 0, quality: 0.7 });
             thumbLocal = t;
@@ -561,18 +694,15 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
           }
         }
 
-        // PDF: on a besoin d'une vignette https. Le fichier vidéo raw est optionnel (QR async).
         let thumbPublicUrl: string | null = isHttps(thumbLocal) ? thumbLocal : null;
         try {
-          const assets: Array<{ kind: string; memoryId?: string }> = [];
-          if (thumbLocal && !isHttps(thumbLocal)) assets.push({ kind: 'video_thumb', memoryId: m.id });
-          if (local) assets.push({ kind: 'video', memoryId: m.id });
-          if (assets.length) {
-            const { status, json } = await postGuestUploadUrls({ pdfTicket, assets });
-            const uploads = ((json as any)?.uploads ?? []) as SignedUploadRow[];
-            const thumbRow = uploads.find(u => u.kind === 'video_thumb');
-            const vidRow = uploads.find(u => u.kind === 'video');
-            if (status === 200 && thumbRow?.signedUrl && thumbRow.publicUrl && thumbLocal && !isHttps(thumbLocal)) {
+          if (thumbLocal && !isHttps(thumbLocal)) {
+            const { status, json } = await postGuestUploadUrls({
+              pdfTicket,
+              assets: [{ kind: 'video_thumb', memoryId: m.id }],
+            });
+            const thumbRow = (json as any)?.uploads?.[0] as SignedUploadRow | undefined;
+            if (status === 200 && thumbRow?.signedUrl && thumbRow.publicUrl) {
               const manipulated = await ImageManipulator.manipulateAsync(
                 thumbLocal,
                 [{ resize: { width: 1200 } }],
@@ -584,15 +714,6 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
                 mimeType: 'image/jpeg',
               });
               thumbPublicUrl = thumbRow.publicUrl;
-            }
-            if (status === 200 && vidRow?.signedUrl && local) {
-              await uploadFileToSignedUrl({ signedUrl: vidRow.signedUrl, localUri: local, mimeType: 'video/mp4' });
-              return {
-                ...g,
-                thumbnail_url: thumbPublicUrl ?? g.thumbnail_url ?? null,
-                poster_url: thumbPublicUrl ?? g.poster_url ?? null,
-                media_path: vidRow.path,
-              };
             }
           }
         } catch {
@@ -685,6 +806,10 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
     throw new Error('Réponse serveur invalide (pdfUrlSigned manquant).');
   }
 
+  // Upload AV brut après succès PDF : lancé tout de suite pour chevaucher le téléchargement du PDF,
+  // puis on attend la fin avant de retourner — sinon `void` laisse souvent la vidéo inachevée (raw vide).
+  const avUploadPromise = guestAvRawUploadAfterPdf({ pdfTicket, memories });
+
   const safeBook = input.bookId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
   const mode = input.exportMode === 'print' ? 'print' : 'digital';
   const baseDir = documentDirectory ?? '';
@@ -700,6 +825,8 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
   if (dl.status !== 200) {
     throw new Error(`Téléchargement PDF échoué (${dl.status})`);
   }
+
+  await avUploadPromise;
 
   return { localUri: dl.uri, response: json, init };
 }

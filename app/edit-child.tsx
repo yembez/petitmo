@@ -61,15 +61,15 @@ export default function EditChildScreen() {
         setChild(currentChild);
         setName(currentChild.name);
         setBirthdate(currentChild.birthdate || '');
-        setPhotoUrl(
-          resolveChildProfileImageUri(currentChild.local_photo_path, currentChild.photo_url) ?? ''
-        );
-        // Récupère la source “originale” si dispo, sinon fallback sur la photo serveur.
+        const resolved =
+          resolveChildProfileImageUri(currentChild.local_photo_path, currentChild.photo_url) ?? '';
+        setPhotoUrl(resolved);
+        // Récupère la source “originale” si dispo, sinon photo affichable (local ou URL).
         try {
           const stored = await AsyncStorage.getItem(originalPhotoKey(currentChild.id));
-          setOriginalPhotoUri((stored ?? currentChild.photo_url ?? '').trim());
+          setOriginalPhotoUri((stored ?? resolved).trim());
         } catch {
-          setOriginalPhotoUri((currentChild.photo_url ?? '').trim());
+          setOriginalPhotoUri(resolved.trim());
         }
       }
     } catch (error) {

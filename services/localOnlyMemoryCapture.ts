@@ -3,7 +3,6 @@ import { copyAsync, documentDirectory, makeDirectoryAsync } from 'expo-file-syst
 import { Platform } from 'react-native';
 import type { Memory } from '@/types/local';
 import { ensureLocalPhotoDerivatives, persistOriginalToSandbox } from '@/services/memoryLocalStore';
-import { getApproximateLocationLabel } from '@/utils/memoryLocation';
 import {
   persistFeedLocalThumbnail,
   persistFeedLocalVideo,
@@ -70,6 +69,7 @@ function emptyMemoryShell(params: {
     favorite_photo_urls: [],
     voice_cover_url: null,
     voice_cover_path: null,
+    voice_playback_start_sec: null,
     edited_media_url: null,
     is_favorite: false,
     duration: null,
@@ -133,16 +133,27 @@ export async function captureMemoryLocalOnly(params: {
   userId: string;
   duration?: number;
   voiceCoverUri?: string | null;
+  /** Début de l’extrait (s) si le fichier local est la prise complète. */
+  voicePlaybackStartSec?: number | null;
   capturedAtIso?: string;
   locationOverride?: string | null;
 }): Promise<Memory | null> {
-  const { uri, type, childId, userId, duration, voiceCoverUri, capturedAtIso, locationOverride } = params;
+  const {
+    uri,
+    type,
+    childId,
+    userId,
+    duration,
+    voiceCoverUri,
+    voicePlaybackStartSec,
+    capturedAtIso,
+    locationOverride,
+  } = params;
   const id = newLocalMemoryId();
   const now = new Date().toISOString();
   const createdAt = capturedAtIso?.trim() || now;
   const insertedAt = now;
-  const locationLabel =
-    locationOverride !== undefined ? locationOverride : await getApproximateLocationLabel();
+  const locationLabel = locationOverride !== undefined ? locationOverride : null;
 
   if (type === 'photo') {
     if (Platform.OS === 'web') {
@@ -272,6 +283,10 @@ export async function captureMemoryLocalOnly(params: {
     mem.file_size = size;
     mem.voice_cover_url = voiceCoverUrl;
     mem.voice_cover_path = voiceCoverPath;
+    mem.voice_playback_start_sec =
+      typeof voicePlaybackStartSec === 'number' && Number.isFinite(voicePlaybackStartSec)
+        ? voicePlaybackStartSec
+        : null;
     return mem;
   }
 
@@ -310,6 +325,10 @@ export async function captureMemoryLocalOnly(params: {
   mem.file_size = size;
   mem.voice_cover_url = voiceCoverUrl;
   mem.voice_cover_path = voiceCoverPath;
+  mem.voice_playback_start_sec =
+    typeof voicePlaybackStartSec === 'number' && Number.isFinite(voicePlaybackStartSec)
+      ? voicePlaybackStartSec
+      : null;
   return mem;
 }
 
@@ -330,8 +349,7 @@ export async function capturePhotoAlbumLocalOnly(params: {
   const now = new Date().toISOString();
   const createdAt = capturedAtIso?.trim() || now;
   const insertedAt = now;
-  const locationLabel =
-    locationOverride !== undefined ? locationOverride : await getApproximateLocationLabel();
+  const locationLabel = locationOverride !== undefined ? locationOverride : null;
 
   const first = uris[0]?.trim();
   if (!first) return null;

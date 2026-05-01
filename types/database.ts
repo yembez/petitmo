@@ -55,6 +55,8 @@ export interface Database {
           favorite_photo_urls: Json
           voice_cover_url: string | null
           voice_cover_path: string | null
+          /** Début de lecture (s) si le média est la prise complète ; null = fichier déjà rogné ou entier. */
+          voice_playback_start_sec?: number | null
           edited_media_url: string | null
           is_favorite: boolean
           duration: number | null
@@ -96,6 +98,7 @@ export interface Database {
           favorite_photo_urls?: Json
           voice_cover_url?: string | null
           voice_cover_path?: string | null
+          voice_playback_start_sec?: number | null
           edited_media_url?: string | null
           is_favorite?: boolean
           duration?: number | null

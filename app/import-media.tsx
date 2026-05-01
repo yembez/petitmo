@@ -16,6 +16,7 @@ import { scale, verticalScale } from '@/utils/responsive';
 import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
 import PermissionModal from '@/components/PermissionModal';
+import ImportBatchLayoutModal from '@/components/ImportBatchLayoutModal';
 import { uploadMedia, uploadPhotoAlbum } from '@/services/media';
 import { usePendingMediaUploads } from '@/contexts/PendingMediaUploadsContext';
 import { getOrSelectFirstChild } from '@/services/children';
@@ -55,6 +56,11 @@ export default function ImportMediaScreen() {
   const [pickAttemptFinished, setPickAttemptFinished] = useState(false);
   /** Dès validation galerie : plus de roue sur cet écran (elle restait car `pickAttemptFinished` restait false). */
   const [navigatingToFeed, setNavigatingToFeed] = useState(false);
+  /** Plusieurs photos : choix album vs un post par photo (modale). */
+  const [batchChoice, setBatchChoice] = useState<{
+    assets: ImagePicker.ImagePickerAsset[];
+    preview: ImportStickerPreview;
+  } | null>(null);
   const autoGalleryLaunchedRef = useRef(false);
 
   useEffect(() => {
@@ -109,7 +115,12 @@ export default function ImportMediaScreen() {
    * Évite l’écran Importer entre la galerie native (« Ajouter ») et le fil.
    */
   const commitSelection = useCallback(
-    async (assets: ImagePicker.ImagePickerAsset[], kind: 'photo' | 'video', preview?: ImportStickerPreview | null) => {
+    async (
+      assets: ImagePicker.ImagePickerAsset[],
+      kind: 'photo' | 'video',
+      preview?: ImportStickerPreview | null,
+      photoBatchLayout: 'album' | 'separate' = 'album'
+    ) => {
       try {
         setNavigatingToFeed(true);
         const cap = preview?.capturedAtIso ?? null;
@@ -123,10 +134,64 @@ export default function ImportMediaScreen() {
         }
 
         const limitCheck = await checkMemoryLimit(childId);
+        const tier = await getUserTier();
+        const slotsNeeded =
+          kind === 'photo' && assets.length > 1 && photoBatchLayout === 'separate' ? assets.length : 1;
+
+        if (tier === 'free' && limitCheck.current + slotsNeeded > limitCheck.limit) {
+          setNavigatingToFeed(false);
+          setPickAttemptFinished(true);
+          const left = Math.max(0, limitCheck.limit - limitCheck.current);
+          Alert.alert(
+            'Limite gratuite',
+            left === 0
+              ? 'Tu as atteint le nombre max de souvenirs pour ce profil.'
+              : `Il reste ${left} emplacement${left > 1 ? 's' : ''} pour ce profil. Réduis ta sélection, ou choisis « Un seul post » pour ne créer qu’un souvenir.`
+          );
+          if (left === 0) {
+            router.push({ pathname: '/paywall', params: { context: 'LIMIT_REACHED' } });
+          }
+          return;
+        }
+
         if (!limitCheck.canCreate) {
           setNavigatingToFeed(false);
           setPickAttemptFinished(true);
           router.push({ pathname: '/paywall', params: { context: 'LIMIT_REACHED' } });
+          return;
+        }
+
+        /**
+         * Un post par photo : un seul pending + un seul router.replace.
+         * Enchaîner N× startBackgroundUploadNavigateToFeed faisait planter l’app (navigation + SQLite / mémoire).
+         * Les uploads sont séquentiels ; uploadMedia émet déjà memories-inserted après chaque souvenir en local.
+         */
+        if (kind === 'photo' && assets.length > 1 && photoBatchLayout === 'separate') {
+          const firstUri = assets[0]?.uri?.trim() ?? '';
+          startBackgroundUploadNavigateToFeed({
+            previewUris: firstUri ? [firstUri] : [],
+            capturedAtPreviewIso: cap,
+            locationPreview: loc,
+            upload: async () => {
+              const inserted: NonNullable<Awaited<ReturnType<typeof uploadMedia>>>[] = [];
+              for (const asset of assets) {
+                const meta = await buildImportMetadataFromPickerAsset(asset, { isVideo: false });
+                const locationOverride =
+                  meta.locationLabel && meta.locationLabel.trim() ? meta.locationLabel.trim() : undefined;
+                const m = await uploadMedia({
+                  uri: asset.uri,
+                  type: 'photo',
+                  childId,
+                  capturedAtIso: meta.capturedAtIso,
+                  locationOverride,
+                  mimeType: asset.mimeType ?? null,
+                  fileName: asset.fileName ?? null,
+                });
+                if (m) inserted.push(m);
+              }
+              return inserted.length > 0 ? inserted : null;
+            },
+          });
           return;
         }
 
@@ -139,7 +204,7 @@ export default function ImportMediaScreen() {
             capturedAtPreviewIso: cap,
             locationPreview: loc,
             upload: async () => {
-              const meta = await buildImportMetadataFromExif(exif ?? undefined);
+              const meta = buildImportMetadataFromExif(exif ?? undefined);
               const locationOverride =
                 meta.locationLabel && meta.locationLabel.trim() ? meta.locationLabel.trim() : undefined;
               const m = await uploadPhotoAlbum({
@@ -277,12 +342,15 @@ export default function ImportMediaScreen() {
       if (assets.length > 1) {
         const first = assets[0];
         const exif = first.exif as Record<string, unknown> | null | undefined;
-        const meta = await buildImportMetadataFromExif(exif ?? undefined);
-        commitSelection(assets, 'photo', {
-          capturedAtIso: meta.capturedAtIso ?? null,
-          locationLabel: meta.locationLabel ?? null,
+        const meta = buildImportMetadataFromExif(exif ?? undefined);
+        setBatchChoice({
+          assets,
+          preview: {
+            capturedAtIso: meta.capturedAtIso ?? null,
+            locationLabel: meta.locationLabel ?? null,
+          },
         });
-        return 'committed';
+        return 'not_committed';
       }
 
       const meta = await buildImportMetadataFromPickerAsset(assets[0], { isVideo: false });
@@ -296,7 +364,7 @@ export default function ImportMediaScreen() {
       Alert.alert('Erreur', 'Impossible d’ouvrir la bibliothèque média.');
       return 'not_committed';
     }
-  }, [commitSelection]);
+  }, [commitSelection, setBatchChoice]);
 
   useEffect(() => {
     if (hasPermission !== true || autoGalleryLaunchedRef.current) return;
@@ -311,13 +379,39 @@ export default function ImportMediaScreen() {
     })();
   }, [hasPermission, pickFromLibrary]);
 
+  const batchLayoutModalEl = (
+    <ImportBatchLayoutModal
+      visible={batchChoice != null}
+      count={batchChoice?.assets.length ?? 0}
+      onChooseSinglePost={() => {
+        const b = batchChoice;
+        if (!b) return;
+        setBatchChoice(null);
+        void commitSelection(b.assets, 'photo', b.preview, 'album');
+      }}
+      onChooseSeparatePosts={() => {
+        const b = batchChoice;
+        if (!b) return;
+        setBatchChoice(null);
+        void commitSelection(b.assets, 'photo', b.preview, 'separate');
+      }}
+      onDismiss={() => setBatchChoice(null)}
+    />
+  );
+
   if (hasPermission === null) {
-    return <View style={styles.container} />;
+    return (
+      <>
+        {batchLayoutModalEl}
+        <View style={styles.container} />
+      </>
+    );
   }
 
   if (!hasPermission) {
     return (
       <>
+        {batchLayoutModalEl}
         <View style={styles.container} />
         <PermissionModal
           visible={showPermissionModal}
@@ -330,11 +424,18 @@ export default function ImportMediaScreen() {
   }
 
   if (navigatingToFeed) {
-    return <View style={styles.container} />;
+    return (
+      <>
+        {batchLayoutModalEl}
+        <View style={styles.container} />
+      </>
+    );
   }
 
   return (
-    <View style={styles.container}>
+    <>
+      {batchLayoutModalEl}
+      <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <ChevronLeft size={ICON_SIZES.lg} color="#3F4A5A" strokeWidth={2} />
@@ -358,6 +459,7 @@ export default function ImportMediaScreen() {
         )}
       </View>
     </View>
+    </>
   );
 }
 

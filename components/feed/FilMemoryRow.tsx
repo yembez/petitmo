@@ -83,10 +83,10 @@ function CapturedAtOverlay({ uriForAnalysis, label, inkOverride }: { uriForAnaly
 
 /** Taille unique des icônes dans le fil (actions + overlays). */
 const FEED_ICON_PX = APP_ICON_PX;
-/** Cœur favori sur média : contour blanc, un peu plus grand que les autres icônes du fil. */
-const FEED_MEDIA_FAVORITE_HEART_PX = scale(26);
+/** Cœur favori : même taille sur médias (photo/vidéo) et sur la ligne d’actions (texte/vocal). */
+const FEED_FAVORITE_HEART_PX = scale(20);
 
-/** Favori post (photo / vidéo) : bas gauche sur le média, contour blanc (lisible sur photo), plein terracotta si actif. */
+/** Favori sur média : hors sélection = contour blanc sur fond sombre ; actif = cœur terracotta plein, fond disque blanc léger. */
 function FeedPhotoFavoriteOverlay({
   isFavorite,
   inkOverride,
@@ -96,19 +96,16 @@ function FeedPhotoFavoriteOverlay({
   inkOverride?: string | null;
   onPress: () => void;
 }) {
-  // On garde le contour blanc même quand le coeur est rempli (sélectionné),
-  // pour rester lisible sur les images en overlay.
-  // `inkOverride` reste ici pour garder la signature stable (et usage potentiel futur),
-  // mais n'influence pas le coeur.
   void inkOverride;
   const outlineInk = '#FFFFFF' as const;
+  const terracotta = THEME.feedFavoriteTerracotta;
 
   return (
     <View style={styles.feedPhotoFavoriteOverlay} pointerEvents="box-none">
       <TouchableOpacity
         onPress={onPress}
         activeOpacity={0.75}
-        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         accessibilityRole="button"
         accessibilityLabel={isFavorite ? 'Retirer des favoris' : 'Mettre en favori'}
         style={[
@@ -117,10 +114,10 @@ function FeedPhotoFavoriteOverlay({
         ]}
       >
         <Heart
-          size={FEED_MEDIA_FAVORITE_HEART_PX}
-          color={outlineInk}
-          strokeWidth={2.45}
-          fill={isFavorite ? THEME.feedFavoriteTerracotta : 'none'}
+          size={FEED_FAVORITE_HEART_PX}
+          color={isFavorite ? terracotta : outlineInk}
+          strokeWidth={isFavorite ? 2.05 : 2.45}
+          fill={isFavorite ? terracotta : 'none'}
         />
       </TouchableOpacity>
     </View>
@@ -509,7 +506,10 @@ function FilMemoryRow({
                   <AudioPlayer
                     uri={memory.media_url}
                     duration={memory.duration || 0}
+                    playbackStartSec={memory.voice_playback_start_sec ?? null}
                     variant={(memory.voice_cover_path ?? memory.voice_cover_url) ? 'coverBottom' : 'default'}
+                    controlIconColor={ACTION_ICON_INK}
+                    coverFlushBottom={!!(memory.voice_cover_path ?? memory.voice_cover_url)}
                   />
                 </View>
               </View>
@@ -618,9 +618,9 @@ function FilMemoryRow({
               accessibilityLabel="Favori"
             >
               <Heart
-                size={FEED_ICON_PX}
+                size={FEED_FAVORITE_HEART_PX}
                 color={memory.is_favorite ? THEME.feedFavoriteTerracotta : ACTION_ICON_INK}
-                strokeWidth={2.2}
+                strokeWidth={2.05}
                 fill={memory.is_favorite ? THEME.feedFavoriteTerracotta : 'none'}
               />
             </TouchableOpacity>

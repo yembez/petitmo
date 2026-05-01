@@ -99,6 +99,7 @@ export function initLocalDb(): void {
     add('print_px_w', 'INTEGER');
     add('print_px_h', 'INTEGER');
     add('sync_status', "TEXT DEFAULT 'synced'");
+    add('voice_playback_start_sec', 'REAL');
   } catch {
     // Silencieux (ne doit pas empêcher l’app de démarrer)
   }
@@ -239,14 +240,14 @@ export function upsertLocalMemory(memory: Memory, uploadStatus?: UploadStatus): 
       local_media_path, local_original_path, local_thumb_path, local_display_path, local_print_path,
       original_px_w, original_px_h, print_px_w, print_px_h,
       media_url, thumb_url, display_url,
-      print_url, poster_url, thumbnail_url, voice_cover_url,
+      print_url, poster_url, thumbnail_url, voice_cover_url, voice_playback_start_sec,
       edited_media_url, extra_photo_urls, favorite_photo_urls,
       extra_thumb_urls, extra_display_urls,
       is_favorite, duration, file_size, location,
       created_at, inserted_at, updated_at,
       upload_status, sync_status, synced_at
     ) VALUES (
-      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
     )`,
     [
       memory.id,
@@ -269,6 +270,7 @@ export function upsertLocalMemory(memory: Memory, uploadStatus?: UploadStatus): 
       memory.poster_url ?? null,
       memory.thumbnail_url ?? null,
       memory.voice_cover_url ?? null,
+      memory.voice_playback_start_sec ?? null,
       memory.edited_media_url ?? null,
       JSON.stringify(memory.extra_photo_urls ?? []),
       JSON.stringify(memory.favorite_photo_urls ?? []),
@@ -445,6 +447,10 @@ function deserializeMemory(row: Record<string, unknown>): Memory {
     favorite_photo_urls: safeJsonParse(row.favorite_photo_urls as string, []),
     voice_cover_url: row.voice_cover_url as string | null,
     voice_cover_path: row.voice_cover_path as string | null,
+    voice_playback_start_sec:
+      typeof row.voice_playback_start_sec === 'number' && Number.isFinite(row.voice_playback_start_sec)
+        ? row.voice_playback_start_sec
+        : null,
     edited_media_url: row.edited_media_url as string | null,
     is_favorite: row.is_favorite === 1,
     duration: row.duration as number | null,

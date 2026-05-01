@@ -32,13 +32,14 @@ import PetitmoLogoManuscrit, { PETITMO_LOGO_VIEWBOX } from '@/components/Petitmo
 import { useCaptureHeroLogoColor } from '@/hooks/useCaptureHeroLogoColor';
 import { useCaptureHeroTopFillColor } from '@/hooks/useCaptureHeroTopFillColor';
 import { checkMemoryLimit } from '@/lib/limits';
+import { resolveChildProfileImageUri } from '@/utils/childPhotoUri';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
 const CHARTE = {
   // Blanc cassé très léger (uniquement écran Capturer)
   bg: '#FBFAF7',
-  eyebrow: '#C4784A',
+  eyebrow: '#D4784A',
   textPrimary: '#1C1C1E',
   textMuted: '#8E8E93',
   terracotta: '#D4784A',
@@ -216,8 +217,12 @@ export default function CapturerScreen() {
 
   const [child, setChild] = useState<Child | null>(() => getCaptureTabChildSnapshot());
   const [isLoading, setIsLoading] = useState(() => getCaptureTabChildSnapshot() === null);
-  const heroLogo = useCaptureHeroLogoColor(child?.photo_url?.trim() || null);
-  const heroTopFill = useCaptureHeroTopFillColor(child?.photo_url?.trim() || null);
+  /** Mode local : photo dans `local_photo_path`, pas dans `photo_url`. */
+  const heroPhotoUri = child
+    ? resolveChildProfileImageUri(child.local_photo_path, child.photo_url)
+    : null;
+  const heroLogo = useCaptureHeroLogoColor(heroPhotoUri);
+  const heroTopFill = useCaptureHeroTopFillColor(heroPhotoUri);
   /** Pour savoir si on rafraîchit sans écran de chargement (évite une course avec les deps de useFocusEffect) */
   const childRef = useRef<Child | null>(null);
   childRef.current = child;
@@ -323,7 +328,7 @@ export default function CapturerScreen() {
     );
   }
 
-  const photoUri = child.photo_url?.trim() || '';
+  const photoUri = heroPhotoUri ?? '';
   /** Même ratio que le viewBox du SVG — sinon le cadre est trop large (bandes vides dans le Svg) */
   const captureLogoH = scale(50);
   const captureLogoW = captureLogoH * (PETITMO_LOGO_VIEWBOX.width / PETITMO_LOGO_VIEWBOX.height);
@@ -540,7 +545,8 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   heroPlaceholder: {
-    backgroundColor: '#C4784A',
+    /** Même brique que les CTA « terracotta » et le splash (#D4784A). */
+    backgroundColor: CHARTE.terracotta,
     alignItems: 'center',
     justifyContent: 'center',
   },

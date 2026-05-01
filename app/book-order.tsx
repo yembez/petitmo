@@ -18,6 +18,7 @@ import { scale } from '@/utils/responsive';
 import { getUserTier } from '@/lib/userTier';
 import { getLastGuestExportEmail, setLastGuestExportEmail } from '@/lib/guestExportPrefs';
 import { calculateBookPriceEuros, type DiscountPercent } from '@/lib/printedBookQuote';
+import { FREE_TIER_BOOK_AUDIO_MAX_COUNT, FREE_TIER_BOOK_VOICE_MAX_DURATION } from '@/lib/limits';
 import { getBook } from '@/services/books';
 import { getChildren } from '@/services/children';
 import { isInitExportConfigured } from '@/services/initExportApi';
@@ -25,6 +26,7 @@ import { initPrintOrderExport } from '@/services/printBookOrder';
 import { fetchCrmPrefillByEmail } from '@/services/crmEdge';
 import {
   generateBookPdfViaServerAsGuest,
+  collectMemoriesFromPagesForPdf,
 } from '@/services/bookPdfServer';
 import { getBookExportPrepIssues, runBookExportPrepInBackground } from '@/services/bookExportPrep';
 import {
@@ -35,6 +37,7 @@ import {
 import { canExportBookPdfViaServer, grantDigitalExportPurchase, resolveServerPdfEntitlements } from '@/lib/digitalExportPurchase';
 import { DIGITAL_EXPORT_PDF_EUR } from '@/lib/bookExportPricing';
 import type { Child } from '@/types/local';
+import { getPendingGuestRawUploadsCountForKeys } from '@/services/pendingRawGuestUploads';
 
 const COUNTRY_OPTIONS = [
   { code: 'FR' as const, label: 'France' },
@@ -80,6 +83,18 @@ function parseIntParam(v: string | string[] | undefined, fallback: number): numb
   if (typeof v !== 'string') return fallback;
   const n = Number.parseInt(v, 10);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function isHttps(u: string | null | undefined): boolean {
+  return typeof u === 'string' && /^https:\/\//i.test(u.trim());
+}
+
+function localUriForAvRawUpload(m: { local_original_path?: string | null; local_media_path?: string | null; media_url?: string | null; edited_media_url?: string | null }): string {
+  const fromLocal = (m.local_original_path ?? m.local_media_path ?? '').trim();
+  if (fromLocal) return fromLocal;
+  const fallback = (m.media_url ?? m.edited_media_url ?? '').trim();
+  if (fallback.toLowerCase().startsWith('file:')) return fallback;
+  return '';
 }
 
 export default function BookOrderScreen() {
@@ -259,6 +274,22 @@ export default function BookOrderScreen() {
     [exportMode, marketingOptIn, router]
   );
 
+  const navigateToFinalizeMedia = useCallback(
+    (p: { pricePaidEuros: number; emailNorm: string; exportTicket: string }) => {
+      router.replace({
+        pathname: '/book-finalize-media',
+        params: {
+          exportMode,
+          priceEuros: String(p.pricePaidEuros),
+          email: p.emailNorm,
+          marketingOptIn: marketingOptIn ? '1' : '0',
+          exportTicket: p.exportTicket,
+        },
+      });
+    },
+    [exportMode, marketingOptIn, router]
+  );
+
   const submitOrder = useCallback(async () => {
     if (!bookId || !childId || !child) return;
     if (billablePages < 1) {
@@ -281,6 +312,35 @@ export default function BookOrderScreen() {
 
     const mail = email.trim().toLowerCase();
     const nowIso = new Date().toISOString();
+
+    // Plan gratuit : QR médias vidéo interdits (PDF + imprimé). Audio OK (finalisé après paiement).
+    const pendingPayload = await getPendingBookOrderPdfPayload();
+    if (subscriptionDb === 'free' && pendingPayload) {
+      const memories = collectMemoriesFromPagesForPdf(pendingPayload.pages, pendingPayload.localEdits ?? {});
+      const hasVideo = memories.some(m => m.type === 'video');
+      if (hasVideo) {
+        setFieldErrors({
+          submit:
+            "Les QR vidéos ne sont pas disponibles avec le plan gratuit. Retire les vidéos de ce livre, ou passe à l’abonnement.",
+        });
+        return;
+      }
+
+      const audios = memories.filter(m => m.type === 'voice');
+      if (audios.length > FREE_TIER_BOOK_AUDIO_MAX_COUNT) {
+        setFieldErrors({
+          submit: `Avec le plan gratuit, ce livre peut contenir au maximum ${FREE_TIER_BOOK_AUDIO_MAX_COUNT} souvenirs audio.`,
+        });
+        return;
+      }
+      const tooLong = audios.find(m => (m.duration ?? 0) > FREE_TIER_BOOK_VOICE_MAX_DURATION);
+      if (tooLong) {
+        setFieldErrors({
+          submit: `Avec le plan gratuit, chaque souvenir audio est limité à ${FREE_TIER_BOOK_VOICE_MAX_DURATION} secondes.`,
+        });
+        return;
+      }
+    }
 
     if (exportMode === 'print') {
       if (!isInitExportConfigured()) return;
@@ -308,7 +368,32 @@ export default function BookOrderScreen() {
           printerName: null,
         });
         await setLastGuestExportEmail(mail);
-        navigateToConfirmation({ pricePaidEuros: res.priceCents / 100, emailNorm: mail });
+        const pricePaid = res.priceCents / 100;
+        // Plan gratuit uniquement : on affiche la finalisation uniquement si au moins 1 AV du livre est encore local/pending.
+        if (subscriptionDb === 'free') {
+          const payload = pendingPayload;
+          if (payload) {
+            const memories = collectMemoriesFromPagesForPdf(payload.pages, payload.localEdits ?? {});
+            const av = memories.filter(m => m.type === 'voice');
+            const keys = av.map(m => `audio:${m.id}`);
+
+            const hasPending = (await getPendingGuestRawUploadsCountForKeys(keys)) > 0;
+            const hasLocalOrMissingCloud = av.some(m => {
+              const local = localUriForAvRawUpload(m);
+              if (local) return true;
+              // Si ce n’est pas local mais pas en https non plus, on ne considère pas “sécurisé”.
+              const main = (m.media_url ?? m.edited_media_url ?? '').trim();
+              return main ? !isHttps(main) : true;
+            });
+
+            if (hasPending || hasLocalOrMissingCloud) {
+              navigateToFinalizeMedia({ pricePaidEuros: pricePaid, emailNorm: mail, exportTicket: res.exportTicket });
+              return;
+            }
+          }
+        }
+
+        navigateToConfirmation({ pricePaidEuros: pricePaid, emailNorm: mail });
       } catch (e) {
         setFieldErrors({ submit: e instanceof Error ? e.message : 'Échec de la commande.' });
       } finally {
@@ -344,7 +429,7 @@ export default function BookOrderScreen() {
         setPdfEntitled({ premium: true, digitalPaid: true });
       }
 
-      const { localUri } = await generateBookPdfViaServerAsGuest({
+      const { localUri, init } = await generateBookPdfViaServerAsGuest({
         ...payload,
         consent: {
           email: mail,
@@ -357,6 +442,24 @@ export default function BookOrderScreen() {
       await setLastGuestExportEmail(mail);
       await clearPendingBookOrderPdfPayload();
       await setBookOrderResultPdfUri(localUri);
+
+      // Plan gratuit : QR médias audio uniquement, finalisation après paiement si nécessaire.
+      if (subscriptionDb === 'free') {
+        const memories = collectMemoriesFromPagesForPdf(payload.pages, payload.localEdits ?? {});
+        const av = memories.filter(m => m.type === 'voice');
+        const keys = av.map(m => `audio:${m.id}`);
+        const hasPending = (await getPendingGuestRawUploadsCountForKeys(keys)) > 0;
+        const hasLocalOrMissingCloud = av.some(m => {
+          const local = localUriForAvRawUpload(m);
+          if (local) return true;
+          const main = (m.media_url ?? m.edited_media_url ?? '').trim();
+          return main ? !isHttps(main) : true;
+        });
+        if ((hasPending || hasLocalOrMissingCloud) && init?.pdfTicket) {
+          navigateToFinalizeMedia({ pricePaidEuros: pricePaid, emailNorm: mail, exportTicket: init.pdfTicket });
+          return;
+        }
+      }
 
       navigateToConfirmation({ pricePaidEuros: pricePaid, emailNorm: mail });
     } catch (e) {
@@ -386,6 +489,7 @@ export default function BookOrderScreen() {
     line2,
     marketingOptIn,
     navigateToConfirmation,
+    navigateToFinalizeMedia,
     router,
     shippingName,
     subscriptionDb,

@@ -6,7 +6,9 @@ export type { Memory, Child } from '@/types/local';
 
 export function filChildLiteKey(c: Child | null): string {
   if (!c) return '';
-  return `${c.id}|${c.birthdate ?? ''}|${(c.photo_url ?? '').trim()}|${c.name.trim()}`;
+  const localPh = (c.local_photo_path ?? '').trim();
+  const remotePh = (c.photo_url ?? '').trim();
+  return `${c.id}|${c.birthdate ?? ''}|${localPh}|${remotePh}|${c.name.trim()}`;
 }
 
 export function filMemoryLiteKey(m: Memory): string {
@@ -104,6 +106,7 @@ export function buildOptimisticMemoryForPending(p: PendingUpload, child: Child |
     captured_overlay_ink: null,
     voice_cover_url: null,
     voice_cover_path: null,
+    voice_playback_start_sec: null,
     edited_media_url: null,
     media_path: null,
     thumbnail_path: null,
