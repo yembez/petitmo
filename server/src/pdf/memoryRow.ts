@@ -18,6 +18,8 @@ export type MemoryRow = {
   print_url: string | null;
   poster_url: string | null;
   poster_print_url: string | null;
+  /** Image de fond optionnelle pour une page vocal. */
+  voice_cover_url: string | null;
   created_at: string;
 };
 

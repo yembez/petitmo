@@ -39,6 +39,7 @@ export type GuestMemoryForPdfPayload = {
   print_url?: string | null;
   poster_url?: string | null;
   poster_print_url?: string | null;
+  voice_cover_url?: string | null;
 };
 
 export type GenerateBookPdfPayload = {
