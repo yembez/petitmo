@@ -38,6 +38,17 @@ function publicMediaBaseUrl(): string {
   return base;
 }
 
+function errorMessageFromPdfServerJson(
+  j: { error?: string; detail?: string },
+  fallback: string
+): string {
+  const d = typeof j.detail === 'string' ? j.detail.trim() : '';
+  if (d) return d;
+  const e = typeof j.error === 'string' ? j.error.trim() : '';
+  if (e) return e;
+  return fallback;
+}
+
 export function isBookPdfServerConfigured(): boolean {
   return pdfServerBaseUrl() != null;
 }
@@ -519,8 +530,8 @@ export async function generateBookPdfViaServer(input: GenerateBookPdfServerInput
   if (!res.ok) {
     let detail = res.statusText;
     try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) detail = j.error;
+      const j = (await res.json()) as { error?: string; detail?: string };
+      detail = errorMessageFromPdfServerJson(j, detail);
     } catch {
       /* ignore */
     }
@@ -793,8 +804,8 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
   if (!res.ok) {
     let detail = res.statusText;
     try {
-      const j = (await res.json()) as { error?: string };
-      if (j.error) detail = j.error;
+      const j = (await res.json()) as { error?: string; detail?: string };
+      detail = errorMessageFromPdfServerJson(j, detail);
     } catch {
       /* ignore */
     }

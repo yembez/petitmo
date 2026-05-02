@@ -246,8 +246,9 @@ export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient)
       };
       res.status(200).json(out);
     } catch (e) {
-      console.error('[generate-pdf]', e);
-      res.status(500).json({ error: 'PDF generation or storage failed' });
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error('[generate-pdf] session path', msg, e instanceof Error ? e.stack : '');
+      res.status(500).json({ error: 'PDF generation or storage failed', detail: msg });
     }
   });
 }
@@ -435,13 +436,13 @@ async function handleTicketPdf(
     };
     res.status(200).json(out);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : 'PDF generation or storage failed';
-    console.error('[generate-pdf] ticket path', e);
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[generate-pdf] ticket path', msg, e instanceof Error ? e.stack : '');
     await supabase
       .from('export_requests')
       .update({ status: 'failed', last_error: msg.slice(0, 2000) })
       .eq('id', ticket.export_request_id);
-    res.status(500).json({ error: 'PDF generation or storage failed' });
+    res.status(500).json({ error: 'PDF generation or storage failed', detail: msg });
   }
 }
 
@@ -612,12 +613,12 @@ async function handleTicketPrintPdf(
     };
     res.status(200).json(out);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : 'PDF generation or storage failed';
-    console.error('[generate-pdf] ticket print path', e);
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[generate-pdf] ticket print path', msg, e instanceof Error ? e.stack : '');
     await supabase
       .from('export_requests')
       .update({ status: 'failed', last_error: msg.slice(0, 2000) })
       .eq('id', ticket.export_request_id);
-    res.status(500).json({ error: 'PDF generation or storage failed' });
+    res.status(500).json({ error: 'PDF generation or storage failed', detail: msg });
   }
 }
