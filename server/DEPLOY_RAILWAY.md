@@ -40,11 +40,14 @@ Réponse attendue : JSON contenant `"ok":true` et le nom du service.
 
 ## Application mobile / front
 
-Mettre à jour l’URL du serveur PDF (ex. `.env` ou secrets EAS) :
+Mettre à jour les URLs côté app (`.env` local, `app.config` / EAS selon ton flux) :
 
 ```bash
 EXPO_PUBLIC_PDF_SERVER_URL=https://<ton-domaine-railway>
+EXPO_PUBLIC_PUBLIC_MEDIA_BASE_URL=https://<ton-domaine-railway>/m
 ```
+
+Les profils **`preview`** et **`dev-ios-device`** dans `eas.json` peuvent dupliquer ces valeurs pour les builds cloud. Adapter si tu changes de domaine Railway ou si tu passes par un domaine custom (ex. `pdf.petitmo.app` + même hôte pour `/m`).
 
 Puis enchaîner un flux **commande / export PDF** de bout en bout.
 

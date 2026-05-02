@@ -1,10 +1,13 @@
 # Déploiement — service PDF Petitmo
 
-Le **service PDF** (dossier `server/`) est déployé **séparément** de l’app Expo. Une seule URL doit être configurée côté client :
+Le **service PDF** (dossier `server/`) est déployé **séparément** de l’app Expo. Côté client, configurer au minimum :
 
 ```bash
 EXPO_PUBLIC_PDF_SERVER_URL=https://<ton-domaine-pdf>
+EXPO_PUBLIC_PUBLIC_MEDIA_BASE_URL=https://<ton-domaine-pdf>/m
 ```
+
+Les QR « souvenirs audio/vidéo » du livre utilisent la base **`/m`** sur le **même** service que l’API PDF (sauf si un domaine public type `petitmo.app` fait le proxy vers ce service).
 
 Variables serveur documentées : [`server/.env.example`](server/.env.example).  
 Référence technique du service : [`server/README.md`](server/README.md).
