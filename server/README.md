@@ -44,11 +44,11 @@ docker run --rm -p 8787:8787 \
   petitmo-pdf-server
 ```
 
-## Railway
+## Déploiement (Railway ou VPS)
 
-1. Créer un service depuis ce repo.
-2. **Root directory** : `server` (important : le Dockerfile copie uniquement ce dossier).
-3. Renseigner les variables d’environnement ci-dessus (`TRUST_PROXY=true` conseillé).
+- **Railway** : guide pas à pas [**DEPLOY_RAILWAY.md**](./DEPLOY_RAILWAY.md) (`railway.toml`, healthcheck, variables).
+- **VPS (ex. Hetzner)** : [**DEPLOY_HETZNER.md**](./DEPLOY_HETZNER.md) + script `scripts/deploy-pdf-server-hetzner.sh`.
+- **Vue d’ensemble** : [**DEPLOY.md**](../DEPLOY.md) à la racine du monorepo.
 
 ## Supabase
 
@@ -61,7 +61,7 @@ Créer le bucket privé **`qr-media`** (si absent) ; les lignes `qr_links` et `q
 
 ### Export sans compte (ticket)
 
-1. Déployer l’Edge Function `init-export` et définir le secret **`EXPORT_PDF_JWT_SECRET`** (identique sur Railway pour le serveur PDF).
+1. Déployer l’Edge Function `init-export` et définir le secret **`EXPORT_PDF_JWT_SECRET`** (identique sur le serveur PDF déployé — Railway, VPS, etc.).
 2. `POST .../functions/v1/init-export` :
    - **`type: "pdf_export"`** : `export_mode` (`digital`|`print`), `book_id`, `email`, `gdpr_consent_at`, `subscription_tier` (`free`|`paid`), `audio_video_page_count`, etc. → réponse `pdfTicket`, `exportRequestId`, `flow: "pdf_export"`.
    - **`type: "print_order"`** : mêmes champs communs + `export_mode: "print"`, `shipping_name`, `shipping_address_json` (`line1`, `city`, `zip`, `country`, `line2?`), `page_count` (20 \| 40 \| 60), `price_cents`, optionnel `discount_percent` (0 \| 20), `printer_name`. → réponse `exportRequestId`, `flow: "print_order"` (**pas** de `pdfTicket` ; paiement / PDF impression à brancher ensuite).

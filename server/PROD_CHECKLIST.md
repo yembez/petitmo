@@ -1,6 +1,8 @@
-## Checklist prod — Railway (petitmo-pdf-server)
+## Checklist prod — petitmo-pdf-server
 
-### 1) Variables d’environnement (Railway)
+S’applique à **tout** déploiement du service PDF (Railway, VPS Docker, etc.) : remplacer `<PUBLIC_PDF_URL>` par l’URL HTTPS réelle.
+
+### 1) Variables d’environnement (hébergeur)
 
 Obligatoires (le service refuse de démarrer sinon) :
 
@@ -9,15 +11,15 @@ Obligatoires (le service refuse de démarrer sinon) :
 
 Optionnelles :
 
-- `PORT` (défaut `8787`)
-- `TRUST_PROXY` (`1` ou `true` si derrière proxy Railway pour que le rate-limit voie la vraie IP)
+- `PORT` (défaut `8787` ; sur Railway laisser la valeur injectée par la plateforme)
+- `TRUST_PROXY` (`1` ou `true` si derrière reverse proxy — Railway, Nginx, etc.)
 
 ### 2) Vérifier le service
 
 - **Healthcheck** :
 
 ```bash
-curl -sS "<RAILWAY_URL>/health"
+curl -sS "<PUBLIC_PDF_URL>/health"
 ```
 
 Attendu :
@@ -64,10 +66,10 @@ Récupérer :
 - `pdfTicket`
 - `exportRequestId`
 
-#### 4.2) Générer le PDF via Railway (ticket)
+#### 4.2) Générer le PDF via le serveur public (ticket)
 
 ```bash
-curl -sS "<RAILWAY_URL>/v1/books/generate-pdf" \\
+curl -sS "<PUBLIC_PDF_URL>/v1/books/generate-pdf" \\
   -H "content-type: application/json" \\
   -H "authorization: Bearer <pdfTicket>" \\
   --data '{
@@ -76,7 +78,7 @@ curl -sS "<RAILWAY_URL>/v1/books/generate-pdf" \\
     "coverTitle":"Test",
     "coverYearLabel":"Avril 2026",
     "chapterTitle":"Notre histoire",
-    "qrBaseUrl":"<RAILWAY_URL>",
+    "qrBaseUrl":"<PUBLIC_PDF_URL>",
     "exportMode":"digital",
     "subscriptionTier":"premium",
     "digitalExportPaid": true,

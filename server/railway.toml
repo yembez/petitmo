@@ -1,9 +1,8 @@
-# Railway : Root Directory = server/
+# Service Railway : définir la racine du service sur le dossier `server/`
+# (Settings → Root Directory = server).
 #
-# Variables :
-#   SUPABASE_URL
-#   SUPABASE_SERVICE_ROLE_KEY
-#   TRUST_PROXY=true (recommandé derrière le proxy Railway)
+# Le Dockerfile utilise l’image Playwright officielle (Chromium aligné sur playwright@1.59.1).
+# Ne pas fixer PORT ici : Railway injecte la variable PORT au runtime.
 
 [build]
 builder = "DOCKERFILE"
@@ -12,4 +11,6 @@ dockerfilePath = "Dockerfile"
 [deploy]
 startCommand = "node dist/index.js"
 healthcheckPath = "/health"
+healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10

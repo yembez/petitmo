@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Database } from '@/types/database';
 import Constants from 'expo-constants';
+import { wrapFetchForSupabaseEgressDebug } from '@/lib/supabaseFetchDebug';
 
 function readPublicEnv(name: 'EXPO_PUBLIC_SUPABASE_URL' | 'EXPO_PUBLIC_SUPABASE_ANON_KEY'): string | undefined {
   const fromProcess = process.env?.[name];
@@ -25,7 +26,11 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
+/** Mettre `EXPO_PUBLIC_DEBUG_SUPABASE_EGRESS=1` en dev pour tracer host+path (sans query). */
+const fetchForSupabase = wrapFetchForSupabaseEgressDebug(supabaseUrl, globalThis.fetch.bind(globalThis));
+
 export const supabase = createClient<Database>(supabaseUrl ?? '', supabaseAnonKey ?? '', {
+  global: { fetch: fetchForSupabase },
   auth: {
     storage: AsyncStorage,
     autoRefreshToken: true,

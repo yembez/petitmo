@@ -1,4 +1,5 @@
-# Build = dossier server/ (Railway : Root Directory = server)
+# Build = dossier server/ (Railway : Root Directory = server).
+# Au runtime, définir PORT via l’hébergeur (Railway injecte PORT) ; défaut local 8787 dans le code.
 FROM node:20-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json* ./
