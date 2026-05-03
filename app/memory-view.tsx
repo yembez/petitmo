@@ -31,6 +31,7 @@ import { getMemoryById, updateMemoryContent } from '@/services/media';
 import { resolveChildProfileImageUri } from '@/utils/childPhotoUri';
 import { getChildren } from '@/services/children';
 import { getAllPhotoUrlsForDisplay, parseFavoritePhotoUrls } from '@/utils/memoryPhotos';
+import { getSignedMediaDisplayUrl, useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { formatDateLong, formatDuration, formatAgeAtMemory } from '@/utils/date';
 import { addMemoryToBook, createBook, listBooks, removeMemoryFromBook, type Book } from '@/services/books';
 import type { Child, Memory } from '@/types/local';
@@ -175,11 +176,57 @@ export default function MemoryViewScreen() {
     await updateMemoryContent(memory.id, text);
   };
 
+  const signedChildRemote = useSignedMediaUrl(child?.photo_url ?? null);
+  const voiceCoverDetailUri =
+    useSignedMediaUrl(
+      memory?.type === 'voice' ? ((memory.voice_cover_path ?? memory.voice_cover_url) ?? null) : null
+    ) ?? '';
+
   const contentText = memory?.content?.trim() || '';
-  const mediaUri = memory ? memory.edited_media_url || memory.media_url || '' : '';
-  const videoPosterUri =
+  const rawMediaUri = memory ? (memory.edited_media_url || memory.media_url || '').trim() : '';
+  const rawVideoPoster =
     (memory?.poster_url?.trim() || memory?.thumbnail_url?.trim() || '') || '';
-  const photoUrls = memory?.type === 'photo' ? getAllPhotoUrlsForDisplay(memory) : [];
+  const rawPhotoUrls = memory?.type === 'photo' ? getAllPhotoUrlsForDisplay(memory) : [];
+
+  const [displayMediaUri, setDisplayMediaUri] = useState(rawMediaUri);
+  const [displayVideoPoster, setDisplayVideoPoster] = useState(rawVideoPoster);
+  const [displayPhotoUrls, setDisplayPhotoUrls] = useState<string[]>(rawPhotoUrls);
+
+  useEffect(() => {
+    const rawMu = memory ? (memory.edited_media_url || memory.media_url || '').trim() : '';
+    const rawVp =
+      (memory?.poster_url?.trim() || memory?.thumbnail_url?.trim() || '') || '';
+    const rawPh = memory?.type === 'photo' ? getAllPhotoUrlsForDisplay(memory) : [];
+    setDisplayMediaUri(rawMu);
+    setDisplayVideoPoster(rawVp);
+    setDisplayPhotoUrls(rawPh);
+    if (!memory) return;
+
+    let alive = true;
+    const signIfHttp = async (u: string) => {
+      const t = u.trim();
+      if (!t || !/^https?:\/\//i.test(t)) return t;
+      return getSignedMediaDisplayUrl(t);
+    };
+    void (async () => {
+      const [mu, vp, ...rest] = await Promise.all([
+        signIfHttp(rawMu),
+        signIfHttp(rawVp),
+        ...rawPh.map(signIfHttp),
+      ]);
+      if (!alive) return;
+      setDisplayMediaUri(mu);
+      setDisplayVideoPoster(vp);
+      setDisplayPhotoUrls(rest);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [memory]);
+
+  const mediaUri = displayMediaUri;
+  const videoPosterUri = displayVideoPoster;
+  const photoUrls = displayPhotoUrls;
   const ageAtMemory = memory ? formatAgeAtMemory(child?.birthdate, memory.created_at) : '';
 
   const coverUriForBook = useCallback(
@@ -187,9 +234,9 @@ export default function MemoryViewScreen() {
       const direct = typeof b.coverPhotoUrl === 'string' ? b.coverPhotoUrl.trim() : '';
       if (direct) return direct;
       if (!child) return null;
-      return resolveChildProfileImageUri(child.local_photo_path, child.photo_url);
+      return resolveChildProfileImageUri(child.local_photo_path, signedChildRemote ?? child.photo_url);
     },
-    [child]
+    [child, signedChildRemote]
   );
 
   const bookParagraphs = (() => {
@@ -321,17 +368,17 @@ export default function MemoryViewScreen() {
               </View>
             )}
 
-            {memory.type === 'voice' && !!memory.media_url && (
+            {memory.type === 'voice' && (!!memory.media_url || !!mediaUri) && (
               <View
                 style={[
                   styles.audioBody,
-                  memory.voice_cover_url ? styles.audioBodyWithCover : null,
+                  (memory.voice_cover_path ?? memory.voice_cover_url) ? styles.audioBodyWithCover : null,
                 ]}
               >
-                {!!memory.voice_cover_url && (
+                {!!(memory.voice_cover_path ?? memory.voice_cover_url) && (
                   <>
                     <Image
-                      source={{ uri: memory.voice_cover_url }}
+                      source={{ uri: voiceCoverDetailUri }}
                       style={styles.voiceCoverBg}
                       resizeMode="cover"
                     />
@@ -341,20 +388,20 @@ export default function MemoryViewScreen() {
                 <View
                   style={[
                     styles.audioForeground,
-                    memory.voice_cover_url ? styles.audioForegroundCover : null,
+                    (memory.voice_cover_path ?? memory.voice_cover_url) ? styles.audioForegroundCover : null,
                   ]}
                 >
                   <View
                     style={[
                       styles.audioPlayerWrap,
-                      memory.voice_cover_url ? styles.audioPlayerWrapCover : null,
+                      (memory.voice_cover_path ?? memory.voice_cover_url) ? styles.audioPlayerWrapCover : null,
                     ]}
                   >
                     <AudioPlayer
-                      uri={memory.media_url}
+                      uri={mediaUri || (memory.media_url ?? '')}
                       duration={memory.duration || 0}
                       playbackStartSec={memory.voice_playback_start_sec ?? null}
-                      variant={memory.voice_cover_url ? 'coverBottom' : 'default'}
+                      variant={(memory.voice_cover_path ?? memory.voice_cover_url) ? 'coverBottom' : 'default'}
                     />
                   </View>
                 </View>

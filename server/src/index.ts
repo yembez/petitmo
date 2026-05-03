@@ -37,7 +37,7 @@ function main(): void {
   const supabase = createSupabaseAdmin(env.supabaseUrl, env.supabaseServiceRoleKey);
   registerQrRoutes(app, supabase);
   registerPublicMediaRoutes(app, supabase);
-  registerGeneratePdfRoute(app, supabase);
+  registerGeneratePdfRoute(app, supabase, env.supabaseUrl);
   registerUploadGuestAssetsRoutes(app, supabase);
   registerUploadGuestAssetRoute(app, supabase);
 

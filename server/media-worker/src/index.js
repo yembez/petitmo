@@ -46,9 +46,12 @@ function requireSecret(req, res) {
   return true;
 }
 
-function publicUrlFor(bucket, objectPath) {
-  const { data } = supabase.storage.from(bucket).getPublicUrl(objectPath);
-  return data.publicUrl;
+const WORKER_MEDIA_SIGNED_SEC = Number.parseInt(process.env.MEDIA_WORKER_SIGNED_URL_SEC || '', 10) || 60 * 60 * 24 * 30;
+
+async function signedUrlFor(bucket, objectPath) {
+  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(objectPath, WORKER_MEDIA_SIGNED_SEC);
+  if (error || !data?.signedUrl) throw error || new Error('createSignedUrl failed');
+  return data.signedUrl;
 }
 
 async function downloadToBuffer(bucket, objectPath) {
@@ -226,9 +229,11 @@ app.post('/process-memory', async (req, res) => {
       await uploadBuffer(bucket, displayPath, displayBuf, 'image/jpeg', true);
       await uploadBuffer(bucket, printPath, printBuf, 'image/jpeg', true);
 
-      const thumbUrl = publicUrlFor(bucket, thumbPath);
-      const displayUrl = publicUrlFor(bucket, displayPath);
-      const printUrl = publicUrlFor(bucket, printPath);
+      const [thumbUrl, displayUrl, printUrl] = await Promise.all([
+        signedUrlFor(bucket, thumbPath),
+        signedUrlFor(bucket, displayPath),
+        signedUrlFor(bucket, printPath),
+      ]);
 
       // Albums: on génère aussi des variantes pour chaque extra_photo_paths
       const extras = Array.isArray(m.extra_photo_paths) ? m.extra_photo_paths.filter(Boolean) : [];
@@ -246,8 +251,8 @@ app.post('/process-memory', async (req, res) => {
         const dPath = `${baseDir}/extra_${i + 1}_display.jpg`;
         await uploadBuffer(bucket, tPath, tb, 'image/jpeg', true);
         await uploadBuffer(bucket, dPath, db, 'image/jpeg', true);
-        extraThumbUrls.push(publicUrlFor(bucket, tPath));
-        extraDisplayUrls.push(publicUrlFor(bucket, dPath));
+        extraThumbUrls.push(await signedUrlFor(bucket, tPath));
+        extraDisplayUrls.push(await signedUrlFor(bucket, dPath));
       }
 
       const { error: upErr } = await supabase
@@ -291,8 +296,10 @@ app.post('/process-memory', async (req, res) => {
         await uploadBuffer(bucket, posterPath, posterSmall, 'image/jpeg', true);
         await uploadBuffer(bucket, posterPrintPath, posterPrint, 'image/jpeg', true);
 
-        const posterUrl = publicUrlFor(bucket, posterPath);
-        const posterPrintUrl = publicUrlFor(bucket, posterPrintPath);
+        const [posterUrl, posterPrintUrl] = await Promise.all([
+          signedUrlFor(bucket, posterPath),
+          signedUrlFor(bucket, posterPrintPath),
+        ]);
 
         const { error: upErr } = await supabase
           .from('memories')

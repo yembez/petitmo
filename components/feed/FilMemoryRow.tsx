@@ -23,6 +23,7 @@ import PhotoMosaic from "@/components/PhotoMosaic";
 import { parseFavoritePhotoUrls } from "@/utils/memoryPhotos";
 import { useFeedPhotoDisplayUrls } from "@/hooks/useFeedPhotoDisplayUrls";
 import { useFeedVideoPlaybackUri } from "@/hooks/useFeedVideoPlaybackUri";
+import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { Video, ResizeMode } from "expo-av";
 import { Swipeable, RectButton } from "react-native-gesture-handler";
 import { useDominantImageColors } from "@/hooks/useDominantImageColors";
@@ -260,9 +261,13 @@ function FilMemoryRow({
     const parts = raw.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
     return parts.length > 0 ? parts : ['Un joli mot du cœur'];
   })();
-  const videoPosterUri =
-    (memory.poster_url?.trim() || memory.thumbnail_url?.trim() || '') ||
-    '';
+  const videoPosterRaw =
+    (memory.poster_url?.trim() || memory.thumbnail_url?.trim() || '') || '';
+  const videoPosterUri = useSignedMediaUrl(videoPosterRaw || null) ?? '';
+  const voiceCoverDisplayUri =
+    useSignedMediaUrl((memory.voice_cover_path ?? memory.voice_cover_url) ?? null) ?? '';
+  const voicePlaybackSigned =
+    useSignedMediaUrl(memory.type === 'voice' ? (memory.media_url ?? null) : null) ?? '';
   const videoPlaybackUri = useFeedVideoPlaybackUri(memory);
   const ageAtMemory = formatAgeAtMemory(child?.birthdate, memory.created_at);
   const addedAtIso = memory.inserted_at || memory.created_at;
@@ -472,7 +477,7 @@ function FilMemoryRow({
             </View>
           )}
 
-          {memory.type === 'voice' && !!memory.media_url && (
+          {memory.type === 'voice' && (!!memory.media_url || !!voicePlaybackSigned) && (
             <View
               style={[
                 styles.audioBody,
@@ -482,7 +487,7 @@ function FilMemoryRow({
               {!!(memory.voice_cover_path ?? memory.voice_cover_url) && (
                 <>
                   <Image
-                    source={{ uri: (memory.voice_cover_path ?? memory.voice_cover_url) as string }}
+                    source={{ uri: voiceCoverDisplayUri }}
                     style={styles.voiceCoverBg}
                     contentFit="cover"
                     cachePolicy="disk"
@@ -504,7 +509,7 @@ function FilMemoryRow({
                   ]}
                 >
                   <AudioPlayer
-                    uri={memory.media_url}
+                    uri={voicePlaybackSigned || (memory.media_url ?? '')}
                     duration={memory.duration || 0}
                     playbackStartSec={memory.voice_playback_start_sec ?? null}
                     variant={(memory.voice_cover_path ?? memory.voice_cover_url) ? 'coverBottom' : 'default'}
@@ -586,7 +591,7 @@ function FilMemoryRow({
             </TouchableOpacity>
           ) : null}
 
-          {memory.type === 'voice' && !!memory.media_url && (
+          {memory.type === 'voice' && (!!memory.media_url || !!voicePlaybackSigned) && (
             <TouchableOpacity
               style={styles.actionButton}
               onPress={() => void handlePickVoiceCover(memory)}

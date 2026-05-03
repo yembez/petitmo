@@ -7,6 +7,7 @@ import {
   peekFeedBootstrapDisplayUrls,
   takeFeedBootstrapDisplayUrls,
 } from '@/services/feedLocalPhotoCache';
+import { getSignedMediaDisplayUrl } from '@/lib/mediaSignedUrl';
 
 function isHttpUrl(u: string): boolean {
   return /^https?:\/\//i.test(u.trim());
@@ -26,6 +27,12 @@ function isLikelyDeviceLocalAsset(u: string): boolean {
   }
   if (t.startsWith('/')) return true;
   return false;
+}
+
+async function resolveFeedSlotRemoteUrl(remote: string): Promise<string> {
+  const r = remote.trim();
+  if (!r || !isHttpUrl(r) || isLikelyDeviceLocalAsset(r)) return r;
+  return getSignedMediaDisplayUrl(r);
 }
 
 function initialMergedForMemory(memory: Memory): string[] {
@@ -63,20 +70,21 @@ export function useFeedPhotoDisplayUrls(memory: Memory): string[] {
       return;
     }
 
-    const rem = getAllPhotoUrlsForFeed(memory);
-    if (Platform.OS === 'web') {
-      setMerged(rem);
-      return;
-    }
-
+    const remRaw = getAllPhotoUrlsForFeed(memory);
     let alive = true;
     void (async () => {
+      const rem = await Promise.all(remRaw.map(u => resolveFeedSlotRemoteUrl(u)));
+      if (!alive) return;
+
       const maxProbe = Math.max(rem.length, 6);
       const slots: { remote: string; local: string }[] = [];
       for (let i = 0; i < maxProbe; i++) {
         const remote = (rem[i]?.trim() || '') || '';
-        const loc = await getFeedLocalThumbnail(memory.id, i);
-        const local = (loc?.trim() || '') || '';
+        const loc =
+          Platform.OS === 'web'
+            ? ''
+            : ((await getFeedLocalThumbnail(memory.id, i))?.trim() || '');
+        const local = loc;
         slots.push({ remote, local });
       }
       if (!alive) return;

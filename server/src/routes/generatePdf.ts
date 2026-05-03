@@ -8,6 +8,11 @@ import { htmlToDigitalPdfBuffer, htmlToPdfBuffer } from '../pdf/renderPdf';
 import { saveBookPdfAndSign, saveBookPdfForExportRequest } from '../pdf/pdfStorage';
 import { preparePublicTokensForBook, preparePublicTokensForExportRequest } from '../pdf/preparePublicTokens';
 import type { MemoryRow, ChildRow } from '../pdf/memoryRow';
+import {
+  signChildRowForPdfRender,
+  signMemoriesMapForPdfRender,
+  signUrlForPdfRender,
+} from '../pdf/signSupabaseMediaForPdf';
 import type {
   GenerateBookPdfPayload,
   GenerateBookPdfResponse,
@@ -94,7 +99,8 @@ function mapGuestMemories(list: GuestMemoryForPdfPayload[], exportRequestId: str
   return map;
 }
 
-export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient): void {
+export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient, supabaseProjectUrl: string): void {
+  const projectOrigin = supabaseProjectUrl.replace(/\/$/, '');
   app.post('/v1/books/generate-pdf', pdfLimiter, async (req: Request, res: Response) => {
     const body = req.body;
     if (!isPayload(body)) {
@@ -111,11 +117,11 @@ export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient)
     const ticket = await verifyExportTicket(bearer);
 
     if (ticket?.kind === 'pdf') {
-      await handleTicketPdf(res, supabase, body, ticket);
+      await handleTicketPdf(res, supabase, projectOrigin, body, ticket);
       return;
     }
     if (ticket?.kind === 'print') {
-      await handleTicketPrintPdf(res, supabase, body, ticket);
+      await handleTicketPrintPdf(res, supabase, projectOrigin, body, ticket);
       return;
     }
 
@@ -217,6 +223,14 @@ export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient)
       return;
     }
 
+    const memoriesForHtml = await signMemoriesMapForPdfRender(supabase, projectOrigin, memoriesById);
+    const childForHtml = await signChildRowForPdfRender(supabase, projectOrigin, child as ChildRow);
+    const coverRaw = body.coverPhotoUrl ?? null;
+    const coverForHtml =
+      typeof coverRaw === 'string' && coverRaw.trim()
+        ? ((await signUrlForPdfRender(supabase, projectOrigin, coverRaw)) ?? coverRaw)
+        : null;
+
     const html = buildBookHtml({
       coverTitle: body.coverTitle,
       coverYearLabel: body.coverYearLabel,
@@ -224,9 +238,9 @@ export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient)
       qrBaseUrl: body.qrBaseUrl,
       exportMode: 'digital',
       pages: body.pages,
-      child: child as ChildRow,
-      coverPhotoUrl: body.coverPhotoUrl ?? null,
-      memoriesById,
+      child: childForHtml,
+      coverPhotoUrl: coverForHtml,
+      memoriesById: memoriesForHtml,
       qrTokensByMemoryId: qrResult.tokensByMemoryId,
     });
 
@@ -266,6 +280,7 @@ type ExportRow = {
 async function handleTicketPdf(
   res: Response,
   supabase: SupabaseClient,
+  projectOrigin: string,
   body: GenerateBookPdfPayload,
   ticket: VerifiedExportTicket & { kind: 'pdf' }
 ): Promise<void> {
@@ -395,6 +410,14 @@ async function handleTicketPdf(
     photo_url: body.guestChild.photo_url ?? null,
   };
 
+  const memoriesForHtml = await signMemoriesMapForPdfRender(supabase, projectOrigin, memoriesById);
+  const childForHtml = await signChildRowForPdfRender(supabase, projectOrigin, child);
+  const coverRawTicket = body.coverPhotoUrl ?? null;
+  const coverForHtmlTicket =
+    typeof coverRawTicket === 'string' && coverRawTicket.trim()
+      ? ((await signUrlForPdfRender(supabase, projectOrigin, coverRawTicket)) ?? coverRawTicket)
+      : null;
+
   const html = buildBookHtml({
     coverTitle: body.coverTitle,
     coverYearLabel: body.coverYearLabel,
@@ -402,9 +425,9 @@ async function handleTicketPdf(
     qrBaseUrl: body.qrBaseUrl,
     exportMode: body.exportMode,
     pages: body.pages,
-    child,
-    coverPhotoUrl: body.coverPhotoUrl ?? null,
-    memoriesById,
+    child: childForHtml,
+    coverPhotoUrl: coverForHtmlTicket,
+    memoriesById: memoriesForHtml,
     qrTokensByMemoryId: qrResult.tokensByMemoryId,
   });
 
@@ -450,6 +473,7 @@ async function handleTicketPdf(
 async function handleTicketPrintPdf(
   res: Response,
   supabase: SupabaseClient,
+  projectOrigin: string,
   body: GenerateBookPdfPayload,
   ticket: VerifiedExportTicket & { kind: 'print' }
 ): Promise<void> {
@@ -575,6 +599,14 @@ async function handleTicketPrintPdf(
     photo_url: body.guestChild.photo_url ?? null,
   };
 
+  const memoriesForHtmlPrint = await signMemoriesMapForPdfRender(supabase, projectOrigin, memoriesById);
+  const childForHtmlPrint = await signChildRowForPdfRender(supabase, projectOrigin, child);
+  const coverRawPrint = body.coverPhotoUrl ?? null;
+  const coverForHtmlPrint =
+    typeof coverRawPrint === 'string' && coverRawPrint.trim()
+      ? ((await signUrlForPdfRender(supabase, projectOrigin, coverRawPrint)) ?? coverRawPrint)
+      : null;
+
   const html = buildBookHtml({
     coverTitle: body.coverTitle,
     coverYearLabel: body.coverYearLabel,
@@ -582,9 +614,9 @@ async function handleTicketPrintPdf(
     qrBaseUrl: body.qrBaseUrl,
     exportMode: 'print',
     pages: body.pages,
-    child,
-    coverPhotoUrl: body.coverPhotoUrl ?? null,
-    memoriesById,
+    child: childForHtmlPrint,
+    coverPhotoUrl: coverForHtmlPrint,
+    memoriesById: memoriesForHtmlPrint,
     qrTokensByMemoryId: qrResult.tokensByMemoryId,
   });
 

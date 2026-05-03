@@ -492,11 +492,11 @@ export default function EditPhotoScreen() {
         }
       }
 
-      const { data: publicUrlData } = supabase.storage
+      const { data: signed, error: signErr } = await supabase.storage
         .from('media')
-        .getPublicUrl(fileName);
+        .createSignedUrl(fileName, 60 * 60 * 24 * 7);
 
-      if (!publicUrlData?.publicUrl) {
+      if (signErr || !signed?.signedUrl) {
         Alert.alert('Erreur', 'Impossible de récupérer l\'URL de la photo');
         return;
       }
@@ -504,7 +504,7 @@ export default function EditPhotoScreen() {
       const { error: updateError } = await supabase
         .from('memories')
         .update({
-          media_url: publicUrlData.publicUrl,
+          media_url: signed.signedUrl,
           updated_at: new Date().toISOString()
         })
         .eq('id', memoryId);

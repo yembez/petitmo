@@ -179,14 +179,21 @@ Deno.serve(async (req: Request) => {
         console.error('[guest-upload-urls] sign upload', error?.message);
         return jsonRes({ error: 'Storage error' }, 500);
       }
-      const pub = supabase.storage.from(bucket).getPublicUrl(path);
+      const readTtl = 60 * 60 * 24 * 7;
+      const { data: readSigned, error: readErr } = await supabase.storage
+        .from(bucket)
+        .createSignedUrl(path, readTtl);
+      if (readErr || !readSigned?.signedUrl) {
+        console.error('[guest-upload-urls] sign read', readErr?.message);
+        return jsonRes({ error: 'Storage error' }, 500);
+      }
       results.push({
         kind: a.kind,
         memoryId: a.kind === 'cover' ? null : memoryId,
         bucket,
         path,
         signedUrl: data.signedUrl,
-        publicUrl: pub.data.publicUrl,
+        publicUrl: readSigned.signedUrl,
       });
       continue;
     }

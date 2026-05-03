@@ -6,6 +6,7 @@ import {
   peekFeedBootstrapVideoUri,
   takeFeedBootstrapVideoUri,
 } from '@/services/feedLocalPhotoCache';
+import { getSignedMediaDisplayUrl } from '@/lib/mediaSignedUrl';
 
 function isHttpUrl(u: string): boolean {
   return /^https?:\/\//i.test(u.trim());
@@ -30,6 +31,12 @@ function remotePlaybackUri(m: Memory): string {
   return (m.edited_media_url?.trim() || m.media_url?.trim() || '').trim();
 }
 
+async function resolveRemoteVideoUri(raw: string): Promise<string> {
+  const t = raw.trim();
+  if (!t || !isHttpUrl(t)) return t;
+  return getSignedMediaDisplayUrl(t);
+}
+
 /**
  * URI de lecture vidéo dans le fil : copie locale persistante si présente (pas d’egress),
  * sinon `edited_media_url` / `media_url`.
@@ -48,14 +55,17 @@ export function useFeedVideoPlaybackUri(memory: Memory): string {
       setUri('');
       return;
     }
-    if (Platform.OS === 'web') {
-      setUri(remotePlaybackUri(memory));
-      return;
-    }
 
     let alive = true;
     void (async () => {
-      const remote = remotePlaybackUri(memory);
+      const remoteRaw = remotePlaybackUri(memory);
+      const remote = await resolveRemoteVideoUri(remoteRaw);
+      if (!alive) return;
+      if (Platform.OS === 'web') {
+        setUri(remote);
+        return;
+      }
+
       const local = await getFeedLocalVideoPath(memory.id);
       let chosen = (local?.trim() || remote || '').trim();
       if (!alive) return;

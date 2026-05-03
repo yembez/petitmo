@@ -111,11 +111,13 @@ export async function uploadChildPhoto(childId: string, photoUri: string): Promi
 
     if (error) throw error;
 
-    const { data: { publicUrl } } = supabase.storage
+    const { data, error: signErr } = await supabase.storage
       .from('media')
-      .getPublicUrl(filePath);
-
-    return publicUrl;
+      .createSignedUrl(filePath, 60 * 60 * 24 * 7);
+    if (signErr || !data?.signedUrl) {
+      throw signErr ?? new Error('Impossible de signer la photo enfant');
+    }
+    return data.signedUrl;
   } catch (error) {
     console.error('Upload child photo error:', error);
     throw error;

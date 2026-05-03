@@ -33,6 +33,7 @@ import {
   upsertLocalMemory,
 } from '@/lib/localDb';
 import { captureMemoryLocalOnly, capturePhotoAlbumLocalOnly } from '@/services/localOnlyMemoryCapture';
+import { getSignedUrlAfterMediaUpload } from '@/lib/mediaSignedUrl';
 
 export type MemoryRow = Memory;
 
@@ -120,8 +121,7 @@ async function uploadToMediaBucket(params: {
     upsert: false,
   });
   if (error) throw error;
-  const { data } = supabase.storage.from('media').getPublicUrl(params.filePath);
-  return data.publicUrl;
+  return getSignedUrlAfterMediaUpload(params.filePath);
 }
 
 export async function uploadFileToSupabase(localUri: string, storagePath: string): Promise<string> {
@@ -323,7 +323,7 @@ async function uploadVoiceCoverToStorage(
     return null;
   }
 
-  const { data: { publicUrl } } = supabase.storage.from('media').getPublicUrl(filePath);
+  const publicUrl = await getSignedUrlAfterMediaUpload(filePath);
   return { publicUrl, path: filePath };
 }
 
@@ -819,9 +819,7 @@ async function readAndUploadPhotoFile(
 
   if (uploadError) throw uploadError;
 
-  const {
-    data: { publicUrl },
-  } = supabase.storage.from('media').getPublicUrl(filePath);
+  const publicUrl = await getSignedUrlAfterMediaUpload(filePath);
   return { publicUrl, size: fileSize, path: filePath, compressedLocalUri };
 }
 

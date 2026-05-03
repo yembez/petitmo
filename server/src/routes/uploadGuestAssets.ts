@@ -74,8 +74,15 @@ export function registerUploadGuestAssetsRoutes(app: Express, supabase: Supabase
           res.status(500).json({ error: 'Upload failed' });
           return;
         }
-        const { data } = supabase.storage.from('media').getPublicUrl(objectPath);
-        res.status(200).json({ url: data.publicUrl, path: objectPath });
+        const { data: signed, error: signErr } = await supabase.storage
+          .from('media')
+          .createSignedUrl(objectPath, 60 * 60 * 24 * 7);
+        if (signErr || !signed?.signedUrl) {
+          console.error('[upload-guest-photo] sign', signErr?.message);
+          res.status(500).json({ error: 'Sign failed' });
+          return;
+        }
+        res.status(200).json({ url: signed.signedUrl, path: objectPath });
       } catch {
         res.status(500).json({ error: 'Upload failed' });
       }
