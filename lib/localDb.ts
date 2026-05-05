@@ -100,6 +100,7 @@ export function initLocalDb(): void {
     add('print_px_h', 'INTEGER');
     add('sync_status', "TEXT DEFAULT 'synced'");
     add('voice_playback_start_sec', 'REAL');
+    add('voice_cover_path', 'TEXT');
     add('import_asset_id', 'TEXT');
     add('import_source_fingerprint', 'TEXT');
   } catch {
@@ -278,7 +279,7 @@ export function upsertLocalMemory(memory: Memory, uploadStatus?: UploadStatus): 
       local_media_path, local_original_path, local_thumb_path, local_display_path, local_print_path,
       original_px_w, original_px_h, print_px_w, print_px_h,
       media_url, thumb_url, display_url,
-      print_url, poster_url, thumbnail_url, voice_cover_url, voice_playback_start_sec,
+      print_url, poster_url, thumbnail_url, voice_cover_url, voice_cover_path, voice_playback_start_sec,
       edited_media_url, extra_photo_urls, favorite_photo_urls,
       extra_thumb_urls, extra_display_urls,
       is_favorite, duration, file_size, location,
@@ -286,7 +287,7 @@ export function upsertLocalMemory(memory: Memory, uploadStatus?: UploadStatus): 
       upload_status, sync_status, synced_at,
       import_asset_id, import_source_fingerprint
     ) VALUES (
-      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
     )`,
     [
       memory.id,
@@ -309,6 +310,7 @@ export function upsertLocalMemory(memory: Memory, uploadStatus?: UploadStatus): 
       memory.poster_url ?? null,
       memory.thumbnail_url ?? null,
       memory.voice_cover_url ?? null,
+      memory.voice_cover_path ?? null,
       memory.voice_playback_start_sec ?? null,
       memory.edited_media_url ?? null,
       JSON.stringify(memory.extra_photo_urls ?? []),

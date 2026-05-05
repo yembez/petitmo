@@ -1958,6 +1958,15 @@ export async function updateVoiceMemoryCover(
       console.error('updateVoiceMemoryCover:', error);
       return null;
     }
+    const existing = getLocalMemoryById(memoryId);
+    if (existing) {
+      upsertLocalMemory({
+        ...existing,
+        voice_cover_url: up.publicUrl,
+        voice_cover_path: up.path,
+        updated_at: new Date().toISOString(),
+      });
+    }
     void triggerProcessMemory(memoryId);
     return up.publicUrl;
   } catch (error) {

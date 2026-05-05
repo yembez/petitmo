@@ -94,6 +94,8 @@ async function ensureVoiceCoversPersistedForServerPdf(
     if (m.type !== 'voice') continue;
     const coverUri = getVoiceCoverUriForBookPreview(m).trim();
     if (!coverUri || isHttps(coverUri)) continue;
+    /** Chemin déjà sur Storage (ex. après sync) : le serveur signe depuis la DB, pas d’upload fichier. */
+    if (isBareMediaBucketPath(coverUri)) continue;
     try {
       await updateVoiceMemoryCover(m.id, childId, coverUri);
     } catch (e) {
@@ -139,6 +141,14 @@ function memoryToGuestPayload(m: Memory): GuestMemoryForPdfPayload {
 
 function isHttps(u: string | null | undefined): boolean {
   return typeof u === 'string' && /^https:\/\//i.test(u.trim());
+}
+
+/** Même règle que le bucket `media` côté serveur : ce n’est pas un fichier local à ré-uploader. */
+const BARE_MEDIA_PATH_RE =
+  /^(guest\/exports\/|exports\/|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/)/i;
+
+function isBareMediaBucketPath(s: string): boolean {
+  return BARE_MEDIA_PATH_RE.test(s.trim());
 }
 
 async function uploadGuestPhotoToPdfServer(params: {

@@ -39,7 +39,9 @@ function esc(s: string): string {
 function imgAttr(url: string | null | undefined): string {
   const t = (url ?? '').trim();
   if (!t) return '';
-  return esc(t);
+  // Ne pas remplacer `&` par `&amp;` : les URLs signées (query avec jeton) peuvent être mal
+  // résolues par Chromium pour `<img src="…">`. Échapper uniquement les guillemets.
+  return t.replace(/"/g, '&quot;');
 }
 
 function imgAttrFirst(urls: Array<string | null | undefined>): string {
