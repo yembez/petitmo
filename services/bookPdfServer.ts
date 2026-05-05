@@ -31,6 +31,7 @@ import { ensureVoiceMemoryCloudForBookExport } from '@/services/migration';
 import { persistVoiceCoverToCloudForPdfExport } from '@/services/media';
 import { getVoiceCoverUriForBookPreview } from '@/utils/memoryPhotos';
 import { resolveServerPdfEntitlements } from '@/lib/digitalExportPurchase';
+import { MEDIA_BOOK_PRINT_MAX_WIDTH } from '@/lib/limits';
 import { isInitExportConfigured, postInitExport, postGuestUploadUrls } from '@/services/initExportApi';
 
 function pdfServerBaseUrl(): string | null {
@@ -218,7 +219,7 @@ async function uploadGuestPhotoToPdfServer(params: {
     try {
       const manipulated = await ImageManipulator.manipulateAsync(
         params.localJpegUri,
-        [{ resize: { width: 1600 } }],
+        [{ resize: { width: MEDIA_BOOK_PRINT_MAX_WIDTH } }],
         { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG }
       );
       if (manipulated?.uri) src = manipulated.uri;
@@ -775,7 +776,7 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
     try {
       const manipulated = await ImageManipulator.manipulateAsync(
         coverLocal,
-        [{ resize: { width: 1600 } }],
+        [{ resize: { width: MEDIA_BOOK_PRINT_MAX_WIDTH } }],
         { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG }
       );
       const { readUrl } = await guestUploadMediaImageThenReadUrl({
@@ -812,7 +813,7 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
           try {
             const manipulated = await ImageManipulator.manipulateAsync(
               coverUri,
-              [{ resize: { width: 1600 } }],
+              [{ resize: { width: MEDIA_BOOK_PRINT_MAX_WIDTH } }],
               { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG }
             );
             const { readUrl } = await guestUploadMediaImageThenReadUrl({
@@ -880,7 +881,7 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
 
       const manipulated = await ImageManipulator.manipulateAsync(
         local,
-        [{ resize: { width: 1600 } }],
+        [{ resize: { width: MEDIA_BOOK_PRINT_MAX_WIDTH } }],
         { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG }
       );
       const { readUrl, path } = await guestUploadMediaImageThenReadUrl({

@@ -31,6 +31,69 @@ export type Book = {
 };
 
 const STORAGE_KEY = '@petitmo_books_v1';
+/** Supprime côté cloud en attente (hors-ligne / échec réseau) : `restore` ignore ces ids. */
+const PENDING_BOOK_DELETE_IDS_KEY = '@petitmo_pending_book_delete_ids';
+
+function booksTable(): ReturnType<typeof supabase.from> {
+  return (supabase as unknown as { from: (t: string) => ReturnType<typeof supabase.from> }).from('books');
+}
+
+async function getPendingBookDeleteIds(): Promise<Set<string>> {
+  try {
+    const raw = await AsyncStorage.getItem(PENDING_BOOK_DELETE_IDS_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw) as unknown;
+    if (!Array.isArray(arr)) return new Set();
+    return new Set(arr.filter((x): x is string => typeof x === 'string' && x.trim().length > 0).map(s => s.trim()));
+  } catch {
+    return new Set();
+  }
+}
+
+async function addPendingBookDeleteId(bookId: string): Promise<void> {
+  const id = bookId.trim();
+  if (!id) return;
+  const s = await getPendingBookDeleteIds();
+  s.add(id);
+  await AsyncStorage.setItem(PENDING_BOOK_DELETE_IDS_KEY, JSON.stringify([...s]));
+}
+
+async function removePendingBookDeleteIds(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const s = await getPendingBookDeleteIds();
+  for (const id of ids) s.delete(id.trim());
+  await AsyncStorage.setItem(PENDING_BOOK_DELETE_IDS_KEY, JSON.stringify([...s]));
+}
+
+/**
+ * Tente de supprimer sur Supabase les livres marqués « supprimés localement » mais pas encore retirés du cloud.
+ * À appeler avant `restoreBooksFromSupabaseIfPremium` au démarrage.
+ */
+export async function flushPendingBookDeletesToSupabase(): Promise<void> {
+  const tier = await getUserTier();
+  if (tier !== 'paid') return;
+  const { data: u } = await supabase.auth.getUser();
+  const user = u.user;
+  if (!user) return;
+  const pending = [...(await getPendingBookDeleteIds())];
+  if (pending.length === 0) return;
+  const removed: string[] = [];
+  for (const id of pending) {
+    const { error } = await booksTable().delete().eq('id', id).eq('user_id', user.id);
+    if (!error) removed.push(id);
+  }
+  await removePendingBookDeleteIds(removed);
+}
+
+async function deleteRemoteBookIfPremium(bookId: string): Promise<void> {
+  const tier = await getUserTier();
+  if (tier !== 'paid') return;
+  const { data: u } = await supabase.auth.getUser();
+  const user = u.user;
+  if (!user) return;
+  const { error } = await booksTable().delete().eq('id', bookId).eq('user_id', user.id);
+  if (error) throw error;
+}
 
 function safeId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -256,8 +319,19 @@ export async function removeMemoryFromBook(bookId: string, memoryId: string): Pr
 }
 
 export async function deleteBook(bookId: string): Promise<void> {
-  deleteLocalBook(bookId);
-  void backupBooksToSupabaseIfPremium().catch(() => {});
+  const id = bookId.trim();
+  if (!id) return;
+  deleteLocalBook(id);
+  void addPendingBookDeleteId(id);
+  void (async () => {
+    try {
+      await deleteRemoteBookIfPremium(id);
+      await removePendingBookDeleteIds([id]);
+    } catch {
+      /* pending conservé : restore ignorera cet id ; flush au prochain démarrage */
+    }
+    await backupBooksToSupabaseIfPremium().catch(() => {});
+  })();
 }
 
 /** Nombre de livres contenant chaque souvenir (clé = memoryId). */
@@ -339,8 +413,17 @@ export async function backupBooksToSupabaseIfPremium(): Promise<void> {
   }));
 
   // Upsert tout : robuste et idempotent.
-  // NOTE: `books` doit exister dans `types/database.ts` (généré depuis Supabase) sinon TS échoue.
-  await (supabase as unknown as { from: (t: string) => any }).from('books').upsert(payload, { onConflict: 'id' });
+  await booksTable().upsert(payload, { onConflict: 'id' });
+
+  const localIds = new Set(books.map((b: LocalBookRow) => b.id));
+  const { data: remoteRows, error: listErr } = await booksTable().select('id').eq('user_id', user.id);
+  if (!listErr && Array.isArray(remoteRows)) {
+    for (const r of remoteRows as { id?: unknown }[]) {
+      const rid = typeof r.id === 'string' ? r.id : '';
+      if (!rid || localIds.has(rid)) continue;
+      await booksTable().delete().eq('id', rid).eq('user_id', user.id);
+    }
+  }
 }
 
 function safeStringArray(x: unknown): string[] {
@@ -399,8 +482,7 @@ export async function restoreBooksFromSupabaseIfPremium(): Promise<void> {
   const user = u.user;
   if (!user) return;
 
-  const { data, error } = await (supabase as unknown as { from: (t: string) => any })
-    .from('books')
+  const { data, error } = await booksTable()
     .select(
       'id, user_id, title, created_at, updated_at, memory_ids, cover_photo_url, rotations, photo_crops, text_edits, chapter_title'
     )
@@ -411,9 +493,12 @@ export async function restoreBooksFromSupabaseIfPremium(): Promise<void> {
     return;
   }
 
+  const pendingDelete = await getPendingBookDeleteIds();
+
   for (const row of data as Array<Record<string, unknown>>) {
     const id = typeof row.id === 'string' ? row.id : '';
     if (!id) continue;
+    if (pendingDelete.has(id)) continue;
 
     const remoteUpdatedAt = typeof row.updated_at === 'string' ? row.updated_at : '';
     const remoteUpdatedMs = Date.parse(remoteUpdatedAt);

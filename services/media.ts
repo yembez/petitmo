@@ -11,7 +11,7 @@ import type { UploadStatus } from '@/types/local';
 import { ensureLocalPhotoDerivatives, persistOriginalToSandbox } from '@/services/memoryLocalStore';
 import { withLocalFields } from '@/services/memoryRowMapping';
 import { pullMemoriesFromRemoteToLocal } from '@/services/memoriesLocalSync';
-import { checkMemoryLimit, checkVideoLimit } from '@/lib/limits';
+import { checkMemoryLimit, checkVideoLimit, MEDIA_BOOK_PRINT_MAX_WIDTH } from '@/lib/limits';
 import { getUserTier } from '@/lib/userTier';
 import { deleteLocalMediaFiles } from '@/lib/localCleanup';
 import {
@@ -273,7 +273,7 @@ async function stratifiedUpload(params: {
   // Toujours uploader print + thumb. En payant : uploader aussi l’original.
   const ts = Date.now();
   const thumbLocal = await createPhotoVariant(uri, 480, 0.7);
-  const printLocal = await createPhotoVariant(uri, 1600, 0.82);
+  const printLocal = await createPhotoVariant(uri, MEDIA_BOOK_PRINT_MAX_WIDTH, 0.82);
 
   const thumbPath = `${userId}/${childId}/photo/thumb_${ts}.jpg`;
   const printPath = `${userId}/${childId}/photo/print_${ts}.jpg`;
@@ -315,16 +315,14 @@ async function stratifiedUpload(params: {
   };
 }
 
-/** Cover vocal : même idée que les photos livre — JPEG léger, largeur max (PDF + mobile). */
-const VOICE_COVER_UPLOAD_MAX_WIDTH = 1200;
-
+/** Cover vocal : même cible que le dérivé photo `print_*` (livre A5 / PDF). */
 async function prepareLocalUriForVoiceCoverUpload(coverUri: string): Promise<string> {
   const trimmed = coverUri.trim();
   if (!trimmed || Platform.OS === 'web') return trimmed;
   try {
     const manipulated = await ImageManipulator.manipulateAsync(
       trimmed,
-      [{ resize: { width: VOICE_COVER_UPLOAD_MAX_WIDTH } }],
+      [{ resize: { width: MEDIA_BOOK_PRINT_MAX_WIDTH } }],
       { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG }
     );
     return manipulated?.uri?.trim() ? manipulated.uri : trimmed;
@@ -1485,10 +1483,9 @@ async function readAndUploadPhotoFile(
     fileData = blob;
     fileSize = blob.size;
   } else {
-    // Réduit taille + temps d’upload ; 1600px suffit pour un bel affichage avant dérivés worker.
     const manipulated = await ImageManipulator.manipulateAsync(
       uri,
-      [{ resize: { width: 1600 } }],
+      [{ resize: { width: MEDIA_BOOK_PRINT_MAX_WIDTH } }],
       { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
     );
     compressedLocalUri = manipulated.uri;

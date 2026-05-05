@@ -244,40 +244,52 @@ function pageQuote(m: MemoryRow, pageNum: number): string {
 </div>`;
 }
 
-function pageAudio(m: MemoryRow, qrUrl: string, pageNum: number): string {
+function pageAudio(
+  m: MemoryRow,
+  qrUrl: string,
+  pageNum: number,
+  rot: number,
+  crop: PhotoCrop | undefined,
+  printBleed: boolean
+): string {
   const titleRaw = sanitizeText((m.content ?? '').trim());
   const dur = fmtDuration(m.duration);
   const titleHtml = titleRaw ? romanHtml(titleRaw) : '';
   const coverUrl = imgAttr(m.voice_cover_url);
-  const coverBlock = coverUrl
-    ? `<div class="audio-cover-bg"><img src="${coverUrl}" alt="" /></div><div class="audio-cover-scrim"></div>`
-    : '';
-  return `<div class="page audio">
-  <div class="inner audio-inner">
-    <div class="audio-header">
-      <div style="display:flex;align-items:center;gap:4pt;">
+  const rotCss = rot ? `transform: rotate(${rot}deg); transform-origin: center;` : '';
+  const pnCls = printBleed ? 'pn-image bleed-x' : 'pn-image';
+  return `<div class="page audio audio-note-layout">
+  <div class="${pnCls}">
+    ${
+      coverUrl
+        ? `<div class="crop-frame" style="width:100%;height:100%;"><img class="crop-img" src="${coverUrl}" alt="" style="${cropCss(crop)}${rotCss}" /></div>`
+        : '<div class="placeholder" style="width:100%;height:100%;"></div>'
+    }
+  </div>
+  <div class="pn-text audio-below-photo">
+    <div class="audio-meta-row">
+      <div class="audio-type-pill">
         <span class="dot vocal"></span>
-        <span class="label" style="color:#5C8FA6;text-transform:none;">Vocal</span>
+        <span class="label audio-type-label">Vocal</span>
       </div>
-      <span class="label">${esc(dateFrCaps(m.created_at))}</span>
+      <span class="label">${esc(dateTimeFrCaps(m.created_at))}</span>
     </div>
-    <div class="audio-body">
-      ${coverBlock}
-      <div class="audio-body-fg">
-        <div class="audio-ring">
-          <div class="audio-play">▶</div>
-        </div>
-        <div class="audio-wave-wrap">${audioWaveformSvg(m.id)}</div>
-        <div class="audio-dur-row">
+    ${titleHtml ? `<div class="audio-title-above-qr body">${titleHtml}</div>` : ''}
+    <div class="audio-qr-block">
+      ${qrImgTag(qrUrl)}
+      <div class="label audio-qr-hint">Scanner pour écouter</div>
+    </div>
+    <div class="audio-player-row">
+      <div class="audio-ring audio-ring-inline">
+        <div class="audio-play">▶</div>
+      </div>
+      <div class="audio-wave-col">
+        <div class="audio-wave-wrap audio-wave-inline">${audioWaveformSvg(m.id)}</div>
+        <div class="audio-dur-row audio-dur-inline">
           <span class="label audio-dur-side">0:00</span>
           <span class="label audio-dur-side">${esc(dur)}</span>
         </div>
-        ${titleHtml ? `<div class="subtitle audio-title-maquette">${titleHtml}</div>` : ''}
       </div>
-    </div>
-    <div class="audio-qr">
-      ${qrImgTag(qrUrl)}
-      <div class="label" style="margin-top:3mm;">Scanner pour écouter</div>
     </div>
   </div>
   <div class="folio">${pageNum}</div>
@@ -350,7 +362,7 @@ function renderPage(page: BookPageServer, input: BuildBookHtmlInput, pageNum: nu
         case 'audio': {
           const tok = qrTokensByMemoryId.get(id) ?? '';
           const qrTarget = tok ? `${qrBaseUrl}/${tok}` : '';
-          return pageAudio(m, qrTarget, pageNum);
+          return pageAudio(m, qrTarget, pageNum, rot, crop, printBleed);
         }
         case 'video': {
           const tok = qrTokensByMemoryId.get(id) ?? '';
@@ -592,54 +604,90 @@ body.print-bleed .bleed-x {
 .quote-rule-seg { flex:1; height:.3pt; background:rgba(0,0,0,.08); }
 .quote-rule-dot { width:4pt; height:4pt; border-radius:50%; background:rgba(0,0,0,.08); }
 
-.audio-inner { position:relative; overflow:hidden; display:flex; flex-direction:column; }
-.audio-cover-bg {
-  position:absolute; inset:0; z-index:0;
+/* Audio : même squelette que photo-note (image bords + bandeau bas). */
+.audio-note-layout { flex-direction:column; }
+.audio-below-photo {
+  display:flex;
+  flex-direction:column;
+  flex:1;
+  min-height:0;
 }
-.audio-cover-bg img {
-  width:100%; height:100%; object-fit:cover; display:block;
+.audio-meta-row {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  flex-shrink:0;
+  padding-bottom:3mm;
+  border-bottom:.3pt solid rgba(0,0,0,.08);
 }
-.audio-cover-scrim {
-  position:absolute; inset:0; z-index:0; pointer-events:none;
-  background:rgba(255,255,255,0.62);
+.audio-type-pill {
+  display:flex;
+  align-items:center;
+  gap:4pt;
 }
-.audio-header {
-  display:flex; justify-content:space-between; align-items:center;
-  padding-top:4mm; padding-bottom:4mm; border-bottom:.3pt solid rgba(0,0,0,.08);
-  position:relative; z-index:1; flex-shrink:0;
+.audio-type-label {
+  color:#5C8FA6;
+  text-transform:none;
+  letter-spacing:0;
 }
-.audio-body {
-  flex:1; min-height:0; display:flex; flex-direction:column;
-  align-items:center; justify-content:center;
-  position:relative;
+.audio-title-above-qr {
+  margin-top:3mm;
+  flex-shrink:0;
 }
-.audio-body-fg {
-  position:relative; z-index:1;
-  width:100%; display:flex; flex-direction:column; align-items:center;
-  justify-content:center; padding:2mm 0;
+.audio-qr-block {
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  flex-shrink:0;
+  margin-top:4mm;
+  margin-bottom:4mm;
+}
+.audio-qr-hint {
+  margin-top:2.5mm;
+  text-align:center;
+}
+.audio-player-row {
+  display:flex;
+  flex-direction:row;
+  align-items:center;
+  gap:4mm;
+  flex-shrink:0;
+  margin-top:auto;
+  padding-top:1mm;
 }
 .audio-ring {
-  width:19mm; height:19mm; border-radius:50%;
+  width:19mm;
+  height:19mm;
+  border-radius:50%;
   border:1.2pt solid rgba(92,143,166,.45);
-  display:flex; align-items:center; justify-content:center;
-  margin-bottom:3mm;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  flex-shrink:0;
 }
+.audio-ring-inline { margin-bottom:0; }
 .audio-play { font-size:11pt; color:#5C8FA6; margin-left:1.5pt; }
+.audio-wave-col {
+  flex:1;
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+}
 .audio-wave-wrap {
-  width:54mm; max-width:72%;
-  margin:0 auto;
+  width:100%;
+  max-width:none;
+  margin:0;
 }
 .audio-wave-wrap .audio-wave-svg { width:100%; height:auto; display:block; }
 .audio-dur-row {
-  display:flex; flex-direction:row; justify-content:space-between;
-  width:54mm; max-width:72%;
-  margin-top:2mm;
+  display:flex;
+  flex-direction:row;
+  justify-content:space-between;
+  width:100%;
+  margin-top:1.5mm;
 }
+.audio-dur-inline { max-width:none; }
 .audio-dur-side { font-size:7pt; text-transform:none; letter-spacing:0; }
-.audio-title-maquette {
-  margin-top:5mm; max-width:85%; text-align:justify;
-  font-size:13.5pt; line-height:1.35;
-}
 .audio-qr { display:flex; flex-direction:column; align-items:center; flex-shrink:0; position:relative; z-index:1; margin-top:auto; padding-bottom:3mm; }
 .qr { width:22mm; height:22mm; }
 

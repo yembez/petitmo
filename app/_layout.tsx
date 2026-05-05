@@ -17,6 +17,7 @@ import {
   migrateBooksFromAsyncStorageToSqliteOnce,
   restoreBooksFromSupabaseIfPremium,
   backupBooksToSupabaseIfPremium,
+  flushPendingBookDeletesToSupabase,
 } from '@/services/books';
 
 export default function RootLayout() {
@@ -138,6 +139,7 @@ export default function RootLayout() {
     // 1) restauration cloud → SQLite (si premium)
     // 2) puis backup (merge “le plus récent gagne”, donc sans perte)
     void (async () => {
+      await flushPendingBookDeletesToSupabase();
       await restoreBooksFromSupabaseIfPremium();
       await backupBooksToSupabaseIfPremium();
     })();

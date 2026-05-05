@@ -11,6 +11,12 @@ export const FREE_TIER_BOOK_VOICE_MAX_DURATION = 60 // secondes (livres : QR aud
 /** Max souvenirs audio avec QR dans un livre / PDF (plan gratuit). Aligné serveur `FREE_TIER_QR_AV_MAX_PER_BOOK`. */
 export const FREE_TIER_BOOK_AUDIO_MAX_COUNT = 5
 
+/**
+ * Largeur max (px) côté client pour le dérivé photo « print » (`print_*`) et pour les covers vocales
+ * envoyées au livre / PDF — même cible A5 que `stratifiedUpload` (photo).
+ */
+export const MEDIA_BOOK_PRINT_MAX_WIDTH = 1600
+
 export type LimitCheck = {
   canCreate: boolean
   current: number
