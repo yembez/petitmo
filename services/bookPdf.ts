@@ -10,6 +10,7 @@ import {
   FONT_DM_SANS_400_B64,
   FONT_DM_SANS_500_B64,
 } from '@/services/bookFontsB64';
+import { audioWaveformSvg } from '@/lib/pdfAudioWaveform';
 
 // ── PUBLIC API ────────────────────────────────────────────────
 
@@ -190,7 +191,7 @@ function collectImageUrls(
     // IMPORTANT: éviter tout téléchargement inutile (egress), surtout les vidéos.
     // - Photo pages: on embed l'image pleine page
     // - Video pages: on embed UNIQUEMENT la miniature (sinon on risquerait de télécharger le mp4)
-    // - Audio pages: pas d'image (hors QR) dans le template PDF
+    // - Audio pages: cover vocale + QR (pas le fichier audio)
     // - Quote pages: pas d'image
     if (page.type === 'photo-full' || page.type === 'photo-note') {
       // Offline-first : préférer le print local, puis l’original local, puis remote.
@@ -205,6 +206,11 @@ function collectImageUrls(
       if (mainUrl) urls.add(mainUrl);
     } else if (page.type === 'video') {
       if (m.thumbnail_url) urls.add(m.thumbnail_url);
+    } else if (page.type === 'audio') {
+      const vcPath = (m.voice_cover_path ?? '').trim();
+      const vcUrl = (m.voice_cover_url ?? '').trim();
+      if (vcPath) urls.add(vcPath);
+      if (vcUrl && vcUrl !== vcPath) urls.add(vcUrl);
     }
 
     if (page.type === 'audio' || page.type === 'video') {
@@ -438,7 +444,7 @@ function renderPage(
     }
     case 'audio': {
       const m = merged(page.memory, textEdits);
-      return pageAudio(m, `${qrBaseUrl}/${m.id}`, pageNum, images);
+      return pageAudio(m, `${qrBaseUrl}/${m.id}`, pageNum, images, rotations[m.id] ?? 0, photoCrops?.[m.id]);
     }
     case 'video': {
       const m = merged(page.memory, textEdits);
@@ -585,28 +591,51 @@ function pageQuote(m: Memory, pageNum: number): string {
 }
 
 /* ─── AUDIO ─── */
-function pageAudio(m: Memory, qrUrl: string, pageNum: number, images: Map<string, string>): string {
-  const title = sanitizeText((m.content ?? '').trim()) || 'Note vocale';
+function pageAudio(
+  m: Memory,
+  qrUrl: string,
+  pageNum: number,
+  images: Map<string, string>,
+  rot: number,
+  crop?: PhotoCrop
+): string {
+  const titleRaw = sanitizeText((m.content ?? '').trim());
   const dur = fmtDuration(m.duration);
-  return `<div class="page audio">
-  <div class="inner">
-    <div class="audio-header">
-      <div style="display:flex;align-items:center;gap:4pt;">
+  const titleHtml = titleRaw ? romanHtml(titleRaw) : '';
+  const coverSrc = imgSrcFirst([m.voice_cover_path, m.voice_cover_url], images);
+  const rotCss = rot ? `transform: rotate(${rot}deg); transform-origin: center;` : '';
+  return `<div class="page audio audio-note-layout">
+  <div class="pn-image">
+    ${
+      coverSrc
+        ? `<div class="crop-frame" style="width:100%;height:100%;"><img class="crop-img" src="${coverSrc}" alt="" style="${cropCss(crop)}${rotCss}" /></div>`
+        : '<div class="placeholder" style="width:100%;height:100%;"></div>'
+    }
+  </div>
+  <div class="pn-text audio-below-photo">
+    <div class="audio-meta-row">
+      <div class="audio-type-pill">
         <span class="dot vocal"></span>
-        <span class="label" style="color:#5C8FA6;text-transform:none;">Vocal</span>
+        <span class="label audio-type-label">Vocal</span>
       </div>
-      <span class="label">${esc(dateFr(m.created_at))}</span>
+      <span class="label">${esc(dateTimeFr(m.created_at))}</span>
     </div>
-    <div class="audio-body">
-      <div class="audio-ring">
+    ${titleHtml ? `<div class="audio-title-above-qr body">${titleHtml}</div>` : ''}
+    <div class="audio-qr-block">
+      ${qrImgTag(qrUrl, images)}
+      <div class="label audio-qr-hint">Scanner pour écouter</div>
+    </div>
+    <div class="audio-player-row">
+      <div class="audio-ring audio-ring-inline">
         <div class="audio-play">▶</div>
       </div>
-      <div class="subtitle" style="margin-top:6mm;max-width:80%;text-align:center;">${esc(title)}</div>
-      <div class="label" style="margin-top:3pt;">${esc(dur)}</div>
-    </div>
-    <div class="audio-qr">
-      ${qrImgTag(qrUrl, images)}
-      <div class="label" style="margin-top:3mm;">Scanner pour écouter</div>
+      <div class="audio-wave-col">
+        <div class="audio-wave-wrap audio-wave-inline">${audioWaveformSvg(m.id)}</div>
+        <div class="audio-dur-row audio-dur-inline">
+          <span class="label audio-dur-side">0:00</span>
+          <span class="label audio-dur-side">${esc(dur)}</span>
+        </div>
+      </div>
     </div>
   </div>
   <div class="folio">${pageNum}</div>
@@ -857,22 +886,91 @@ img { display:block; }
 .quote-rule-seg { flex:1; height:.3pt; background:rgba(0,0,0,.08); }
 .quote-rule-dot { width:4pt; height:4pt; border-radius:50%; background:rgba(0,0,0,.08); }
 
-/* ── AUDIO ── */
-.audio-header {
-  display:flex; justify-content:space-between; align-items:center;
-  padding-bottom:4mm; border-bottom:.3pt solid rgba(0,0,0,.08);
+/* ── AUDIO (même squelette que photo-note + bandeau bas, aligné serveur) ── */
+.audio-note-layout { flex-direction:column; }
+.audio-below-photo {
+  display:flex;
+  flex-direction:column;
+  flex:1;
+  min-height:0;
 }
-.audio-body {
-  flex:1; min-height:0; display:flex; flex-direction:column;
-  align-items:center; justify-content:center;
+.audio-meta-row {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  flex-shrink:0;
+  padding-bottom:3mm;
+  border-bottom:.3pt solid rgba(0,0,0,.08);
+}
+.audio-type-pill {
+  display:flex;
+  align-items:center;
+  gap:4pt;
+}
+.audio-type-label {
+  color:#5C8FA6;
+  text-transform:none;
+  letter-spacing:0;
+}
+.audio-title-above-qr {
+  margin-top:3mm;
+  flex-shrink:0;
+}
+.audio-qr-block {
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  flex-shrink:0;
+  margin-top:4mm;
+  margin-bottom:4mm;
+}
+.audio-qr-hint {
+  margin-top:2.5mm;
+  text-align:center;
+}
+.audio-player-row {
+  display:flex;
+  flex-direction:row;
+  align-items:center;
+  gap:4mm;
+  flex-shrink:0;
+  margin-top:auto;
+  padding-top:1mm;
 }
 .audio-ring {
-  width:30mm; height:30mm; border-radius:50%;
+  width:19mm;
+  height:19mm;
+  border-radius:50%;
   border:1.2pt solid rgba(92,143,166,.45);
-  display:flex; align-items:center; justify-content:center;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  flex-shrink:0;
 }
-.audio-play { font-size:14pt; color:#5C8FA6; margin-left:2pt; }
-.audio-qr { display:flex; flex-direction:column; align-items:center; flex-shrink:0; }
+.audio-ring-inline { margin-bottom:0; }
+.audio-play { font-size:11pt; color:#5C8FA6; margin-left:1.5pt; }
+.audio-wave-col {
+  flex:1;
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+}
+.audio-wave-wrap {
+  width:100%;
+  max-width:none;
+  margin:0;
+}
+.audio-wave-wrap .audio-wave-svg { width:100%; height:auto; display:block; }
+.audio-dur-row {
+  display:flex;
+  flex-direction:row;
+  justify-content:space-between;
+  width:100%;
+  margin-top:1.5mm;
+}
+.audio-dur-inline { max-width:none; }
+.audio-dur-side { font-size:7pt; text-transform:none; letter-spacing:0; }
+.audio-qr { display:flex; flex-direction:column; align-items:center; flex-shrink:0; position:relative; z-index:1; margin-top:auto; padding-bottom:3mm; }
 .qr { width:22mm; height:22mm; }
 
 /* ── VIDEO ── */
