@@ -101,15 +101,17 @@ export async function signMemoryRowForPdfRender(
       }
     }
   }
-  /** Vocal : URL absente ou expirée mais chemin Storage présent → URL signée pour Playwright. */
+  /**
+   * Vocal : `voice_cover_path` (bucket `media`) est la source de vérité. Toujours préférer une
+   * URL signée fraîche depuis ce chemin quand il existe, sinon Playwright peut charger un JWT
+   * expiré encore présent dans `voice_cover_url`.
+   */
   if (out.type === 'voice') {
-    const urlOk = typeof out.voice_cover_url === 'string' && out.voice_cover_url.trim().length > 0;
-    const pathRaw = out.voice_cover_path;
-    const pathTrim = typeof pathRaw === 'string' ? pathRaw.trim() : '';
-    if (!urlOk && pathTrim) {
+    const pathTrim = typeof out.voice_cover_path === 'string' ? out.voice_cover_path.trim() : '';
+    if (pathTrim) {
       const signed = await signUrlForPdfRender(supabase, projectOrigin, pathTrim);
-      if (typeof signed === 'string' && signed.trim()) {
-        out.voice_cover_url = signed;
+      if (typeof signed === 'string' && /^https:\/\//i.test(signed.trim())) {
+        out.voice_cover_url = signed.trim();
       }
     }
   }

@@ -24,6 +24,7 @@ import type {
 import { supabase } from '@/lib/supabase';
 import { getLocalMemoryById } from '@/lib/localDb';
 import { updateVoiceMemoryCover } from '@/services/media';
+import { getVoiceCoverUriForBookPreview } from '@/utils/memoryPhotos';
 import { resolveServerPdfEntitlements } from '@/lib/digitalExportPurchase';
 import { isInitExportConfigured, postInitExport, postGuestUploadUrls } from '@/services/initExportApi';
 
@@ -79,7 +80,9 @@ function countAudioVideoPages(pages: BookPage[]): number {
 
 /**
  * Export PDF avec session : le serveur lit `memories` dans Supabase.
- * Si la couverture vocale n’est que locale (`file://`), on pousse Storage + DB avant le POST.
+ * Même logique que la maquette (`getVoiceCoverUriForBookPreview`) : `voice_cover_path` (souvent
+ * fichier sandbox) prime sur `voice_cover_url`. Ne pas court-circuiter dès que l’URL est https :
+ * l’aperçu peut encore utiliser un fichier local alors que la ligne Supabase n’a pas la cover.
  */
 async function ensureVoiceCoversPersistedForServerPdf(
   pages: BookPage[],
@@ -89,11 +92,10 @@ async function ensureVoiceCoversPersistedForServerPdf(
   const memories = collectMemoriesFromPagesForPdf(pages, localEdits);
   for (const m of memories) {
     if (m.type !== 'voice') continue;
-    if (isHttps(m.voice_cover_url)) continue;
-    const coverLocal = (m.voice_cover_path ?? '').trim();
-    if (!coverLocal || isHttps(coverLocal)) continue;
+    const coverUri = getVoiceCoverUriForBookPreview(m).trim();
+    if (!coverUri || isHttps(coverUri)) continue;
     try {
-      await updateVoiceMemoryCover(m.id, childId, coverLocal);
+      await updateVoiceMemoryCover(m.id, childId, coverUri);
     } catch (e) {
       console.warn('[bookPdfServer] ensureVoiceCoversPersistedForServerPdf', m.id, e);
     }
