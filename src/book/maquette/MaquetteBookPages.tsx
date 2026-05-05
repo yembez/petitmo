@@ -167,7 +167,7 @@ type Props = {
     uri: string;
     frameW: number;
     frameH: number;
-    pageType: 'cover' | 'photo-full' | 'photo-note';
+    pageType: 'cover' | 'photo-full' | 'photo-note' | 'audio';
   }) => void;
   /** Texte affiché sur les pages chapitre (éditable). */
   chapterDisplayTitle?: string;
@@ -321,6 +321,10 @@ export default function MaquetteBookPages(props: Props) {
           pad={pad}
           pageNum={pageNum}
           qrUrl={qrUrl}
+          rotation={rotation}
+          photoCrop={photoCrop}
+          onRotate={onRotate}
+          onRequestBookCrop={onRequestBookCrop}
           onRequestTextEdit={onRequestTextEdit}
           dm400={dm400}
           dm600={dm600}
@@ -805,6 +809,10 @@ function MaquetteAudio({
   pad,
   pageNum,
   qrUrl,
+  rotation,
+  photoCrop,
+  onRotate,
+  onRequestBookCrop,
   onRequestTextEdit,
   dm400,
   dm600,
@@ -816,6 +824,16 @@ function MaquetteAudio({
   pad: number;
   pageNum: number;
   qrUrl: string;
+  rotation: number;
+  photoCrop?: PhotoCrop;
+  onRotate: () => void;
+  onRequestBookCrop?: (payload: {
+    storageKey: string;
+    uri: string;
+    frameW: number;
+    frameH: number;
+    pageType: 'audio';
+  }) => void;
   onRequestTextEdit: () => void;
   dm400?: string;
   dm600?: string;
@@ -828,66 +846,94 @@ function MaquetteAudio({
   const titleRaw = (memory.content ?? '').trim();
   const qrSize = Math.min(120, width * 0.28);
   const coverUri = getVoiceCoverUriForBookPreview(memory);
+  const imgH = height * 0.6;
+  const ringSize = 56;
+  const playerGap = 14;
+  const waveSvgW = Math.max(96, width - 2 * pad - ringSize - playerGap);
 
   return (
     <View style={[styles.paper, { width, height }]}>
-      <View style={[styles.audioHeader, { paddingHorizontal: pad }]}>
-        <View style={styles.quoteHeaderLeft}>
-          <View style={styles.vocalDot} />
-          <Text style={[styles.vocalLabel, dm600 && { fontFamily: dm600 }]}>Vocal</Text>
-        </View>
-        <Text style={[styles.quoteDate, dm400 && { fontFamily: dm400 }]}>{dateFrCaps(memory.created_at)}</Text>
-      </View>
-      <View style={styles.audioBody}>
+      <View style={[styles.page4ImageBleed, { height: imgH, width }]}>
         {coverUri ? (
-          <>
-            <ExpoImage
-              source={{ uri: coverUri }}
-              style={styles.audioCoverBg}
-              contentFit="cover"
-              cachePolicy="disk"
-            />
-            <View style={styles.audioCoverScrim} />
-          </>
-        ) : null}
-        <View style={styles.audioBodyForeground}>
-          <View style={styles.audioRing}>
-            <Text style={styles.playGlyph}>▶</Text>
-          </View>
-          <Svg width={waveW} height={24} viewBox={`0 0 ${waveW} 24`}>
-            {heights.map((h, i) => (
-              <Rect
-                key={i}
-                x={i * (BAR_W + BAR_GAP)}
-                y={(24 - h) / 2}
-                width={BAR_W}
-                height={h}
-                rx={1}
-                fill={i < BAR_COUNT * 0.4 ? VOCAL_BLUE : 'rgba(0,0,0,0.12)'}
+          <View style={StyleSheet.absoluteFill}>
+            <View style={[styles.rot, { transform: [{ rotate: `${rotation}deg` }] }]}>
+              <CroppedPhotoDisplay uri={coverUri} width={width} height={imgH} crop={photoCrop} />
+            </View>
+            {onRequestBookCrop ? (
+              <Pressable
+                style={StyleSheet.absoluteFill}
+                onPress={() =>
+                  onRequestBookCrop({
+                    storageKey: memory.id,
+                    uri: coverUri,
+                    frameW: width,
+                    frameH: imgH,
+                    pageType: 'audio',
+                  })
+                }
+                accessibilityRole="button"
+                accessibilityLabel="Recadrer la photo"
               />
-            ))}
-          </Svg>
-          <View style={styles.audioDurRow}>
-            <Text style={[styles.audioDur, dm400 && { fontFamily: dm400 }]}>0:00</Text>
-            <Text style={[styles.audioDur, dm400 && { fontFamily: dm400 }]}>{durLabel}</Text>
+            ) : null}
+            <Pressable style={styles.rotateOverlayBtn} onPress={onRotate} accessibilityLabel="Pivoter la photo">
+              <Text style={styles.rotateOverlayIcon}>↻</Text>
+            </Pressable>
           </View>
-          {titleRaw.length > 0 ? (
-            <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
+        ) : (
+          <View style={[styles.coverPh, { height: imgH }]} />
+        )}
+      </View>
+      <View style={styles.audioBelowPhoto}>
+        <View style={[styles.audioMetaRow, { paddingHorizontal: pad }]}>
+          <View style={styles.quoteHeaderLeft}>
+            <View style={styles.vocalDot} />
+            <Text style={[styles.vocalLabel, dm600 && { fontFamily: dm600 }]}>Vocal</Text>
+          </View>
+          <Text style={[styles.page4Meta, dm400 && { fontFamily: dm400 }]}>{dateTimeFrCaps(memory.created_at)}</Text>
+        </View>
+        <View style={[styles.audioLower, { paddingHorizontal: pad, paddingBottom: 36 }]}>
+          <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
+            {titleRaw.length > 0 ? (
               <Text
                 style={[
-                  styles.audioTitle,
+                  styles.page4Body,
+                  { marginTop: 0 },
                   garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
                 ]}
               >
                 {romanParagraphs(titleRaw)}
               </Text>
-            </Pressable>
-          ) : null}
+            ) : null}
+            <View style={styles.audioQrCenter}>
+              <QRCode value={qrUrl} size={qrSize} backgroundColor="#FFFFFF" color={INK} />
+              <Text style={[styles.audioQrHint, dm400 && { fontFamily: dm400 }]}>Scanner pour écouter</Text>
+            </View>
+          </Pressable>
+          <View style={styles.audioPlayerRow}>
+            <View style={styles.audioRingInline}>
+              <Text style={styles.playGlyphInline}>▶</Text>
+            </View>
+            <View style={styles.audioWaveCol}>
+              <Svg width={waveSvgW} height={24} viewBox={`0 0 ${waveW} 24`} preserveAspectRatio="xMidYMid meet">
+                {heights.map((h, i) => (
+                  <Rect
+                    key={i}
+                    x={i * (BAR_W + BAR_GAP)}
+                    y={(24 - h) / 2}
+                    width={BAR_W}
+                    height={h}
+                    rx={1}
+                    fill={i < BAR_COUNT * 0.4 ? VOCAL_BLUE : 'rgba(0,0,0,0.12)'}
+                  />
+                ))}
+              </Svg>
+              <View style={styles.audioDurRowWide}>
+                <Text style={[styles.audioDur, dm400 && { fontFamily: dm400 }]}>0:00</Text>
+                <Text style={[styles.audioDur, dm400 && { fontFamily: dm400 }]}>{durLabel}</Text>
+              </View>
+            </View>
+          </View>
         </View>
-      </View>
-      <View style={styles.audioQrBlock}>
-        <QRCode value={qrUrl} size={qrSize} backgroundColor="#FFFFFF" color={INK} />
-        <Text style={[styles.audioQrHint, dm400 && { fontFamily: dm400 }]}>Scanner pour écouter</Text>
       </View>
       <Folio n={pageNum} dm400={dm400} />
     </View>
@@ -1189,62 +1235,64 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: MUTED,
   },
-  audioHeader: {
+  /** Même squelette que le PDF : photo-note en haut, bandeau (meta → texte → QR → play + onde). */
+  audioBelowPhoto: {
+    flex: 1,
+    minHeight: 0,
+    flexDirection: 'column',
+  },
+  audioMetaRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingTop: 16,
+    flexShrink: 0,
+    paddingTop: 14,
+    paddingBottom: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: LINE,
   },
-  audioBody: {
+  audioLower: {
     flex: 1,
-    position: 'relative',
-    overflow: 'hidden',
+    minHeight: 0,
+    paddingTop: 12,
+    justifyContent: 'space-between',
+  },
+  audioQrCenter: {
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
+    marginTop: 18,
   },
-  audioCoverBg: { ...StyleSheet.absoluteFillObject },
-  audioCoverScrim: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255,255,255,0.62)',
-  },
-  audioBodyForeground: {
-    zIndex: 1,
-    width: '100%',
+  audioPlayerRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 4,
+    flexShrink: 0,
+    gap: 14,
+    paddingTop: 10,
   },
-  audioRing: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+  audioRingInline: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     borderWidth: 1.5,
     borderColor: 'rgba(92,143,166,0.45)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
   },
-  playGlyph: {
-    fontSize: 22,
+  playGlyphInline: {
+    fontSize: 18,
     color: VOCAL_BLUE,
-    marginLeft: 3,
+    marginLeft: 2,
   },
-  audioDurRow: {
+  audioWaveCol: {
+    flex: 1,
+    minWidth: 0,
+  },
+  audioDurRowWide: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    width: BAR_COUNT * BAR_W + (BAR_COUNT - 1) * BAR_GAP,
+    width: '100%',
     marginTop: 6,
   },
   audioDur: { fontSize: 10, color: MUTED },
-  audioTitle: {
-    marginTop: 16,
-    fontSize: 18,
-    color: INK,
-    textAlign: 'justify' as const,
-    paddingHorizontal: 24,
-  },
-  audioQrBlock: { alignItems: 'center', paddingBottom: 36 },
   audioQrHint: { marginTop: 8, fontSize: 11, color: MUTED },
   videoTitle: { marginTop: 10, fontSize: 18, color: INK },
   videoSub: { marginTop: 10, fontSize: 14, color: '#6B7280', lineHeight: 22, textAlign: 'justify' as const },

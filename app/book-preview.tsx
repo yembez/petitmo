@@ -199,7 +199,7 @@ export default function BookPreviewScreen() {
     uri: string;
     frameW: number;
     frameH: number;
-    pageType: 'cover' | 'photo-full' | 'photo-note';
+    pageType: 'cover' | 'photo-full' | 'photo-note' | 'audio';
     imgPxW: number;
     imgPxH: number;
     printMmW: number;
@@ -357,16 +357,22 @@ export default function BookPreviewScreen() {
     [imagePxCache]
   );
 
-  function printFrameMmFor(pageType: 'cover' | 'photo-full' | 'photo-note'): { w: number; h: number } {
+  function printFrameMmFor(pageType: 'cover' | 'photo-full' | 'photo-note' | 'audio'): { w: number; h: number } {
     const pageWmm = 154;
     const pageHmm = 216;
     if (pageType === 'cover') return { w: pageWmm, h: 142 };
-    if (pageType === 'photo-note') return { w: pageWmm, h: pageHmm * 0.6 };
+    if (pageType === 'photo-note' || pageType === 'audio') return { w: pageWmm, h: pageHmm * 0.6 };
     return { w: pageWmm, h: pageHmm };
   }
 
   const openBookCrop = useCallback(
-    (payload: { storageKey: string; uri: string; frameW: number; frameH: number; pageType: 'cover' | 'photo-full' | 'photo-note' }) => {
+    (payload: {
+      storageKey: string;
+      uri: string;
+      frameW: number;
+      frameH: number;
+      pageType: 'cover' | 'photo-full' | 'photo-note' | 'audio';
+    }) => {
       void (async () => {
         const mm = printFrameMmFor(payload.pageType);
         try {
@@ -543,7 +549,9 @@ export default function BookPreviewScreen() {
           memory={m}
           rotation={rot}
           photoCrop={
-            page.type === 'photo-full' || page.type === 'photo-note' ? photoCrops[m?.id ?? ''] : undefined
+            page.type === 'photo-full' || page.type === 'photo-note' || page.type === 'audio'
+              ? photoCrops[m?.id ?? '']
+              : undefined
           }
           truncated={false}
           coverYearLabel={coverYearLabel}
@@ -560,7 +568,7 @@ export default function BookPreviewScreen() {
           onRequestBookCrop={openBookCrop}
           chapterDisplayTitle={page.type === 'chapter' ? (chapterTitleLine ?? undefined) : undefined}
           onRotate={() => {
-            if (m && (page.type === 'photo-full' || page.type === 'photo-note')) {
+            if (m && (page.type === 'photo-full' || page.type === 'photo-note' || page.type === 'audio')) {
               onRotateMemory(m.id);
             }
           }}
