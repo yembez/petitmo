@@ -10,7 +10,7 @@ import {
   FONT_DM_SANS_400_B64,
   FONT_DM_SANS_500_B64,
 } from '@/services/bookFontsB64';
-import { audioWaveformSvg } from '@/lib/pdfAudioWaveform';
+import { audioWaveformHtmlBars } from '@/lib/pdfAudioWaveform';
 
 // ── PUBLIC API ────────────────────────────────────────────────
 
@@ -625,12 +625,13 @@ function pageAudio(
       ${qrImgTag(qrUrl, images)}
       <div class="label audio-qr-hint">Scanner pour écouter</div>
     </div>
+    <div class="audio-spacer"></div>
     <div class="audio-player-row">
       <div class="audio-ring audio-ring-inline">
         <div class="audio-play">▶</div>
       </div>
       <div class="audio-wave-col">
-        <div class="audio-wave-wrap audio-wave-inline">${audioWaveformSvg(m.id)}</div>
+        <div class="audio-wave-wrap audio-wave-inline">${audioWaveformHtmlBars(m.id)}</div>
         <div class="audio-dur-row audio-dur-inline">
           <span class="label audio-dur-side">0:00</span>
           <span class="label audio-dur-side">${esc(dur)}</span>
@@ -928,13 +929,18 @@ img { display:block; }
   margin-top:2.5mm;
   text-align:center;
 }
+/* WebKit print : margin-top:auto sur flex enfant est souvent ignoré ; spacer + flex plus fiable. */
+.audio-spacer {
+  flex:1;
+  min-height:0;
+  flex-shrink:1;
+}
 .audio-player-row {
   display:flex;
   flex-direction:row;
   align-items:center;
   gap:4mm;
   flex-shrink:0;
-  margin-top:auto;
   padding-top:1mm;
 }
 .audio-ring {
@@ -960,7 +966,20 @@ img { display:block; }
   max-width:none;
   margin:0;
 }
-.audio-wave-wrap .audio-wave-svg { width:100%; height:auto; display:block; }
+.audio-wave-bars {
+  display:flex;
+  flex-direction:row;
+  align-items:center;
+  justify-content:flex-start;
+  gap:2.5px;
+  width:100%;
+  box-sizing:border-box;
+}
+.audio-wave-bar {
+  width:3px;
+  border-radius:1px;
+  flex-shrink:0;
+}
 .audio-dur-row {
   display:flex;
   flex-direction:row;

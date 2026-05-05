@@ -5,6 +5,7 @@ import {
   StyleSheet,
   Image,
   Pressable,
+  ScrollView,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import Svg, { Rect } from 'react-native-svg';
@@ -891,24 +892,31 @@ function MaquetteAudio({
           </View>
           <Text style={[styles.page4Meta, dm400 && { fontFamily: dm400 }]}>{dateTimeFrCaps(memory.created_at)}</Text>
         </View>
-        <View style={[styles.audioLower, { paddingHorizontal: pad, paddingBottom: 36 }]}>
-          <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
-            {titleRaw.length > 0 ? (
-              <Text
-                style={[
-                  styles.page4Body,
-                  { marginTop: 0 },
-                  garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
-                ]}
-              >
-                {romanParagraphs(titleRaw)}
-              </Text>
-            ) : null}
-            <View style={styles.audioQrCenter}>
-              <QRCode value={qrUrl} size={qrSize} backgroundColor="#FFFFFF" color={INK} />
-              <Text style={[styles.audioQrHint, dm400 && { fontFamily: dm400 }]}>Scanner pour écouter</Text>
-            </View>
-          </Pressable>
+        <View style={[styles.audioLower, { paddingHorizontal: pad, paddingBottom: 48 }]}>
+          <ScrollView
+            style={styles.audioScroll}
+            contentContainerStyle={styles.audioScrollInner}
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+          >
+            <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
+              {titleRaw.length > 0 ? (
+                <Text
+                  style={[
+                    styles.page4Body,
+                    { marginTop: 0 },
+                    garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
+                  ]}
+                >
+                  {romanParagraphs(titleRaw)}
+                </Text>
+              ) : null}
+              <View style={styles.audioQrCenter}>
+                <QRCode value={qrUrl} size={qrSize} backgroundColor="#FFFFFF" color={INK} />
+                <Text style={[styles.audioQrHint, dm400 && { fontFamily: dm400 }]}>Scanner pour écouter</Text>
+              </View>
+            </Pressable>
+          </ScrollView>
           <View style={styles.audioPlayerRow}>
             <View style={styles.audioRingInline}>
               <Text style={styles.playGlyphInline}>▶</Text>
@@ -1255,7 +1263,15 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 0,
     paddingTop: 12,
-    justifyContent: 'space-between',
+  },
+  audioScroll: {
+    flex: 1,
+    minHeight: 0,
+    flexGrow: 1,
+  },
+  audioScrollInner: {
+    flexGrow: 1,
+    paddingBottom: 10,
   },
   audioQrCenter: {
     alignItems: 'center',

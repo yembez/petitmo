@@ -49,3 +49,18 @@ export function audioWaveformSvg(memoryId: string, viewBoxH = 24): string {
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" class="audio-wave-svg" viewBox="0 0 ${waveW} ${viewBoxH}" preserveAspectRatio="xMidYMid meet">${rects.join('')}</svg>`;
 }
+
+/**
+ * Même onde en barres HTML — à préférer pour `expo-print` / WebKit : les SVG inline
+ * sont souvent vides ou tronqués dans le PDF, alors que Chromium (export serveur) les gère.
+ */
+export function audioWaveformHtmlBars(memoryId: string, rowH = 24): string {
+  const heights = audioBarHeightsFromMemoryId(memoryId);
+  const bars = heights
+    .map((h, i) => {
+      const fill = i < BAR_COUNT * 0.4 ? '#5C8FA6' : 'rgba(0,0,0,0.12)';
+      return `<div class="audio-wave-bar" style="height:${h}px;background-color:${fill}"></div>`;
+    })
+    .join('');
+  return `<div class="audio-wave-bars" style="height:${rowH}px">${bars}</div>`;
+}
