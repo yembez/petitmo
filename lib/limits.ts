@@ -8,7 +8,8 @@ export const FREE_TIER_VIDEO_LIMIT = 10
 export const FREE_TIER_VIDEO_MAX_DURATION = 30 // secondes
 export const FREE_TIER_VOICE_MAX_DURATION = 120 // secondes (création de souvenirs audio)
 export const FREE_TIER_BOOK_VOICE_MAX_DURATION = 60 // secondes (livres : QR audio)
-export const FREE_TIER_BOOK_AUDIO_MAX_COUNT = 2
+/** Max souvenirs audio avec QR dans un livre / PDF (plan gratuit). Aligné serveur `FREE_TIER_QR_AV_MAX_PER_BOOK`. */
+export const FREE_TIER_BOOK_AUDIO_MAX_COUNT = 5
 
 export type LimitCheck = {
   canCreate: boolean

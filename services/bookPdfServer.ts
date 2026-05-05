@@ -23,7 +23,12 @@ import type {
 } from '@/types/shared';
 import { supabase } from '@/lib/supabase';
 import { getLocalMemoryById } from '@/lib/localDb';
-import { updateVoiceMemoryCover } from '@/services/media';
+import {
+  ensureChildRowExistsOnSupabaseForExport,
+  ensureLocalChildrenSyncedToSupabase,
+} from '@/services/children';
+import { ensureVoiceMemoryCloudForBookExport } from '@/services/migration';
+import { persistVoiceCoverToCloudForPdfExport } from '@/services/media';
 import { getVoiceCoverUriForBookPreview } from '@/utils/memoryPhotos';
 import { resolveServerPdfEntitlements } from '@/lib/digitalExportPurchase';
 import { isInitExportConfigured, postInitExport, postGuestUploadUrls } from '@/services/initExportApi';
@@ -84,24 +89,74 @@ function countAudioVideoPages(pages: BookPage[]): number {
  * fichier sandbox) prime sur `voice_cover_url`. Ne pas court-circuiter dès que l’URL est https :
  * l’aperçu peut encore utiliser un fichier local alors que la ligne Supabase n’a pas la cover.
  */
+function mergeMemoryWithLocalRowForVoiceCover(m: Memory): Memory {
+  if (m.type !== 'voice') return m;
+  if (Platform.OS === 'web') return m;
+  try {
+    const row = getLocalMemoryById(m.id);
+    if (!row) return m;
+    return {
+      ...m,
+      voice_cover_path: m.voice_cover_path ?? row.voice_cover_path ?? null,
+      voice_cover_url: m.voice_cover_url ?? row.voice_cover_url ?? null,
+    };
+  } catch {
+    return m;
+  }
+}
+
+/** Vocal : chemins audio + cover depuis SQLite (export livre). */
+function mergeVoiceMemoryForBookExportFromSqlite(m: Memory): Memory {
+  if (m.type !== 'voice') return m;
+  return mergeMemoryWithLocalRowForVoiceCover(mergeMemoryWithLocalRowForAv(m));
+}
+
+async function ensureVoiceRowsCloudSyncedForSessionPdf(
+  pages: BookPage[],
+  localEdits: Record<string, Partial<Memory>>,
+  userId: string,
+  childId: string
+): Promise<void> {
+  await ensureChildRowExistsOnSupabaseForExport(childId);
+  await ensureLocalChildrenSyncedToSupabase();
+  const memories = collectMemoriesFromPagesForPdf(pages, localEdits);
+  for (const m of memories) {
+    if (m.type !== 'voice') continue;
+    const ed = localEdits[m.id];
+    const base = ed ? { ...m, ...ed } : m;
+    try {
+      await ensureVoiceMemoryCloudForBookExport(mergeVoiceMemoryForBookExportFromSqlite(base), userId);
+    } catch (e) {
+      console.warn('[bookPdfServer] ensureVoiceRowsCloudSyncedForSessionPdf', m.id, e);
+    }
+  }
+}
+
+/** Retourne des entrées `guestMemories` minimales pour fusion côté serveur (cover HTTPS fraîche). */
 async function ensureVoiceCoversPersistedForServerPdf(
   pages: BookPage[],
   localEdits: Record<string, Partial<Memory>>,
   childId: string
-): Promise<void> {
+): Promise<GuestMemoryForPdfPayload[]> {
+  const overrides: GuestMemoryForPdfPayload[] = [];
   const memories = collectMemoriesFromPagesForPdf(pages, localEdits);
   for (const m of memories) {
     if (m.type !== 'voice') continue;
-    const coverUri = getVoiceCoverUriForBookPreview(m).trim();
+    const ed = localEdits[m.id];
+    const merged = mergeMemoryWithLocalRowForVoiceCover(ed ? { ...m, ...ed } : m);
+    const coverUri = getVoiceCoverUriForBookPreview(merged).trim();
     if (!coverUri || isHttps(coverUri)) continue;
-    /** Chemin déjà sur Storage (ex. après sync) : le serveur signe depuis la DB, pas d’upload fichier. */
     if (isBareMediaBucketPath(coverUri)) continue;
     try {
-      await updateVoiceMemoryCover(m.id, childId, coverUri);
+      const url = await persistVoiceCoverToCloudForPdfExport(m.id, childId, coverUri);
+      if (url) {
+        overrides.push({ id: m.id, type: 'voice', voice_cover_url: url });
+      }
     } catch (e) {
       console.warn('[bookPdfServer] ensureVoiceCoversPersistedForServerPdf', m.id, e);
     }
   }
+  return overrides;
 }
 
 export function collectMemoriesFromPagesForPdf(
@@ -576,11 +631,18 @@ export async function generateBookPdfViaServer(input: GenerateBookPdfServerInput
 
   const { data: sess } = await supabase.auth.getSession();
   const accessToken = sess.session?.access_token;
-  if (!accessToken) {
+  const userId = sess.session?.user?.id;
+  if (!accessToken || !userId) {
     throw new Error('Session requise pour exporter via le serveur.');
   }
 
-  await ensureVoiceCoversPersistedForServerPdf(input.pages, input.localEdits, input.childId);
+  await ensureVoiceRowsCloudSyncedForSessionPdf(input.pages, input.localEdits, userId, input.childId);
+
+  const voiceCoverOverrides = await ensureVoiceCoversPersistedForServerPdf(
+    input.pages,
+    input.localEdits,
+    input.childId
+  );
 
   const { subscriptionTier, digitalExportPaid } = await resolveServerPdfEntitlements();
 
@@ -602,6 +664,7 @@ export async function generateBookPdfViaServer(input: GenerateBookPdfServerInput
     ),
     subscriptionTier,
     ...(subscriptionTier === 'free' ? { digitalExportPaid } : {}),
+    ...(voiceCoverOverrides.length > 0 ? { guestMemories: voiceCoverOverrides } : {}),
   };
 
   const res = await fetch(`${base}/v1/books/generate-pdf`, {
@@ -732,23 +795,30 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
   // Cela évite de dépendre d'une session Supabase pour obtenir des URLs https.
   const guestMemories = await Promise.all(
     memories.map(async m => {
-      const g = memoryToGuestPayload(m);
-      if (m.type === 'voice') {
+      const merged = m.type === 'voice' ? mergeMemoryWithLocalRowForVoiceCover(m) : m;
+      const g = memoryToGuestPayload(merged);
+      if (merged.type === 'voice') {
         // PDF immédiat : pas d’upload du fichier audio avant generate-pdf.
         // Photo de fond vocal (voice_cover) : même besoin que la vignette vidéo — petite image HTTPS pour Playwright.
-        const coverLocal = (m.voice_cover_path ?? '').trim();
-        let voiceCoverUrl: string | null = httpsOrNull(m.voice_cover_url);
-        if (!voiceCoverUrl && coverLocal && Platform.OS !== 'web') {
+        const coverUri = getVoiceCoverUriForBookPreview(merged).trim();
+        let voiceCoverUrl: string | null = httpsOrNull(merged.voice_cover_url);
+        if (
+          !voiceCoverUrl &&
+          coverUri &&
+          !isHttps(coverUri) &&
+          !isBareMediaBucketPath(coverUri) &&
+          Platform.OS !== 'web'
+        ) {
           try {
             const manipulated = await ImageManipulator.manipulateAsync(
-              coverLocal,
+              coverUri,
               [{ resize: { width: 1600 } }],
               { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG }
             );
             const { readUrl } = await guestUploadMediaImageThenReadUrl({
               pdfTicket,
               asset: { kind: 'voice_cover', memoryId: m.id },
-              localUri: manipulated?.uri || coverLocal,
+              localUri: manipulated?.uri || coverUri,
               mimeType: 'image/jpeg',
             });
             voiceCoverUrl = readUrl;

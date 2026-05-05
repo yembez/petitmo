@@ -315,22 +315,43 @@ async function stratifiedUpload(params: {
   };
 }
 
+/** Cover vocal : même idée que les photos livre — JPEG léger, largeur max (PDF + mobile). */
+const VOICE_COVER_UPLOAD_MAX_WIDTH = 1200;
+
+async function prepareLocalUriForVoiceCoverUpload(coverUri: string): Promise<string> {
+  const trimmed = coverUri.trim();
+  if (!trimmed || Platform.OS === 'web') return trimmed;
+  try {
+    const manipulated = await ImageManipulator.manipulateAsync(
+      trimmed,
+      [{ resize: { width: VOICE_COVER_UPLOAD_MAX_WIDTH } }],
+      { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG }
+    );
+    return manipulated?.uri?.trim() ? manipulated.uri : trimmed;
+  } catch {
+    return trimmed;
+  }
+}
+
 async function uploadVoiceCoverToStorage(
   userId: string,
   childId: string,
   coverUri: string
 ): Promise<{ publicUrl: string; path: string } | null> {
+  const sourceUri = await prepareLocalUriForVoiceCoverUpload(coverUri);
   let fileData: Blob | Uint8Array;
-  let fileExt = coverUri.split('.').pop()?.split('?')[0] || 'jpg';
-  if (!['jpg', 'jpeg', 'png', 'webp', 'heic'].includes(fileExt.toLowerCase())) {
+  let fileExt = sourceUri.split('.').pop()?.split('?')[0] || 'jpg';
+  if (Platform.OS !== 'web' && sourceUri !== coverUri.trim()) {
+    fileExt = 'jpg';
+  } else if (!['jpg', 'jpeg', 'png', 'webp', 'heic'].includes(fileExt.toLowerCase())) {
     fileExt = 'jpg';
   }
 
   if (Platform.OS === 'web') {
-    const response = await fetch(coverUri);
+    const response = await fetch(sourceUri);
     fileData = await response.blob();
   } else {
-    const file = new FileSystem.File(coverUri);
+    const file = new FileSystem.File(sourceUri);
     fileData = await file.bytes();
   }
 
@@ -350,6 +371,15 @@ async function uploadVoiceCoverToStorage(
 
   const publicUrl = await getSignedUrlAfterMediaUpload(filePath);
   return { publicUrl, path: filePath };
+}
+
+/** Upload cover vocal (image locale ou déjà optimisée) vers le bucket `media`. */
+export async function uploadVoiceCoverToSupabaseFromLocal(
+  userId: string,
+  childId: string,
+  localCoverUri: string
+): Promise<{ publicUrl: string; path: string } | null> {
+  return uploadVoiceCoverToStorage(userId, childId, localCoverUri);
 }
 
 /** Évite les rafales (backfill + requestMissing + refresh) sur le même souvenir. */
@@ -1897,6 +1927,50 @@ export async function deleteMemory(memoryId: string) {
   } catch (error) {
     console.error('Delete memory error:', error);
     return false;
+  }
+}
+
+/**
+ * Export PDF serveur : envoie la cover locale vers le bucket `media` et met à jour la ligne
+ * `memories`, **même en mode gratuit (`local`)** — le rendu Playwright lit Supabase, pas SQLite.
+ */
+export async function persistVoiceCoverToCloudForPdfExport(
+  memoryId: string,
+  childId: string,
+  localCoverUri: string
+): Promise<string | null> {
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return null;
+
+    const up = await uploadVoiceCoverToStorage(user.id, childId, localCoverUri.trim());
+    if (!up) return null;
+
+    const { error } = await supabase
+      .from('memories')
+      .update({ voice_cover_url: up.publicUrl, voice_cover_path: up.path })
+      .eq('id', memoryId);
+
+    if (error) {
+      console.error('persistVoiceCoverToCloudForPdfExport:', error);
+      return null;
+    }
+    const existing = getLocalMemoryById(memoryId);
+    if (existing) {
+      upsertLocalMemory({
+        ...existing,
+        voice_cover_url: up.publicUrl,
+        voice_cover_path: up.path,
+        updated_at: new Date().toISOString(),
+      });
+    }
+    void triggerProcessMemory(memoryId);
+    return up.publicUrl;
+  } catch (e) {
+    console.error('persistVoiceCoverToCloudForPdfExport', e);
+    return null;
   }
 }
 

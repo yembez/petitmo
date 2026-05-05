@@ -11,6 +11,7 @@ export type PublicMediaTokenRow = {
   ready_bucket: string | null;
   ready_path: string | null;
   last_error: string | null;
+  expires_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -28,8 +29,10 @@ export async function ensurePublicMediaToken(params: {
   supabase: SupabaseClient;
   mediaId: string;
   kind: 'audio' | 'video';
+  /** Nouveaux tokens : fin d’accès QR (spec 10 ans). */
+  expiresAtIso?: string | null;
 }): Promise<string> {
-  const { supabase, mediaId, kind } = params;
+  const { supabase, mediaId, kind, expiresAtIso } = params;
   const { data: existing, error: selErr } = await supabase
     .from('public_media_tokens')
     .select('token')
@@ -43,6 +46,8 @@ export async function ensurePublicMediaToken(params: {
   if (typeof tok === 'string' && tok.trim()) return tok;
 
   const token = newPublicToken();
+  const exp =
+    typeof expiresAtIso === 'string' && expiresAtIso.trim() ? expiresAtIso.trim() : null;
   const { error: insErr } = await supabase.from('public_media_tokens').insert({
     token,
     media_id: mediaId,
@@ -53,6 +58,7 @@ export async function ensurePublicMediaToken(params: {
     ready_bucket: null,
     ready_path: null,
     last_error: null,
+    ...(exp ? { expires_at: exp } : {}),
   });
   if (insErr) {
     // Conflit concurrent: relire

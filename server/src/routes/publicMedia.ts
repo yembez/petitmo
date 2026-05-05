@@ -19,7 +19,15 @@ type TokenRow = {
   ready_bucket: string | null;
   ready_path: string | null;
   last_error: string | null;
+  expires_at: string | null;
 };
+
+function isTokenExpired(iso: string | null | undefined): boolean {
+  if (iso == null || typeof iso !== 'string' || !iso.trim()) return false;
+  const t = Date.parse(iso.trim());
+  if (!Number.isFinite(t)) return false;
+  return t < Date.now();
+}
 
 function htmlPage(title: string, body: string): string {
   return `<!doctype html>
@@ -60,7 +68,7 @@ export function registerPublicMediaRoutes(app: Express, supabase: SupabaseClient
 
     const { data, error } = await supabase
       .from('public_media_tokens')
-      .select('token, kind, status, ready_bucket, ready_path, last_error')
+      .select('token, kind, status, ready_bucket, ready_path, last_error, expires_at')
       .eq('token', token)
       .maybeSingle();
 
@@ -73,6 +81,11 @@ export function registerPublicMediaRoutes(app: Express, supabase: SupabaseClient
     const row = data as TokenRow | null;
     if (!row) {
       res.status(404).type('text/plain').send('Not found');
+      return;
+    }
+
+    if (isTokenExpired(row.expires_at)) {
+      res.status(410).type('text/plain').send('Expired');
       return;
     }
 

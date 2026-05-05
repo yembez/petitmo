@@ -58,6 +58,12 @@ function newPublicToken(): string {
   return base64Url(bytes);
 }
 
+function bookPublicMediaExpiresAtIso(): string {
+  const d = new Date();
+  d.setFullYear(d.getFullYear() + 10);
+  return d.toISOString();
+}
+
 async function ensurePublicMediaToken(supabase: ReturnType<typeof createClient>, params: { mediaId: string; kind: 'audio' | 'video' }): Promise<string> {
   const { mediaId, kind } = params;
   const { data: existing, error: selErr } = await supabase
@@ -81,6 +87,7 @@ async function ensurePublicMediaToken(supabase: ReturnType<typeof createClient>,
     ready_bucket: null,
     ready_path: null,
     last_error: null,
+    expires_at: bookPublicMediaExpiresAtIso(),
   });
   if (!insErr) return token;
 

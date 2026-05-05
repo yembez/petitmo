@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { BookPageServer } from '../types/contracts';
 import type { MemoryRow } from './memoryRow';
 import { ensurePublicMediaToken } from '../publicMediaTokens';
-import { FREE_TIER_QR_AV_MAX_PER_BOOK } from '../constants/spec';
+import { bookPublicMediaExpiresAtIso, FREE_TIER_QR_AV_MAX_PER_BOOK } from '../constants/spec';
 
 export type PrepareTokensResult =
   | { ok: true; tokensByMemoryId: Map<string, string> }
@@ -53,7 +53,12 @@ export async function preparePublicTokensForBook(params: {
     if (m.type !== 'voice' && m.type !== 'video') {
       return { ok: false, status: 400, message: `Memory ${memoryId} is not audio/video` };
     }
-    const tok = await ensurePublicMediaToken({ supabase, mediaId: memoryId, kind });
+    const tok = await ensurePublicMediaToken({
+      supabase,
+      mediaId: memoryId,
+      kind,
+      expiresAtIso: bookPublicMediaExpiresAtIso(),
+    });
     tokensByMemoryId.set(memoryId, tok);
   }
 
@@ -99,7 +104,12 @@ export async function preparePublicTokensForExportRequest(params: {
       return { ok: false, status: 400, message: `Memory ${memoryClientId} is not audio/video` };
     }
     // Token stable basé sur memoryClientId (id local). `exportRequestId` pourra servir plus tard pour rattacher/cleanup.
-    const tok = await ensurePublicMediaToken({ supabase, mediaId: memoryClientId, kind });
+    const tok = await ensurePublicMediaToken({
+      supabase,
+      mediaId: memoryClientId,
+      kind,
+      expiresAtIso: bookPublicMediaExpiresAtIso(),
+    });
     tokensByMemoryId.set(memoryClientId, tok);
   }
   return { ok: true, tokensByMemoryId };

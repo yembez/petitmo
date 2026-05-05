@@ -194,6 +194,17 @@ export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient,
       const rows = (memories ?? []) as MemoryRow[];
       memoriesById = new Map(rows.map(m => [m.id, m]));
 
+      if (body.guestMemories && isGuestMemoryList(body.guestMemories)) {
+        for (const g of body.guestMemories) {
+          const row = memoriesById.get(g.id);
+          if (!row || g.type !== 'voice') continue;
+          const vc = typeof g.voice_cover_url === 'string' ? g.voice_cover_url.trim() : '';
+          if (vc && /^https:\/\//i.test(vc)) {
+            row.voice_cover_url = vc;
+          }
+        }
+      }
+
       for (const id of memoryIds) {
         const m = memoriesById.get(id);
         if (!m || m.user_id !== userId) {

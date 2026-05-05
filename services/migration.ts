@@ -1,12 +1,17 @@
 import * as FileSystem from 'expo-file-system';
-import { getLocalMemoriesPendingCloudSync, upsertLocalMemory } from '@/lib/localDb';
+import { getLocalMemoryById, getLocalMemoriesPendingCloudSync, upsertLocalMemory } from '@/lib/localDb';
 import { setUserTier } from '@/lib/userTier';
 import { ensureLocalChildrenSyncedToSupabase } from '@/services/children';
-import { uploadFileToSupabase } from '@/services/media';
+import {
+  persistVoiceCoverToCloudForPdfExport,
+  uploadFileToSupabase,
+  uploadVoiceCoverToSupabaseFromLocal,
+} from '@/services/media';
 import { supabase } from '@/lib/supabase';
 import type { Database } from '@/types/database';
 import type { Memory } from '@/types/local';
 import { withLocalFields } from '@/services/memoryRowMapping';
+import { getVoiceCoverUriForBookPreview } from '@/utils/memoryPhotos';
 
 export type MigrationProgress = {
   total: number;
@@ -81,6 +86,42 @@ async function migrateText(memory: Memory, userId: string): Promise<void> {
   }
 }
 
+function voiceMemoryHasCloudMedia(m: Memory): boolean {
+  const p = (m.media_path ?? '').trim();
+  const u = (m.media_url ?? '').trim();
+  return !!p && /^https:\/\//i.test(u);
+}
+
+const BARE_MEDIA_PATH_RE =
+  /^(guest\/exports\/|exports\/|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/)/i;
+
+/**
+ * Lors de la création d’un livre / PDF : assure vocal + cover en Supabase/Storage pour les QR.
+ * Les vocaux 100 % locaux (plan gratuit) sont poussés ici, pas à la capture.
+ * Si l’audio est déjà cloud mais la cover encore locale (souvent Petitmo+), on pousse la cover seule.
+ */
+export async function ensureVoiceMemoryCloudForBookExport(memory: Memory, userId: string): Promise<void> {
+  if (memory.type !== 'voice') return;
+  if ((memory.user_id ?? '').trim() && memory.user_id !== userId) return;
+
+  if (!voiceMemoryHasCloudMedia(memory)) {
+    const audioUri = (memory.local_original_path ?? memory.local_media_path ?? '').trim();
+    if (!audioUri || !(await fileExists(audioUri))) return;
+    await migrateVoice(memory, userId);
+  }
+
+  const refreshed = getLocalMemoryById(memory.id) ?? memory;
+  const cand = getVoiceCoverUriForBookPreview(refreshed).trim();
+  if (
+    cand &&
+    !/^https:\/\//i.test(cand) &&
+    !BARE_MEDIA_PATH_RE.test(cand) &&
+    (await fileExists(cand))
+  ) {
+    await persistVoiceCoverToCloudForPdfExport(refreshed.id, refreshed.child_id, cand);
+  }
+}
+
 async function migrateVoice(memory: Memory, userId: string): Promise<void> {
   const audioUri = (memory.local_original_path ?? memory.local_media_path ?? '').trim();
   if (!audioUri || !(await fileExists(audioUri))) return;
@@ -95,10 +136,10 @@ async function migrateVoice(memory: Memory, userId: string): Promise<void> {
   let voiceCoverPath: string | null = null;
   const coverLocal = (memory.voice_cover_path ?? memory.voice_cover_url ?? '').trim();
   if (coverLocal && !/^https?:\/\//i.test(coverLocal) && (await fileExists(coverLocal))) {
-    const cPath = `${userId}/${memory.child_id}/voice/${memory.id}_cover.jpg`;
     try {
-      voiceCoverUrl = await uploadFileToSupabase(coverLocal, `media/${cPath}`);
-      voiceCoverPath = cPath;
+      const up = await uploadVoiceCoverToSupabaseFromLocal(userId, memory.child_id, coverLocal);
+      voiceCoverUrl = up?.publicUrl ?? null;
+      voiceCoverPath = up?.path ?? null;
     } catch {
       voiceCoverUrl = null;
       voiceCoverPath = null;

@@ -314,6 +314,44 @@ export async function ensureLocalChildrenSyncedToSupabase(): Promise<void> {
   }
 }
 
+/**
+ * Export livre/PDF (y compris plan gratuit) : assure une ligne `children` sur Supabase pour la FK `memories.child_id`.
+ */
+export async function ensureChildRowExistsOnSupabaseForExport(childId: string): Promise<void> {
+  const { data: auth } = await supabase.auth.getUser();
+  const user = auth.user;
+  if (!user) return;
+
+  const local = getLocalChild(childId);
+  if (!local) return;
+
+  const insert: Database['public']['Tables']['children']['Insert'] = {
+    id: local.id,
+    user_id: user.id,
+    name: local.name,
+    birthdate: local.birthdate,
+    photo_url: local.photo_url ?? null,
+    created_at: local.created_at,
+    updated_at: local.updated_at ?? local.created_at,
+  };
+
+  const { error } = await supabase.from('children').insert(insert);
+  if (error) {
+    if (isChildDuplicateKeyError(error)) {
+      if ((await getCachedUserMode()) === 'cloud') {
+        await syncChildProfilePhotoFromLocalIfNeeded(local);
+      }
+      return;
+    }
+    console.warn('[children] ensureChildRowExistsOnSupabaseForExport', childId, error.message);
+    return;
+  }
+
+  if ((await getCachedUserMode()) === 'cloud') {
+    await syncChildProfilePhotoFromLocalIfNeeded(local);
+  }
+}
+
 export async function createChild(name: string, birthdate?: string, photoUri?: string) {
   try {
     const { data: { user } } = await supabase.auth.getUser();

@@ -1,15 +1,22 @@
-/** Max pages audio + vidéo avec QR par livre (tier free). Spec §1 / §4. */
-export const FREE_TIER_QR_AV_MAX_PER_BOOK = 10;
+/** Max pages audio + vidéo avec QR par livre (tier free). Spec : 5 vocaux / livre. */
+export const FREE_TIER_QR_AV_MAX_PER_BOOK = 5;
 
 /** Durée URL signée PDF renvoyée au client (secondes). Spec ~10 min. */
 export const PDF_SIGNED_URL_SECONDS = 600;
 
-/** Expiration lien QR média en base (free : 3 ans). Spec §4. */
-export function qrLinkExpiresAtIso(subscriptionTier: 'free' | 'premium'): string {
-  const years = subscriptionTier === 'free' ? 3 : 10;
+/** Durée d’accès QR médias (`public_media_tokens` + legacy `qr_links`). Spec : 10 ans. */
+export const BOOK_QR_MEDIA_EXPIRY_YEARS = 10;
+
+export function bookPublicMediaExpiresAtIso(): string {
   const d = new Date();
-  d.setFullYear(d.getFullYear() + years);
+  d.setFullYear(d.getFullYear() + BOOK_QR_MEDIA_EXPIRY_YEARS);
   return d.toISOString();
+}
+
+/** Expiration lien QR legacy `qr_links` (même règle que les tokens publics). */
+export function qrLinkExpiresAtIso(subscriptionTier: 'free' | 'premium'): string {
+  void subscriptionTier;
+  return bookPublicMediaExpiresAtIso();
 }
 
 /** Flux export sans compte (`qr_links_exports`) : durée longue fixe (spec produit). */
