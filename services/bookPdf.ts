@@ -10,6 +10,7 @@ import {
   FONT_DM_SANS_400_B64,
   FONT_DM_SANS_500_B64,
 } from '@/services/bookFontsB64';
+import { clampAudioBookAnnotation } from '@/lib/audioBookAnnotation';
 import { audioWaveformHtmlBars } from '@/lib/pdfAudioWaveform';
 
 // ── PUBLIC API ────────────────────────────────────────────────
@@ -599,7 +600,7 @@ function pageAudio(
   rot: number,
   crop?: PhotoCrop
 ): string {
-  const titleRaw = sanitizeText((m.content ?? '').trim());
+  const titleRaw = clampAudioBookAnnotation(sanitizeText((m.content ?? '').trim()));
   const dur = fmtDuration(m.duration);
   const titleHtml = titleRaw ? romanHtml(titleRaw) : '';
   const coverSrc = imgSrcFirst([m.voice_cover_path, m.voice_cover_url], images);
@@ -914,7 +915,7 @@ img { display:block; }
   letter-spacing:0;
 }
 .audio-title-above-qr {
-  margin-top:3mm;
+  margin-top:2mm;
   flex-shrink:0;
 }
 .audio-qr-block {
@@ -922,8 +923,12 @@ img { display:block; }
   flex-direction:column;
   align-items:center;
   flex-shrink:0;
-  margin-top:4mm;
-  margin-bottom:4mm;
+  margin-top:2mm;
+  margin-bottom:2mm;
+}
+.page.audio .audio-qr-block .qr {
+  width:17mm;
+  height:17mm;
 }
 .audio-qr-hint {
   margin-top:2.5mm;

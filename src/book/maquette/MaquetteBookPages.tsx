@@ -5,7 +5,6 @@ import {
   StyleSheet,
   Image,
   Pressable,
-  ScrollView,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import Svg, { Rect } from 'react-native-svg';
@@ -24,6 +23,7 @@ import type { Child, Memory } from '@/types/local';
 import { formatDuration } from '@/utils/date';
 import { splitPhotoNoteTitleBody, splitVideoTitleBody } from '@/src/book/bookTextParts';
 import type { PhotoCrop } from '@/src/book/photoCrop';
+import { clampAudioBookAnnotation } from '@/lib/audioBookAnnotation';
 import {
   getPrimaryPhotoUriForBookPreview,
   getVideoPosterUriForBookPreview,
@@ -844,13 +844,15 @@ function MaquetteAudio({
   const totalSec = memory.duration ?? 0;
   const durLabel = formatDuration(Math.max(0, Math.floor(totalSec)));
   const waveW = BAR_COUNT * BAR_W + (BAR_COUNT - 1) * BAR_GAP;
-  const titleRaw = (memory.content ?? '').trim();
-  const qrSize = Math.min(120, width * 0.28);
+  const titleRaw = clampAudioBookAnnotation((memory.content ?? '').trim());
+  /** QR réduit pour laisser la place au bloc play + onde sous ~2 lignes de texte. */
+  const qrSize = Math.min(64, width * 0.19);
   const coverUri = getVoiceCoverUriForBookPreview(memory);
-  const imgH = height * 0.6;
-  const ringSize = 56;
-  const playerGap = 14;
-  const waveSvgW = Math.max(96, width - 2 * pad - ringSize - playerGap);
+  const imgH = height * 0.54;
+  const ringSize = 44;
+  const playerGap = 10;
+  const waveSvgH = 18;
+  const waveSvgW = Math.max(72, width - 2 * pad - ringSize - playerGap);
 
   return (
     <View style={[styles.paper, { width, height }]}>
@@ -892,21 +894,17 @@ function MaquetteAudio({
           </View>
           <Text style={[styles.page4Meta, dm400 && { fontFamily: dm400 }]}>{dateTimeFrCaps(memory.created_at)}</Text>
         </View>
-        <View style={[styles.audioLower, { paddingHorizontal: pad, paddingBottom: 48 }]}>
-          <ScrollView
-            style={styles.audioScroll}
-            contentContainerStyle={styles.audioScrollInner}
-            showsVerticalScrollIndicator={false}
-            bounces={false}
-          >
+        <View style={[styles.audioLower, { paddingHorizontal: pad, paddingBottom: 42 }]}>
+          <View style={styles.audioTopBlock}>
             <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
               {titleRaw.length > 0 ? (
                 <Text
                   style={[
-                    styles.page4Body,
-                    { marginTop: 0 },
+                    styles.audioCaption,
                     garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
                   ]}
+                  numberOfLines={2}
+                  ellipsizeMode="tail"
                 >
                   {romanParagraphs(titleRaw)}
                 </Text>
@@ -916,13 +914,13 @@ function MaquetteAudio({
                 <Text style={[styles.audioQrHint, dm400 && { fontFamily: dm400 }]}>Scanner pour écouter</Text>
               </View>
             </Pressable>
-          </ScrollView>
+          </View>
           <View style={styles.audioPlayerRow}>
             <View style={styles.audioRingInline}>
               <Text style={styles.playGlyphInline}>▶</Text>
             </View>
             <View style={styles.audioWaveCol}>
-              <Svg width={waveSvgW} height={24} viewBox={`0 0 ${waveW} 24`} preserveAspectRatio="xMidYMid meet">
+              <Svg width={waveSvgW} height={waveSvgH} viewBox={`0 0 ${waveW} 24`} preserveAspectRatio="xMidYMid meet">
                 {heights.map((h, i) => (
                   <Rect
                     key={i}
@@ -1254,47 +1252,51 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     flexShrink: 0,
-    paddingTop: 14,
-    paddingBottom: 12,
+    paddingTop: 10,
+    paddingBottom: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: LINE,
   },
   audioLower: {
     flex: 1,
     minHeight: 0,
-    paddingTop: 12,
+    paddingTop: 8,
+    flexDirection: 'column',
   },
-  audioScroll: {
+  audioTopBlock: {
     flex: 1,
     minHeight: 0,
-    flexGrow: 1,
+    overflow: 'hidden',
   },
-  audioScrollInner: {
-    flexGrow: 1,
-    paddingBottom: 10,
+  audioCaption: {
+    marginTop: 0,
+    fontSize: 13,
+    lineHeight: 19,
+    color: INK,
+    textAlign: 'justify' as const,
   },
   audioQrCenter: {
     alignItems: 'center',
-    marginTop: 18,
+    marginTop: 8,
   },
   audioPlayerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     flexShrink: 0,
-    gap: 14,
-    paddingTop: 10,
+    gap: 10,
+    paddingTop: 6,
   },
   audioRingInline: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     borderWidth: 1.5,
     borderColor: 'rgba(92,143,166,0.45)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   playGlyphInline: {
-    fontSize: 18,
+    fontSize: 14,
     color: VOCAL_BLUE,
     marginLeft: 2,
   },
@@ -1306,10 +1308,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     width: '100%',
-    marginTop: 6,
+    marginTop: 4,
   },
-  audioDur: { fontSize: 10, color: MUTED },
-  audioQrHint: { marginTop: 8, fontSize: 11, color: MUTED },
+  audioDur: { fontSize: 9, color: MUTED },
+  audioQrHint: { marginTop: 6, fontSize: 10, color: MUTED },
   videoTitle: { marginTop: 10, fontSize: 18, color: INK },
   videoSub: { marginTop: 10, fontSize: 14, color: '#6B7280', lineHeight: 22, textAlign: 'justify' as const },
   rotateOverlayBtn: {

@@ -8,6 +8,7 @@ import {
 import type { BookPageServer } from '../types/contracts';
 import { splitVideoTitleBody } from './bookTextParts';
 import type { ChildRow, MemoryRow } from './memoryRow';
+import { clampAudioBookAnnotation } from './audioBookAnnotation';
 import {
   audioWaveformSvg,
   dateFrCaps,
@@ -252,7 +253,7 @@ function pageAudio(
   crop: PhotoCrop | undefined,
   printBleed: boolean
 ): string {
-  const titleRaw = sanitizeText((m.content ?? '').trim());
+  const titleRaw = clampAudioBookAnnotation(sanitizeText((m.content ?? '').trim()));
   const dur = fmtDuration(m.duration);
   const titleHtml = titleRaw ? romanHtml(titleRaw) : '';
   const coverUrl = imgAttr(m.voice_cover_url);
@@ -631,7 +632,7 @@ body.print-bleed .bleed-x {
   letter-spacing:0;
 }
 .audio-title-above-qr {
-  margin-top:3mm;
+  margin-top:2mm;
   flex-shrink:0;
 }
 .audio-qr-block {
@@ -639,8 +640,12 @@ body.print-bleed .bleed-x {
   flex-direction:column;
   align-items:center;
   flex-shrink:0;
-  margin-top:4mm;
-  margin-bottom:4mm;
+  margin-top:2mm;
+  margin-bottom:2mm;
+}
+.page.audio .audio-qr-block .qr {
+  width:17mm;
+  height:17mm;
 }
 .audio-qr-hint {
   margin-top:2.5mm;

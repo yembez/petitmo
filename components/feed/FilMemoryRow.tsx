@@ -24,6 +24,7 @@ import PhotoMosaic from "@/components/PhotoMosaic";
 import { isFeedMultiPhotoAlbum, parseFavoritePhotoUrls } from '@/utils/memoryPhotos';
 import { useFeedPhotoDisplayUrls } from "@/hooks/useFeedPhotoDisplayUrls";
 import { useFeedVideoPlaybackUri } from "@/hooks/useFeedVideoPlaybackUri";
+import { clampAudioBookAnnotation } from '@/lib/audioBookAnnotation';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { Video, ResizeMode } from "expo-av";
 import { Swipeable, RectButton } from "react-native-gesture-handler";
@@ -249,7 +250,9 @@ function FilMemoryRow({
   isOptimisticFeedPending = false,
 }: FilMemoryRowProps) {
   const photoUrls = useFeedPhotoDisplayUrls(memory);
-  const contentText = memory.content?.trim() || '';
+  const contentTextRaw = memory.content?.trim() || '';
+  const contentText =
+    memory.type === 'voice' ? clampAudioBookAnnotation(contentTextRaw) : contentTextRaw;
   const bookParagraphs = (() => {
     const raw = (memory.content ?? '')
       .replace(/\r\n/g, '\n')
@@ -559,7 +562,7 @@ function FilMemoryRow({
             >
               <Text
                 style={[styles.captionAnnotation, fontsLoaded && { fontFamily: FONT_MAMAN }]}
-                numberOfLines={4}
+                numberOfLines={memory.type === 'voice' ? 2 : 4}
               >
                 {contentText}
               </Text>
