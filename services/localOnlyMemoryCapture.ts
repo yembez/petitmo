@@ -137,6 +137,7 @@ export async function captureMemoryLocalOnly(params: {
   voicePlaybackStartSec?: number | null;
   capturedAtIso?: string;
   locationOverride?: string | null;
+  importAssetId?: string | null;
 }): Promise<Memory | null> {
   const {
     uri,
@@ -149,6 +150,11 @@ export async function captureMemoryLocalOnly(params: {
     capturedAtIso,
     locationOverride,
   } = params;
+
+  const stampLibraryAsset = (mem: Memory): Memory => {
+    mem.import_asset_id = params.importAssetId?.trim() ? params.importAssetId.trim() : null;
+    return mem;
+  };
   const id = newLocalMemoryId();
   const now = new Date().toISOString();
   const createdAt = capturedAtIso?.trim() || now;
@@ -173,7 +179,7 @@ export async function captureMemoryLocalOnly(params: {
       mem.display_url = src;
       mem.file_size = size;
       setFeedBootstrapDisplayUrls(id, [src]);
-      return mem;
+      return stampLibraryAsset(mem);
     }
 
     const { localOriginalUri } = await persistOriginalToSandbox({ memoryId: id, type: 'photo', sourceUri: uri });
@@ -202,7 +208,7 @@ export async function captureMemoryLocalOnly(params: {
     mem.file_size = size;
     mem.thumb_url = mem.local_thumb_path ?? mem.local_media_path;
     mem.display_url = mem.local_display_path ?? mem.thumb_url;
-    return mem;
+    return stampLibraryAsset(mem);
   }
 
   if (type === 'video') {
@@ -223,7 +229,7 @@ export async function captureMemoryLocalOnly(params: {
       mem.duration = typeof duration === 'number' && Number.isFinite(duration) ? duration : null;
       mem.file_size = size;
       setFeedBootstrapVideoUri(id, src);
-      return mem;
+      return stampLibraryAsset(mem);
     }
 
     const { localOriginalUri } = await persistOriginalToSandbox({ memoryId: id, type: 'video', sourceUri: uri });
@@ -256,7 +262,7 @@ export async function captureMemoryLocalOnly(params: {
     mem.file_size = size;
     mem.thumbnail_url = thumbDest;
     mem.poster_url = thumbDest;
-    return mem;
+    return stampLibraryAsset(mem);
   }
 
   if (Platform.OS === 'web') {
@@ -287,7 +293,7 @@ export async function captureMemoryLocalOnly(params: {
       typeof voicePlaybackStartSec === 'number' && Number.isFinite(voicePlaybackStartSec)
         ? voicePlaybackStartSec
         : null;
-    return mem;
+    return stampLibraryAsset(mem);
   }
 
   const { localOriginalUri } = await persistOriginalToSandbox({ memoryId: id, type: 'voice', sourceUri: uri });
@@ -329,7 +335,7 @@ export async function captureMemoryLocalOnly(params: {
     typeof voicePlaybackStartSec === 'number' && Number.isFinite(voicePlaybackStartSec)
       ? voicePlaybackStartSec
       : null;
-  return mem;
+  return stampLibraryAsset(mem);
 }
 
 /**
@@ -341,10 +347,18 @@ export async function capturePhotoAlbumLocalOnly(params: {
   userId: string;
   capturedAtIso?: string;
   locationOverride?: string | null;
+  importSourceFingerprint?: string | null;
 }): Promise<Memory | null> {
   if (params.uris.length === 0) return null;
 
   const { uris, childId, userId, capturedAtIso, locationOverride } = params;
+
+  const stampAlbumFp = (mem: Memory): Memory => {
+    mem.import_source_fingerprint = params.importSourceFingerprint?.trim()
+      ? params.importSourceFingerprint.trim()
+      : null;
+    return mem;
+  };
   const id = newLocalMemoryId();
   const now = new Date().toISOString();
   const createdAt = capturedAtIso?.trim() || now;
@@ -378,7 +392,7 @@ export async function capturePhotoAlbumLocalOnly(params: {
     mem.display_url = first;
     mem.file_size = totalSize;
     setFeedBootstrapDisplayUrls(id, cleaned);
-    return mem;
+    return stampAlbumFp(mem);
   }
 
   const { localOriginalUri } = await persistOriginalToSandbox({ memoryId: id, type: 'photo', sourceUri: first });
@@ -429,5 +443,5 @@ export async function capturePhotoAlbumLocalOnly(params: {
   mem.extra_photo_paths = extraUris;
   mem.thumb_url = mem.local_thumb_path ?? mem.local_media_path;
   mem.display_url = mem.local_display_path ?? mem.thumb_url;
-  return mem;
+  return stampAlbumFp(mem);
 }

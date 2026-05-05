@@ -23,6 +23,7 @@ import type {
 } from '@/types/shared';
 import { supabase } from '@/lib/supabase';
 import { getLocalMemoryById } from '@/lib/localDb';
+import { updateVoiceMemoryCover } from '@/services/media';
 import { resolveServerPdfEntitlements } from '@/lib/digitalExportPurchase';
 import { isInitExportConfigured, postInitExport, postGuestUploadUrls } from '@/services/initExportApi';
 
@@ -74,6 +75,29 @@ export { isInitExportConfigured } from '@/services/initExportApi';
 
 function countAudioVideoPages(pages: BookPage[]): number {
   return pages.filter(p => p.type === 'audio' || p.type === 'video').length;
+}
+
+/**
+ * Export PDF avec session : le serveur lit `memories` dans Supabase.
+ * Si la couverture vocale n’est que locale (`file://`), on pousse Storage + DB avant le POST.
+ */
+async function ensureVoiceCoversPersistedForServerPdf(
+  pages: BookPage[],
+  localEdits: Record<string, Partial<Memory>>,
+  childId: string
+): Promise<void> {
+  const memories = collectMemoriesFromPagesForPdf(pages, localEdits);
+  for (const m of memories) {
+    if (m.type !== 'voice') continue;
+    if (isHttps(m.voice_cover_url)) continue;
+    const coverLocal = (m.voice_cover_path ?? '').trim();
+    if (!coverLocal || isHttps(coverLocal)) continue;
+    try {
+      await updateVoiceMemoryCover(m.id, childId, coverLocal);
+    } catch (e) {
+      console.warn('[bookPdfServer] ensureVoiceCoversPersistedForServerPdf', m.id, e);
+    }
+  }
 }
 
 export function collectMemoriesFromPagesForPdf(
@@ -227,6 +251,58 @@ async function uploadFileToSignedUrl(params: {
   if (res.status < 200 || res.status >= 300) {
     throw new Error(`SIGNED_UPLOAD_FAILED (${res.status}) ${res.body || ''}`.trim());
   }
+}
+
+type GuestImageAssetForUploadUrls =
+  | { kind: 'cover' }
+  | { kind: 'photo'; memoryId: string }
+  | { kind: 'voice_cover'; memoryId: string }
+  | { kind: 'video_thumb'; memoryId: string };
+
+type GuestSignedUploadRow = {
+  kind: 'cover' | 'photo' | 'voice_cover' | 'audio' | 'video' | 'video_thumb';
+  memoryId: string | null;
+  bucket: string;
+  path: string;
+  signedUrl: string;
+  token?: string;
+  publicUrl?: string;
+};
+
+function guestUploadRowFromJson(json: Record<string, unknown>): GuestSignedUploadRow | undefined {
+  const uploads = json.uploads;
+  if (!Array.isArray(uploads) || uploads.length < 1) return undefined;
+  return uploads[0] as GuestSignedUploadRow;
+}
+
+/**
+ * Bucket `media` privé : l’URL de **lecture** signée n’est disponible qu’après le PUT.
+ * `guest-upload-urls` peut donc ne pas renvoyer `publicUrl` au premier appel.
+ */
+async function guestUploadMediaImageThenReadUrl(params: {
+  pdfTicket: string;
+  asset: GuestImageAssetForUploadUrls;
+  localUri: string;
+  mimeType: string;
+}): Promise<{ readUrl: string; path: string }> {
+  const { pdfTicket, asset, localUri, mimeType } = params;
+  const first = await postGuestUploadUrls({ pdfTicket, assets: [asset] });
+  const row = guestUploadRowFromJson(first.json);
+  if (first.status !== 200 || !row?.signedUrl?.trim() || !row.path?.trim()) {
+    throw new Error('PREP_NOT_READY');
+  }
+  await uploadFileToSignedUrl({ signedUrl: row.signedUrl, localUri, mimeType });
+  const readFromFirst = (row.publicUrl ?? '').trim();
+  if (readFromFirst) {
+    return { readUrl: readFromFirst, path: row.path };
+  }
+  const second = await postGuestUploadUrls({ pdfTicket, assets: [asset] });
+  const row2 = guestUploadRowFromJson(second.json);
+  const readUrl = (row2?.publicUrl ?? '').trim();
+  if (second.status !== 200 || !readUrl) {
+    throw new Error('PREP_NOT_READY');
+  }
+  return { readUrl, path: row.path };
 }
 
 /** URI fichier local pour upload brut (sandbox / repli `file:` après JSON AsyncStorage). */
@@ -492,6 +568,8 @@ export async function generateBookPdfViaServer(input: GenerateBookPdfServerInput
     throw new Error('Session requise pour exporter via le serveur.');
   }
 
+  await ensureVoiceCoversPersistedForServerPdf(input.pages, input.localEdits, input.childId);
+
   const { subscriptionTier, digitalExportPaid } = await resolveServerPdfEntitlements();
 
   const payload: GenerateBookPdfPayload = {
@@ -615,17 +693,7 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
     throw new Error('Réponse init-export invalide (ticket manquant).');
   }
 
-  type SignedUploadRow = {
-    kind: 'cover' | 'photo' | 'audio' | 'video' | 'video_thumb';
-    memoryId: string | null;
-    bucket: string;
-    path: string;
-    signedUrl: string;
-    token?: string;
-    publicUrl?: string;
-  };
-
-  // Cover: si locale, upload direct Supabase (`media`) via signed URL et injecter l'URL publique.
+  // Cover: si locale, upload direct Supabase (`media`) via signed URL et injecter l'URL de lecture signée.
   let coverPhotoUrlOut: string | null = input.coverPhotoUrl ?? null;
   const coverLocal = (coverPhotoUrlOut ?? '').trim();
   if (coverLocal && !isHttps(coverLocal) && Platform.OS !== 'web') {
@@ -635,18 +703,13 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
         [{ resize: { width: 1600 } }],
         { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG }
       );
-      const { status, json } = await postGuestUploadUrls({ pdfTicket, assets: [{ kind: 'cover' }] });
-      const row = (json as any)?.uploads?.[0] as SignedUploadRow | undefined;
-      if (status === 200 && row?.signedUrl && row.publicUrl) {
-        await uploadFileToSignedUrl({
-          signedUrl: row.signedUrl,
-          localUri: manipulated?.uri || coverLocal,
-          mimeType: 'image/jpeg',
-        });
-        coverPhotoUrlOut = row.publicUrl;
-      } else {
-        coverPhotoUrlOut = null;
-      }
+      const { readUrl } = await guestUploadMediaImageThenReadUrl({
+        pdfTicket,
+        asset: { kind: 'cover' },
+        localUri: manipulated?.uri || coverLocal,
+        mimeType: 'image/jpeg',
+      });
+      coverPhotoUrlOut = readUrl;
     } catch {
       // fallback: pas de cover (placeholder)
       coverPhotoUrlOut = null;
@@ -670,19 +733,13 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
               [{ resize: { width: 1600 } }],
               { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG }
             );
-            const { status, json } = await postGuestUploadUrls({
+            const { readUrl } = await guestUploadMediaImageThenReadUrl({
               pdfTicket,
-              assets: [{ kind: 'photo', memoryId: m.id }],
+              asset: { kind: 'voice_cover', memoryId: m.id },
+              localUri: manipulated?.uri || coverLocal,
+              mimeType: 'image/jpeg',
             });
-            const row = (json as any)?.uploads?.[0] as SignedUploadRow | undefined;
-            if (status === 200 && row?.signedUrl && row.publicUrl) {
-              await uploadFileToSignedUrl({
-                signedUrl: row.signedUrl,
-                localUri: manipulated?.uri || coverLocal,
-                mimeType: 'image/jpeg',
-              });
-              voiceCoverUrl = row.publicUrl;
-            }
+            voiceCoverUrl = readUrl;
           } catch {
             /* ignore */
           }
@@ -708,24 +765,18 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
         let thumbPublicUrl: string | null = isHttps(thumbLocal) ? thumbLocal : null;
         try {
           if (thumbLocal && !isHttps(thumbLocal)) {
-            const { status, json } = await postGuestUploadUrls({
+            const manipulated = await ImageManipulator.manipulateAsync(
+              thumbLocal,
+              [{ resize: { width: 1200 } }],
+              { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG }
+            );
+            const { readUrl } = await guestUploadMediaImageThenReadUrl({
               pdfTicket,
-              assets: [{ kind: 'video_thumb', memoryId: m.id }],
+              asset: { kind: 'video_thumb', memoryId: m.id },
+              localUri: manipulated?.uri || thumbLocal,
+              mimeType: 'image/jpeg',
             });
-            const thumbRow = (json as any)?.uploads?.[0] as SignedUploadRow | undefined;
-            if (status === 200 && thumbRow?.signedUrl && thumbRow.publicUrl) {
-              const manipulated = await ImageManipulator.manipulateAsync(
-                thumbLocal,
-                [{ resize: { width: 1200 } }],
-                { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG }
-              );
-              await uploadFileToSignedUrl({
-                signedUrl: thumbRow.signedUrl,
-                localUri: manipulated?.uri || thumbLocal,
-                mimeType: 'image/jpeg',
-              });
-              thumbPublicUrl = thumbRow.publicUrl;
-            }
+            thumbPublicUrl = readUrl;
           }
         } catch {
           /* ignore */
@@ -750,18 +801,13 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
         [{ resize: { width: 1600 } }],
         { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG }
       );
-      const { status, json } = await postGuestUploadUrls({
+      const { readUrl, path } = await guestUploadMediaImageThenReadUrl({
         pdfTicket,
-        assets: [{ kind: 'photo', memoryId: m.id }],
-      });
-      const row = (json as any)?.uploads?.[0] as SignedUploadRow | undefined;
-      if (status !== 200 || !row?.signedUrl || !row.publicUrl) throw new Error('PREP_NOT_READY');
-      await uploadFileToSignedUrl({
-        signedUrl: row.signedUrl,
+        asset: { kind: 'photo', memoryId: m.id },
         localUri: manipulated?.uri || local,
         mimeType: 'image/jpeg',
       });
-      return { ...g, print_url: row.publicUrl, display_url: row.publicUrl, media_url: row.publicUrl, media_path: row.path };
+      return { ...g, print_url: readUrl, display_url: readUrl, media_url: readUrl, media_path: path };
     })
   );
   const payload: GenerateBookPdfPayload = {

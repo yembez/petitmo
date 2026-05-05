@@ -24,6 +24,7 @@ import {
 import { BookOpen, ChevronRight, Cloud, Lock, X } from 'lucide-react-native'
 import PetitmoLogoManuscrit, { PETITMO_LOGO_VIEWBOX } from '@/components/PetitmoLogoManuscrit'
 import { setUserTier } from '@/lib/userTier'
+import { ensureLocalChildrenSyncedToSupabase } from '@/services/children'
 import { grantDigitalExportPurchase } from '@/lib/digitalExportPurchase'
 import { FREE_TIER_LIMIT } from '@/lib/limits'
 import { hp, scale, screenHeight, screenWidth, verticalScale } from '@/utils/responsive'
@@ -149,6 +150,7 @@ export default function PaywallScreen() {
     try {
       await new Promise(r => setTimeout(r, 1200))
       await setUserTier('paid')
+      await ensureLocalChildrenSyncedToSupabase()
       await AsyncStorage.setItem('petitmo_subscribed_at', new Date().toISOString())
       router.replace('/(tabs)')
     } catch {

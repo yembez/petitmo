@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets, useSafeAreaFrame } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Import as ImportIcon, Menu, Mic, PenLine, Video } from 'lucide-react-native';
@@ -23,9 +23,12 @@ import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
 import { scale, verticalScale } from '@/utils/responsive';
 import {
   getChildren,
-  getOrSelectFirstChild,
   getCaptureTabChildSnapshot,
+  cacheRemoteChildProfilePhotoLocally,
+  loadCaptureChildFromLocalDbFirst,
+  getSelectedChild,
   setCaptureTabChildSnapshot,
+  setSelectedChild,
 } from '@/services/children';
 import type { Child } from '@/types/local';
 import PetitmoLogoManuscrit, { PETITMO_LOGO_VIEWBOX } from '@/components/PetitmoLogoManuscrit';
@@ -191,6 +194,7 @@ const shadowCard = Platform.select({
 
 export default function CapturerScreen() {
   const router = useRouter();
+  const isTabFocused = useIsFocused();
   const insets = useSafeAreaInsets();
   const frame = useSafeAreaFrame();
   const { height: windowH } = useWindowDimensions();
@@ -277,19 +281,44 @@ export default function CapturerScreen() {
       const run = async () => {
         const silent = childRef.current != null;
         try {
-          if (!silent) setIsLoading(true);
-          const storedSelectedId = await getOrSelectFirstChild();
+          if (!silent) {
+            const boot = await loadCaptureChildFromLocalDbFirst();
+            if (!cancelled && boot) {
+              setChild(boot);
+              setIsLoading(false);
+            } else if (!cancelled) {
+              setIsLoading(true);
+            }
+          }
+
           const allChildren = await getChildren();
           if (cancelled) return;
 
-          if (storedSelectedId && allChildren.length > 0) {
-            const selected = allChildren.find(c => c.id === storedSelectedId) ?? allChildren[0];
-            setChild(selected);
-          } else if (allChildren.length === 0) {
+          if (allChildren.length === 0) {
             setChild(null);
             router.push('/create-child');
+            return;
+          }
+
+          const stored = await getSelectedChild();
+          let selected: Child | undefined;
+          if (stored && allChildren.some(c => c.id === stored)) {
+            selected = allChildren.find(c => c.id === stored);
           } else {
-            setChild(allChildren[0]);
+            const first = allChildren[0];
+            await setSelectedChild(first.id);
+            selected = first;
+          }
+
+          if (selected) {
+            setChild(selected);
+            if (selected.photo_url?.trim() && !selected.local_photo_path?.trim()) {
+              void cacheRemoteChildProfilePhotoLocally(selected).then(refreshed => {
+                if (!cancelled && refreshed.local_photo_path?.trim()) {
+                  setChild(refreshed);
+                }
+              });
+            }
           }
         } catch (error) {
           console.error('Error loading child:', error);
@@ -341,7 +370,7 @@ export default function CapturerScreen() {
 
   return (
     <View style={styles.root}>
-      <StatusBar style="light" />
+      {isTabFocused ? <StatusBar style="light" /> : null}
 
       {/*
         Photo / panneau 12/8 (sans chevauchement : le dégradé reste visible sur le hero).
@@ -368,7 +397,7 @@ export default function CapturerScreen() {
               {photoUri ? (
                 <>
                   <ImageBackground
-                    key={photoUri}
+                    key={`hero-${child.id}`}
                     source={{ uri: photoUri }}
                     style={[styles.heroPhotoCrop, { top: topBandH }]}
                     imageStyle={styles.heroImageTopAligned}

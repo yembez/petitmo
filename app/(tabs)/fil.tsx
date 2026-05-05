@@ -6,6 +6,7 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useCallback, useMemo, useRef } from 'react';
@@ -24,6 +25,7 @@ import { styles } from '@/components/feed/feedStyles';
 import { FeedHeader } from '@/components/feed/FeedHeader';
 import type { FeedListItem } from '@/components/feed/FilMemoryRow';
 import { peekSilentInitialFilLoadArmed } from '@/services/feedAfterImportFlags';
+import { setMemoryViewerSession } from '@/services/memoryViewerSession';
 import { StyleSheet } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { getTimingNudge, markNudgeSeen, recordInstallDate } from '@/lib/paywallTiming';
@@ -33,7 +35,6 @@ export default function FilScreen() {
   const { pending: pendingUploads } = usePendingMediaUploads();
   const insets = useSafeAreaInsets();
   const [fontsLoaded] = useFonts({ Lora_400Regular_Italic });
-  const [playingVideoId, setPlayingVideoId] = useState<string | null>(null);
   const [timingNudge, setTimingNudge] = useState<'DAY_30' | 'DAY_60' | null>(null);
   const {
     memories,
@@ -43,7 +44,7 @@ export default function FilScreen() {
     isRefreshing,
     onRefresh,
     memoryFlatListKeyByIdRef,
-  } = useFeedData(pendingUploads, setPlayingVideoId);
+  } = useFeedData(pendingUploads);
 
   const { setPostHeights, onFeedViewportLayout, snapOffsets, headerSnapOffsetsIos } = useFilLayout({
     memories,
@@ -77,6 +78,14 @@ export default function FilScreen() {
     router.push({ pathname: '/camera', params: { from: 'fil' } });
   }, [router]);
   const listRef = useRef<FlatList<FeedListItem> | null>(null);
+  const immersiveLaunchRef = useRef<(index: number) => void>(() => {});
+  immersiveLaunchRef.current = (index: number) => {
+    setMemoryViewerSession({ memories, initialIndex: index });
+    router.push({
+      pathname: '/memory-viewer',
+      params: { initialIndex: String(index) },
+    });
+  };
   const toggleFavorite = useToggleFavorite(setMemories);
 
   const { feedData, renderItem } = useFilFeedList(
@@ -85,8 +94,6 @@ export default function FilScreen() {
     child,
     pendingUploads,
     fontsLoaded,
-    playingVideoId,
-    setPlayingVideoId,
     uploadingVoiceCoverId,
     setPostHeights,
     toggleFavorite,
@@ -94,7 +101,8 @@ export default function FilScreen() {
     handleEditLocation,
     handlePickVoiceCover,
     handleDeleteMemory,
-    swipeRefs
+    swipeRefs,
+    immersiveLaunchRef
   );
 
   useFocusEffect(
@@ -118,6 +126,7 @@ export default function FilScreen() {
   if (isLoading && pendingUploads.length === 0 && !peekSilentInitialFilLoadArmed()) {
     return (
       <View style={[styles.container, styles.centered]}>
+        <StatusBar style="dark" />
         <ActivityIndicator size="large" color="#FF7F74" />
       </View>
     );
@@ -126,6 +135,7 @@ export default function FilScreen() {
   if (!child && pendingUploads.length === 0) {
     return (
       <View style={[styles.container, styles.centered]}>
+        <StatusBar style="dark" />
         <Text style={styles.emptyText}>Aucun enfant trouvé</Text>
         <TouchableOpacity style={styles.createButton} onPress={() => router.push('/create-child')}>
           <Text style={styles.createButtonText}>Créer un profil</Text>
@@ -136,6 +146,7 @@ export default function FilScreen() {
 
   return (
     <View style={styles.container}>
+      <StatusBar style="dark" />
       <View style={styles.headerShell}>
         <FeedHeader
           child={child}

@@ -1,6 +1,7 @@
 import * as FileSystem from 'expo-file-system';
 import { getLocalMemoriesPendingCloudSync, upsertLocalMemory } from '@/lib/localDb';
 import { setUserTier } from '@/lib/userTier';
+import { ensureLocalChildrenSyncedToSupabase } from '@/services/children';
 import { uploadFileToSupabase } from '@/services/media';
 import { supabase } from '@/lib/supabase';
 import type { Database } from '@/types/database';
@@ -293,6 +294,7 @@ export async function ensureMemoryUploadedForCloud(memory: Memory): Promise<void
 
 export async function upgradeToFullCloud(onProgress?: ProgressCallback): Promise<void> {
   await setUserTier('paid');
+  await ensureLocalChildrenSyncedToSupabase();
 
   const pending = getLocalMemoriesPendingCloudSync();
 

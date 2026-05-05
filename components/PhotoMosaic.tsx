@@ -13,6 +13,8 @@ type Props = {
   memoryId?: string;
   favoritePhotoUrls?: string[];
   onFavoritePhotoUrlsUpdated?: (urls: string[]) => void;
+  /** Une seule photo : ouvre le viewer immersif au lieu de la galerie modale. */
+  onSinglePhotoImmersive?: () => void;
 };
 
 /**
@@ -23,6 +25,7 @@ export default function PhotoMosaic({
   memoryId,
   favoritePhotoUrls,
   onFavoritePhotoUrlsUpdated,
+  onSinglePhotoImmersive,
 }: Props) {
   const { width: screenW } = useWindowDimensions();
   const W = Math.max(0, screenW - 2 * MEDIA_CARD_INSET);
@@ -62,7 +65,9 @@ export default function PhotoMosaic({
   if (n === 1) {
     grid = (
       <Pressable
-        onPress={() => openGallery(0)}
+        onPress={() =>
+          onSinglePhotoImmersive ? onSinglePhotoImmersive() : openGallery(0)
+        }
         style={[styles.wrap, { borderRadius: MEDIA_CARD_RADIUS }]}
         accessibilityRole="image"
         accessibilityLabel="Ouvrir la photo en grand"

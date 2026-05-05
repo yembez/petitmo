@@ -46,10 +46,7 @@ export type UseFeedDataResult = {
   memoryFlatListKeyByIdRef: MutableRefObject<Map<string, string>>;
 };
 
-export function useFeedData(
-  pendingUploads: PendingUpload[],
-  setPlayingVideoId: Dispatch<SetStateAction<string | null>>
-): UseFeedDataResult {
+export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult {
   const [memories, setMemories] = useState<Memory[]>(() => [...filMemoriesHydrationSnapshot]);
   const memoriesRef = useRef<Memory[]>([]);
   memoriesRef.current = memories;
@@ -183,6 +180,7 @@ export function useFeedData(
       (payload: unknown) => {
         let rows: Memory[];
         let pendingTempId: string | undefined;
+        let preserveInsertionOrder = false;
         if (Array.isArray(payload)) {
           rows = payload as Memory[];
         } else if (
@@ -190,18 +188,25 @@ export function useFeedData(
           typeof payload === 'object' &&
           Array.isArray((payload as { memories?: unknown }).memories)
         ) {
-          const p = payload as { memories: Memory[]; pendingTempId?: string };
+          const p = payload as {
+            memories: Memory[];
+            pendingTempId?: string;
+            preserveInsertionOrder?: boolean;
+          };
           rows = p.memories;
           pendingTempId = p.pendingTempId;
+          preserveInsertionOrder = p.preserveInsertionOrder === true;
         } else {
           return;
         }
         if (rows.length === 0) return;
-        const ordered = [...rows].sort((a, b) => {
-          const ta = new Date(a.inserted_at ?? a.created_at).getTime();
-          const tb = new Date(b.inserted_at ?? b.created_at).getTime();
-          return tb - ta;
-        });
+        const ordered = preserveInsertionOrder
+          ? [...rows]
+          : [...rows].sort((a, b) => {
+              const ta = new Date(a.inserted_at ?? a.created_at).getTime();
+              const tb = new Date(b.inserted_at ?? b.created_at).getTime();
+              return tb - ta;
+            });
         if (pendingTempId && ordered.length === 1) {
           memoryFlatListKeyByIdRef.current.set(ordered[0].id, pendingTempId);
         }
@@ -222,8 +227,7 @@ export function useFeedData(
   useFocusEffect(
     useCallback(() => {
       setStatusBarStyle('dark');
-      return () => setPlayingVideoId(null);
-    }, [setPlayingVideoId])
+    }, [])
   );
 
   const stuckDerivativeIdsKey = useMemo(() => {

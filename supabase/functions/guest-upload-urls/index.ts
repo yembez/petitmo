@@ -95,10 +95,10 @@ async function ensurePublicMediaToken(supabase: ReturnType<typeof createClient>,
   throw new Error(insErr.message);
 }
 
-type AssetKind = 'cover' | 'photo' | 'audio' | 'video' | 'video_thumb';
+type AssetKind = 'cover' | 'photo' | 'voice_cover' | 'audio' | 'video' | 'video_thumb';
 type AssetReq = {
   kind: AssetKind;
-  /** Requis pour photo/audio/video/video_thumb. */
+  /** Requis pour photo/voice_cover/audio/video/video_thumb. */
   memoryId?: string;
 };
 
@@ -114,7 +114,15 @@ function normalizeAssets(raw: unknown): AssetReq[] | null {
     if (!it || typeof it !== 'object') return null;
     const o = it as Record<string, unknown>;
     const kind = o.kind;
-    if (kind !== 'cover' && kind !== 'photo' && kind !== 'audio' && kind !== 'video' && kind !== 'video_thumb') return null;
+    if (
+      kind !== 'cover' &&
+      kind !== 'photo' &&
+      kind !== 'voice_cover' &&
+      kind !== 'audio' &&
+      kind !== 'video' &&
+      kind !== 'video_thumb'
+    )
+      return null;
     const memoryId = typeof o.memoryId === 'string' ? o.memoryId.trim() : '';
     if (kind !== 'cover' && !memoryId) return null;
     out.push({ kind, memoryId: memoryId || undefined });
@@ -170,22 +178,26 @@ Deno.serve(async (req: Request) => {
 
   for (const a of assets) {
     const memoryId = (a.memoryId ?? '').trim();
-    if (a.kind === 'cover' || a.kind === 'photo' || a.kind === 'video_thumb') {
+    if (a.kind === 'cover' || a.kind === 'photo' || a.kind === 'voice_cover' || a.kind === 'video_thumb') {
       const bucket = 'media';
       const idSeg = a.kind === 'cover' ? 'cover' : safeIdSegment(memoryId);
       const path = `guest/exports/${exportRequestId}/${a.kind}/${idSeg}.jpg`;
-      const { data, error } = await supabase.storage.from(bucket).createSignedUploadUrl(path);
+      // Second appel après PUT : sans upsert, l’API répond « The resource already exists ».
+      const { data, error } = await supabase.storage.from(bucket).createSignedUploadUrl(path, { upsert: true });
       if (error || !data?.signedUrl) {
         console.error('[guest-upload-urls] sign upload', error?.message);
         return jsonRes({ error: 'Storage error' }, 500);
       }
+      // `createSignedUrl` (lecture) échoue tant que l’objet n’existe pas (avant le PUT) → normal.
+      // L’app refait un appel après upload pour obtenir `publicUrl`.
       const readTtl = 60 * 60 * 24 * 7;
       const { data: readSigned, error: readErr } = await supabase.storage
         .from(bucket)
         .createSignedUrl(path, readTtl);
-      if (readErr || !readSigned?.signedUrl) {
-        console.error('[guest-upload-urls] sign read', readErr?.message);
-        return jsonRes({ error: 'Storage error' }, 500);
+      const publicUrl =
+        !readErr && readSigned?.signedUrl ? readSigned.signedUrl : undefined;
+      if (!publicUrl && readErr?.message) {
+        console.log('[guest-upload-urls] sign read skipped (before upload)', readErr.message);
       }
       results.push({
         kind: a.kind,
@@ -193,7 +205,7 @@ Deno.serve(async (req: Request) => {
         bucket,
         path,
         signedUrl: data.signedUrl,
-        publicUrl: readSigned.signedUrl,
+        ...(publicUrl ? { publicUrl } : {}),
       });
       continue;
     }
@@ -211,7 +223,7 @@ Deno.serve(async (req: Request) => {
         .eq('media_id', memoryId)
         .eq('kind', a.kind);
 
-      const { data, error } = await supabase.storage.from(bucket).createSignedUploadUrl(path);
+      const { data, error } = await supabase.storage.from(bucket).createSignedUploadUrl(path, { upsert: true });
       if (error || !data?.signedUrl) {
         console.error('[guest-upload-urls] sign upload', error?.message);
         return jsonRes({ error: 'Storage error' }, 500);

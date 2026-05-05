@@ -13,6 +13,7 @@ import {
   type Dispatch,
   type SetStateAction,
   type MutableRefObject,
+  type RefObject,
 } from 'react';
 import { THEME } from "@/constants/theme";
 import { scale, verticalScale } from "@/utils/responsive";
@@ -20,7 +21,7 @@ import { ICON_SIZES } from "@/constants/sizes";
 import { TEXT_POST_CARD_INSET } from '@/constants/feedLayout';
 import { APP_ICON_PX } from '@/constants/iconSizes';
 import PhotoMosaic from "@/components/PhotoMosaic";
-import { parseFavoritePhotoUrls } from "@/utils/memoryPhotos";
+import { isFeedMultiPhotoAlbum, parseFavoritePhotoUrls } from '@/utils/memoryPhotos';
 import { useFeedPhotoDisplayUrls } from "@/hooks/useFeedPhotoDisplayUrls";
 import { useFeedVideoPlaybackUri } from "@/hooks/useFeedVideoPlaybackUri";
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
@@ -137,8 +138,6 @@ type FilMemoryRowProps = {
   setPostHeights: Dispatch<SetStateAction<number[]>>;
   child: Child | null;
   fontsLoaded: boolean;
-  playingVideoId: string | null;
-  setPlayingVideoId: Dispatch<SetStateAction<string | null>>;
   uploadingVoiceCoverId: string | null;
   setMemories: Dispatch<SetStateAction<Memory[]>>;
   toggleFavorite: (id: string) => void | Promise<void>;
@@ -147,6 +146,7 @@ type FilMemoryRowProps = {
   handlePickVoiceCover: (m: Memory) => void | Promise<void>;
   handleDeleteMemory: (m: Memory) => void;
   swipeRefs: MutableRefObject<Map<string, Swipeable | null>>;
+  immersiveLaunchRef: RefObject<(index: number) => void>;
   /** Ligne « import en cours » : ne pas écrire dans `postHeights` (index hors `memories`). */
   skipPostHeightMeasurement?: boolean;
   /** Import non finalisé : pas de favori / swipe / actions. */
@@ -154,7 +154,6 @@ type FilMemoryRowProps = {
 };
 function filMemoryRowDataPropsEqual(prev: FilMemoryRowProps, next: FilMemoryRowProps): boolean {
   if (prev.memoryIndex !== next.memoryIndex) return false;
-  if (prev.playingVideoId !== next.playingVideoId) return false;
   if (prev.uploadingVoiceCoverId !== next.uploadingVoiceCoverId) return false;
   if (prev.fontsLoaded !== next.fontsLoaded) return false;
   if (!!prev.skipPostHeightMeasurement !== !!next.skipPostHeightMeasurement) return false;
@@ -237,8 +236,6 @@ function FilMemoryRow({
   setPostHeights,
   child,
   fontsLoaded,
-  playingVideoId,
-  setPlayingVideoId,
   uploadingVoiceCoverId,
   setMemories,
   toggleFavorite,
@@ -247,6 +244,7 @@ function FilMemoryRow({
   handlePickVoiceCover,
   handleDeleteMemory,
   swipeRefs,
+  immersiveLaunchRef,
   skipPostHeightMeasurement = false,
   isOptimisticFeedPending = false,
 }: FilMemoryRowProps) {
@@ -291,6 +289,15 @@ function FilMemoryRow({
     ? formatCaptureStickerLabel(capturedIso, memory.location)
     : '';
   const videoUriForOverlay = (videoPosterUri || videoPlaybackUri || '').trim();
+
+  const skipImmersive =
+    isOptimisticFeedPending ||
+    (memory.type === 'photo' && isFeedMultiPhotoAlbum(memory));
+
+  const launchImmersive = () => {
+    if (skipImmersive) return;
+    immersiveLaunchRef.current(memoryIndex);
+  };
 
   const postCard = (
     <View
@@ -381,6 +388,9 @@ function FilMemoryRow({
                     )
                   )
                 }
+                onSinglePhotoImmersive={
+                  !skipImmersive && photoUrls.length > 0 ? launchImmersive : undefined
+                }
               />
               <FeedPhotoFavoriteOverlay
                 isFavorite={!!memory.is_favorite}
@@ -402,66 +412,48 @@ function FilMemoryRow({
 
           {memory.type === 'video' && (!!videoPlaybackUri || !!videoPosterUri) && (
             <View style={{ position: 'relative' }}>
-              <View style={[styles.mediaCard, styles.videoBody]}>
-                {playingVideoId === memory.id ? (
-                  <Video
-                    source={{ uri: videoPlaybackUri }}
-                    style={styles.photoImage}
-                    resizeMode={ResizeMode.COVER}
-                    shouldPlay
-                    isLooping={false}
-                    isMuted={false}
-                    useNativeControls={false}
-                    onPlaybackStatusUpdate={status => {
-                      if (status.isLoaded && status.didJustFinish) {
-                        setPlayingVideoId(prev => (prev === memory.id ? null : prev));
-                      }
-                    }}
-                  />
-                ) : videoPosterUri ? (
-                  <Image
-                    source={{ uri: videoPosterUri }}
-                    style={styles.photoImage}
-                    contentFit="cover"
-                    cachePolicy="disk"
-                    recyclingKey={memory.id}
-                  />
-                ) : videoPlaybackUri ? (
-                  <Video
-                    source={{ uri: videoPlaybackUri }}
-                    style={styles.photoImage}
-                    resizeMode={ResizeMode.COVER}
-                    shouldPlay={false}
-                    isLooping={false}
-                    isMuted
-                    useNativeControls={false}
-                  />
-                ) : (
-                  <View style={[styles.photoImage, { backgroundColor: '#ECECEF' }]} />
-                )}
-                <Pressable
-                  onPress={() =>
-                    setPlayingVideoId(prev => (prev === memory.id ? null : memory.id))
-                  }
-                  style={styles.videoTapLayer}
-                  accessibilityRole="button"
-                  accessibilityLabel={
-                    playingVideoId === memory.id ? 'Mettre en pause' : 'Lire la vidéo'
-                  }
-                />
-                {playingVideoId !== memory.id ? (
-                  <View style={[styles.playOverlay, styles.videoPlayIconAboveTap]} pointerEvents="none">
-                    <View style={styles.playButton}>
-                      <Play size={ICON_SIZES.sm} color="#FFFFFF" fill="#FFFFFF" strokeWidth={0} />
+              <Pressable
+                onPress={launchImmersive}
+                disabled={skipImmersive}
+                accessibilityRole="button"
+                accessibilityLabel="Ouvrir en plein écran"
+              >
+                <View style={[styles.mediaCard, styles.videoBody]}>
+                  {videoPosterUri ? (
+                    <Image
+                      source={{ uri: videoPosterUri }}
+                      style={styles.photoImage}
+                      contentFit="cover"
+                      cachePolicy="disk"
+                      recyclingKey={memory.id}
+                    />
+                  ) : videoPlaybackUri ? (
+                    <Video
+                      source={{ uri: videoPlaybackUri }}
+                      style={styles.photoImage}
+                      resizeMode={ResizeMode.COVER}
+                      shouldPlay={false}
+                      isLooping={false}
+                      isMuted
+                      useNativeControls={false}
+                    />
+                  ) : (
+                    <View style={[styles.photoImage, { backgroundColor: '#ECECEF' }]} />
+                  )}
+                  {!skipImmersive ? (
+                    <View style={[styles.playOverlay, styles.videoPlayIconAboveTap]} pointerEvents="none">
+                      <View style={styles.playButton}>
+                        <Play size={ICON_SIZES.sm} color="#FFFFFF" fill="#FFFFFF" strokeWidth={0} />
+                      </View>
                     </View>
-                  </View>
-                ) : null}
-                {memory.duration ? (
-                  <View style={[styles.durationBadge, styles.videoDurationAboveTap]} pointerEvents="none">
-                    <Text style={styles.durationText}>{formatDuration(memory.duration)}</Text>
-                  </View>
-                ) : null}
-              </View>
+                  ) : null}
+                  {memory.duration ? (
+                    <View style={[styles.durationBadge, styles.videoDurationAboveTap]} pointerEvents="none">
+                      <Text style={styles.durationText}>{formatDuration(memory.duration)}</Text>
+                    </View>
+                  ) : null}
+                </View>
+              </Pressable>
               <FeedPhotoFavoriteOverlay
                 isFavorite={!!memory.is_favorite}
                 inkOverride={memory.captured_overlay_ink}
@@ -478,6 +470,12 @@ function FilMemoryRow({
           )}
 
           {memory.type === 'voice' && (!!memory.media_url || !!voicePlaybackSigned) && (
+            <Pressable
+              onPress={launchImmersive}
+              disabled={skipImmersive}
+              accessibilityRole="button"
+              accessibilityLabel="Ouvrir en plein écran"
+            >
             <View
               style={[
                 styles.audioBody,
@@ -519,14 +517,16 @@ function FilMemoryRow({
                 </View>
               </View>
             </View>
+            </Pressable>
           )}
 
           {memory.type === 'text' && (
             <Pressable
-              onPress={() => handleEditMemory(memory)}
+              onPress={launchImmersive}
+              disabled={skipImmersive}
               style={({ pressed }) => [pressed && { opacity: 0.92 }]}
               accessibilityRole="button"
-              accessibilityLabel="Modifier le texte"
+              accessibilityLabel="Ouvrir en plein écran"
             >
               <View style={styles.textBody}>
                 {bookParagraphs.map((para, idx) => (
@@ -573,7 +573,7 @@ function FilMemoryRow({
             memory.type === 'text' && { paddingHorizontal: TEXT_POST_GUTTER },
           ]}
         >
-          {!contentText ? (
+          {memory.type === 'text' || !contentText ? (
             <TouchableOpacity
               style={styles.actionButton}
               onPress={() => handleEditMemory(memory)}
@@ -581,7 +581,7 @@ function FilMemoryRow({
               accessibilityRole="button"
               accessibilityLabel={
                 memory.type === 'text'
-                  ? 'Modifier'
+                  ? 'Modifier le texte'
                   : memory.content?.trim()
                     ? 'Modifier'
                     : 'Annoter'

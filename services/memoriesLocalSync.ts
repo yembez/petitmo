@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase'
 import { getCachedUserMode } from '@/lib/userMode'
-import { getLocalMemories, upsertLocalMemories } from '@/lib/localDb'
+import { getLocalMemories, getLocalMemoryById, upsertLocalMemories } from '@/lib/localDb'
 import type { Memory } from '@/types/local'
 import { withLocalFields } from '@/services/memoryRowMapping'
 
@@ -22,10 +22,15 @@ export async function pullMemoriesFromRemoteToLocal(childId: string): Promise<Me
 
     if (error || !data) return getLocalMemories(childId)
 
-    const withLocal: Memory[] = data.map(row => ({
-      ...withLocalFields(row),
-      sync_status: 'synced',
-    }))
+    const withLocal: Memory[] = data.map(row => {
+      const existing = getLocalMemoryById(row.id)
+      return {
+        ...withLocalFields(row),
+        sync_status: 'synced' as const,
+        import_asset_id: existing?.import_asset_id ?? null,
+        import_source_fingerprint: existing?.import_source_fingerprint ?? null,
+      }
+    })
     upsertLocalMemories(withLocal, 'full')
     return withLocal
   } catch {

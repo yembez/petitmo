@@ -166,6 +166,10 @@ export default function RootLayout() {
         <Stack.Screen name="record-voice" />
         <Stack.Screen name="import-media" />
         <Stack.Screen name="edit-photo" />
+        <Stack.Screen
+          name="memory-viewer"
+          options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom' }}
+        />
         <Stack.Screen name="memory-view" />
         <Stack.Screen name="book-preview" />
         <Stack.Screen name="book-order" />
@@ -175,7 +179,8 @@ export default function RootLayout() {
         <Stack.Screen name="capture-applelike-mock" />
         <Stack.Screen name="+not-found" />
       </Stack>
-      <StatusBar style="auto" />
+      {/** Défaut fond clair : icônes statut foncées. `auto` suivait le thème OS (icônes claires en mode sombre) alors que l’UI reste claire. */}
+      <StatusBar style="dark" />
       </PendingMediaUploadsProvider>
     </GestureHandlerRootView>
   );

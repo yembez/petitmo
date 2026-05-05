@@ -19,9 +19,13 @@ import {
   clearFeedLocalVideo,
   persistFeedLocalThumbnail,
   persistFeedLocalVideo,
+  setFeedBootstrapVideoUri,
 } from '@/services/feedLocalPhotoCache';
+import { IMPORT_DUPLICATE_ASSET } from '@/lib/importDuplicate';
 import {
   deleteLocalMemory,
+  findMemoryIdByImportAssetId,
+  findMemoryIdByImportFingerprint,
   getLocalMemories,
   getLocalMemoryById,
   updateLocalMemoryContent,
@@ -57,6 +61,27 @@ interface UploadMediaParams {
   /** Issu du picker (vidéo) — bonne extension / Content-Type (ex. .mov, video/quicktime) */
   mimeType?: string | null;
   fileName?: string | null;
+  /**
+   * Import lot « un post par photo » : pas d’émission `memories-inserted` par image
+   * (le lot émet une seule fois depuis le contexte pending → ordre stable, moins de re-renders).
+   */
+  suppressFeedEmit?: boolean;
+  /** Photothèque uniquement — évite un second import du même média pour cet enfant. */
+  importAssetId?: string | null;
+}
+
+function throwIfImportDuplicate(
+  childId: string,
+  keys: { importAssetId?: string | null; importSourceFingerprint?: string | null }
+): void {
+  const aid = keys.importAssetId?.trim();
+  if (aid && findMemoryIdByImportAssetId(childId, aid)) {
+    throw new Error(IMPORT_DUPLICATE_ASSET);
+  }
+  const fp = keys.importSourceFingerprint?.trim();
+  if (fp && findMemoryIdByImportFingerprint(childId, fp)) {
+    throw new Error(IMPORT_DUPLICATE_ASSET);
+  }
 }
 
 async function readBytes(uri: string): Promise<{ bytes: Blob | Uint8Array; size: number }> {
@@ -581,6 +606,333 @@ async function backfillStoragePathsBestEffort(rows: MemoryRow[]): Promise<void> 
   }
 }
 
+/** UUID v4 sans `crypto.randomUUID` (Hermes / RN : parfois absent alors que `crypto` existe). */
+function randomUUIDv4Fallback(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, ch => {
+    const r = (Math.random() * 16) | 0;
+    const v = ch === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+/** Id UUID pour `memories` Supabase (évite le préfixe `loc_` du mode gratuit). */
+function newCloudSyncMemoryId(): string {
+  const c = globalThis.crypto;
+  if (c && typeof c.randomUUID === 'function') {
+    return c.randomUUID();
+  }
+  return randomUUIDv4Fallback();
+}
+
+/**
+ * Petitmo+ photo native : upload Storage + insert Supabase en arrière-plan après affichage local.
+ */
+async function syncCloudPhotoMemoryInBackground(params: {
+  memoryId: string;
+  childId: string;
+  userId: string;
+  localOriginalUri: string;
+  isPaid: boolean;
+  capturedAtIso?: string;
+  locationLabel: string | null;
+}): Promise<void> {
+  const { memoryId, childId, userId, localOriginalUri, isPaid, capturedAtIso, locationLabel } = params;
+  try {
+    const uploaded = await stratifiedUpload({
+      userId,
+      childId,
+      type: 'photo',
+      uri: localOriginalUri,
+      isPaid,
+    });
+
+    const insertedAt = new Date().toISOString();
+    const insertPayload: Database['public']['Tables']['memories']['Insert'] = {
+      id: memoryId,
+      child_id: childId,
+      user_id: userId,
+      type: 'photo',
+      content: null,
+      media_url: uploaded.media_url,
+      media_path: uploaded.media_path,
+      thumb_url: uploaded.thumb_url,
+      display_url: uploaded.display_url,
+      print_url: uploaded.print_url,
+      poster_url: uploaded.poster_url,
+      thumbnail_url: uploaded.thumbnail_url,
+      extra_photo_urls: [],
+      extra_photo_paths: [],
+      extra_thumb_urls: [],
+      extra_display_urls: [],
+      favorite_photo_urls: [],
+      duration: null,
+      file_size: uploaded.file_size,
+      location: locationLabel,
+      voice_cover_url: null,
+      voice_cover_path: null,
+      voice_playback_start_sec: null,
+      edited_media_url: null,
+      is_favorite: false,
+      inserted_at: insertedAt,
+      captured_overlay_ink: null,
+    };
+    if (capturedAtIso) {
+      insertPayload.created_at = capturedAtIso;
+    }
+
+    const { data: insertedRow, error: insertError } = await supabase
+      .from('memories')
+      .insert(insertPayload)
+      .select('*')
+      .single();
+
+    if (insertError) throw insertError;
+    if (!insertedRow?.id) return;
+
+    void triggerProcessMemory(insertedRow.id);
+
+    const prev = getLocalMemoryById(insertedRow.id);
+    const base = withLocalFields(insertedRow, { clientUploadStatus: uploaded.upload_status });
+    const out: Memory = {
+      ...base,
+      local_media_path: prev?.local_media_path ?? prev?.local_thumb_path ?? localOriginalUri,
+      local_original_path: prev?.local_original_path ?? localOriginalUri,
+      local_thumb_path: prev?.local_thumb_path ?? null,
+      local_display_path: prev?.local_display_path ?? null,
+      local_print_path: prev?.local_print_path ?? null,
+      original_px_w: prev?.original_px_w ?? null,
+      original_px_h: prev?.original_px_h ?? null,
+      print_px_w: prev?.print_px_w ?? null,
+      print_px_h: prev?.print_px_h ?? null,
+      sync_status: 'synced',
+      import_asset_id: prev?.import_asset_id ?? null,
+      import_source_fingerprint: prev?.import_source_fingerprint ?? null,
+    };
+    upsertLocalMemory(out);
+    DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId: insertedRow.id });
+  } catch (e) {
+    console.warn('[media] syncCloudPhotoMemoryInBackground', params.memoryId, e);
+  }
+}
+
+/** Petitmo+ vidéo native : sandbox + fil immédiat, Storage + insert en arrière-plan. */
+async function syncCloudVideoMemoryInBackground(params: {
+  memoryId: string;
+  childId: string;
+  userId: string;
+  localOriginalUri: string;
+  isPaid: boolean;
+  durationSec?: number;
+  mimeType?: string | null;
+  fileName?: string | null;
+  capturedAtIso?: string;
+  locationLabel: string | null;
+}): Promise<void> {
+  const {
+    memoryId,
+    childId,
+    userId,
+    localOriginalUri,
+    isPaid,
+    durationSec,
+    mimeType,
+    fileName,
+    capturedAtIso,
+    locationLabel,
+  } = params;
+  try {
+    const uploaded = await stratifiedUpload({
+      userId,
+      childId,
+      type: 'video',
+      uri: localOriginalUri,
+      isPaid,
+      durationSec,
+      mimeType,
+      fileName,
+    });
+
+    const insertedAt = new Date().toISOString();
+    const insertPayload: Database['public']['Tables']['memories']['Insert'] = {
+      id: memoryId,
+      child_id: childId,
+      user_id: userId,
+      type: 'video',
+      content: null,
+      media_url: uploaded.media_url,
+      media_path: uploaded.media_path,
+      thumb_url: uploaded.thumb_url,
+      display_url: uploaded.display_url,
+      print_url: uploaded.print_url,
+      poster_url: uploaded.poster_url,
+      thumbnail_url: uploaded.thumbnail_url,
+      extra_photo_urls: [],
+      extra_photo_paths: [],
+      extra_thumb_urls: [],
+      extra_display_urls: [],
+      favorite_photo_urls: [],
+      duration: typeof durationSec === 'number' && Number.isFinite(durationSec) ? durationSec : null,
+      file_size: uploaded.file_size,
+      location: locationLabel,
+      voice_cover_url: null,
+      voice_cover_path: null,
+      voice_playback_start_sec: null,
+      edited_media_url: null,
+      is_favorite: false,
+      inserted_at: insertedAt,
+      captured_overlay_ink: null,
+    };
+    if (capturedAtIso) {
+      insertPayload.created_at = capturedAtIso;
+    }
+
+    const { data: insertedRow, error: insertError } = await supabase
+      .from('memories')
+      .insert(insertPayload)
+      .select('*')
+      .single();
+
+    if (insertError) throw insertError;
+    if (!insertedRow?.id) return;
+
+    void triggerProcessMemory(insertedRow.id);
+
+    const prev = getLocalMemoryById(insertedRow.id);
+    const base = withLocalFields(insertedRow, { clientUploadStatus: uploaded.upload_status });
+    const out: Memory = {
+      ...base,
+      local_media_path: prev?.local_media_path ?? null,
+      local_original_path: prev?.local_original_path ?? localOriginalUri,
+      local_thumb_path: prev?.local_thumb_path ?? null,
+      local_display_path: prev?.local_display_path ?? null,
+      local_print_path: prev?.local_print_path ?? null,
+      original_px_w: prev?.original_px_w ?? null,
+      original_px_h: prev?.original_px_h ?? null,
+      print_px_w: prev?.print_px_w ?? null,
+      print_px_h: prev?.print_px_h ?? null,
+      sync_status: 'synced',
+      import_asset_id: prev?.import_asset_id ?? null,
+      import_source_fingerprint: prev?.import_source_fingerprint ?? null,
+    };
+    upsertLocalMemory(out);
+    DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId: insertedRow.id });
+  } catch (e) {
+    console.warn('[media] syncCloudVideoMemoryInBackground', params.memoryId, e);
+  }
+}
+
+/** Petitmo+ vocal native : sandbox + fil immédiat, cover + audio + insert en arrière-plan. */
+async function syncCloudVoiceMemoryInBackground(params: {
+  memoryId: string;
+  childId: string;
+  userId: string;
+  localVoiceUri: string;
+  localVoiceCoverUri: string | null;
+  isPaid: boolean;
+  durationSec?: number | null;
+  voicePlaybackStartSec: number | null;
+  capturedAtIso?: string;
+  locationLabel: string | null;
+}): Promise<void> {
+  const {
+    memoryId,
+    childId,
+    userId,
+    localVoiceUri,
+    localVoiceCoverUri,
+    isPaid,
+    durationSec,
+    voicePlaybackStartSec,
+    capturedAtIso,
+    locationLabel,
+  } = params;
+  try {
+    let voiceCoverPublicUrl: string | null = null;
+    let voiceCoverPath: string | null = null;
+    if (localVoiceCoverUri?.trim()) {
+      const up = await uploadVoiceCoverToStorage(userId, childId, localVoiceCoverUri.trim());
+      voiceCoverPublicUrl = up?.publicUrl ?? null;
+      voiceCoverPath = up?.path ?? null;
+    }
+
+    const uploaded = await stratifiedUpload({
+      userId,
+      childId,
+      type: 'voice',
+      uri: localVoiceUri,
+      isPaid,
+    });
+
+    const insertedAt = new Date().toISOString();
+    const insertPayload: Database['public']['Tables']['memories']['Insert'] = {
+      id: memoryId,
+      child_id: childId,
+      user_id: userId,
+      type: 'voice',
+      content: null,
+      media_url: uploaded.media_url,
+      media_path: uploaded.media_path,
+      thumb_url: uploaded.thumb_url,
+      display_url: uploaded.display_url,
+      print_url: uploaded.print_url,
+      poster_url: uploaded.poster_url,
+      thumbnail_url: uploaded.thumbnail_url,
+      extra_photo_urls: [],
+      extra_photo_paths: [],
+      extra_thumb_urls: [],
+      extra_display_urls: [],
+      favorite_photo_urls: [],
+      duration:
+        typeof durationSec === 'number' && Number.isFinite(durationSec) ? durationSec : null,
+      file_size: uploaded.file_size,
+      location: locationLabel,
+      voice_cover_url: voiceCoverPublicUrl,
+      voice_cover_path: voiceCoverPath,
+      voice_playback_start_sec: voicePlaybackStartSec,
+      edited_media_url: null,
+      is_favorite: false,
+      inserted_at: insertedAt,
+      captured_overlay_ink: null,
+    };
+    if (capturedAtIso) {
+      insertPayload.created_at = capturedAtIso;
+    }
+
+    const { data: insertedRow, error: insertError } = await supabase
+      .from('memories')
+      .insert(insertPayload)
+      .select('*')
+      .single();
+
+    if (insertError) throw insertError;
+    if (!insertedRow?.id) return;
+
+    void triggerProcessMemory(insertedRow.id);
+
+    const prev = getLocalMemoryById(insertedRow.id);
+    const base = withLocalFields(insertedRow, { clientUploadStatus: uploaded.upload_status });
+    const out: Memory = {
+      ...base,
+      local_media_path: prev?.local_media_path ?? localVoiceUri,
+      local_original_path: prev?.local_original_path ?? localVoiceUri,
+      local_thumb_path: prev?.local_thumb_path ?? null,
+      local_display_path: prev?.local_display_path ?? null,
+      local_print_path: prev?.local_print_path ?? null,
+      original_px_w: prev?.original_px_w ?? null,
+      original_px_h: prev?.original_px_h ?? null,
+      print_px_w: prev?.print_px_w ?? null,
+      print_px_h: prev?.print_px_h ?? null,
+      sync_status: 'synced',
+      import_asset_id: prev?.import_asset_id ?? null,
+      import_source_fingerprint: prev?.import_source_fingerprint ?? null,
+    };
+    upsertLocalMemory(out);
+    DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId: insertedRow.id });
+  } catch (e) {
+    console.warn('[media] syncCloudVoiceMemoryInBackground', params.memoryId, e);
+  }
+}
+
 export async function uploadMedia({
   uri,
   type,
@@ -593,6 +945,8 @@ export async function uploadMedia({
   locationOverride,
   mimeType,
   fileName,
+  suppressFeedEmit = false,
+  importAssetId,
 }: UploadMediaParams): Promise<MemoryRow | null> {
   console.log('[uploadMedia] called', { type, childId });
   try {
@@ -611,6 +965,8 @@ export async function uploadMedia({
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('User not authenticated');
 
+    throwIfImportDuplicate(childId, { importAssetId });
+
     if ((await getCachedUserMode()) === 'local') {
       const localMem = await captureMemoryLocalOnly({
         uri,
@@ -622,16 +978,323 @@ export async function uploadMedia({
         voicePlaybackStartSec,
         capturedAtIso,
         locationOverride,
+        importAssetId,
       });
       if (localMem) {
         upsertLocalMemory(localMem);
-        DeviceEventEmitter.emit('petitmo:memories-inserted', { memories: [localMem] });
+        if (!suppressFeedEmit) {
+          DeviceEventEmitter.emit('petitmo:memories-inserted', { memories: [localMem] });
+        }
         return localMem;
       }
       return null;
     }
 
     const paid = isPaid ?? (await getUserTier()) === 'paid';
+
+    /** Import photothèque : lieu EXIF (peut être null). Sinon position actuelle approximative. */
+    const locationLabel =
+      locationOverride !== undefined ? locationOverride : null;
+
+    // Petitmo+ photo (native) : sandbox + fil immédiat, sync Storage/Supabase en arrière-plan.
+    if (type === 'photo' && Platform.OS !== 'web') {
+      const insertedAt = new Date().toISOString();
+      const createdAt = capturedAtIso?.trim() || insertedAt;
+      const memoryId = newCloudSyncMemoryId();
+
+      const { localOriginalUri } = await persistOriginalToSandbox({
+        memoryId,
+        type: 'photo',
+        sourceUri: uri,
+      });
+      const src = (localOriginalUri ?? uri).trim();
+      const d = await ensureLocalPhotoDerivatives({ memoryId, localOriginalUri: src });
+      await persistFeedLocalThumbnail(memoryId, uri, 0);
+
+      let fileSize = 0;
+      try {
+        fileSize = (await readBytes(src)).size;
+      } catch {
+        fileSize = 0;
+      }
+
+      const localThumb = d.localThumbUri ?? src;
+      const mem: Memory = {
+        id: memoryId,
+        child_id: childId,
+        user_id: user.id,
+        type: 'photo',
+        content: null,
+        media_url: null,
+        media_path: null,
+        extra_photo_urls: [],
+        extra_photo_paths: [],
+        extra_thumb_urls: [],
+        extra_display_urls: [],
+        favorite_photo_urls: [],
+        voice_cover_url: null,
+        voice_cover_path: null,
+        voice_playback_start_sec: null,
+        edited_media_url: null,
+        is_favorite: false,
+        duration: null,
+        thumbnail_url: null,
+        thumbnail_path: null,
+        file_size: fileSize,
+        location: locationLabel,
+        inserted_at: insertedAt,
+        captured_overlay_ink: null,
+        thumb_url: localThumb,
+        display_url: d.localDisplayUri ?? localThumb,
+        print_url: null,
+        poster_url: null,
+        poster_print_url: null,
+        upload_status: 'pending',
+        created_at: createdAt,
+        updated_at: insertedAt,
+        local_media_path: localThumb,
+        local_original_path: localOriginalUri,
+        local_thumb_path: d.localThumbUri,
+        local_display_path: d.localDisplayUri,
+        local_print_path: d.localPrintUri,
+        original_px_w: d.originalPx?.w ?? null,
+        original_px_h: d.originalPx?.h ?? null,
+        print_px_w: d.printPx?.w ?? null,
+        print_px_h: d.printPx?.h ?? null,
+        synced_at: null,
+        sync_status: 'pending',
+        import_asset_id: importAssetId?.trim() ? importAssetId.trim() : null,
+      };
+
+      upsertLocalMemory(mem);
+      if (!suppressFeedEmit) {
+        DeviceEventEmitter.emit('petitmo:memories-inserted', { memories: [mem] });
+      }
+      void syncCloudPhotoMemoryInBackground({
+        memoryId,
+        childId,
+        userId: user.id,
+        localOriginalUri: src,
+        isPaid: paid,
+        capturedAtIso,
+        locationLabel,
+      });
+      return mem;
+    }
+
+    // Petitmo+ vidéo (native) : sandbox + copie fil + poster local, sync en arrière-plan.
+    if (type === 'video' && Platform.OS !== 'web') {
+      const insertedAt = new Date().toISOString();
+      const createdAt = capturedAtIso?.trim() || insertedAt;
+      const memoryId = newCloudSyncMemoryId();
+
+      const { localOriginalUri } = await persistOriginalToSandbox({
+        memoryId,
+        type: 'video',
+        sourceUri: uri,
+      });
+      const src = (localOriginalUri ?? uri).trim();
+
+      let fileSize = 0;
+      try {
+        fileSize = (await readBytes(src)).size;
+      } catch {
+        fileSize = 0;
+      }
+
+      const feedPath = await persistFeedLocalVideo(memoryId, uri);
+      const mediaPathLocal = feedPath ?? src;
+
+      let thumbDest: string | null = null;
+      try {
+        const { uri: thumbTmp } = await VideoThumbnails.getThumbnailAsync(mediaPathLocal, {
+          time: 0,
+          quality: 0.7,
+        });
+        if (thumbTmp?.trim() && documentDirectory) {
+          const dir = `${documentDirectory}petitmo_memories/${memoryId}/`;
+          await makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
+          thumbDest = `${dir}poster.jpg`;
+          await copyAsync({ from: thumbTmp.trim(), to: thumbDest }).catch(() => {
+            thumbDest = null;
+          });
+        }
+      } catch {
+        thumbDest = null;
+      }
+
+      setFeedBootstrapVideoUri(memoryId, mediaPathLocal);
+
+      const mem: Memory = {
+        id: memoryId,
+        child_id: childId,
+        user_id: user.id,
+        type: 'video',
+        content: null,
+        media_url: null,
+        media_path: null,
+        extra_photo_urls: [],
+        extra_photo_paths: [],
+        extra_thumb_urls: [],
+        extra_display_urls: [],
+        favorite_photo_urls: [],
+        voice_cover_url: null,
+        voice_cover_path: null,
+        voice_playback_start_sec: null,
+        edited_media_url: null,
+        is_favorite: false,
+        duration: typeof duration === 'number' && Number.isFinite(duration) ? duration : null,
+        thumbnail_url: thumbDest,
+        thumbnail_path: null,
+        file_size: fileSize,
+        location: locationLabel,
+        inserted_at: insertedAt,
+        captured_overlay_ink: null,
+        thumb_url: null,
+        display_url: null,
+        print_url: null,
+        poster_url: thumbDest,
+        poster_print_url: null,
+        upload_status: 'pending',
+        created_at: createdAt,
+        updated_at: insertedAt,
+        local_media_path: mediaPathLocal,
+        local_original_path: localOriginalUri,
+        local_thumb_path: null,
+        local_display_path: null,
+        local_print_path: null,
+        original_px_w: null,
+        original_px_h: null,
+        print_px_w: null,
+        print_px_h: null,
+        synced_at: null,
+        sync_status: 'pending',
+        import_asset_id: importAssetId?.trim() ? importAssetId.trim() : null,
+      };
+
+      upsertLocalMemory(mem);
+      if (!suppressFeedEmit) {
+        DeviceEventEmitter.emit('petitmo:memories-inserted', { memories: [mem] });
+      }
+      void syncCloudVideoMemoryInBackground({
+        memoryId,
+        childId,
+        userId: user.id,
+        localOriginalUri: src,
+        isPaid: paid,
+        durationSec: duration,
+        mimeType,
+        fileName,
+        capturedAtIso,
+        locationLabel,
+      });
+      return mem;
+    }
+
+    // Petitmo+ vocal (native) : sandbox + couverture locale, sync en arrière-plan.
+    if (type === 'voice' && Platform.OS !== 'web') {
+      const insertedAt = new Date().toISOString();
+      const createdAt = capturedAtIso?.trim() || insertedAt;
+      const memoryId = newCloudSyncMemoryId();
+
+      const { localOriginalUri } = await persistOriginalToSandbox({
+        memoryId,
+        type: 'voice',
+        sourceUri: uri,
+      });
+      const src = (localOriginalUri ?? uri).trim();
+
+      let fileSize = 0;
+      try {
+        fileSize = (await readBytes(src)).size;
+      } catch {
+        fileSize = 0;
+      }
+
+      let voiceCoverLocal: string | null = null;
+      if (voiceCoverUri?.trim() && documentDirectory) {
+        const dir = `${documentDirectory}petitmo_memories/${memoryId}/`;
+        await makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
+        const ext = voiceCoverUri.split('.').pop()?.split('?')[0]?.toLowerCase() || 'jpg';
+        const dest = `${dir}voice_cover.${ext}`;
+        try {
+          await copyAsync({ from: voiceCoverUri.trim(), to: dest });
+          voiceCoverLocal = dest;
+        } catch {
+          voiceCoverLocal = null;
+        }
+      }
+
+      const vStart =
+        typeof voicePlaybackStartSec === 'number' && Number.isFinite(voicePlaybackStartSec)
+          ? voicePlaybackStartSec
+          : null;
+
+      const mem: Memory = {
+        id: memoryId,
+        child_id: childId,
+        user_id: user.id,
+        type: 'voice',
+        content: null,
+        media_url: src,
+        media_path: null,
+        extra_photo_urls: [],
+        extra_photo_paths: [],
+        extra_thumb_urls: [],
+        extra_display_urls: [],
+        favorite_photo_urls: [],
+        voice_cover_url: voiceCoverLocal,
+        voice_cover_path: voiceCoverLocal,
+        voice_playback_start_sec: vStart,
+        edited_media_url: null,
+        is_favorite: false,
+        duration: typeof duration === 'number' && Number.isFinite(duration) ? duration : null,
+        thumbnail_url: null,
+        thumbnail_path: null,
+        file_size: fileSize,
+        location: locationLabel,
+        inserted_at: insertedAt,
+        captured_overlay_ink: null,
+        thumb_url: null,
+        display_url: null,
+        print_url: null,
+        poster_url: null,
+        poster_print_url: null,
+        upload_status: 'pending',
+        created_at: createdAt,
+        updated_at: insertedAt,
+        local_media_path: src,
+        local_original_path: localOriginalUri,
+        local_thumb_path: null,
+        local_display_path: null,
+        local_print_path: null,
+        original_px_w: null,
+        original_px_h: null,
+        print_px_w: null,
+        print_px_h: null,
+        synced_at: null,
+        sync_status: 'pending',
+        import_asset_id: importAssetId?.trim() ? importAssetId.trim() : null,
+      };
+
+      upsertLocalMemory(mem);
+      if (!suppressFeedEmit) {
+        DeviceEventEmitter.emit('petitmo:memories-inserted', { memories: [mem] });
+      }
+      void syncCloudVoiceMemoryInBackground({
+        memoryId,
+        childId,
+        userId: user.id,
+        localVoiceUri: src,
+        localVoiceCoverUri: voiceCoverLocal,
+        isPaid: paid,
+        durationSec: duration,
+        voicePlaybackStartSec: vStart,
+        capturedAtIso,
+        locationLabel,
+      });
+      return mem;
+    }
 
     const uploaded = await stratifiedUpload({
       userId: user.id,
@@ -645,10 +1308,6 @@ export async function uploadMedia({
     });
 
     const memoryType = type === 'voice' ? 'voice' : type === 'video' ? 'video' : 'photo';
-
-    /** Import photothèque : lieu EXIF (peut être null). Sinon position actuelle approximative. */
-    const locationLabel =
-      locationOverride !== undefined ? locationOverride : null;
 
     let voiceCoverPublicUrl: string | null = null;
     let voiceCoverPath: string | null = null;
@@ -749,12 +1408,17 @@ export async function uploadMedia({
       print_px_w: printPxW,
       print_px_h: printPxH,
       sync_status: 'synced',
+      import_asset_id: importAssetId?.trim() ? importAssetId.trim() : null,
     };
     upsertLocalMemory(out);
     return out;
   } catch (error) {
     if (error instanceof Error) {
-      if (error.message === 'LIMIT_REACHED' || error.message === 'VIDEO_LIMIT_REACHED') {
+      if (
+        error.message === 'LIMIT_REACHED' ||
+        error.message === 'VIDEO_LIMIT_REACHED' ||
+        error.message === IMPORT_DUPLICATE_ASSET
+      ) {
         throw error;
       }
     }
@@ -828,6 +1492,7 @@ export interface UploadPhotoAlbumParams {
   childId: string;
   capturedAtIso?: string;
   locationOverride?: string | null;
+  importSourceFingerprint?: string | null;
 }
 
 /** Plusieurs photos en un seul souvenir (mosaïque dans le fil) — max conseillé côté UI */
@@ -836,6 +1501,7 @@ export async function uploadPhotoAlbum({
   childId,
   capturedAtIso,
   locationOverride,
+  importSourceFingerprint,
 }: UploadPhotoAlbumParams): Promise<MemoryRow | null> {
   try {
     if (uris.length === 0) return null;
@@ -848,6 +1514,8 @@ export async function uploadPhotoAlbum({
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('User not authenticated');
 
+    throwIfImportDuplicate(childId, { importSourceFingerprint });
+
     if ((await getCachedUserMode()) === 'local') {
       const localMem = await capturePhotoAlbumLocalOnly({
         uris,
@@ -855,6 +1523,7 @@ export async function uploadPhotoAlbum({
         userId: user.id,
         capturedAtIso,
         locationOverride,
+        importSourceFingerprint,
       });
       if (localMem) {
         upsertLocalMemory(localMem);
@@ -915,12 +1584,20 @@ export async function uploadPhotoAlbum({
     }
     void triggerProcessMemory(insertedRow.id);
 
-    const out: Memory = { ...withLocalFields(insertedRow, { clientUploadStatus: 'full' }), sync_status: 'synced' };
+    const out: Memory = {
+      ...withLocalFields(insertedRow, { clientUploadStatus: 'full' }),
+      sync_status: 'synced',
+      import_source_fingerprint: importSourceFingerprint?.trim() ? importSourceFingerprint.trim() : null,
+    };
     upsertLocalMemory(out);
     return out;
   } catch (error) {
     if (error instanceof Error) {
-      if (error.message === 'LIMIT_REACHED' || error.message === 'VIDEO_LIMIT_REACHED') {
+      if (
+        error.message === 'LIMIT_REACHED' ||
+        error.message === 'VIDEO_LIMIT_REACHED' ||
+        error.message === IMPORT_DUPLICATE_ASSET
+      ) {
         throw error;
       }
     }

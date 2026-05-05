@@ -10,12 +10,13 @@ import {
   StyleSheet,
   Platform,
   ActivityIndicator,
+  InteractionManager,
   type ViewToken,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Pressable as GHPressable } from 'react-native-gesture-handler';
 import { Heart, X } from 'lucide-react-native';
-import { StatusBar } from 'expo-status-bar';
+import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
 import { THEME } from '@/constants/theme';
 import { scale, verticalScale } from '@/utils/responsive';
 import { isPhotoUrlFavorited } from '@/utils/memoryPhotos';
@@ -94,6 +95,27 @@ export default function PhotoGalleryModal({
 
   useEffect(() => {
     if (!visible) didInitialScroll.current = false;
+  }, [visible]);
+
+  /**
+   * Après fermeture du plein écran, le nœud StatusBar du modal disparaît : sans réappliquer
+   * `dark`, l’app pouvait retomber sur le défaut (icônes claires si thème système sombre) alors
+   * que le fil est blanc. On force après la fin des interactions (animation native du Modal).
+   */
+  useEffect(() => {
+    if (!visible) {
+      const raf = requestAnimationFrame(() => {
+        setStatusBarStyle('dark');
+      });
+      const task = InteractionManager.runAfterInteractions(() => {
+        setStatusBarStyle('dark');
+      });
+      return () => {
+        cancelAnimationFrame(raf);
+        task.cancel?.();
+      };
+    }
+    return undefined;
   }, [visible]);
 
   useEffect(() => {

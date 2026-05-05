@@ -23,6 +23,8 @@ import { getOrSelectFirstChild } from '@/services/children';
 import { buildImportMetadataFromExif, buildImportMetadataFromPickerAsset } from '@/utils/mediaExif';
 import { getUserTier } from '@/lib/userTier';
 import { checkMemoryLimit, checkVideoLimit, FREE_TIER_VIDEO_MAX_DURATION } from '@/lib/limits';
+import { IMPORT_DUPLICATE_ASSET } from '@/lib/importDuplicate';
+import { buildAlbumImportFingerprint, dedupePickerAssetsByLibraryId } from '@/utils/importLibraryDedupe';
 
 type ImportStickerPreview = {
   capturedAtIso?: string | null;
@@ -30,6 +32,61 @@ type ImportStickerPreview = {
 };
 
 const MAX_PHOTOS_AT_ONCE = 10;
+/** Copie sandbox + miniatures en parallèle (le cloud n’est pas attendu ici). */
+const SEPARATE_PHOTOS_IMPORT_CONCURRENCY = 3;
+
+async function importSeparatePhotosWithConcurrency(
+  assets: ImagePicker.ImagePickerAsset[],
+  childId: string
+): Promise<{
+  memories: NonNullable<Awaited<ReturnType<typeof uploadMedia>>>[];
+  duplicateSkipped: number;
+  otherFailed: number;
+}> {
+  type Row = NonNullable<Awaited<ReturnType<typeof uploadMedia>>>;
+  const results: (Row | null)[] = new Array(assets.length).fill(null);
+  let duplicateSkipped = 0;
+  let otherFailed = 0;
+  let next = 0;
+
+  const worker = async () => {
+    while (true) {
+      const idx = next++;
+      if (idx >= assets.length) break;
+      const asset = assets[idx];
+      try {
+        const meta = await buildImportMetadataFromPickerAsset(asset, { isVideo: false });
+        const locationOverride =
+          meta.locationLabel && meta.locationLabel.trim() ? meta.locationLabel.trim() : undefined;
+        const m = await uploadMedia({
+          uri: asset.uri,
+          type: 'photo',
+          childId,
+          capturedAtIso: meta.capturedAtIso,
+          locationOverride,
+          mimeType: asset.mimeType ?? null,
+          fileName: asset.fileName ?? null,
+          suppressFeedEmit: true,
+          importAssetId: asset.assetId ?? null,
+        });
+        results[idx] = m;
+      } catch (e) {
+        if (e instanceof Error && e.message === IMPORT_DUPLICATE_ASSET) {
+          duplicateSkipped += 1;
+        } else {
+          otherFailed += 1;
+          console.warn('[import-media] importSeparatePhotos', asset?.uri, e);
+        }
+        results[idx] = null;
+      }
+    }
+  };
+
+  const n = Math.min(SEPARATE_PHOTOS_IMPORT_CONCURRENCY, assets.length);
+  await Promise.all(Array.from({ length: n }, () => worker()));
+  const memories = results.filter((x): x is Row => x != null);
+  return { memories, duplicateSkipped, otherFailed };
+}
 
 const pickerOpts = {
   /** Préserve au mieux EXIF (date, GPS) — pas de recadrage */
@@ -135,8 +192,16 @@ export default function ImportMediaScreen() {
 
         const limitCheck = await checkMemoryLimit(childId);
         const tier = await getUserTier();
+        const dedupedForSeparate =
+          kind === 'photo' && photoBatchLayout === 'separate' && assets.length > 1
+            ? dedupePickerAssetsByLibraryId(assets)
+            : null;
         const slotsNeeded =
-          kind === 'photo' && assets.length > 1 && photoBatchLayout === 'separate' ? assets.length : 1;
+          dedupedForSeparate != null
+            ? Math.max(1, dedupedForSeparate.length)
+            : kind === 'photo' && assets.length > 1
+              ? 1
+              : 1;
 
         if (tier === 'free' && limitCheck.current + slotsNeeded > limitCheck.limit) {
           setNavigatingToFeed(false);
@@ -164,30 +229,44 @@ export default function ImportMediaScreen() {
         /**
          * Un post par photo : un seul pending + un seul router.replace.
          * Enchaîner N× startBackgroundUploadNavigateToFeed faisait planter l’app (navigation + SQLite / mémoire).
-         * Les uploads sont séquentiels ; uploadMedia émet déjà memories-inserted après chaque souvenir en local.
+         * Traitement local (sandbox + dérivés) en parallèle (concurrence bornée) ; sync cloud toujours en arrière-plan.
          */
-        if (kind === 'photo' && assets.length > 1 && photoBatchLayout === 'separate') {
-          const firstUri = assets[0]?.uri?.trim() ?? '';
+        if (
+          kind === 'photo' &&
+          photoBatchLayout === 'separate' &&
+          dedupedForSeparate != null &&
+          dedupedForSeparate.length > 1
+        ) {
+          const firstUri = dedupedForSeparate[0]?.uri?.trim() ?? '';
           startBackgroundUploadNavigateToFeed({
             previewUris: firstUri ? [firstUri] : [],
             capturedAtPreviewIso: cap,
             locationPreview: loc,
             upload: async () => {
-              const inserted: NonNullable<Awaited<ReturnType<typeof uploadMedia>>>[] = [];
-              for (const asset of assets) {
-                const meta = await buildImportMetadataFromPickerAsset(asset, { isVideo: false });
-                const locationOverride =
-                  meta.locationLabel && meta.locationLabel.trim() ? meta.locationLabel.trim() : undefined;
-                const m = await uploadMedia({
-                  uri: asset.uri,
-                  type: 'photo',
-                  childId,
-                  capturedAtIso: meta.capturedAtIso,
-                  locationOverride,
-                  mimeType: asset.mimeType ?? null,
-                  fileName: asset.fileName ?? null,
+              const { memories: inserted, duplicateSkipped, otherFailed } =
+                await importSeparatePhotosWithConcurrency(dedupedForSeparate, childId);
+              if (duplicateSkipped > 0 || otherFailed > 0) {
+                requestAnimationFrame(() => {
+                  if (duplicateSkipped > 0 && otherFailed === 0) {
+                    Alert.alert(
+                      'Déjà dans le fil',
+                      `${duplicateSkipped} photo${duplicateSkipped > 1 ? 's' : ''} ${duplicateSkipped > 1 ? 'étaient' : 'était'} déjà importée${duplicateSkipped > 1 ? 's' : ''} pour cet enfant.`
+                    );
+                  } else if (otherFailed > 0) {
+                    const parts: string[] = [];
+                    if (duplicateSkipped > 0) {
+                      parts.push(
+                        `${duplicateSkipped} déjà importée${duplicateSkipped > 1 ? 's' : ''}`
+                      );
+                    }
+                    parts.push(
+                      otherFailed === 1
+                        ? '1 import a échoué'
+                        : `${otherFailed} imports ont échoué`
+                    );
+                    Alert.alert('Import partiel', parts.join(' · ') + '. Réessaie depuis Importer si besoin.');
+                  }
                 });
-                if (m) inserted.push(m);
               }
               return inserted.length > 0 ? inserted : null;
             },
@@ -195,7 +274,7 @@ export default function ImportMediaScreen() {
           return;
         }
 
-        if (kind === 'photo' && assets.length > 1) {
+        if (kind === 'photo' && assets.length > 1 && photoBatchLayout === 'album') {
           const first = assets[0];
           const exif = first.exif as Record<string, unknown> | null | undefined;
           const uris = assets.map(a => a.uri);
@@ -207,11 +286,13 @@ export default function ImportMediaScreen() {
               const meta = buildImportMetadataFromExif(exif ?? undefined);
               const locationOverride =
                 meta.locationLabel && meta.locationLabel.trim() ? meta.locationLabel.trim() : undefined;
+              const albumFp = buildAlbumImportFingerprint(assets.map(a => a.assetId));
               const m = await uploadPhotoAlbum({
                 uris,
                 childId,
                 capturedAtIso: meta.capturedAtIso,
                 locationOverride,
+                importSourceFingerprint: albumFp,
               });
               return m ? [m] : null;
             },
@@ -242,6 +323,7 @@ export default function ImportMediaScreen() {
                 locationOverride,
                 mimeType: pickedAsset.mimeType ?? null,
                 fileName: pickedAsset.fileName ?? null,
+                importAssetId: pickedAsset.assetId ?? null,
               });
               return m ? [m] : null;
             },
@@ -272,6 +354,7 @@ export default function ImportMediaScreen() {
                 locationOverride,
                 mimeType: pickedAsset.mimeType ?? null,
                 fileName: pickedAsset.fileName ?? null,
+                importAssetId: pickedAsset.assetId ?? null,
               });
               return m ? [m] : null;
             },

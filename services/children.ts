@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
-import { copyAsync, documentDirectory, makeDirectoryAsync } from 'expo-file-system/legacy';
+import { copyAsync, documentDirectory, downloadAsync, makeDirectoryAsync } from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 import type { Database } from '@/types/database';
 import type { Child as LocalChild } from '@/types/local';
@@ -10,8 +10,93 @@ import { getLocalChild, listLocalChildren, upsertLocalChild } from '@/lib/localD
 
 type ChildRow = Database['public']['Tables']['children']['Row'];
 
+function isChildDuplicateKeyError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const code = (error as { code?: string }).code;
+  if (code === '23505') return true;
+  const msg = String((error as { message?: string }).message ?? '');
+  return /duplicate key|unique constraint/i.test(msg);
+}
+
 function withLocalChildFields(row: ChildRow): LocalChild {
   return { ...row, local_photo_path: null };
+}
+
+/**
+ * Copie la source (picker, crop, fichier sandbox) vers `petitmo_children/{id}.ext` (Petitmo+).
+ * Retourne le chemin sandbox ou null (web / pas de stockage).
+ */
+async function copyChildAvatarSourceToSandbox(childId: string, sourceUri: string): Promise<string | null> {
+  if (Platform.OS === 'web' || !documentDirectory) return null;
+  const root = `${documentDirectory}petitmo_children/`;
+  await makeDirectoryAsync(root, { intermediates: true }).catch(() => {});
+  const rawExt = (sourceUri.split('?')[0] ?? '').split('.').pop()?.toLowerCase() || 'jpg';
+  const safeExt = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'].includes(rawExt) ? rawExt : 'jpg';
+  const dest = `${root}${childId}.${safeExt}`;
+  const src = sourceUri.trim();
+  if (!src) return null;
+  const norm = (u: string) => u.replace(/^file:\/\//, '');
+  if (norm(src) === norm(dest)) {
+    return dest;
+  }
+  try {
+    await copyAsync({ from: src, to: dest });
+    return dest;
+  } catch (e) {
+    console.warn('[children] copyChildAvatarSourceToSandbox', childId, e);
+    return null;
+  }
+}
+
+/**
+ * Hydratation immédiate onglet Capturer : enfant déjà en SQLite (sans attendre Supabase).
+ */
+export async function loadCaptureChildFromLocalDbFirst(): Promise<LocalChild | null> {
+  const id = await getSelectedChild();
+  if (!id?.trim()) return null;
+  return getLocalChild(id.trim());
+}
+
+/**
+ * Télécharge `photo_url` (URL signée) vers le sandbox pour affichage offline-first du profil.
+ */
+export async function cacheRemoteChildProfilePhotoLocally(child: LocalChild): Promise<LocalChild> {
+  if (Platform.OS === 'web' || !documentDirectory) return child;
+  const remote = (child.photo_url ?? '').trim();
+  if (!remote) return child;
+  if ((child.local_photo_path ?? '').trim()) return child;
+
+  const dest = `${documentDirectory}petitmo_children/${child.id}.jpg`;
+  const root = `${documentDirectory}petitmo_children/`;
+  await makeDirectoryAsync(root, { intermediates: true }).catch(() => {});
+
+  let headers: Record<string, string> | undefined;
+  try {
+    const host = new URL(remote).hostname;
+    if (host.includes('supabase')) {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      if (token) headers = { Authorization: `Bearer ${token}` };
+    }
+  } catch {
+    /* ignore */
+  }
+
+  try {
+    const res = await downloadAsync(remote, dest, headers && Object.keys(headers).length ? { headers } : undefined);
+    if (res.status !== 200) return child;
+
+    const next: LocalChild = {
+      ...child,
+      local_photo_path: res.uri,
+      updated_at: new Date().toISOString(),
+    };
+    upsertLocalChild(next);
+    return next;
+  } catch (e) {
+    console.warn('[children] cacheRemoteChildProfilePhotoLocally', child.id, e);
+    return child;
+  }
 }
 
 function newLocalChildId(): string {
@@ -46,7 +131,16 @@ export async function getChildren() {
       .order('created_at', { ascending: false });
 
     if (error) throw error;
-    return (data || []).map(withLocalChildFields);
+    return (data || []).map(row => {
+      const base = withLocalChildFields(row);
+      /** Copie sandbox déjà en SQLite (gratuit → payant, etc.) : affichage local-first si dispo. */
+      const local = getLocalChild(row.id);
+      const lp = (local?.local_photo_path ?? '').trim();
+      if (lp) {
+        return { ...base, local_photo_path: lp };
+      }
+      return base;
+    });
   } catch (error) {
     console.error('Get children error:', error);
     return [];
@@ -117,10 +211,106 @@ export async function uploadChildPhoto(childId: string, photoUri: string): Promi
     if (signErr || !data?.signedUrl) {
       throw signErr ?? new Error('Impossible de signer la photo enfant');
     }
-    return data.signedUrl;
+    const signedUrl = data.signedUrl;
+
+    const sandboxPath = await copyChildAvatarSourceToSandbox(childId, photoUri.trim());
+    const existing = getLocalChild(childId);
+    const now = new Date().toISOString();
+    if (sandboxPath) {
+      if (existing) {
+        upsertLocalChild({
+          ...existing,
+          photo_url: signedUrl,
+          local_photo_path: sandboxPath,
+          updated_at: now,
+        });
+      } else {
+        const { data: row, error: fetchErr } = await supabase
+          .from('children')
+          .select('*')
+          .eq('id', childId)
+          .single();
+        if (!fetchErr && row) {
+          upsertLocalChild({
+            ...withLocalChildFields(row),
+            photo_url: signedUrl,
+            local_photo_path: sandboxPath,
+            updated_at: now,
+          });
+        }
+      }
+    } else if (existing) {
+      upsertLocalChild({
+        ...existing,
+        photo_url: signedUrl,
+        updated_at: now,
+      });
+    }
+
+    return signedUrl;
   } catch (error) {
     console.error('Upload child photo error:', error);
     throw error;
+  }
+}
+
+async function syncChildProfilePhotoFromLocalIfNeeded(child: LocalChild): Promise<void> {
+  const lp = (child.local_photo_path ?? '').trim();
+  const hasRemotePhoto = !!(child.photo_url ?? '').trim();
+  if (!lp || hasRemotePhoto) return;
+  try {
+    const url = await uploadChildPhoto(child.id, lp);
+    const { error: upErr } = await supabase.from('children').update({ photo_url: url }).eq('id', child.id);
+    if (upErr) {
+      console.warn('[children] syncChildProfilePhotoFromLocalIfNeeded', child.id, upErr.message);
+      return;
+    }
+    const cur = getLocalChild(child.id);
+    if (cur) {
+      upsertLocalChild({ ...cur, photo_url: url });
+    }
+  } catch (e) {
+    console.warn('[children] syncChildProfilePhotoFromLocalIfNeeded', child.id, e);
+  }
+}
+
+/**
+ * Après passage en Petitmo+ : les profils enfants existent en SQLite (mode gratuit).
+ * Les insère sur Supabase **avec le même `id`** pour que `memories.child_id` reste valide.
+ * Idempotent si la ligne existe déjà (contrainte unique).
+ */
+export async function ensureLocalChildrenSyncedToSupabase(): Promise<void> {
+  if ((await getCachedUserMode()) !== 'cloud') return;
+
+  const { data: auth } = await supabase.auth.getUser();
+  const user = auth.user;
+  if (!user) return;
+
+  const locals = listLocalChildren();
+  if (locals.length === 0) return;
+
+  for (const child of locals) {
+    const insert: Database['public']['Tables']['children']['Insert'] = {
+      id: child.id,
+      user_id: user.id,
+      name: child.name,
+      birthdate: child.birthdate,
+      photo_url: child.photo_url ?? null,
+      created_at: child.created_at,
+      updated_at: child.updated_at ?? child.created_at,
+    };
+
+    const { error } = await supabase.from('children').insert(insert);
+    if (error) {
+      if (isChildDuplicateKeyError(error)) {
+        await syncChildProfilePhotoFromLocalIfNeeded(child);
+        continue;
+      }
+      console.warn('[children] ensureLocalChildrenSyncedToSupabase insert', child.id, error.message);
+      continue;
+    }
+
+    await syncChildProfilePhotoFromLocalIfNeeded(child);
   }
 }
 
@@ -273,7 +463,18 @@ export async function updateChild(
       .single();
 
     if (error) throw error;
-    return data;
+    if (!data) throw new Error('Update failed');
+
+    const base = withLocalChildFields(data as ChildRow);
+    const local = getLocalChild(childId);
+    const lp = (local?.local_photo_path ?? '').trim();
+    const next: LocalChild = {
+      ...base,
+      local_photo_path: lp || null,
+      updated_at: data.updated_at ?? base.updated_at,
+    };
+    upsertLocalChild(next);
+    return next;
   } catch (error) {
     console.error('Update child error:', error);
     throw error;

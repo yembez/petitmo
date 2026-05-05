@@ -19,6 +19,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { scale, verticalScale } from '@/utils/responsive';
 import { SPACING, FONT_SIZES, PROFILE_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
+import { getLocalChild } from '@/lib/localDb';
 import { getChildren, setSelectedChild, updateChild, uploadChildPhoto } from '@/services/children';
 import { getCachedUserMode } from '@/lib/userMode';
 import type { Child } from '@/types/local';
@@ -127,7 +128,21 @@ export default function EditChildScreen() {
     try {
       setIsUploadingPhoto(true);
       const url = await uploadChildPhoto(child.id, uri);
-      setPhotoUrl(url);
+      const cur = getLocalChild(child.id);
+      const display =
+        Platform.OS !== 'web'
+          ? resolveChildProfileImageUri(cur?.local_photo_path ?? null, url) ?? url
+          : url;
+      setPhotoUrl(display);
+      setChild(prev =>
+        prev && prev.id === child.id
+          ? {
+              ...prev,
+              photo_url: url,
+              local_photo_path: cur?.local_photo_path ?? prev.local_photo_path ?? null,
+            }
+          : prev
+      );
     } catch (error) {
       console.error('Error uploading photo:', error);
       Alert.alert('Erreur', 'Impossible de télécharger la photo');
@@ -154,7 +169,8 @@ export default function EditChildScreen() {
         await updateChild(child.id, {
           name: name.trim(),
           birthdate: birthdate || null,
-          photo_url: photoUrl || null,
+          /** Toujours l’URL Supabase / signée — `photoUrl` peut être un `file://` après persistance sandbox. */
+          photo_url: (child.photo_url ?? '').trim() || null,
         });
       }
       router.back();

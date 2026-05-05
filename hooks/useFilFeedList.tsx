@@ -1,4 +1,12 @@
-import { useCallback, useMemo, type Dispatch, type MutableRefObject, type ReactElement, type SetStateAction } from 'react';
+import {
+  useCallback,
+  useMemo,
+  type Dispatch,
+  type MutableRefObject,
+  type ReactElement,
+  type RefObject,
+  type SetStateAction,
+} from 'react';
 import type { Swipeable } from 'react-native-gesture-handler';
 import type { PendingUpload } from '@/contexts/PendingMediaUploadsContext';
 import {
@@ -19,8 +27,6 @@ export function useFilFeedList(
   child: Child | null,
   pendingUploads: PendingUpload[],
   fontsLoaded: boolean,
-  playingVideoId: string | null,
-  setPlayingVideoId: Dispatch<SetStateAction<string | null>>,
   uploadingVoiceCoverId: string | null,
   setPostHeights: Dispatch<SetStateAction<number[]>>,
   toggleFavorite: (id: string) => void | Promise<void>,
@@ -28,7 +34,8 @@ export function useFilFeedList(
   handleEditLocation: (m: Memory) => void,
   handlePickVoiceCover: (m: Memory) => void | Promise<void>,
   handleDeleteMemory: (m: Memory) => void,
-  swipeRefs: MutableRefObject<Map<string, Swipeable | null>>
+  swipeRefs: MutableRefObject<Map<string, Swipeable | null>>,
+  immersiveLaunchRef: RefObject<(index: number) => void>
 ): {
   feedData: FeedListItem[];
   renderItem: (info: { item: FeedListItem }) => ReactElement;
@@ -63,8 +70,6 @@ export function useFilFeedList(
         setPostHeights={setPostHeights}
         child={child}
         fontsLoaded={fontsLoaded}
-        playingVideoId={playingVideoId}
-        setPlayingVideoId={setPlayingVideoId}
         uploadingVoiceCoverId={uploadingVoiceCoverId}
         setMemories={setMemories}
         toggleFavorite={toggleFavorite}
@@ -73,6 +78,7 @@ export function useFilFeedList(
         handlePickVoiceCover={handlePickVoiceCover}
         handleDeleteMemory={handleDeleteMemory}
         swipeRefs={swipeRefs}
+        immersiveLaunchRef={immersiveLaunchRef}
         skipPostHeightMeasurement={opts?.skipPostHeight === true}
         isOptimisticFeedPending={opts?.isOptimisticFeedPending === true}
       />
@@ -81,7 +87,6 @@ export function useFilFeedList(
       memories,
       child,
       fontsLoaded,
-      playingVideoId,
       uploadingVoiceCoverId,
       setMemories,
       setPostHeights,
@@ -91,7 +96,7 @@ export function useFilFeedList(
       handlePickVoiceCover,
       handleDeleteMemory,
       swipeRefs,
-      setPlayingVideoId,
+      immersiveLaunchRef,
     ]
   );
 

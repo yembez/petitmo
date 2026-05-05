@@ -1,9 +1,10 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
-import { DeviceEventEmitter } from 'react-native';
+import { Alert, DeviceEventEmitter } from 'react-native';
 import { useRouter } from 'expo-router';
 import type { MemoryRow } from '@/services/media';
 import { setFeedBootstrapDisplayUrls, setFeedBootstrapVideoUri } from '@/services/feedLocalPhotoCache';
 import { armSilentInitialFilLoadAfterMediaImport } from '@/services/feedAfterImportFlags';
+import { IMPORT_DUPLICATE_ASSET } from '@/lib/importDuplicate';
 
 export type PendingMediaKind = 'photo' | 'video';
 
@@ -125,6 +126,8 @@ export function PendingMediaUploadsProvider({ children }: { children: React.Reac
             /** Même clé que la ligne « envoi » dans le FlatList → pas de recycle de cellule. */
             pendingTempId: tempId,
             previewUris,
+            /** Plusieurs posts d’un coup : garder l’ordre de la sélection (évite un tri par date identique). */
+            preserveInsertionOrder: inserted.length > 1,
           });
           if (singleRow) {
             requestAnimationFrame(() => {
@@ -137,6 +140,14 @@ export function PendingMediaUploadsProvider({ children }: { children: React.Reac
           }
         } catch (err) {
           if (err instanceof Error) {
+            if (err.message === IMPORT_DUPLICATE_ASSET) {
+              setPending(p => p.filter(x => x.tempId !== tempId));
+              Alert.alert(
+                'Déjà importé',
+                'Ce souvenir est déjà dans le fil pour cet enfant.'
+              );
+              return;
+            }
             if (err.message === 'LIMIT_REACHED') {
               router.push({
                 pathname: '/paywall',

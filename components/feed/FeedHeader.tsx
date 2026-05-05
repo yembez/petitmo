@@ -23,7 +23,7 @@ export type FeedHeaderProps = {
 
 /** Aligné sur `styles.headerRow` + `styles.headerContent` (minHeight + paddingBottom + bordure) pour éviter un saut de layout quand `child` arrive après `router.replace` (import). */
 const HEADER_INNER_RESERVE_H =
-  verticalScale(40) + verticalScale(8) + StyleSheet.hairlineWidth;
+  verticalScale(48) + verticalScale(8) + StyleSheet.hairlineWidth;
 
 export const FeedHeader = memo(function FeedHeader({ child, paddingTop, onAddPress }: FeedHeaderProps) {
   if (!child) {

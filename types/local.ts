@@ -23,6 +23,10 @@ export type LocalFields = {
   upload_status: UploadStatus
   synced_at: string | null
   sync_status?: MemorySyncStatus | null
+  /** Id photothèque (expo-image-picker `assetId`) — dédoublonnage import par enfant. */
+  import_asset_id?: string | null
+  /** Empreinte stable pour un post-album (plusieurs `assetId` triés). */
+  import_source_fingerprint?: string | null
 }
 
 export type Memory = SupabaseMemory & LocalFields

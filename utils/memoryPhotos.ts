@@ -92,6 +92,12 @@ export function getAllPhotoUrlsForFeed(memory: Memory): string[] {
   return [first, ...cleaned].filter((u): u is string => !!u && u.length > 0);
 }
 
+/** Album multi-photos dans le fil : garde la visionneuse galerie (pas le viewer vertical immersif). */
+export function isFeedMultiPhotoAlbum(memory: Memory): boolean {
+  if (memory.type !== 'photo') return false;
+  return getAllPhotoUrlsForFeed(memory).length > 1;
+}
+
 /** URLs pour écrans détail (accepte display puis fallback original si nécessaire). */
 export function getAllPhotoUrlsForDisplay(memory: Memory): string[] {
   const first =

@@ -14,7 +14,7 @@ import {
 const CAN_USE_AVATAR_BW_FILTER =
   Platform.OS !== 'web' && Constants.executionEnvironment !== ExecutionEnvironment.StoreClient;
 
-const HEADER_AVATAR_PX = scale(44);
+const HEADER_AVATAR_PX = scale(52);
 /** Requis par react-native-color-matrix-image-filters si un style est passé au filtre */
 const HEADER_AVATAR_CM_STYLE = {
   width: HEADER_AVATAR_PX,
@@ -79,7 +79,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    minHeight: verticalScale(40),
+    minHeight: verticalScale(48),
   },
   headerLeft: {
     flexDirection: 'row',
@@ -104,7 +104,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerAvatarLetter: {
-    fontSize: scale(20),
+    fontSize: scale(22),
     fontWeight: '600',
     color: '#636366',
   },

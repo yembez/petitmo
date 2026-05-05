@@ -31,7 +31,7 @@ import Reanimated, {
 import type { SharedValue } from 'react-native-reanimated';
 import { BookOpen, Check, Heart, Type, Mic, Video, Camera, PenLine, Play } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
 import { scale, verticalScale } from '@/utils/responsive';
 import { THEME } from '@/constants/theme';
@@ -817,6 +817,7 @@ const GalleryTile = memo(function GalleryTile({
 
 export default function FavorisScreen() {
   const router = useRouter();
+  const isTabFocused = useIsFocused();
   const params = useLocalSearchParams<{ bookId?: string; createBookTitle?: string }>();
   const insets = useSafeAreaInsets();
   const [fontsLoaded] = useFonts({ EBGaramond_400Regular_Italic });
@@ -932,11 +933,11 @@ export default function FavorisScreen() {
     }
   }, [slideshowUrls.length]);
 
-  /** Toujours « light » sur Favoris (icônes blanches) : aucune branche dark sur cet écran. */
+  /** Icônes claires sur le hero sombre : seulement quand cet onglet est au premier plan (pas sous memory-view / autre stack). */
   useEffect(() => {
-    if (loading) return;
+    if (!isTabFocused || loading) return;
     setStatusBarStyle('light');
-  }, [loading]);
+  }, [loading, isTabFocused]);
 
   const columns = 3;
   const gridGap = GALLERY_TILE_GAP;
@@ -1008,7 +1009,7 @@ export default function FavorisScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar style="light" />
+      {isTabFocused ? <StatusBar style="light" /> : null}
       {loading ? (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={THEME.accent} />

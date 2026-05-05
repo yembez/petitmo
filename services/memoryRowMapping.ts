@@ -38,5 +38,7 @@ export function withLocalFields(row: MemoryRowDb, opts?: WithLocalFieldsOpts): M
     print_px_w: null,
     print_px_h: null,
     synced_at: null,
+    import_asset_id: null,
+    import_source_fingerprint: null,
   }
 }

@@ -101,6 +101,18 @@ export async function signMemoryRowForPdfRender(
       }
     }
   }
+  /** Vocal : URL absente ou expirée mais chemin Storage présent → URL signée pour Playwright. */
+  if (out.type === 'voice') {
+    const urlOk = typeof out.voice_cover_url === 'string' && out.voice_cover_url.trim().length > 0;
+    const pathRaw = out.voice_cover_path;
+    const pathTrim = typeof pathRaw === 'string' ? pathRaw.trim() : '';
+    if (!urlOk && pathTrim) {
+      const signed = await signUrlForPdfRender(supabase, projectOrigin, pathTrim);
+      if (typeof signed === 'string' && signed.trim()) {
+        out.voice_cover_url = signed;
+      }
+    }
+  }
   return out;
 }
 

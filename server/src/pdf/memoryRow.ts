@@ -20,6 +20,8 @@ export type MemoryRow = {
   poster_print_url: string | null;
   /** Image de fond optionnelle pour une page vocal. */
   voice_cover_url: string | null;
+  /** Chemin bucket `media` (souvent renseigné alors que `voice_cover_url` est encore null ou expiré). */
+  voice_cover_path: string | null;
   created_at: string;
 };
 

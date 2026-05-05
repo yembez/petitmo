@@ -100,8 +100,21 @@ export function initLocalDb(): void {
     add('print_px_h', 'INTEGER');
     add('sync_status', "TEXT DEFAULT 'synced'");
     add('voice_playback_start_sec', 'REAL');
+    add('import_asset_id', 'TEXT');
+    add('import_source_fingerprint', 'TEXT');
   } catch {
     // Silencieux (ne doit pas empêcher l’app de démarrer)
+  }
+
+  try {
+    db.execSync(`
+      CREATE INDEX IF NOT EXISTS idx_memories_child_import_asset
+      ON memories(child_id, import_asset_id);
+      CREATE INDEX IF NOT EXISTS idx_memories_child_import_fp
+      ON memories(child_id, import_source_fingerprint);
+    `)
+  } catch {
+    /* migration douce */
   }
 }
 
@@ -217,6 +230,31 @@ export function deleteLocalBook(bookId: string): void {
   db.runSync(`DELETE FROM books WHERE id = ?`, [bookId])
 }
 
+/** Retourne l’id souvenir si ce média bibliothèque est déjà importé pour cet enfant. */
+export function findMemoryIdByImportAssetId(childId: string, importAssetId: string): string | null {
+  const key = importAssetId.trim()
+  if (!key) return null
+  const row = db.getFirstSync(
+    `SELECT id FROM memories
+     WHERE child_id = ? AND import_asset_id = ?
+     LIMIT 1`,
+    [childId, key]
+  ) as { id?: string } | undefined
+  return typeof row?.id === 'string' && row.id.trim() ? row.id.trim() : null
+}
+
+export function findMemoryIdByImportFingerprint(childId: string, fingerprint: string): string | null {
+  const fp = fingerprint.trim()
+  if (!fp) return null
+  const row = db.getFirstSync(
+    `SELECT id FROM memories
+     WHERE child_id = ? AND import_source_fingerprint = ?
+     LIMIT 1`,
+    [childId, fp]
+  ) as { id?: string } | undefined
+  return typeof row?.id === 'string' && row.id.trim() ? row.id.trim() : null
+}
+
 export function getLocalMemoryById(id: string): Memory | null {
   const row = db.getFirstSync(
     `SELECT * FROM memories
@@ -245,9 +283,10 @@ export function upsertLocalMemory(memory: Memory, uploadStatus?: UploadStatus): 
       extra_thumb_urls, extra_display_urls,
       is_favorite, duration, file_size, location,
       created_at, inserted_at, updated_at,
-      upload_status, sync_status, synced_at
+      upload_status, sync_status, synced_at,
+      import_asset_id, import_source_fingerprint
     ) VALUES (
-      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
     )`,
     [
       memory.id,
@@ -286,6 +325,8 @@ export function upsertLocalMemory(memory: Memory, uploadStatus?: UploadStatus): 
       resolvedUpload,
       syncStatus,
       memory.synced_at ?? new Date().toISOString(),
+      memory.import_asset_id?.trim() ? memory.import_asset_id.trim() : null,
+      memory.import_source_fingerprint?.trim() ? memory.import_source_fingerprint.trim() : null,
     ]
   )
 }
@@ -483,6 +524,14 @@ function deserializeMemory(row: Record<string, unknown>): Memory {
     sync_status:
       row.sync_status === 'local' || row.sync_status === 'pending' || row.sync_status === 'synced'
         ? row.sync_status
+        : null,
+    import_asset_id:
+      typeof row.import_asset_id === 'string' && row.import_asset_id.trim()
+        ? row.import_asset_id.trim()
+        : null,
+    import_source_fingerprint:
+      typeof row.import_source_fingerprint === 'string' && row.import_source_fingerprint.trim()
+        ? row.import_source_fingerprint.trim()
         : null,
   }
 }

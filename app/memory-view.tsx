@@ -19,7 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BookOpen, Check, ChevronLeft, Pencil, Plus, X } from 'lucide-react-native';
 import { useFonts, Lora_400Regular_Italic } from '@expo-google-fonts/lora';
 import { Video, ResizeMode } from 'expo-av';
-import { setStatusBarStyle } from 'expo-status-bar';
+import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
 import { useFocusEffect } from '@react-navigation/native';
 import { scale, verticalScale } from '@/utils/responsive';
 import { THEME } from '@/constants/theme';
@@ -255,6 +255,7 @@ export default function MemoryViewScreen() {
   if (!memoryId) {
     return (
       <View style={[styles.root, styles.centered]}>
+        <StatusBar style="dark" />
         <Text style={styles.errText}>Souvenir introuvable</Text>
         <Pressable style={styles.backLink} onPress={() => router.back()}>
           <Text style={styles.backLinkText}>Retour</Text>
@@ -266,6 +267,7 @@ export default function MemoryViewScreen() {
   if (loading) {
     return (
       <View style={[styles.root, styles.centered]}>
+        <StatusBar style="dark" />
         <ActivityIndicator size="large" color={THEME.accent} />
       </View>
     );
@@ -274,6 +276,7 @@ export default function MemoryViewScreen() {
   if (!memory) {
     return (
       <View style={[styles.root, styles.centered]}>
+        <StatusBar style="dark" />
         <Text style={styles.errText}>Ce souvenir n’existe plus.</Text>
         <Pressable style={styles.backLink} onPress={() => router.back()}>
           <Text style={styles.backLinkText}>Retour</Text>
@@ -284,6 +287,7 @@ export default function MemoryViewScreen() {
 
   return (
     <View style={styles.root}>
+      <StatusBar style="dark" />
       <View style={[styles.header, { paddingTop: insets.top + verticalScale(8) }]}>
         <Pressable
           onPress={() => router.back()}
