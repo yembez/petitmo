@@ -5,6 +5,7 @@ import { useFonts, DMSans_400Regular, DMSans_600SemiBold } from '@expo-google-fo
 import { EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
 import { Pencil } from 'lucide-react-native';
 import type { Memory } from '@/types/local';
+import { formatBookLocationShort } from '@/utils/date';
 import FilteredImage from '@/components/FilteredImage';
 import EditTextModal from '@/components/EditTextModal';
 
@@ -47,6 +48,7 @@ export default function PhotoFullPage({
   const height = width / A5_RATIO;
   const uri = memory.edited_media_url ?? memory.media_url;
   const titleText = memory.content?.trim() ? memory.content : 'Sans titre';
+  const bookLocationLine = formatBookLocationShort(memory.location);
 
   const dm400 = fontsLoaded ? 'DMSans_400Regular' : undefined;
   const dm600 = fontsLoaded ? 'DMSans_600SemiBold' : undefined;
@@ -107,9 +109,19 @@ export default function PhotoFullPage({
       </View>
 
       <View style={styles.caption}>
-        <Text style={[styles.captionDate, dm400 && { fontFamily: dm400 }]}>
-          {formatBookDate(memory.created_at)}
-        </Text>
+        <View style={styles.captionMetaRow}>
+          <Text style={[styles.captionDate, dm400 && { fontFamily: dm400 }]}>
+            {formatBookDate(memory.created_at)}
+          </Text>
+          {bookLocationLine ? (
+            <Text
+              style={[styles.captionLocation, dm400 && { fontFamily: dm400 }]}
+              numberOfLines={1}
+            >
+              {bookLocationLine}
+            </Text>
+          ) : null}
+        </View>
         <Pressable
           style={styles.titleRow}
           onPress={handleTitlePress}
@@ -214,9 +226,22 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 2,
   },
+  captionMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 6,
+  },
   captionDate: {
     fontSize: 6,
     color: '#AEAEB2',
+    flexShrink: 0,
+  },
+  captionLocation: {
+    fontSize: 6,
+    color: '#AEAEB2',
+    textAlign: 'right',
+    flex: 1,
   },
   titleRow: {
     flexDirection: 'row',

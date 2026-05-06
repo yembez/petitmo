@@ -1,5 +1,13 @@
 import type { Memory } from '@/types/local';
+import { extractMediaBucketPath } from '@/lib/mediaSignedUrl';
 import { peekFeedBootstrapDisplayUrls } from '@/services/feedLocalPhotoCache';
+
+function asTrimmedStringArray(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
+    .map(u => u.trim());
+}
 
 function firstNonEmpty(...candidates: (string | null | undefined)[]): string {
   for (const c of candidates) {
@@ -69,18 +77,8 @@ export function getAllPhotoUrlsForFeed(memory: Memory): string[] {
     memory.display_url?.trim() ||
     undefined;
 
-  const rawThumb = memory.extra_thumb_urls;
-  const rawDisplay = memory.extra_display_urls;
-  const thumbs: string[] = Array.isArray(rawThumb)
-    ? (rawThumb as unknown[])
-        .filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
-        .map(u => u.trim())
-    : [];
-  const displays: string[] = Array.isArray(rawDisplay)
-    ? (rawDisplay as unknown[])
-        .filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
-        .map(u => u.trim())
-    : [];
+  const thumbs = asTrimmedStringArray(memory.extra_thumb_urls);
+  const displays = asTrimmedStringArray(memory.extra_display_urls);
 
   const max = Math.max(thumbs.length, displays.length);
   const cleaned: string[] = [];
@@ -98,24 +96,87 @@ export function isFeedMultiPhotoAlbum(memory: Memory): boolean {
   return getAllPhotoUrlsForFeed(memory).length > 1;
 }
 
-/** URLs pour écrans détail (accepte display puis fallback original si nécessaire). */
+/**
+ * URLs pour écrans détail (mémoire / galerie) : **dérivés avant originaux** pour limiter l’egress,
+ * comme le fil mais avec repli `edited` / `media` sur la 1re image si le worker n’a pas encore livré.
+ */
 export function getAllPhotoUrlsForDisplay(memory: Memory): string[] {
   const first =
-    (memory.display_url?.trim() ||
-      memory.edited_media_url?.trim() ||
-      memory.media_url?.trim()) ||
-    undefined;
+    firstNonEmpty(
+      memory.display_url,
+      memory.thumb_url,
+      memory.edited_media_url,
+      memory.media_url
+    ) || undefined;
 
-  const rawDisplay = memory.extra_display_urls;
-  const rawExtra = memory.extra_photo_urls;
-  const dispArr: unknown[] = Array.isArray(rawDisplay) ? rawDisplay : [];
-  const extraArr: unknown[] = Array.isArray(rawExtra) ? rawExtra : [];
-  const rest = dispArr.length > 0 ? dispArr : extraArr;
-  const cleaned = rest
+  const displays = asTrimmedStringArray(memory.extra_display_urls);
+  const thumbs = asTrimmedStringArray(memory.extra_thumb_urls);
+  const originals = asTrimmedStringArray(memory.extra_photo_urls);
+  const max = Math.max(displays.length, thumbs.length, originals.length);
+  const rest: string[] = [];
+  for (let i = 0; i < max; i++) {
+    const u = firstNonEmpty(displays[i], thumbs[i], originals[i]);
+    if (u) rest.push(u);
+  }
+
+  return [first, ...rest].filter((u): u is string => !!u && u.length > 0);
+}
+
+/** Groupes d’URLs qui désignent la même photo (favoris par image, URLs signées différentes). */
+function photoVariantGroups(memory: Memory): string[][] {
+  const groups: string[][] = [];
+  const g0 = [
+    memory.display_url,
+    memory.thumb_url,
+    memory.edited_media_url,
+    memory.media_url,
+  ]
     .filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
     .map(u => u.trim());
+  if (g0.length) groups.push(g0);
 
-  return [first, ...cleaned].filter((u): u is string => !!u && u.length > 0);
+  const displays = asTrimmedStringArray(memory.extra_display_urls);
+  const thumbs = asTrimmedStringArray(memory.extra_thumb_urls);
+  const originals = asTrimmedStringArray(memory.extra_photo_urls);
+  const n = Math.max(displays.length, thumbs.length, originals.length);
+  for (let i = 0; i < n; i++) {
+    const g = [displays[i], thumbs[i], originals[i]].filter(
+      (u): u is string => typeof u === 'string' && u.length > 0
+    );
+    if (g.length) groups.push(g);
+  }
+  return groups;
+}
+
+function sameStorageObject(a: string, b: string): boolean {
+  const pa = extractMediaBucketPath(a);
+  const pb = extractMediaBucketPath(b);
+  return !!(pa && pb && pa === pb);
+}
+
+function urlsInSamePhotoVariantGroup(memory: Memory, a: string, b: string): boolean {
+  const A = normalizePhotoUrlForCompare(a);
+  const B = normalizePhotoUrlForCompare(b);
+  if (!A || !B) return false;
+  if (A === B) return true;
+  if (sameStorageObject(A, B)) return true;
+  for (const g of photoVariantGroups(memory)) {
+    const set = new Set(g.map(normalizePhotoUrlForCompare));
+    if (set.has(A) && set.has(B)) return true;
+  }
+  return false;
+}
+
+/**
+ * Favori par photo : la liste peut contenir une variante (originale) et l’UI afficher une autre (thumb/display),
+ * ou deux signatures différentes du même objet Storage.
+ */
+export function isPhotoUrlFavoritedWithVariants(
+  memory: Memory,
+  favoriteUrls: string[],
+  shownUrl: string
+): boolean {
+  return favoriteUrls.some(f => urlsInSamePhotoVariantGroup(memory, f, shownUrl));
 }
 
 /**

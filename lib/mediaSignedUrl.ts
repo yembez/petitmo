@@ -6,6 +6,9 @@ export const MEDIA_DISPLAY_SIGNED_TTL_SEC = 3600;
 
 const CACHE_SKEW_MS = 60_000;
 
+/** Limite conservative pour `createSignedUrls` (évite timeouts / limites API). */
+const SIGNED_URL_BATCH_SIZE = 80;
+
 const signedDisplayCache = new Map<string, { url: string; expiresAt: number }>();
 
 const BARE_MEDIA_PATH_RE =
@@ -41,6 +44,13 @@ export function extractMediaBucketPath(urlOrPath: string): string | null {
   }
 }
 
+function cacheSignedPath(path: string, url: string, ttlSec: number): void {
+  signedDisplayCache.set(path, {
+    url,
+    expiresAt: Date.now() + ttlSec * 1000,
+  });
+}
+
 async function getSignedUrlForMediaPath(path: string, ttlSec: number): Promise<string | null> {
   const cached = signedDisplayCache.get(path);
   if (cached && cached.expiresAt > Date.now() + CACHE_SKEW_MS) {
@@ -51,11 +61,55 @@ async function getSignedUrlForMediaPath(path: string, ttlSec: number): Promise<s
     console.warn('[mediaSignedUrl]', path, error?.message);
     return null;
   }
-  signedDisplayCache.set(path, {
-    url: data.signedUrl,
-    expiresAt: Date.now() + ttlSec * 1000,
-  });
+  cacheSignedPath(path, data.signedUrl, ttlSec);
   return data.signedUrl;
+}
+
+/**
+ * Pré-remplit le cache d’URLs signées en **un ou peu d’appels** `createSignedUrls`.
+ * Les entrées non reconnues comme chemins / URLs bucket `media` sont ignorées.
+ */
+export async function primeSignedMediaDisplayUrls(remoteUrlOrPaths: string[]): Promise<void> {
+  const pathsToSign: string[] = [];
+  for (const raw of remoteUrlOrPaths) {
+    const path = extractMediaBucketPath(raw.trim());
+    if (!path) continue;
+    const cached = signedDisplayCache.get(path);
+    if (cached && cached.expiresAt > Date.now() + CACHE_SKEW_MS) continue;
+    pathsToSign.push(path);
+  }
+  const uniq = [...new Set(pathsToSign)];
+  if (uniq.length === 0) return;
+
+  for (let i = 0; i < uniq.length; i += SIGNED_URL_BATCH_SIZE) {
+    const chunk = uniq.slice(i, i + SIGNED_URL_BATCH_SIZE);
+    const { data, error } = await supabase.storage
+      .from('media')
+      .createSignedUrls(chunk, MEDIA_DISPLAY_SIGNED_TTL_SEC);
+
+    if (error) {
+      console.warn('[mediaSignedUrl] createSignedUrls batch', error.message);
+      for (const p of chunk) {
+        await getSignedUrlForMediaPath(p, MEDIA_DISPLAY_SIGNED_TTL_SEC);
+      }
+      continue;
+    }
+
+    const rows = Array.isArray(data) ? data : [];
+    for (const row of rows as { path?: string; signedUrl?: string }[]) {
+      const path = row.path?.trim();
+      const url = row.signedUrl?.trim();
+      if (path && url) {
+        cacheSignedPath(path, url, MEDIA_DISPLAY_SIGNED_TTL_SEC);
+      }
+    }
+    for (const p of chunk) {
+      const c = signedDisplayCache.get(p);
+      if (!c || c.expiresAt <= Date.now() + CACHE_SKEW_MS) {
+        await getSignedUrlForMediaPath(p, MEDIA_DISPLAY_SIGNED_TTL_SEC);
+      }
+    }
+  }
 }
 
 /**

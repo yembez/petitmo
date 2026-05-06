@@ -5,6 +5,7 @@ import { useFonts, DMSans_400Regular, DMSans_600SemiBold } from '@expo-google-fo
 import { EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
 import { Pencil } from 'lucide-react-native';
 import type { Memory } from '@/types/local';
+import { formatBookLocationShort } from '@/utils/date';
 import FilteredImage from '@/components/FilteredImage';
 import EditTextModal from '@/components/EditTextModal';
 
@@ -46,6 +47,7 @@ export default function PhotoNotePage({
   const height = width / A5_RATIO;
   const uri = memory.edited_media_url ?? memory.media_url;
   const bodyText = (memory.content ?? '').trim() || 'Ta note…';
+  const bookLocationLine = formatBookLocationShort(memory.location);
 
   const dm400 = fontsLoaded ? 'DMSans_400Regular' : undefined;
   const dm600 = fontsLoaded ? 'DMSans_600SemiBold' : undefined;
@@ -70,9 +72,6 @@ export default function PhotoNotePage({
               Photo & note
             </Text>
           </View>
-          <Text style={[styles.bannerDate, dm400 && { fontFamily: dm400 }]}>
-            {formatBookDate(memory.created_at)}
-          </Text>
         </View>
 
         <View style={styles.imageShell}>
@@ -97,6 +96,19 @@ export default function PhotoNotePage({
           end={{ x: 1, y: 0 }}
           style={styles.spineGradient}
         />
+        <View style={styles.imageBottomMeta} pointerEvents="none">
+          <Text style={[styles.imageBottomMetaDate, dm400 && { fontFamily: dm400 }]}>
+            {formatBookDate(memory.created_at)}
+          </Text>
+          {bookLocationLine ? (
+            <Text
+              style={[styles.imageBottomMetaLoc, dm400 && { fontFamily: dm400 }]}
+              numberOfLines={1}
+            >
+              {bookLocationLine}
+            </Text>
+          ) : null}
+        </View>
         </View>
 
         <Pressable
@@ -173,9 +185,31 @@ const styles = StyleSheet.create({
     fontSize: 8,
     color: '#1C1C1E',
   },
-  bannerDate: {
+  imageBottomMeta: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    backgroundColor: 'rgba(255,255,255,0.94)',
+    borderTopWidth: 0.5,
+    borderTopColor: 'rgba(0,0,0,0.06)',
+    gap: 6,
+  },
+  imageBottomMetaDate: {
     fontSize: 7,
     color: '#AEAEB2',
+    flexShrink: 0,
+  },
+  imageBottomMetaLoc: {
+    fontSize: 7,
+    color: '#AEAEB2',
+    textAlign: 'right',
+    flex: 1,
   },
   imageShell: {
     flex: 4,

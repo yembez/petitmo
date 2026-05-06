@@ -3,7 +3,10 @@ import { Image } from 'expo-image';
 import type { ViewToken } from 'react-native';
 import type { Memory as MemoryRow } from '@/types/local';
 import { getAllPhotoUrlsForFeed } from '@/utils/memoryPhotos';
-import { getSignedMediaDisplayUrl } from '@/lib/mediaSignedUrl';
+import { getSignedMediaDisplayUrl, primeSignedMediaDisplayUrls } from '@/lib/mediaSignedUrl';
+
+/** Limite le travail réseau / disque quand beaucoup de lignes sont « viewables ». */
+const PREFETCH_MAX_HTTPS_URLS = 40;
 
 type FeedListItemForPrefetch =
   | { rowKind: 'memory'; memory: MemoryRow }
@@ -52,7 +55,11 @@ export function usePrefetchMemories(): {
       }
       const list = [...all];
       if (list.length === 0) return;
+      if (list.length > PREFETCH_MAX_HTTPS_URLS) {
+        list.length = PREFETCH_MAX_HTTPS_URLS;
+      }
       void (async () => {
+        await primeSignedMediaDisplayUrls(list);
         const signed = await Promise.all(list.map(u => getSignedMediaDisplayUrl(u)));
         void Image.prefetch(signed, 'disk');
       })();

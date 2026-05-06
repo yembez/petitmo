@@ -4,6 +4,7 @@ import { MEDIA_CARD_INSET, MEDIA_CARD_RADIUS } from '@/constants/feedLayout';
 import { scale } from '@/utils/responsive';
 import PhotoGalleryModal from '@/components/PhotoGalleryModal';
 import { toggleFavoritePhotoUrl } from '@/services/media';
+import type { Memory } from '@/types/local';
 
 const GAP = scale(3);
 
@@ -15,6 +16,8 @@ type Props = {
   onFavoritePhotoUrlsUpdated?: (urls: string[]) => void;
   /** Une seule photo : ouvre le viewer immersif au lieu de la galerie modale. */
   onSinglePhotoImmersive?: () => void;
+  /** Aligner l’état « favori » sur la galerie quand l’URL affichée est un dérivé. */
+  memoryForFavoriteVariants?: Memory | null;
 };
 
 /**
@@ -26,6 +29,7 @@ export default function PhotoMosaic({
   favoritePhotoUrls,
   onFavoritePhotoUrlsUpdated,
   onSinglePhotoImmersive,
+  memoryForFavoriteVariants = null,
 }: Props) {
   const { width: screenW } = useWindowDimensions();
   const W = Math.max(0, screenW - 2 * MEDIA_CARD_INSET);
@@ -152,6 +156,7 @@ export default function PhotoMosaic({
         onToggleFavoritePhoto={
           memoryId && onFavoritePhotoUrlsUpdated ? handleToggleFavoritePhoto : undefined
         }
+        memoryForFavoriteVariants={memoryForFavoriteVariants ?? undefined}
       />
     </>
   );

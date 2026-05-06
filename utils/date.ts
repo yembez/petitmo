@@ -93,6 +93,15 @@ export function formatMemoryContextLine(
  * Découpe un libellé type géocodage « Ville (Région) » pour typographies distinctes.
  * Sinon tout le texte est considéré comme le lieu principal (ville / pays).
  */
+/**
+ * Lieu compact pour livres / légendes (retire le suffixe « Ville (Région) » issu du géocodage).
+ */
+export function formatBookLocationShort(location: string | null | undefined): string {
+  const raw = location?.trim();
+  if (!raw) return '';
+  return raw.replace(/\s*\([^)]*\)\s*$/, '').trim();
+}
+
 export function parseLocationForHeader(location: string | null | undefined): {
   placeBold: string;
   regionNormal: string | null;

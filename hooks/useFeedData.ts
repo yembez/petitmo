@@ -24,16 +24,17 @@ import {
   peekSilentInitialFilLoadArmed,
 } from '@/services/feedAfterImportFlags';
 import {
+  feedBooksHydrationSnapshot,
+  feedChildHydrationSnapshot,
+  feedMemoriesHydrationSnapshot,
+  setFeedHydrationSnapshots,
+} from '@/services/tabScreensCache';
+import {
   mergeMemoriesListPreservingVisualRowRefs,
   memoryWaitingForFeedDerivatives,
   type Memory,
   type Child,
 } from '@/utils/feedHelpers';
-
-let filMemoriesHydrationSnapshot: Memory[] = [];
-let filBooksHydrationSnapshot: Book[] = [];
-/** Dernier enfant affiché sur le fil : évite `child === null` au remontage et évite un `getChildren` inutile au retour d’import. */
-let filChildHydrationSnapshot: Child | null = null;
 
 export type UseFeedDataResult = {
   memories: Memory[];
@@ -47,32 +48,24 @@ export type UseFeedDataResult = {
 };
 
 export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult {
-  const [memories, setMemories] = useState<Memory[]>(() => [...filMemoriesHydrationSnapshot]);
+  const [memories, setMemories] = useState<Memory[]>(() => [...feedMemoriesHydrationSnapshot]);
   const memoriesRef = useRef<Memory[]>([]);
   memoriesRef.current = memories;
 
-  const [child, setChild] = useState<Child | null>(() => filChildHydrationSnapshot);
-  const [books, setBooks] = useState<Book[]>(() => [...filBooksHydrationSnapshot]);
+  const [child, setChild] = useState<Child | null>(() => feedChildHydrationSnapshot);
+  const [books, setBooks] = useState<Book[]>(() => [...feedBooksHydrationSnapshot]);
   const childRef = useRef<Child | null>(child);
   childRef.current = child;
   const pendingLenRef = useRef(0);
   pendingLenRef.current = pendingUploads.length;
 
   useEffect(() => {
-    filMemoriesHydrationSnapshot = memories;
-  }, [memories]);
-
-  useEffect(() => {
-    filBooksHydrationSnapshot = books;
-  }, [books]);
-
-  useEffect(() => {
-    filChildHydrationSnapshot = child;
-  }, [child]);
+    setFeedHydrationSnapshots(child, memories, books);
+  }, [child, memories, books]);
 
   const [isLoading, setIsLoading] = useState(() => {
     if (pendingUploads.length > 0) return false;
-    if (filChildHydrationSnapshot != null) return false;
+    if (feedChildHydrationSnapshot != null) return false;
     if (peekSilentInitialFilLoadArmed()) return false;
     return true;
   });
@@ -163,7 +156,7 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
   useEffect(() => {
     const silentFromImport = consumeSilentInitialFilLoadAfterMediaImport();
     const silent =
-      pendingUploads.length > 0 || filChildHydrationSnapshot != null || silentFromImport;
+      pendingUploads.length > 0 || feedChildHydrationSnapshot != null || silentFromImport;
     void loadData({ silent });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 1er montage : silent si pending, réhydratation fil, ou retour import
   }, [loadData]);

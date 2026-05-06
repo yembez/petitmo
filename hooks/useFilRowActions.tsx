@@ -29,7 +29,13 @@ export function useFilRowActions(setMemories: Dispatch<SetStateAction<Memory[]>>
       const target = editingMemory;
       if (!target) return;
       setMemories(prev => prev.map(m => (m.id === target.id ? { ...m, content: text } : m)));
-      await updateMemoryContent(target.id, text);
+      const ok = await updateMemoryContent(target.id, text);
+      if (!ok) {
+        Alert.alert(
+          'Connexion',
+          "Ton texte est bien enregistré sur l’app, mais la synchronisation a échoué. Réessaie plus tard."
+        );
+      }
     },
     [editingMemory, setMemories]
   );

@@ -9,7 +9,7 @@ import type { Database } from '@/types/database';
 import type { Memory } from '@/types/local';
 import type { UploadStatus } from '@/types/local';
 import { ensureLocalPhotoDerivatives, persistOriginalToSandbox } from '@/services/memoryLocalStore';
-import { withLocalFields } from '@/services/memoryRowMapping';
+import { withLocalFields, type MemoryRowDb } from '@/services/memoryRowMapping';
 import { pullMemoriesFromRemoteToLocal } from '@/services/memoriesLocalSync';
 import { checkMemoryLimit, checkVideoLimit, MEDIA_BOOK_PRINT_MAX_WIDTH } from '@/lib/limits';
 import { getUserTier } from '@/lib/userTier';
@@ -1571,7 +1571,10 @@ export async function uploadPhotoAlbum({
       locationOverride !== undefined ? locationOverride : null;
 
     const extras = publicUrls.slice(1);
+    const memoryId = newCloudSyncMemoryId();
+    const insertedAtIso = new Date().toISOString();
     const insertPayload: Database['public']['Tables']['memories']['Insert'] = {
+      id: memoryId,
       child_id: childId,
       user_id: user.id,
       type: 'photo',
@@ -1589,20 +1592,60 @@ export async function uploadPhotoAlbum({
       location: locationLabel,
       voice_cover_url: null,
       voice_cover_path: null,
-      inserted_at: new Date().toISOString(),
+      inserted_at: insertedAtIso,
     };
 
     if (capturedAtIso) {
       insertPayload.created_at = capturedAtIso;
     }
 
-    const { data: insertedRow, error: insertError } = await supabase
+    const { data: insertedRows, error: insertError } = await supabase
       .from('memories')
       .insert(insertPayload)
-      .select('*')
-      .single();
+      .select('*');
 
     if (insertError) throw insertError;
+
+    const nowIso = new Date().toISOString();
+    let insertedRow = insertedRows?.[0] as MemoryRowDb | undefined;
+    if (!insertedRow) {
+      // RLS / returning vide : l’insert peut réussir sans ligne renvoyée — on reconstruit la ligne (id connu).
+      insertedRow = {
+        id: memoryId,
+        child_id: childId,
+        user_id: user.id,
+        type: 'photo',
+        content: null,
+        media_url: publicUrls[0] ?? null,
+        media_path: paths[0] ?? null,
+        extra_photo_urls: extras as MemoryRowDb['extra_photo_urls'],
+        extra_photo_paths: paths.slice(1) as MemoryRowDb['extra_photo_paths'],
+        extra_thumb_urls: extras as MemoryRowDb['extra_thumb_urls'],
+        extra_display_urls: extras as MemoryRowDb['extra_display_urls'],
+        favorite_photo_urls: [] as MemoryRowDb['favorite_photo_urls'],
+        voice_cover_url: null,
+        voice_cover_path: null,
+        voice_playback_start_sec: null,
+        edited_media_url: null,
+        is_favorite: false,
+        duration: null,
+        thumbnail_url: null,
+        thumbnail_path: null,
+        file_size: totalSize,
+        location: locationLabel,
+        inserted_at: insertedAtIso,
+        captured_overlay_ink: null,
+        thumb_url: publicUrls[0] ?? null,
+        display_url: publicUrls[0] ?? null,
+        print_url: null,
+        poster_url: null,
+        poster_print_url: null,
+        upload_status: 'full',
+        created_at: insertPayload.created_at ?? nowIso,
+        updated_at: nowIso,
+      };
+    }
+
     if (!insertedRow?.id) return null;
 
     for (let i = 0; i < results.length; i++) {
@@ -1676,17 +1719,27 @@ export async function getMemories(childId: string): Promise<MemoryRow[]> {
 }
 
 export async function getMemoryById(memoryId: string) {
+  const id = memoryId?.trim();
+  if (!id) return null;
+
   try {
     if ((await getCachedUserMode()) === 'local') {
-      return getLocalMemoryById(memoryId);
+      return getLocalMemoryById(id);
     }
 
-    const { data, error } = await supabase.from('memories').select('*').eq('id', memoryId).single();
+    const { data, error } = await supabase
+      .from('memories')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
     if (error) throw error;
-    return data ? withLocalFields(data) : null;
+    if (data) return withLocalFields(data);
+
+    // Le fil / Favoris lisent souvent SQLite en premier ; la ligne peut ne pas être (encore) lisible via PostgREST.
+    return getLocalMemoryById(id);
   } catch (error) {
     console.error('getMemoryById error:', error);
-    return null;
+    return getLocalMemoryById(id);
   }
 }
 
@@ -1857,18 +1910,18 @@ export async function removeFavoritePhotoUrl(memoryId: string, photoUrl: string)
 
 export async function updateMemoryContent(memoryId: string, content: string) {
   try {
+    /**
+     * Offline-first: on persiste localement *tout de suite* pour éviter une perte de saisie.
+     * La sync Supabase peut échouer (réseau, session, RLS) mais l’utilisateur ne doit pas perdre son texte.
+     */
+    updateLocalMemoryContent(memoryId, content);
+
     if ((await getCachedUserMode()) === 'local') {
-      updateLocalMemoryContent(memoryId, content);
       return true;
     }
 
-    const { error } = await supabase
-      .from('memories')
-      .update({ content })
-      .eq('id', memoryId);
-
+    const { error } = await supabase.from('memories').update({ content }).eq('id', memoryId);
     if (error) throw error;
-    updateLocalMemoryContent(memoryId, content);
     return true;
   } catch (error) {
     console.error('Update memory content error:', error);

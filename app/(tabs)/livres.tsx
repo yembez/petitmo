@@ -1,11 +1,10 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  ActivityIndicator,
   RefreshControl,
   Alert,
   Modal,
@@ -13,6 +12,7 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  DeviceEventEmitter,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -24,15 +24,14 @@ import { scale, verticalScale } from '@/utils/responsive';
 import { THEME } from '@/constants/theme';
 import type { Book } from '@/services/books';
 import { deleteBook, listBooks } from '@/services/books';
+import { feedBooksHydrationSnapshot } from '@/services/tabScreensCache';
 import { supabase } from '@/lib/supabase';
 
 export default function LivresScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const [books, setBooks] = useState<Book[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [books, setBooks] = useState<Book[]>(() => [...feedBooksHydrationSnapshot]);
   const [refreshing, setRefreshing] = useState(false);
-  const didLoadOnceRef = useRef(false);
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [draftTitle, setDraftTitle] = useState('');
@@ -57,13 +56,10 @@ export default function LivresScreen() {
 
   const load = useCallback(async (opts?: { pull?: boolean }) => {
     if (opts?.pull) setRefreshing(true);
-    else if (!didLoadOnceRef.current) setLoading(true);
     try {
       const bks = await listBooks();
       setBooks(bks);
-      didLoadOnceRef.current = true;
     } finally {
-      setLoading(false);
       setRefreshing(false);
     }
   }, []);
@@ -73,6 +69,13 @@ export default function LivresScreen() {
       void load();
     }, [load])
   );
+
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener('petitmo:memories-invalidate', () => {
+      void load();
+    });
+    return () => sub.remove();
+  }, [load]);
 
   const onRefresh = useCallback(() => {
     void load({ pull: true });
@@ -119,14 +122,6 @@ export default function LivresScreen() {
     const direct = (b.coverPhotoUrl ?? '').trim();
     return direct || null;
   };
-
-  if (loading && books.length === 0 && !refreshing) {
-    return (
-      <View style={[styles.root, styles.centered]}>
-        <ActivityIndicator size="large" color={THEME.accent} />
-      </View>
-    );
-  }
 
   return (
     <View style={styles.root}>

@@ -119,6 +119,18 @@ export function setCaptureTabChildSnapshot(row: LocalChild | null): void {
 
 const SELECTED_CHILD_KEY = '@petitmo_selected_child';
 
+/** Dernier enfant sélectionné : hydratation SQLite **sync** des onglets + cohérence après `setSelectedChild`. */
+let selectedChildIdLastKnown: string | null = null;
+
+export function peekSelectedChildIdLastKnown(): string | null {
+  return selectedChildIdLastKnown;
+}
+
+/** Après `initLocalDb`, avant l’auth : lit AsyncStorage pour que `hydrateTabScreensFromSqliteSync` cible le bon profil. */
+export async function warmSelectedChildIdFromStorage(): Promise<void> {
+  await getSelectedChild();
+}
+
 export async function getChildren() {
   try {
     if ((await getCachedUserMode()) === 'local') {
@@ -431,8 +443,10 @@ export async function createChild(name: string, birthdate?: string, photoUri?: s
 }
 
 export async function setSelectedChild(childId: string) {
+  const id = childId.trim();
+  selectedChildIdLastKnown = id || null;
   try {
-    await AsyncStorage.setItem(SELECTED_CHILD_KEY, childId);
+    await AsyncStorage.setItem(SELECTED_CHILD_KEY, id);
   } catch (error) {
     console.error('Set selected child error:', error);
   }
@@ -440,7 +454,10 @@ export async function setSelectedChild(childId: string) {
 
 export async function getSelectedChild(): Promise<string | null> {
   try {
-    return await AsyncStorage.getItem(SELECTED_CHILD_KEY);
+    const v = await AsyncStorage.getItem(SELECTED_CHILD_KEY);
+    const t = v?.trim() || null;
+    selectedChildIdLastKnown = t;
+    return t;
   } catch (error) {
     console.error('Get selected child error:', error);
     return null;

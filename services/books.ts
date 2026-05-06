@@ -210,9 +210,19 @@ async function writeAll(books: Book[]): Promise<void> {
   }
 }
 
-export async function listBooks(): Promise<Book[]> {
-  const books = await readAll();
+/** Lecture SQLite synchrone (même tri que `listBooks`) pour préchauffe des onglets sans attendre l’auth. */
+export function listBooksFromSqliteSync(): Book[] {
+  const raw = listLocalBooks();
+  const books: Book[] = [];
+  for (const row of raw) {
+    const b = normalizeBook(row);
+    if (b) books.push(b);
+  }
   return books.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+export async function listBooks(): Promise<Book[]> {
+  return listBooksFromSqliteSync();
 }
 
 export async function getBook(bookId: string): Promise<Book | null> {

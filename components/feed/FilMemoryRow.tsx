@@ -394,6 +394,7 @@ function FilMemoryRow({
                 onSinglePhotoImmersive={
                   !skipImmersive && photoUrls.length > 0 ? launchImmersive : undefined
                 }
+                memoryForFavoriteVariants={memory}
               />
               <FeedPhotoFavoriteOverlay
                 isFavorite={!!memory.is_favorite}

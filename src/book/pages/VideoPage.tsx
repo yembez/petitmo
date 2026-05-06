@@ -4,6 +4,7 @@ import { useFonts, DMSans_400Regular, DMSans_600SemiBold } from '@expo-google-fo
 import { EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
 import QRCode from 'react-native-qrcode-svg';
 import type { Memory } from '@/types/local';
+import { formatBookLocationShort } from '@/utils/date';
 
 const PAGE_RATIO = 0.7;
 const IMAGE_ZONE_RATIO = 0.62;
@@ -50,6 +51,7 @@ export default function VideoPage({
 
   const thumb = memory.poster_url ?? memory.thumbnail_url;
   const dur = formatDuration(memory.duration);
+  const bookLocationLine = formatBookLocationShort(memory.location);
   const qrColW = width * 0.28;
   const qrSize = width * 0.2;
 
@@ -96,9 +98,19 @@ export default function VideoPage({
 
       <View style={styles.bottom}>
         <View style={styles.bottomLeft}>
-          <Text style={[styles.dateLine, dm400 && { fontFamily: dm400 }]}>
-            {formatBookDate(memory.created_at)}
-          </Text>
+          <View style={styles.bottomDateLocRow}>
+            <Text style={[styles.dateLine, dm400 && { fontFamily: dm400 }]}>
+              {formatBookDate(memory.created_at)}
+            </Text>
+            {bookLocationLine ? (
+              <Text
+                style={[styles.bottomLocation, dm400 && { fontFamily: dm400 }]}
+                numberOfLines={1}
+              >
+                {bookLocationLine}
+              </Text>
+            ) : null}
+          </View>
           <Text
             style={[
               styles.titleLine,
@@ -231,10 +243,23 @@ const styles = StyleSheet.create({
     paddingBottom: 5,
     paddingLeft: 10,
   },
+  bottomDateLocRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 6,
+    marginBottom: 2,
+  },
   dateLine: {
     fontSize: 6,
     color: '#AEAEB2',
-    marginBottom: 2,
+    flexShrink: 0,
+  },
+  bottomLocation: {
+    fontSize: 6,
+    color: '#AEAEB2',
+    textAlign: 'right',
+    flex: 1,
   },
   titleLine: {
     fontSize: 11,

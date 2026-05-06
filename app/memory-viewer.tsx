@@ -8,6 +8,7 @@ import {
   useWindowDimensions,
   type ViewToken,
   Platform,
+  Alert,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -34,6 +35,7 @@ import { updateMemoryContent } from '@/services/media';
 const BG = '#000000';
 const CAPTION = 'rgba(255,255,255,0.92)';
 const FONT_MAMAN = 'Lora_400Regular_Italic';
+const EM_QUAD = '\u2003';
 
 export default function MemoryViewerScreen() {
   const router = useRouter();
@@ -114,7 +116,13 @@ export default function MemoryViewerScreen() {
       const target = editingTextMemory;
       if (!target) return;
       setMemories(prev => prev.map(m => (m.id === target.id ? { ...m, content: text } : m)));
-      await updateMemoryContent(target.id, text);
+      const ok = await updateMemoryContent(target.id, text);
+      if (!ok) {
+        Alert.alert(
+          'Connexion',
+          "Ton texte est bien enregistré sur l’app, mais la synchronisation a échoué. Réessaie plus tard."
+        );
+      }
       setEditingTextMemory(null);
     },
     [editingTextMemory, setMemories]
@@ -363,6 +371,19 @@ function ImmersiveText({
   onTapEdit: () => void;
 }) {
   const raw = memory.content?.trim() || '';
+  const fitLevel = useMemo<0 | 1 | 2 | 3>(() => {
+    const t = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+    if (!t) return 0;
+    const paragraphCount = t.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean).length;
+    // Heuristique simple “sans mesure” pour garantir la visibilité sans scroll.
+    // On combine longueur + “coût” des paragraphes (sauts de ligne plus chers visuellement).
+    const approxLines = Math.ceil(t.length / 23) + Math.max(0, paragraphCount - 1) * 2;
+    // Compromis: réduction visible mais pas extrême.
+    if (approxLines >= 24 || t.length >= 720 || paragraphCount >= 7) return 3;
+    if (approxLines >= 20 || t.length >= 600 || paragraphCount >= 5) return 2;
+    if (approxLines >= 16 || t.length >= 480 || paragraphCount >= 4) return 1;
+    return 0;
+  }, [raw]);
   const paragraphs = useMemo(() => {
     const t = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
     if (!t) return ['Un joli mot du cœur'];
@@ -370,20 +391,46 @@ function ImmersiveText({
     return parts.length ? parts : [t];
   }, [raw]);
 
+  const wrapStyle =
+    fitLevel === 3
+      ? styles.textWrapFit3
+      : fitLevel === 2
+        ? styles.textWrapFit2
+        : fitLevel === 1
+          ? styles.textWrapFit1
+          : null;
+  const bodyStyle =
+    fitLevel === 3
+      ? styles.textBodyFit3
+      : fitLevel === 2
+        ? styles.textBodyFit2
+        : fitLevel === 1
+          ? styles.textBodyFit1
+          : styles.textBody;
+  const paraGapStyle =
+    fitLevel === 3
+      ? styles.textParaGapFit3
+      : fitLevel === 2
+        ? styles.textParaGapFit2
+        : fitLevel === 1
+          ? styles.textParaGapFit1
+          : styles.textParaGap;
+
   return (
     <Pressable
       onPress={onTapEdit}
-      style={styles.textWrap}
+      style={[styles.textWrap, wrapStyle]}
       accessibilityRole="button"
       accessibilityLabel="Modifier le texte"
     >
       {paragraphs.map((para, idx) => (
         <Text
           key={idx}
-          style={[styles.textBody, idx > 0 && styles.textParaGap]}
+          style={[bodyStyle, idx > 0 && paraGapStyle]}
           {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
         >
-          {para}
+          {EM_QUAD}
+          {para.replace(/\n/g, `\n${EM_QUAD}`)}
         </Text>
       ))}
     </Pressable>
@@ -459,14 +506,56 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     minHeight: verticalScale(280),
   },
+  textWrapFit1: {
+    paddingHorizontal: scale(26),
+  },
+  textWrapFit2: {
+    paddingHorizontal: scale(25),
+  },
+  textWrapFit3: {
+    paddingHorizontal: scale(24),
+  },
   textBody: {
     color: '#FFFFFF',
     fontSize: scale(26),
     lineHeight: scale(34),
-    textAlign: 'center',
+    textAlign: 'left',
+    // Style “roman” : aligné gauche, justification douce.
+    textAlignVertical: 'top',
+    ...(Platform.OS === 'ios' || Platform.OS === 'android' ? { textAlign: 'left' as const } : {}),
+    fontFamily: FONT_MAMAN,
+  },
+  textBodyFit1: {
+    color: '#FFFFFF',
+    fontSize: scale(24),
+    lineHeight: scale(32),
+    textAlign: 'left',
+    fontFamily: FONT_MAMAN,
+  },
+  textBodyFit2: {
+    color: '#FFFFFF',
+    fontSize: scale(21),
+    lineHeight: scale(28),
+    textAlign: 'left',
+    fontFamily: FONT_MAMAN,
+  },
+  textBodyFit3: {
+    color: '#FFFFFF',
+    fontSize: scale(18),
+    lineHeight: scale(25),
+    textAlign: 'left',
     fontFamily: FONT_MAMAN,
   },
   textParaGap: {
     marginTop: verticalScale(18),
+  },
+  textParaGapFit1: {
+    marginTop: verticalScale(16),
+  },
+  textParaGapFit2: {
+    marginTop: verticalScale(14),
+  },
+  textParaGapFit3: {
+    marginTop: verticalScale(12),
   },
 });

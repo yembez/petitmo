@@ -30,6 +30,7 @@ import {
   setCaptureTabChildSnapshot,
   setSelectedChild,
 } from '@/services/children';
+import { feedChildHydrationSnapshot } from '@/services/tabScreensCache';
 import type { Child } from '@/types/local';
 import PetitmoLogoManuscrit, { PETITMO_LOGO_VIEWBOX } from '@/components/PetitmoLogoManuscrit';
 import { useCaptureHeroLogoColor } from '@/hooks/useCaptureHeroLogoColor';
@@ -219,8 +220,12 @@ export default function CapturerScreen() {
   const ctaScrollBottomPad =
     panelBottomPad + Math.max(insets.bottom, verticalScale(10)) + verticalScale(10);
 
-  const [child, setChild] = useState<Child | null>(() => getCaptureTabChildSnapshot());
-  const [isLoading, setIsLoading] = useState(() => getCaptureTabChildSnapshot() === null);
+  const [child, setChild] = useState<Child | null>(() => {
+    return getCaptureTabChildSnapshot() ?? feedChildHydrationSnapshot;
+  });
+  const [isLoading, setIsLoading] = useState(() => {
+    return (getCaptureTabChildSnapshot() ?? feedChildHydrationSnapshot) === null;
+  });
   /** Mode local : photo dans `local_photo_path`, pas dans `photo_url`. */
   const heroPhotoUri = child
     ? resolveChildProfileImageUri(child.local_photo_path, child.photo_url)

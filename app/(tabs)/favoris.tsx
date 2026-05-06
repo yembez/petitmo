@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Platform,
   Dimensions,
+  DeviceEventEmitter,
   FlatList,
   TouchableOpacity,
   type ListRenderItem,
@@ -39,6 +40,10 @@ import { SPACING, FONT_SIZES } from '@/constants/sizes';
 import { useFonts, EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
 import { getMemories, requestMissingMediaDerivatives } from '@/services/media';
 import { getOrSelectFirstChild } from '@/services/children';
+import {
+  feedChildHydrationSnapshot,
+  feedMemoriesHydrationSnapshot,
+} from '@/services/tabScreensCache';
 import type { Memory } from '@/types/local';
 import {
   getAllPhotoUrls,
@@ -105,6 +110,17 @@ function buildSlideshowUrls(items: FavListItem[]): string[] {
     out.push(u);
   }
   return out;
+}
+
+/** Extrait sous les vignettes photo / vidéo (premiers mots, même annotation que le souvenir). */
+const PHOTO_CAPTION_MAX_WORDS = 14;
+
+function photoCaptionOverlayText(content: string | null | undefined): string | null {
+  const raw = (content ?? '').trim();
+  if (!raw) return null;
+  const words = raw.split(/\s+/u).filter(Boolean);
+  if (words.length <= PHOTO_CAPTION_MAX_WORDS) return raw;
+  return `${words.slice(0, PHOTO_CAPTION_MAX_WORDS).join(' ')}…`;
 }
 
 /** Zoom de départ → 1 : uniquement zoom arrière (aucun zoom avant visible). */
@@ -695,6 +711,7 @@ function galleryTilePropsEqual(a: GalleryTileProps, b: GalleryTileProps): boolea
     a.item.thumbUrl === b.item.thumbUrl &&
     a.item.memory.id === b.item.memory.id &&
     a.item.memory.type === b.item.memory.type &&
+    a.item.memory.content === b.item.memory.content &&
     a.tileSize === b.tileSize &&
     a.fontsLoaded === b.fontsLoaded &&
     a.selectionMode === b.selectionMode &&
@@ -718,6 +735,10 @@ const GalleryTile = memo(function GalleryTile({
   const isMedia = memory.type === 'photo' || memory.type === 'video';
   const isText = memory.type === 'text';
   const isAudio = memory.type === 'voice';
+  const tileCaptionSnippet =
+    memory.type === 'photo' || memory.type === 'video'
+      ? photoCaptionOverlayText(memory.content)
+      : null;
 
   const scaleSv = useSharedValue(1);
   const animStyle = useAnimatedStyle(() => ({
@@ -755,7 +776,39 @@ const GalleryTile = memo(function GalleryTile({
     >
       <Reanimated.View style={[styles.galleryTileInner, animStyle]}>
         {isMedia && uri ? (
-          <Image source={{ uri }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+          <>
+            <Image source={{ uri }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+            {tileCaptionSnippet ? (
+              <View
+                style={[
+                  styles.galleryPhotoCaptionBand,
+                  selectionMode ? styles.galleryPhotoCaptionBandSelection : null,
+                ]}
+                pointerEvents="none"
+              >
+                <LinearGradient
+                  pointerEvents="none"
+                  colors={['rgba(55,55,55,0)', 'rgba(28,28,28,0.78)']}
+                  locations={[0, 1]}
+                  start={{ x: 0.5, y: 0 }}
+                  end={{ x: 0.5, y: 1 }}
+                  style={StyleSheet.absoluteFillObject}
+                />
+                <Text
+                  style={[
+                    styles.galleryPhotoCaptionText,
+                    fontsLoaded
+                      ? { fontFamily: 'EBGaramond_400Regular_Italic', fontWeight: '400' }
+                      : { fontWeight: '600' },
+                  ]}
+                  numberOfLines={2}
+                  ellipsizeMode="tail"
+                >
+                  {tileCaptionSnippet}
+                </Text>
+              </View>
+            ) : null}
+          </>
         ) : isAudio ? (
           <View style={styles.audioThumb}>
             {uri ? (
@@ -795,7 +848,7 @@ const GalleryTile = memo(function GalleryTile({
 
         {memory.type === 'video' ? (
           <View style={styles.galleryVideoBadge} pointerEvents="none">
-            <Video size={scale(14)} color="#FFFFFF" strokeWidth={2.2} />
+            <Video size={scale(18)} color="#FFFFFF" strokeWidth={2.2} />
           </View>
         ) : null}
 
@@ -821,9 +874,10 @@ export default function FavorisScreen() {
   const params = useLocalSearchParams<{ bookId?: string; createBookTitle?: string }>();
   const insets = useSafeAreaInsets();
   const [fontsLoaded] = useFonts({ EBGaramond_400Regular_Italic });
-  const [loading, setLoading] = useState(true);
-  const [memories, setMemories] = useState<Memory[]>([]);
-  const [hasChild, setHasChild] = useState(true);
+  /** Prérempli après `hydrateTabScreensFromLocal` : pas de roue si les données locales sont déjà connues. */
+  const [loading, setLoading] = useState(() => feedChildHydrationSnapshot === null);
+  const [memories, setMemories] = useState<Memory[]>(() => [...feedMemoriesHydrationSnapshot]);
+  const [hasChild, setHasChild] = useState(() => feedChildHydrationSnapshot !== null);
   /** Pixels d’overscroll en haut (y négatif → valeur positive), suit le doigt */
   const [pullOverscrollPx, setPullOverscrollPx] = useState(0);
   const [selectionMode, setSelectionMode] = useState(false);
@@ -892,6 +946,13 @@ export default function FavorisScreen() {
       };
     }, [load])
   );
+
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener('petitmo:memories-invalidate', () => {
+      void load();
+    });
+    return () => sub.remove();
+  }, [load]);
 
   useEffect(() => {
     const id = typeof params.bookId === 'string' ? params.bookId : null;
@@ -1559,16 +1620,43 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontStyle: 'italic',
   },
+  /** Même centrage et taille de pastille que `audioThumbPlay` (icône play audio). */
   galleryVideoBadge: {
     position: 'absolute',
-    right: scale(6),
-    bottom: scale(6),
-    width: scale(24),
-    height: scale(24),
-    borderRadius: scale(12),
+    left: '50%',
+    top: '50%',
+    transform: [{ translateX: -scale(18) }, { translateY: -scale(18) }],
+    width: scale(36),
+    height: scale(36),
+    borderRadius: scale(18),
     backgroundColor: 'rgba(0,0,0,0.35)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  /** Bandeau bas : dégradé gris (transparent → foncé) + extrait de l’annotation photo. */
+  galleryPhotoCaptionBand: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '42%',
+    justifyContent: 'flex-end',
+    paddingHorizontal: scale(8),
+    paddingBottom: verticalScale(7),
+    paddingTop: verticalScale(10),
+    overflow: 'hidden',
+  },
+  galleryPhotoCaptionBandSelection: {
+    paddingRight: scale(34),
+  },
+  galleryPhotoCaptionText: {
+    fontSize: scale(11),
+    lineHeight: scale(14),
+    color: '#FFFFFF',
+    textAlign: 'left',
+    textShadowColor: 'rgba(0,0,0,0.35)',
+    textShadowOffset: { width: 0, height: 0.5 },
+    textShadowRadius: 3,
   },
 
   textThumbGlyph: {

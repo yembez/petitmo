@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { View, ActivityIndicator, StyleSheet, AppState, AppStateStatus } from 'react-native';
+import {
+  View,
+  ActivityIndicator,
+  StyleSheet,
+  AppState,
+  AppStateStatus,
+  DeviceEventEmitter,
+} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
@@ -19,6 +26,15 @@ import {
   backupBooksToSupabaseIfPremium,
   flushPendingBookDeletesToSupabase,
 } from '@/services/books';
+import {
+  setCaptureTabChildSnapshot,
+  warmSelectedChildIdFromStorage,
+} from '@/services/children';
+import { setFeedHydrationSnapshots } from '@/services/tabScreensCache';
+import {
+  hydrateTabScreensFromLocal,
+  hydrateTabScreensFromSqliteSync,
+} from '@/services/tabScreensHydrate';
 
 export default function RootLayout() {
   useFrameworkReady();
@@ -32,6 +48,14 @@ export default function RootLayout() {
     void migrateBooksFromAsyncStorageToSqliteOnce();
     void runWeeklyCleanup();
     void processPendingGuestRawUploads();
+
+    /**
+     * En parallèle de l’auth : ID enfant depuis AsyncStorage puis cache onglets **SQLite pur**
+     * → onglets peuvent déjà avoir données locales au 1er rendu (multi-enfants : ID connu dès que la promesse résout).
+     */
+    void warmSelectedChildIdFromStorage().then(() => {
+      hydrateTabScreensFromSqliteSync();
+    });
 
     const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
       if (next === 'active') {
@@ -119,8 +143,12 @@ export default function RootLayout() {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           console.log('User authenticated:', user.id);
+          /** Enfant + souvenirs + livres en local avant le 1er rendu des onglets → pas de roue au 1er tap. */
+          await hydrateTabScreensFromLocal();
         } else {
           console.error('No user after auth');
+          setFeedHydrationSnapshots(null, [], []);
+          setCaptureTabChildSnapshot(null);
         }
       } catch (error) {
         console.error('Auth initialization error:', error);
@@ -132,6 +160,31 @@ export default function RootLayout() {
     initAuth();
   }, []);
 
+  /** Retour au premier plan : réaligner cache onglets (robuste après sync / autre appareil). */
+  useEffect(() => {
+    if (!isAuthReady) return;
+    let debounce: ReturnType<typeof setTimeout> | null = null;
+    const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
+      if (next !== 'active') return;
+      if (debounce) clearTimeout(debounce);
+      debounce = setTimeout(() => {
+        debounce = null;
+        void warmSelectedChildIdFromStorage()
+          .then(() => {
+            hydrateTabScreensFromSqliteSync();
+            return hydrateTabScreensFromLocal();
+          })
+          .then(() => {
+            DeviceEventEmitter.emit('petitmo:memories-invalidate');
+          });
+      }, 450);
+    });
+    return () => {
+      sub.remove();
+      if (debounce) clearTimeout(debounce);
+    };
+  }, [isAuthReady]);
+
   // Backup cloud (premium uniquement) : déclenché après auth ready.
   useEffect(() => {
     if (!isAuthReady) return;
@@ -142,6 +195,10 @@ export default function RootLayout() {
       await flushPendingBookDeletesToSupabase();
       await restoreBooksFromSupabaseIfPremium();
       await backupBooksToSupabaseIfPremium();
+      await warmSelectedChildIdFromStorage();
+      hydrateTabScreensFromSqliteSync();
+      await hydrateTabScreensFromLocal();
+      DeviceEventEmitter.emit('petitmo:memories-invalidate');
     })();
   }, [isAuthReady]);
 

@@ -7,7 +7,7 @@ import {
   peekFeedBootstrapDisplayUrls,
   takeFeedBootstrapDisplayUrls,
 } from '@/services/feedLocalPhotoCache';
-import { getSignedMediaDisplayUrl } from '@/lib/mediaSignedUrl';
+import { getSignedMediaDisplayUrl, primeSignedMediaDisplayUrls } from '@/lib/mediaSignedUrl';
 
 function isHttpUrl(u: string): boolean {
   return /^https?:\/\//i.test(u.trim());
@@ -73,18 +73,52 @@ export function useFeedPhotoDisplayUrls(memory: Memory): string[] {
     const remRaw = getAllPhotoUrlsForFeed(memory);
     let alive = true;
     void (async () => {
-      const rem = await Promise.all(remRaw.map(u => resolveFeedSlotRemoteUrl(u)));
+      const maxProbe = Math.max(remRaw.length, 6);
+
+      const localPromises: Promise<string>[] = [];
+      for (let i = 0; i < maxProbe; i++) {
+        if (Platform.OS === 'web') {
+          localPromises.push(Promise.resolve(''));
+        } else {
+          localPromises.push(
+            getFeedLocalThumbnail(memory.id, i).then(s => (s?.trim() ? s.trim() : ''))
+          );
+        }
+      }
+      const locals = await Promise.all(localPromises);
       if (!alive) return;
 
-      const maxProbe = Math.max(rem.length, 6);
+      const toPrime: string[] = [];
+      for (let i = 0; i < remRaw.length; i++) {
+        const raw = remRaw[i]?.trim() || '';
+        if (!raw) continue;
+        if (locals[i] && Platform.OS !== 'web') continue;
+        if (isHttpUrl(raw) && !isLikelyDeviceLocalAsset(raw)) {
+          toPrime.push(raw);
+        }
+      }
+      await primeSignedMediaDisplayUrls(toPrime);
+      if (!alive) return;
+
+      const rem: string[] = [];
+      for (let i = 0; i < remRaw.length; i++) {
+        const raw = remRaw[i]?.trim() || '';
+        if (!raw) {
+          rem.push('');
+          continue;
+        }
+        if (locals[i] && Platform.OS !== 'web') {
+          rem.push('');
+          continue;
+        }
+        rem.push(await resolveFeedSlotRemoteUrl(raw));
+      }
+      if (!alive) return;
+
       const slots: { remote: string; local: string }[] = [];
       for (let i = 0; i < maxProbe; i++) {
         const remote = (rem[i]?.trim() || '') || '';
-        const loc =
-          Platform.OS === 'web'
-            ? ''
-            : ((await getFeedLocalThumbnail(memory.id, i))?.trim() || '');
-        const local = loc;
+        const local = (locals[i]?.trim() || '') || '';
         slots.push({ remote, local });
       }
       if (!alive) return;

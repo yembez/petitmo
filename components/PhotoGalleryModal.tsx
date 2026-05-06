@@ -19,7 +19,8 @@ import { Heart, X } from 'lucide-react-native';
 import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
 import { THEME } from '@/constants/theme';
 import { scale, verticalScale } from '@/utils/responsive';
-import { isPhotoUrlFavorited } from '@/utils/memoryPhotos';
+import type { Memory } from '@/types/local';
+import { isPhotoUrlFavorited, isPhotoUrlFavoritedWithVariants } from '@/utils/memoryPhotos';
 
 /** Cœurs favoris : terracotta charte (pas l’accent bleu du reste de l’app). */
 const FAVORI_FILL = THEME.feedFavoriteTerracotta;
@@ -35,6 +36,8 @@ type Props = {
   /** Album multi-photos : favori sur tout le souvenir (`memories.is_favorite`). */
   memoryFavorited?: boolean;
   onToggleMemoryFavorite?: () => void | Promise<void>;
+  /** Pour comparer cœur / favoris quand l’URL affichée est un dérivé ou une nouvelle signature Storage. */
+  memoryForFavoriteVariants?: Memory | null;
 };
 
 const PLACEHOLDER_ASPECT = 4 / 5;
@@ -54,6 +57,7 @@ export default function PhotoGalleryModal({
   onToggleFavoritePhoto,
   memoryFavorited = false,
   onToggleMemoryFavorite,
+  memoryForFavoriteVariants = null,
 }: Props) {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -237,7 +241,9 @@ export default function PhotoGalleryModal({
             renderItem={({ item, index }) => {
               const h = rowHeights[index] ?? width * PLACEHOLDER_ASPECT;
               const showHeart = !!onToggleFavoritePhoto;
-              const liked = isPhotoUrlFavorited(favoritePhotoUrls, item);
+              const liked = memoryForFavoriteVariants
+                ? isPhotoUrlFavoritedWithVariants(memoryForFavoriteVariants, favoritePhotoUrls, item)
+                : isPhotoUrlFavorited(favoritePhotoUrls, item);
               return (
                 <View
                   style={[
@@ -291,7 +297,7 @@ export default function PhotoGalleryModal({
             windowSize={7}
             initialNumToRender={3}
             maxToRenderPerBatch={4}
-            extraData={{ favoritePhotoUrls, memoryFavorited }}
+            extraData={{ favoritePhotoUrls, memoryFavorited, memoryForFavoriteVariants }}
           />
         )}
       </View>

@@ -32,7 +32,12 @@ import { resolveChildProfileImageUri } from '@/utils/childPhotoUri';
 import { getChildren } from '@/services/children';
 import { getAllPhotoUrlsForDisplay, parseFavoritePhotoUrls } from '@/utils/memoryPhotos';
 import { getSignedMediaDisplayUrl, useSignedMediaUrl } from '@/lib/mediaSignedUrl';
-import { formatDateLong, formatDuration, formatAgeAtMemory } from '@/utils/date';
+import {
+  formatDateLong,
+  formatDuration,
+  formatAgeAtMemory,
+  formatBookLocationShort,
+} from '@/utils/date';
 import { addMemoryToBook, createBook, listBooks, removeMemoryFromBook, type Book } from '@/services/books';
 import type { Child, Memory } from '@/types/local';
 
@@ -173,7 +178,13 @@ export default function MemoryViewScreen() {
   const handleSaveEdit = async (text: string) => {
     if (!memory) return;
     setMemory({ ...memory, content: text });
-    await updateMemoryContent(memory.id, text);
+    const ok = await updateMemoryContent(memory.id, text);
+    if (!ok) {
+      Alert.alert(
+        'Connexion',
+        "Ton texte est bien enregistré sur l’app, mais la synchronisation a échoué. Réessaie plus tard."
+      );
+    }
   };
 
   const signedChildRemote = useSignedMediaUrl(child?.photo_url ?? null);
@@ -228,6 +239,8 @@ export default function MemoryViewScreen() {
   const videoPosterUri = displayVideoPoster;
   const photoUrls = displayPhotoUrls;
   const ageAtMemory = memory ? formatAgeAtMemory(child?.birthdate, memory.created_at) : '';
+  const locationLineShort = memory ? formatBookLocationShort(memory.location) : '';
+  const locationMeta = locationLineShort ? `à ${locationLineShort}` : '';
 
   const coverUriForBook = useCallback(
     (b: Book): string | null => {
@@ -321,6 +334,12 @@ export default function MemoryViewScreen() {
                 <Text style={styles.metaLight}>{ageAtMemory}</Text>
               </>
             ) : null}
+            {locationMeta ? (
+              <>
+                <Text style={styles.metaSep}> · </Text>
+                <Text style={styles.metaLight}>{locationMeta}</Text>
+              </>
+            ) : null}
           </Text>
         </View>
 
@@ -334,6 +353,7 @@ export default function MemoryViewScreen() {
                 onFavoritePhotoUrlsUpdated={urls =>
                   setMemory(m => (m ? { ...m, favorite_photo_urls: urls } : m))
                 }
+                memoryForFavoriteVariants={memory}
               />
             )}
 
