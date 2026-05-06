@@ -142,6 +142,36 @@ function Folio({ n, dm400 }: { n: number; dm400?: string }) {
   );
 }
 
+/** Bandeau bas sur la photo : date à gauche, lieu à droite (aperçu livre — bien visible sur l’image). */
+function BookImageDateLocationStrip({
+  dateLabel,
+  bookLoc,
+  dm400,
+}: {
+  dateLabel: string;
+  bookLoc: string;
+  dm400?: string;
+}) {
+  return (
+    <View style={styles.bookImageMetaStrip} pointerEvents="none">
+      <Text
+        style={[styles.bookImageMetaDate, dm400 && { fontFamily: dm400 }]}
+        numberOfLines={bookLoc ? 1 : 2}
+      >
+        {dateLabel}
+      </Text>
+      {bookLoc ? (
+        <Text
+          style={[styles.bookImageMetaLoc, dm400 && { fontFamily: dm400 }]}
+          numberOfLines={2}
+        >
+          {bookLoc}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 type Props = {
   page: BookPage;
   pageNum: number;
@@ -524,25 +554,17 @@ function MaquettePhotoSimple({
         ) : (
           <View style={[styles.coverPh, { height: imgH }]} />
         )}
+        <BookImageDateLocationStrip
+          dateLabel={dateFrCaps(memory.created_at)}
+          bookLoc={bookLoc}
+          dm400={dm400}
+        />
       </View>
       <Pressable
         style={[styles.photoFooter, { paddingHorizontal: pad }]}
         onPress={onRequestTextEdit}
         accessibilityRole="button"
       >
-        <View style={styles.photoDateLocRow}>
-          <Text style={[styles.photoDate, dm400 && { fontFamily: dm400 }]}>
-            {dateFrCaps(memory.created_at)}
-          </Text>
-          {bookLoc ? (
-            <Text
-              style={[styles.photoLocationBook, dm400 && { fontFamily: dm400 }]}
-              numberOfLines={2}
-            >
-              {bookLoc}
-            </Text>
-          ) : null}
-        </View>
         {caption.length > 0 ? (
           <Text
             style={[
@@ -627,6 +649,11 @@ function MaquettePhotoNote({
         ) : (
           <View style={[styles.coverPh, { height: imgH }]} />
         )}
+        <BookImageDateLocationStrip
+          dateLabel={dateTimeFrCaps(memory.created_at)}
+          bookLoc={bookLoc}
+          dm400={dm400}
+        />
       </View>
       <View style={[styles.page4TextBlock, { overflow: 'hidden' }]}>
         <Pressable
@@ -634,19 +661,6 @@ function MaquettePhotoNote({
           accessibilityRole="button"
           style={[styles.page4ScrollContent, { paddingHorizontal: pad, paddingBottom: 40 }]}
         >
-          <View style={styles.page4MetaRow}>
-            <Text style={[styles.page4Meta, dm400 && { fontFamily: dm400 }]}>
-              {dateTimeFrCaps(memory.created_at)}
-            </Text>
-            {bookLoc ? (
-              <Text
-                style={[styles.page4MetaLocation, dm400 && { fontFamily: dm400 }]}
-                numberOfLines={2}
-              >
-                {bookLoc}
-              </Text>
-            ) : null}
-          </View>
           {legendLimited.length > 0 ? (
             <Text
               style={[
@@ -910,25 +924,17 @@ function MaquetteAudio({
         ) : (
           <View style={[styles.coverPh, { height: imgH }]} />
         )}
+        <BookImageDateLocationStrip
+          dateLabel={dateTimeFrCaps(memory.created_at)}
+          bookLoc={bookLoc}
+          dm400={dm400}
+        />
       </View>
       <View style={styles.audioBelowPhoto}>
         <View style={[styles.audioMetaRow, { paddingHorizontal: pad }]}>
           <View style={styles.quoteHeaderLeft}>
             <View style={styles.vocalDot} />
             <Text style={[styles.vocalLabel, dm600 && { fontFamily: dm600 }]}>Vocal</Text>
-          </View>
-          <View style={[styles.page4MetaRow, { flex: 1, minWidth: 0 }]}>
-            <Text style={[styles.page4Meta, dm400 && { fontFamily: dm400 }]}>
-              {dateTimeFrCaps(memory.created_at)}
-            </Text>
-            {bookLoc ? (
-              <Text
-                style={[styles.page4MetaLocation, dm400 && { fontFamily: dm400 }]}
-                numberOfLines={2}
-              >
-                {bookLoc}
-              </Text>
-            ) : null}
           </View>
         </View>
         <View style={[styles.audioLower, { paddingHorizontal: pad, paddingBottom: 42 }]}>
@@ -1021,22 +1027,14 @@ function MaquetteVideo({
         ) : (
           <View style={[styles.coverPh, { height: imgH }]} />
         )}
+        <BookImageDateLocationStrip
+          dateLabel={dateTimeFrCaps(memory.created_at)}
+          bookLoc={bookLoc}
+          dm400={dm400}
+        />
       </View>
       <View style={{ flex: 1, overflow: 'hidden', paddingHorizontal: pad, paddingTop: 20 }}>
         <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
-          <View style={styles.noteMetaRow}>
-            <Text style={[styles.noteMeta, dm400 && { fontFamily: dm400 }]}>
-              {dateTimeFrCaps(memory.created_at)}
-            </Text>
-            {bookLoc ? (
-              <Text
-                style={[styles.noteMetaLocation, dm400 && { fontFamily: dm400 }]}
-                numberOfLines={2}
-              >
-                {bookLoc}
-              </Text>
-            ) : null}
-          </View>
           <Text
             style={[
               styles.videoTitle,
@@ -1141,6 +1139,41 @@ const styles = StyleSheet.create({
     width: '100%',
     overflow: 'hidden',
     backgroundColor: '#F2F2F7',
+    position: 'relative',
+  },
+  bookImageMetaStrip: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 6,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 8,
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(0,0,0,0.1)',
+    gap: 8,
+  },
+  bookImageMetaDate: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: INK,
+    opacity: 0.82,
+    flexShrink: 0,
+    maxWidth: '46%',
+  },
+  bookImageMetaLoc: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: INK,
+    opacity: 0.82,
+    textAlign: 'right',
+    flex: 1,
+    minWidth: 0,
   },
   rot: { flex: 1, overflow: 'hidden' },
   page4TopBand: {
@@ -1149,6 +1182,7 @@ const styles = StyleSheet.create({
   page4ImageBleed: {
     overflow: 'hidden',
     backgroundColor: '#F2F2F7',
+    position: 'relative',
   },
   page4TextBlock: {
     flex: 1,
@@ -1158,24 +1192,6 @@ const styles = StyleSheet.create({
   },
   page4ScrollContent: {
     paddingTop: 14,
-  },
-  page4MetaRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  page4Meta: {
-    fontSize: 11,
-    color: MUTED,
-    letterSpacing: 0.2,
-    flexShrink: 0,
-  },
-  page4MetaLocation: {
-    fontSize: 11,
-    color: MUTED,
-    textAlign: 'right',
-    flex: 1,
   },
   page4Title: {
     marginTop: 10,
@@ -1195,47 +1211,11 @@ const styles = StyleSheet.create({
     paddingBottom: 36,
     flex: 1,
   },
-  photoDateLocRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  photoDate: {
-    fontSize: 11,
-    color: MUTED,
-    letterSpacing: 0.3,
-    flexShrink: 0,
-  },
-  photoLocationBook: {
-    fontSize: 11,
-    color: MUTED,
-    textAlign: 'right',
-    flex: 1,
-    letterSpacing: 0.2,
-  },
   photoCaption: {
     marginTop: 6,
     fontSize: 17,
     color: INK,
     textAlign: 'justify' as const,
-  },
-  noteMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  noteMeta: {
-    fontSize: 11,
-    color: MUTED,
-    flexShrink: 0,
-  },
-  noteMetaLocation: {
-    fontSize: 11,
-    color: MUTED,
-    textAlign: 'right',
-    flex: 1,
   },
   noteTitle: {
     marginTop: 8,
