@@ -1,6 +1,7 @@
 import type { Memory } from '@/types/local';
 import { extractMediaBucketPath } from '@/lib/mediaSignedUrl';
 import { peekFeedBootstrapDisplayUrls } from '@/services/feedLocalPhotoCache';
+import { isProbablyStalePetitmoSandboxPath } from '@/utils/localMediaReadable';
 
 function asTrimmedStringArray(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
@@ -46,18 +47,27 @@ export function getPrimaryPhotoUriForBookPreview(memory: Memory): string {
   const boot = peekFeedBootstrapDisplayUrls(memory.id)?.[0]?.trim();
   if (boot) return boot;
 
-  return firstNonEmpty(
+  const localPick = firstNonEmpty(
     memory.local_display_path,
     memory.local_thumb_path,
     memory.local_print_path,
     memory.local_original_path,
     memory.local_media_path,
-    memory.display_url,
+  );
+  const remotePick = firstNonEmpty(
     memory.thumb_url,
+    memory.display_url,
     memory.print_url,
     memory.edited_media_url,
-    memory.media_url
+    memory.media_url,
+    typeof memory.media_path === 'string' ? memory.media_path : '',
   );
+  const ghostLocal = !!localPick.trim() && isProbablyStalePetitmoSandboxPath(localPick);
+  const raw =
+    ghostLocal && remotePick.trim()
+      ? remotePick.trim()
+      : localPick.trim() || remotePick.trim();
+  return raw ? normalizeMemoryMediaUriForDisplay(raw) : '';
 }
 
 /** Photo de fond d’un vocal : chemin local (sandbox) si présent, sinon URL publique. */
@@ -67,12 +77,18 @@ export function getVoiceCoverUriForBookPreview(memory: Memory): string {
 
 /** Vignette / poster vidéo pour la maquette : dérivé local éventuel, puis URLs. */
 export function getVideoPosterUriForBookPreview(memory: Memory): string {
-  return firstNonEmpty(
-    memory.local_thumb_path,
+  const localPick = firstNonEmpty(memory.local_thumb_path);
+  const remotePick = firstNonEmpty(
     memory.poster_url,
     memory.poster_print_url,
-    memory.thumbnail_url
+    memory.thumbnail_url,
   );
+  const ghostLocal = !!localPick.trim() && isProbablyStalePetitmoSandboxPath(localPick);
+  const raw =
+    ghostLocal && remotePick.trim()
+      ? remotePick.trim()
+      : localPick.trim() || remotePick.trim();
+  return raw.trim();
 }
 
 /** Toutes les URLs d’un souvenir photo (1ère = version éditée si présente, puis `extra_photo_urls`). */
@@ -117,6 +133,36 @@ export function getAllPhotoUrlsForFeed(memory: Memory): string[] {
   const cleaned: string[] = [];
   for (let i = 0; i < max; i++) {
     const raw = firstNonEmpty(localExtras[i], thumbs[i], displays[i], originals[i]);
+    if (raw) cleaned.push(normalizeMemoryMediaUriForDisplay(raw));
+  }
+
+  return [first, ...cleaned].filter(u => u.length > 0);
+}
+
+/**
+ * Comme `getAllPhotoUrlsForFeed` mais **sans** colonnes `local_*` ni entrées `extra_photo_paths`
+ * avant thumb/display/originals — pour repli cloud quand les fichiers sandbox sont morts (réinstall).
+ */
+export function getAllPhotoUrlsForFeedRemoteOnly(memory: Memory): string[] {
+  const firstRemote = firstNonEmpty(
+    memory.thumb_url,
+    memory.display_url,
+    memory.print_url,
+    memory.edited_media_url,
+    memory.media_url,
+    typeof memory.media_path === 'string' ? memory.media_path : '',
+  );
+  const first = firstRemote ? normalizeMemoryMediaUriForDisplay(firstRemote) : '';
+
+  const thumbs = asTrimmedStringArray(memory.extra_thumb_urls);
+  const displays = asTrimmedStringArray(memory.extra_display_urls);
+  const originals = asTrimmedStringArray(memory.extra_photo_urls);
+  const paths = asTrimmedStringArray(memory.extra_photo_paths);
+
+  const max = Math.max(thumbs.length, displays.length, originals.length, paths.length);
+  const cleaned: string[] = [];
+  for (let i = 0; i < max; i++) {
+    const raw = firstNonEmpty(thumbs[i], displays[i], originals[i], paths[i]);
     if (raw) cleaned.push(normalizeMemoryMediaUriForDisplay(raw));
   }
 

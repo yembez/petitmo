@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import type { Memory } from '@/types/local';
-import { getAllPhotoUrlsForFeed } from '@/utils/memoryPhotos';
+import { getAllPhotoUrlsForFeed, getAllPhotoUrlsForFeedRemoteOnly } from '@/utils/memoryPhotos';
+import { isLocalMediaUriReadable } from '@/utils/localMediaReadable';
 import {
   getFeedLocalThumbnail,
   peekFeedBootstrapDisplayUrls,
@@ -91,11 +92,34 @@ export function useFeedPhotoDisplayUrls(memory: Memory): string[] {
       const locals = await Promise.all(localPromises);
       if (!alive) return;
 
-      const toPrime: string[] = [];
+      const localsVerified: string[] = [];
+      for (let i = 0; i < locals.length; i++) {
+        const L = locals[i]?.trim() || '';
+        if (!L || Platform.OS === 'web') {
+          localsVerified.push('');
+          continue;
+        }
+        localsVerified.push((await isLocalMediaUriReadable(L)) ? L : '');
+      }
+      if (!alive) return;
+
+      const remoteOnly = getAllPhotoUrlsForFeedRemoteOnly(memory);
+      const resolvedRaw: string[] = [];
       for (let i = 0; i < remRaw.length; i++) {
-        const raw = remRaw[i]?.trim() || '';
+        let raw = remRaw[i]?.trim() || '';
+        if (raw && isLikelyDeviceLocalAsset(raw)) {
+          const ok = await isLocalMediaUriReadable(raw);
+          if (!ok) raw = (remoteOnly[i]?.trim() ?? '').trim();
+        }
+        resolvedRaw.push(raw);
+      }
+      if (!alive) return;
+
+      const toPrime: string[] = [];
+      for (let i = 0; i < resolvedRaw.length; i++) {
+        const raw = resolvedRaw[i]?.trim() || '';
         if (!raw) continue;
-        if (locals[i] && Platform.OS !== 'web') continue;
+        if (localsVerified[i] && Platform.OS !== 'web') continue;
         if (isLikelyDeviceLocalAsset(raw)) continue;
         if (isHttpUrl(raw) || extractMediaBucketPath(raw)) {
           toPrime.push(raw);
@@ -105,13 +129,13 @@ export function useFeedPhotoDisplayUrls(memory: Memory): string[] {
       if (!alive) return;
 
       const rem: string[] = [];
-      for (let i = 0; i < remRaw.length; i++) {
-        const raw = remRaw[i]?.trim() || '';
+      for (let i = 0; i < resolvedRaw.length; i++) {
+        const raw = resolvedRaw[i]?.trim() || '';
         if (!raw) {
           rem.push('');
           continue;
         }
-        if (locals[i] && Platform.OS !== 'web') {
+        if (localsVerified[i] && Platform.OS !== 'web') {
           rem.push('');
           continue;
         }
@@ -122,7 +146,7 @@ export function useFeedPhotoDisplayUrls(memory: Memory): string[] {
       const slots: { remote: string; local: string }[] = [];
       for (let i = 0; i < maxProbe; i++) {
         const remote = (rem[i]?.trim() || '') || '';
-        const local = (locals[i]?.trim() || '') || '';
+        const local = (localsVerified[i]?.trim() || '') || '';
         slots.push({ remote, local });
       }
       if (!alive) return;
