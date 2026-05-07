@@ -4,7 +4,6 @@ import {
   View,
   Text,
   StyleSheet,
-  Image,
   Pressable,
   ActivityIndicator,
   Platform,
@@ -46,8 +45,11 @@ import {
 } from '@/services/tabScreensCache';
 import type { Memory } from '@/types/local';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
+import { Image as ExpoImage } from 'expo-image';
 import {
   getAllPhotoUrls,
+  getAllPhotoUrlsForFeed,
+  getAllPhotoUrlsForFeedRemoteOnly,
   parseFavoritePhotoUrls,
   normalizePhotoUrlForCompare,
   mapPhotoUrlToThumb,
@@ -55,6 +57,7 @@ import {
   getVoiceCoverUriForBookPreview,
   getVideoPosterUriForBookPreview,
 } from '@/utils/memoryPhotos';
+import { useFeedPhotoDisplayUrls } from '@/hooks/useFeedPhotoDisplayUrls';
 import { AddToBookModal } from '@/components/AddToBookModal';
 
 type FavListItem = {
@@ -62,11 +65,47 @@ type FavListItem = {
   memory: Memory;
   thumbUrl: string;
   kind: 'whole' | 'photo';
+  /** Pour `kind === 'photo'` : URL originale dans `favorite_photo_urls` (alignement index avec le fil). */
+  favPhotoOriginalUrl?: string;
 };
 
+function thumbUri(m: Memory): string | null {
+  if (m.type === 'voice') {
+    const u = getVoiceCoverUriForBookPreview(m);
+    return u.trim() || null;
+  }
+  if (m.type === 'video') {
+    const u = getVideoPosterUriForBookPreview(m);
+    return u.trim() || null;
+  }
+  return null;
+}
+
+/** Identique à `FilMemoryRow` : vignette vidéo dans le fil. */
+function feedVideoPosterRaw(memory: Memory): string {
+  return (memory.poster_url?.trim() || memory.thumbnail_url?.trim() || '') || '';
+}
+
+/** Identique à `FilMemoryRow` : cover vocale dans le fil. */
+function feedVoiceCoverRaw(memory: Memory): string {
+  return (memory.voice_cover_path ?? memory.voice_cover_url ?? '').trim();
+}
+
 function primaryDisplayThumb(m: Memory): string {
-  // Aligné sur le fil : dérivés + sandbox fantôme → URLs bucket (`pickPrimary*` / posters / covers).
-  if (m.type === 'photo') return pickPrimaryPhotoNormalizedForFeedAndViewer(m);
+  // Même donnée affichable que le fil : distant d’abord pour les photos (SQLite peut encore pointer vers un fichier sandbox mort).
+  if (m.type === 'photo') {
+    const fromRemote = getAllPhotoUrlsForFeedRemoteOnly(m)[0]?.trim();
+    if (fromRemote) return fromRemote;
+    return pickPrimaryPhotoNormalizedForFeedAndViewer(m);
+  }
+  if (m.type === 'video') {
+    const v = feedVideoPosterRaw(m);
+    if (v) return v;
+  }
+  if (m.type === 'voice') {
+    const c = feedVoiceCoverRaw(m);
+    if (c) return c;
+  }
   return thumbUri(m) ?? '';
 }
 
@@ -94,6 +133,7 @@ function buildFavoriteItems(memories: Memory[]): FavListItem[] {
           memory: m,
           thumbUrl: mapPhotoUrlToThumb(m, url),
           kind: 'photo',
+          favPhotoOriginalUrl: url,
         });
       }
     }
@@ -103,17 +143,49 @@ function buildFavoriteItems(memories: Memory[]): FavListItem[] {
   );
 }
 
-/** URLs pour le diaporama (médias avec image uniquement, pas les cartes texte). */
-function buildSlideshowUrls(items: FavListItem[]): string[] {
-  const out: string[] = [];
+/** Items pour le diaporama (médias avec une vignette possible ; les photos résolvent comme le fil). */
+function buildSlideshowItems(items: FavListItem[]): FavListItem[] {
+  const out: FavListItem[] = [];
   for (const it of items) {
-    const u = it.thumbUrl.trim();
-    if (!u) continue;
     const t = it.memory.type;
     if (t !== 'photo' && t !== 'video' && t !== 'voice') continue;
-    out.push(u);
+    if (t === 'photo') {
+      out.push(it);
+      continue;
+    }
+    if (t === 'video') {
+      if (feedVideoPosterRaw(it.memory) || it.thumbUrl.trim()) out.push(it);
+      continue;
+    }
+    if (t === 'voice') {
+      if (feedVoiceCoverRaw(it.memory) || it.thumbUrl.trim()) out.push(it);
+      continue;
+    }
   }
   return out;
+}
+
+/** URL brute pour une slide : même pipeline que `useFeedPhotoDisplayUrls` (fichier mort → distant). */
+function slideshowSlideRawUri(item: FavListItem, feedUrls: string[]): string {
+  const memory = item.memory;
+  if (memory.type === 'photo') {
+    if (item.kind === 'photo' && item.favPhotoOriginalUrl) {
+      const slots = getAllPhotoUrlsForFeed(memory);
+      const fav = item.favPhotoOriginalUrl;
+      const idx = slots.findIndex(
+        u => normalizePhotoUrlForCompare(u) === normalizePhotoUrlForCompare(fav)
+      );
+      return ((idx >= 0 ? feedUrls[idx] : '') ?? '').trim() || item.thumbUrl.trim();
+    }
+    return feedUrls[0]?.trim() || item.thumbUrl.trim();
+  }
+  if (memory.type === 'video') {
+    return feedVideoPosterRaw(memory) || item.thumbUrl.trim();
+  }
+  if (memory.type === 'voice') {
+    return feedVoiceCoverRaw(memory) || item.thumbUrl.trim();
+  }
+  return item.thumbUrl.trim();
 }
 
 /** Extrait sous les vignettes photo / vidéo (premiers mots, même annotation que le souvenir). */
@@ -146,29 +218,49 @@ const FAVORIS_TOP_GRADIENT_COLORS: [string, string, string] = [
 ];
 const FAVORIS_TOP_GRADIENT_LOCATIONS: [number, number, number] = [0, 0.42, 1];
 
-/** Diaporama : chemins bucket → URLs signées comme dans le fil. */
-function SlideshowSignedLayer({
-  rawUri,
+/** Une slide du diaporama : même chaîne que le fil (`PhotoMosaic` + `FilMemoryRow`). */
+function SlideshowSlideImage({
+  item,
   onLoad,
 }: {
-  rawUri: string;
+  item: FavListItem;
   onLoad: () => void;
 }) {
-  const signed = useSignedMediaUrl(rawUri.trim() || null);
-  const uri = (signed ?? rawUri).trim();
+  const memory = item.memory;
+  const feedUrls = useFeedPhotoDisplayUrls(memory);
+
+  const rawPhoto =
+    memory.type === 'photo' ? slideshowSlideRawUri(item, feedUrls).trim() : '';
+  const rawVideo =
+    memory.type === 'video' ? (feedVideoPosterRaw(memory) || item.thumbUrl.trim()).trim() : '';
+  const rawVoice =
+    memory.type === 'voice' ? (feedVoiceCoverRaw(memory) || item.thumbUrl.trim()).trim() : '';
+
+  const signedVideo = useSignedMediaUrl(memory.type === 'video' ? rawVideo || null : null);
+  const signedVoice = useSignedMediaUrl(memory.type === 'voice' ? rawVoice || null : null);
+
+  const uri =
+    memory.type === 'photo'
+      ? rawPhoto
+      : memory.type === 'video'
+        ? (signedVideo ?? rawVideo).trim()
+        : memory.type === 'voice'
+          ? (signedVoice ?? rawVoice).trim()
+          : '';
 
   useEffect(() => {
     if (!uri) return;
-    void Image.prefetch(uri).catch(() => {});
+    void ExpoImage.prefetch(uri).catch(() => {});
   }, [uri]);
 
   if (!uri) return null;
   return (
-    <Image
-      key={uri}
+    <ExpoImage
+      key={`${item.key}|${uri}`}
       source={{ uri }}
       style={StyleSheet.absoluteFillObject}
-      resizeMode="cover"
+      contentFit="cover"
+      cachePolicy="disk"
       onLoad={onLoad}
     />
   );
@@ -176,16 +268,16 @@ function SlideshowSignedLayer({
 
 /** Diaporama : double calque — l’image visible reste à l’écran pendant que la suivante se charge en dessous (pas d’écran noir). */
 function FavorisSlideshow({
-  urls,
+  items,
   height,
   isActive,
 }: {
-  urls: string[];
+  items: FavListItem[];
   height: number;
   isActive: boolean;
 }) {
-  const n = urls.length;
-  const urlsKey = useMemo(() => urls.join('\0'), [urls]);
+  const n = items.length;
+  const itemsKey = useMemo(() => items.map(i => i.key).join('\0'), [items]);
   const [visibleIdx, setVisibleIdx] = useState(0);
   /** Couche au premier plan (opaque) ; l’autre précharge la photo suivante sous opacity 0. */
   const [topLayer, setTopLayer] = useState<0 | 1>(0);
@@ -197,26 +289,26 @@ function FavorisSlideshow({
   const readyRef = useRef<[boolean, boolean]>([false, false]);
   const pendingAdvanceRef = useRef(false);
 
-  const layer0Uri =
-    n <= 1 ? (urls[0] ?? '') : topLayer === 0 ? (urls[visibleIdx] ?? '') : (urls[(visibleIdx + 1) % n] ?? '');
-  const layer1Uri =
+  const layer0Item: FavListItem | null =
+    n <= 1 ? (items[0] ?? null) : topLayer === 0 ? items[visibleIdx] ?? null : items[(visibleIdx + 1) % n] ?? null;
+  const layer1Item: FavListItem | null =
     n <= 1
-      ? ''
+      ? null
       : topLayer === 1
-        ? (urls[visibleIdx] ?? '')
-        : (urls[(visibleIdx + 1) % n] ?? '');
+        ? items[visibleIdx] ?? null
+        : items[(visibleIdx + 1) % n] ?? null;
 
   useEffect(() => {
     readyRef.current[0] = false;
     readyRef.current[1] = false;
-  }, [layer0Uri, layer1Uri]);
+  }, [layer0Item?.key, layer1Item?.key]);
 
   useEffect(() => {
     if (isActive && n > 0) {
       setVisibleIdx(0);
       setTopLayer(0);
     }
-  }, [isActive, n, urlsKey]);
+  }, [isActive, n, itemsKey]);
 
   useEffect(() => {
     if (!isActive || n === 0) {
@@ -248,7 +340,7 @@ function FavorisSlideshow({
     });
     cancelAnimation(sBack);
     sBack.value = SLIDESHOW_ZOOM_START;
-  }, [isActive, n, topLayer, visibleIdx, urlsKey, scale0, scale1]);
+  }, [isActive, n, topLayer, visibleIdx, itemsKey, scale0, scale1]);
 
   const tryAdvance = useCallback(() => {
     if (n <= 1) return;
@@ -314,9 +406,9 @@ function FavorisSlideshow({
         ]}
         pointerEvents="none"
       >
-        {layer0Uri ? (
-          <SlideshowSignedLayer
-            rawUri={layer0Uri}
+        {layer0Item ? (
+          <SlideshowSlideImage
+            item={layer0Item}
             onLoad={n === 1 ? onSingleImageLoad : onLayer0Load}
           />
         ) : null}
@@ -333,9 +425,7 @@ function FavorisSlideshow({
           ]}
           pointerEvents="none"
         >
-          {layer1Uri ? (
-            <SlideshowSignedLayer rawUri={layer1Uri} onLoad={onLayer1Load} />
-          ) : null}
+          {layer1Item ? <SlideshowSlideImage item={layer1Item} onLoad={onLayer1Load} /> : null}
         </Reanimated.View>
       ) : null}
     </View>
@@ -344,7 +434,7 @@ function FavorisSlideshow({
 
 type HeroListHeaderProps = {
   scrollY: SharedValue<number>;
-  urls: string[];
+  slideshowItems: FavListItem[];
   heroHeight: number;
   heroBaseH: number;
   heroGradientHeight: number;
@@ -362,7 +452,7 @@ type HeroListHeaderProps = {
  */
 function HeroListHeader({
   scrollY,
-  urls,
+  slideshowItems,
   heroHeight,
   heroBaseH,
   heroGradientHeight,
@@ -406,13 +496,13 @@ function HeroListHeader({
     };
   });
 
-  if (heroHeight < 2 || urls.length === 0) return null;
+  if (heroHeight < 2 || slideshowItems.length === 0) return null;
 
   return (
     <View style={styles.heroHeaderStack}>
       <View style={[styles.heroColumn, { height: heroHeight }]}>
         <Reanimated.View style={[styles.heroSlideshowLayer, imageMotionStyle]}>
-          <FavorisSlideshow urls={urls} height={heroHeight} isActive={heroHeight > 8} />
+          <FavorisSlideshow items={slideshowItems} height={heroHeight} isActive={heroHeight > 8} />
         </Reanimated.View>
         {!selectionMode ? (
           <Reanimated.View style={[StyleSheet.absoluteFill, { zIndex: 14 }, titleFadeStyle]} pointerEvents="none">
@@ -675,18 +765,6 @@ function TypeGlyph({ type }: { type: Memory['type'] }) {
   }
 }
 
-function thumbUri(m: Memory): string | null {
-  if (m.type === 'voice') {
-    const u = getVoiceCoverUriForBookPreview(m);
-    return u.trim() || null;
-  }
-  if (m.type === 'video') {
-    const u = getVideoPosterUriForBookPreview(m);
-    return u.trim() || null;
-  }
-  return null;
-}
-
 type GalleryTileProps = {
   item: FavListItem;
   tileSize: number;
@@ -700,10 +778,18 @@ type GalleryTileProps = {
 function galleryTilePropsEqual(a: GalleryTileProps, b: GalleryTileProps): boolean {
   return (
     a.item.key === b.item.key &&
+    a.item.kind === b.item.kind &&
+    a.item.favPhotoOriginalUrl === b.item.favPhotoOriginalUrl &&
     a.item.thumbUrl === b.item.thumbUrl &&
     a.item.memory.id === b.item.memory.id &&
     a.item.memory.type === b.item.memory.type &&
     a.item.memory.content === b.item.memory.content &&
+    a.item.memory.thumb_url === b.item.memory.thumb_url &&
+    a.item.memory.display_url === b.item.memory.display_url &&
+    a.item.memory.poster_url === b.item.memory.poster_url &&
+    a.item.memory.thumbnail_url === b.item.memory.thumbnail_url &&
+    a.item.memory.voice_cover_url === b.item.memory.voice_cover_url &&
+    (a.item.memory.voice_cover_path ?? '') === (b.item.memory.voice_cover_path ?? '') &&
     a.tileSize === b.tileSize &&
     a.fontsLoaded === b.fontsLoaded &&
     a.selectionMode === b.selectionMode &&
@@ -723,9 +809,49 @@ const GalleryTile = memo(function GalleryTile({
   onToggleSelect,
 }: GalleryTileProps) {
   const { memory, thumbUrl } = item;
-  const rawThumb = thumbUrl.trim() || thumbUri(memory) || '';
-  const signedThumb = useSignedMediaUrl(rawThumb || null);
-  const uri = (signedThumb ?? rawThumb).trim();
+  const feedPhotoUrls = useFeedPhotoDisplayUrls(memory);
+
+  let photoUri = '';
+  if (memory.type === 'photo') {
+    if (item.kind === 'photo' && item.favPhotoOriginalUrl) {
+      const slots = getAllPhotoUrlsForFeed(memory);
+      const fav = item.favPhotoOriginalUrl;
+      const idx = slots.findIndex(
+        u => normalizePhotoUrlForCompare(u) === normalizePhotoUrlForCompare(fav)
+      );
+      photoUri = ((idx >= 0 ? feedPhotoUrls[idx] : '') ?? '').trim() || thumbUrl.trim();
+    } else {
+      photoUri = feedPhotoUrls[0]?.trim() || thumbUrl.trim();
+    }
+  }
+
+  const videoPosterRaw = memory.type === 'video' ? feedVideoPosterRaw(memory) : '';
+  const voiceCoverRaw = memory.type === 'voice' ? feedVoiceCoverRaw(memory) : '';
+
+  const videoPosterSigned = useSignedMediaUrl(memory.type === 'video' ? videoPosterRaw || null : null);
+  const voiceCoverSigned = useSignedMediaUrl(memory.type === 'voice' ? voiceCoverRaw || null : null);
+
+  const videoPosterUri =
+    memory.type === 'video' ? (videoPosterSigned ?? videoPosterRaw).trim() : '';
+  const voiceCoverUri =
+    memory.type === 'voice' ? (voiceCoverSigned ?? voiceCoverRaw).trim() : '';
+
+  /** Comme `PhotoMosaic` / `FilMemoryRow` : pas de seconde signature sur les URLs déjà résolues par le hook photo. */
+  const uri =
+    memory.type === 'photo'
+      ? photoUri
+      : memory.type === 'video'
+        ? videoPosterUri
+        : memory.type === 'voice'
+          ? voiceCoverUri
+          : thumbUrl.trim();
+
+  const showRasterThumb =
+    !!uri &&
+    (memory.type === 'photo' ||
+      memory.type === 'video' ||
+      memory.type === 'voice');
+
   const isMedia = memory.type === 'photo' || memory.type === 'video';
   const isText = memory.type === 'text';
   const isAudio = memory.type === 'voice';
@@ -769,9 +895,15 @@ const GalleryTile = memo(function GalleryTile({
       }
     >
       <Reanimated.View style={[styles.galleryTileInner, animStyle]}>
-        {isMedia && uri ? (
+        {isMedia && showRasterThumb ? (
           <>
-            <Image source={{ uri }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+            <ExpoImage
+              source={{ uri }}
+              style={StyleSheet.absoluteFillObject}
+              contentFit="cover"
+              cachePolicy="disk"
+              recyclingKey={`${item.key}|${memory.type}|${uri.slice(0, 120)}`}
+            />
             {tileCaptionSnippet ? (
               <View
                 style={[
@@ -805,9 +937,15 @@ const GalleryTile = memo(function GalleryTile({
           </>
         ) : isAudio ? (
           <View style={styles.audioThumb}>
-            {uri ? (
+            {showRasterThumb ? (
               <>
-                <Image source={{ uri }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+                <ExpoImage
+                  source={{ uri }}
+                  style={StyleSheet.absoluteFillObject}
+                  contentFit="cover"
+                  cachePolicy="disk"
+                  recyclingKey={`${item.key}|voice|${uri.slice(0, 120)}`}
+                />
                 <View style={styles.audioThumbScrim} pointerEvents="none" />
               </>
             ) : null}
@@ -979,14 +1117,14 @@ export default function FavorisScreen() {
     return [...ids];
   }, [galleryItems, selectedIds]);
 
-  const slideshowUrls = useMemo(() => buildSlideshowUrls(galleryItems), [galleryItems]);
+  const slideshowItems = useMemo(() => buildSlideshowItems(galleryItems), [galleryItems]);
 
   useEffect(() => {
-    if (slideshowUrls.length === 0) {
+    if (slideshowItems.length === 0) {
       slideshowStickyChromeRef.current = false;
       setSlideshowStickyChrome(false);
     }
-  }, [slideshowUrls.length]);
+  }, [slideshowItems.length]);
 
   /** Icônes claires sur le hero sombre : seulement quand cet onglet est au premier plan (pas sous memory-view / autre stack). */
   useEffect(() => {
@@ -997,9 +1135,9 @@ export default function FavorisScreen() {
   const columns = 3;
   const gridGap = GALLERY_TILE_GAP;
   const tileSize = Math.floor((SCREEN_W - gridGap * (columns - 1)) / columns);
-  const heroBaseH = slideshowUrls.length > 0 ? SCREEN_H * HERO_BASE_RATIO : 0;
+  const heroBaseH = slideshowItems.length > 0 ? SCREEN_H * HERO_BASE_RATIO : 0;
   const heroBonusH =
-    slideshowUrls.length > 0
+    slideshowItems.length > 0
       ? (Math.min(pullOverscrollPx, SLIDESHOW_PULL_MAX_PX) / SLIDESHOW_PULL_MAX_PX) *
         (SCREEN_H * HERO_BONUS_RATIO)
       : 0;
@@ -1035,11 +1173,11 @@ export default function FavorisScreen() {
   );
 
   const favoritesListHeader = useMemo(() => {
-    if (slideshowUrls.length === 0) return null;
+    if (slideshowItems.length === 0) return null;
     return (
       <HeroListHeader
         scrollY={galleryScrollY}
-        urls={slideshowUrls}
+        slideshowItems={slideshowItems}
         heroHeight={heroHeight}
         heroBaseH={heroBaseH}
         heroGradientHeight={heroGradientHeight}
@@ -1051,7 +1189,7 @@ export default function FavorisScreen() {
       />
     );
   }, [
-    slideshowUrls,
+    slideshowItems,
     heroHeight,
     heroBaseH,
     heroGradientHeight,
@@ -1122,7 +1260,7 @@ export default function FavorisScreen() {
                   setPullOverscrollPx(
                     y < 0 ? Math.min(-y, SLIDESHOW_PULL_MAX_PX) : 0
                   );
-                  if (slideshowUrls.length > 0 && heroBaseH > 1e-6) {
+                  if (slideshowItems.length > 0 && heroBaseH > 1e-6) {
                     const past =
                       y > heroBaseH * STICKY_CHROME_SCROLL_THRESHOLD_RATIO;
                     if (past !== slideshowStickyChromeRef.current) {
@@ -1136,7 +1274,7 @@ export default function FavorisScreen() {
                 })}
               />
 
-              {slideshowUrls.length > 0 && galleryItems.length > 0 ? (
+              {slideshowItems.length > 0 && galleryItems.length > 0 ? (
                 <FavorisStickyGalleryChrome
                   scrollY={galleryScrollY}
                   heroBaseH={heroBaseH}
@@ -1150,7 +1288,7 @@ export default function FavorisScreen() {
                 />
               ) : null}
 
-              {slideshowUrls.length === 0 && galleryItems.length > 0 ? (
+              {slideshowItems.length === 0 && galleryItems.length > 0 ? (
                 <View style={[styles.topChrome, styles.topChromeFloatingGradient]} pointerEvents="box-none">
                   <View
                     style={[styles.stickyChromeInner, { minHeight: heroGradientHeight }]}

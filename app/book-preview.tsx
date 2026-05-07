@@ -510,46 +510,25 @@ export default function BookPreviewScreen() {
     [bookMemories, getImagePx]
   );
 
-  useEffect(() => {
+  const unlockOrientationPortrait = useCallback(() => {
     void (async () => {
       try {
-        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.ALL);
+        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
       } catch {
         /* */
       }
     })();
-    return () => {
-      void (async () => {
-        try {
-          await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-        } catch {
-          /* */
-        }
-      })();
-    };
   }, []);
 
   const unlockAndBack = useCallback(() => {
-    void (async () => {
-      try {
-        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-      } catch {
-        /* */
-      }
-      router.replace('/(tabs)/livres');
-    })();
-  }, [router]);
+    unlockOrientationPortrait();
+    router.replace('/(tabs)/livres');
+  }, [router, unlockOrientationPortrait]);
 
   const unlockAndGoToFavoris = useCallback(() => {
-    void (async () => {
-      try {
-        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-      } catch {
-        /* */
-      }
-      router.replace('/(tabs)/favoris');
-    })();
-  }, [router]);
+    unlockOrientationPortrait();
+    router.replace('/(tabs)/favoris');
+  }, [router, unlockOrientationPortrait]);
 
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {

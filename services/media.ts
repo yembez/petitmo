@@ -47,6 +47,7 @@ import {
 } from '@/lib/localDb';
 import { captureMemoryLocalOnly, capturePhotoAlbumLocalOnly } from '@/services/localOnlyMemoryCapture';
 import { getSignedUrlAfterMediaUpload } from '@/lib/mediaSignedUrl';
+import { isLocalMediaUriReadable } from '@/utils/localMediaReadable';
 
 export type MemoryRow = Memory;
 
@@ -1025,6 +1026,7 @@ export async function resumePetitmoPlusCloudCaptureOrMerge(
   if (memory.type === 'photo') {
     const src = (memory.local_original_path ?? memory.local_media_path ?? '').trim();
     if (!src) return false;
+    if (Platform.OS !== 'web' && !(await isLocalMediaUriReadable(src))) return false;
     await syncCloudPhotoMemoryInBackground({
       memoryId: memory.id,
       childId: memory.child_id,
@@ -1040,6 +1042,7 @@ export async function resumePetitmoPlusCloudCaptureOrMerge(
   if (memory.type === 'video') {
     const src = (memory.local_original_path ?? memory.local_media_path ?? '').trim();
     if (!src) return false;
+    if (Platform.OS !== 'web' && !(await isLocalMediaUriReadable(src))) return false;
     await syncCloudVideoMemoryInBackground({
       memoryId: memory.id,
       childId: memory.child_id,
@@ -1058,6 +1061,7 @@ export async function resumePetitmoPlusCloudCaptureOrMerge(
   if (memory.type === 'voice') {
     const src = (memory.local_original_path ?? memory.local_media_path ?? '').trim();
     if (!src) return false;
+    if (Platform.OS !== 'web' && !(await isLocalMediaUriReadable(src))) return false;
     const coverRaw = (memory.voice_cover_path ?? memory.voice_cover_url ?? '').trim();
     const coverLocal =
       coverRaw && !/^https?:\/\//i.test(coverRaw) ? coverRaw : null;

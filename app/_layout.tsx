@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Stack } from 'expo-router';
+import { Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import {
   View,
@@ -41,17 +41,25 @@ import { flushPendingCloudUploadsOnce } from '@/services/pendingCloudFlush';
 export default function RootLayout() {
   useFrameworkReady();
   const [isAuthReady, setIsAuthReady] = useState(false);
+  const pathname = usePathname();
 
-  // Orientation globale: portrait (sauf écrans spécifiques qui unlock).
+  /** Portrait partout sauf prévisualisation livre (paysage au pivot). Évite la course avec `book-preview` : une seule source selon la route. */
   useEffect(() => {
+    if (!isAuthReady) return;
     void (async () => {
       try {
-        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+        const bookViewer = pathname.includes('book-preview');
+        if (bookViewer) {
+          await ScreenOrientation.unlockAsync();
+          await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.ALL);
+        } else {
+          await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+        }
       } catch {
         /* ignore */
       }
     })();
-  }, []);
+  }, [isAuthReady, pathname]);
 
   useEffect(() => {
     initLocalDb();
