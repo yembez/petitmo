@@ -182,6 +182,7 @@ function memoryToGuestPayload(m: Memory): GuestMemoryForPdfPayload {
     id: m.id,
     type: m.type,
     content: m.content ?? null,
+    location: m.location ?? null,
     media_url: m.media_url ?? null,
     media_path: m.media_path ?? null,
     edited_media_url: m.edited_media_url ?? null,

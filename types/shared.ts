@@ -30,6 +30,8 @@ export type GuestMemoryForPdfPayload = {
   id: string;
   type: 'voice' | 'video' | 'photo' | 'text';
   content?: string | null;
+  /** Lieu brut (optionnel) affiché si présent dans le livre. */
+  location?: string | null;
   media_url?: string | null;
   media_path?: string | null;
   edited_media_url?: string | null;
