@@ -17,7 +17,7 @@ function firstNonEmpty(...candidates: (string | null | undefined)[]): string {
   return '';
 }
 
-/** URI affichable pour Image / expo-image (chemins sandbox → `file://`). */
+/** URI pour composants Image : `file://` pour fichiers disque, laisse tel quel HTTP et chemins bucket signables. */
 function normalizeMemoryMediaUriForDisplay(u: string): string {
   const t = u.trim();
   if (!t) return '';
@@ -31,6 +31,8 @@ function normalizeMemoryMediaUriForDisplay(u: string): string {
   ) {
     return t;
   }
+  // Chemin objet Storage (`uuid/.../photo/...`) — pas un fichier local ; évite `file://` incorrect après réinstall.
+  if (extractMediaBucketPath(t)) return t;
   const path = t.startsWith('/') ? t : `/${t}`;
   return `file://${path}`;
 }
@@ -100,6 +102,7 @@ export function getAllPhotoUrlsForFeed(memory: Memory): string[] {
     memory.display_url,
     memory.edited_media_url,
     memory.media_url,
+    typeof memory.media_path === 'string' ? memory.media_path : '',
   );
   const firstRaw = firstNonEmpty(firstLocal, firstRemote);
   const first = firstRaw ? normalizeMemoryMediaUriForDisplay(firstRaw) : '';
@@ -135,16 +138,18 @@ export function getAllPhotoUrlsForDisplay(memory: Memory): string[] {
       memory.display_url,
       memory.thumb_url,
       memory.edited_media_url,
-      memory.media_url
+      memory.media_url,
+      typeof memory.media_path === 'string' ? memory.media_path : '',
     ) || undefined;
 
   const displays = asTrimmedStringArray(memory.extra_display_urls);
   const thumbs = asTrimmedStringArray(memory.extra_thumb_urls);
   const originals = asTrimmedStringArray(memory.extra_photo_urls);
-  const max = Math.max(displays.length, thumbs.length, originals.length);
+  const paths = asTrimmedStringArray(memory.extra_photo_paths);
+  const max = Math.max(displays.length, thumbs.length, originals.length, paths.length);
   const rest: string[] = [];
   for (let i = 0; i < max; i++) {
-    const u = firstNonEmpty(displays[i], thumbs[i], originals[i]);
+    const u = firstNonEmpty(displays[i], thumbs[i], originals[i], paths[i]);
     if (u) rest.push(u);
   }
 
@@ -159,6 +164,7 @@ function photoVariantGroups(memory: Memory): string[][] {
     memory.thumb_url,
     memory.edited_media_url,
     memory.media_url,
+    typeof memory.media_path === 'string' ? memory.media_path : '',
   ]
     .filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
     .map(u => u.trim());
@@ -167,9 +173,10 @@ function photoVariantGroups(memory: Memory): string[][] {
   const displays = asTrimmedStringArray(memory.extra_display_urls);
   const thumbs = asTrimmedStringArray(memory.extra_thumb_urls);
   const originals = asTrimmedStringArray(memory.extra_photo_urls);
-  const n = Math.max(displays.length, thumbs.length, originals.length);
+  const paths = asTrimmedStringArray(memory.extra_photo_paths);
+  const n = Math.max(displays.length, thumbs.length, originals.length, paths.length);
   for (let i = 0; i < n; i++) {
-    const g = [displays[i], thumbs[i], originals[i]].filter(
+    const g = [displays[i], thumbs[i], originals[i], paths[i]].filter(
       (u): u is string => typeof u === 'string' && u.length > 0
     );
     if (g.length) groups.push(g);

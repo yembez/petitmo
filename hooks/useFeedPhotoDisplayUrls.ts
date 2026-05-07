@@ -7,7 +7,7 @@ import {
   peekFeedBootstrapDisplayUrls,
   takeFeedBootstrapDisplayUrls,
 } from '@/services/feedLocalPhotoCache';
-import { getSignedMediaDisplayUrl, primeSignedMediaDisplayUrls } from '@/lib/mediaSignedUrl';
+import { getSignedMediaDisplayUrl, primeSignedMediaDisplayUrls, extractMediaBucketPath } from '@/lib/mediaSignedUrl';
 
 function isHttpUrl(u: string): boolean {
   return /^https?:\/\//i.test(u.trim());
@@ -31,8 +31,11 @@ function isLikelyDeviceLocalAsset(u: string): boolean {
 
 async function resolveFeedSlotRemoteUrl(remote: string): Promise<string> {
   const r = remote.trim();
-  if (!r || !isHttpUrl(r) || isLikelyDeviceLocalAsset(r)) return r;
-  return getSignedMediaDisplayUrl(r);
+  if (!r || isLikelyDeviceLocalAsset(r)) return r;
+  if (isHttpUrl(r) || extractMediaBucketPath(r)) {
+    return getSignedMediaDisplayUrl(r);
+  }
+  return r;
 }
 
 function initialMergedForMemory(memory: Memory): string[] {
@@ -93,7 +96,8 @@ export function useFeedPhotoDisplayUrls(memory: Memory): string[] {
         const raw = remRaw[i]?.trim() || '';
         if (!raw) continue;
         if (locals[i] && Platform.OS !== 'web') continue;
-        if (isHttpUrl(raw) && !isLikelyDeviceLocalAsset(raw)) {
+        if (isLikelyDeviceLocalAsset(raw)) continue;
+        if (isHttpUrl(raw) || extractMediaBucketPath(raw)) {
           toPrime.push(raw);
         }
       }
@@ -172,6 +176,7 @@ export function useFeedPhotoDisplayUrls(memory: Memory): string[] {
     memory.extra_thumb_urls,
     memory.extra_display_urls,
     memory.extra_photo_urls,
+    memory.media_path,
   ]);
 
   return merged;

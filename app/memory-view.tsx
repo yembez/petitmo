@@ -214,16 +214,17 @@ export default function MemoryViewScreen() {
     if (!memory) return;
 
     let alive = true;
-    const signIfHttp = async (u: string) => {
+    /** HTTP Storage **et** chemins bucket `uuid/...` (réinstall : URLs parfois vides). */
+    const resolveDetailDisplayUri = async (u: string) => {
       const t = u.trim();
-      if (!t || !/^https?:\/\//i.test(t)) return t;
+      if (!t) return t;
       return getSignedMediaDisplayUrl(t);
     };
     void (async () => {
       const [mu, vp, ...rest] = await Promise.all([
-        signIfHttp(rawMu),
-        signIfHttp(rawVp),
-        ...rawPh.map(signIfHttp),
+        resolveDetailDisplayUri(rawMu),
+        resolveDetailDisplayUri(rawVp),
+        ...rawPh.map(resolveDetailDisplayUri),
       ]);
       if (!alive) return;
       setDisplayMediaUri(mu);

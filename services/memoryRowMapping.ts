@@ -12,6 +12,7 @@ export function inferUploadStatusFromRow(row: MemoryRowDb): UploadStatus {
   if (u === 'pending' || u === 'thumb_only' || u === 'print_only' || u === 'full') return u
   if (row.type === 'text') return 'full'
   if (row.media_url && String(row.media_url).trim() !== '') return 'full'
+  if (row.media_path && String(row.media_path).trim() !== '') return 'full'
   if (
     row.print_url &&
     String(row.print_url).trim() !== '' &&
