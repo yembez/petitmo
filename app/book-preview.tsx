@@ -60,6 +60,13 @@ const MAX_BOOK_SELECTION_KEYS = 80;
 
 type PageRow = { page: BookPage; pageNum: number };
 
+type SpreadRow = {
+  kind: 'spread';
+  spreadIndex: number;
+  left: PageRow | null;
+  right: PageRow | null;
+};
+
 type TextEditTarget =
   | { kind: 'cover'; modalTitle: string }
   | { kind: 'chapter'; modalTitle: string }
@@ -157,6 +164,15 @@ function pageLabel(current: number, total: number): string {
   return `Page ${current} · ${total} pages`;
 }
 
+function spreadLabel(row: SpreadRow, totalPages: number): string {
+  const l = row.left?.pageNum ?? null;
+  const r = row.right?.pageNum ?? null;
+  if (l && r) return `Pages ${l}–${r} · ${totalPages} pages`;
+  if (r) return `Page ${r} · ${totalPages} pages`;
+  if (l) return `Page ${l} · ${totalPages} pages`;
+  return `${totalPages} pages`;
+}
+
 
 export default function BookPreviewScreen() {
   const router = useRouter();
@@ -206,7 +222,7 @@ export default function BookPreviewScreen() {
     printMmH: number;
   } | null>(null);
 
-  const listRef = useRef<FlatList<PageRow>>(null);
+  const listRef = useRef<FlatList<any>>(null);
 
   const pages = useMemo(() => {
     if (!child) return [];
@@ -224,6 +240,61 @@ export default function BookPreviewScreen() {
     () => pages.map((page, i) => ({ page, pageNum: i + 1 })),
     [pages]
   );
+
+  const isLandscape = screenWidth > screenHeight;
+
+  /**
+   * Paysage: aperçu en doubles-pages (spreads) pour visualiser les voisinages.
+   * Étape A (safe): pas d’actions d’édition en paysage (sinon ambigu: page gauche ou droite ?).
+   *
+   * Règles:
+   * - Couverture seule à droite (gauche vide)
+   * - Quatrième de couverture seule à gauche (droite vide)
+   * - Entre les deux: paires (2–3), (4–5), etc. (gauche=page paire, droite=page impaire suivante)
+   */
+  const spreadRows = useMemo<SpreadRow[]>(() => {
+    if (!isLandscape) return [];
+    if (pageRows.length === 0) return [];
+
+    const out: SpreadRow[] = [];
+    const last = pageRows[pageRows.length - 1]!;
+    const hasBackCover = last.page.type === 'back-cover';
+    const backCover = hasBackCover ? last : null;
+
+    // Cover (page 1) seule à droite
+    out.push({ kind: 'spread', spreadIndex: 0, left: null, right: pageRows[0] ?? null });
+
+    // Paires au milieu, sans inclure la back-cover si elle existe.
+    const endExclusive = hasBackCover ? pageRows.length - 1 : pageRows.length;
+    for (let i = 1; i < endExclusive; i += 2) {
+      out.push({
+        kind: 'spread',
+        spreadIndex: out.length,
+        left: pageRows[i] ?? null,
+        right: pageRows[i + 1] ?? null,
+      });
+    }
+
+    // Back cover seule à gauche
+    if (backCover) {
+      out.push({
+        kind: 'spread',
+        spreadIndex: out.length,
+        left: backCover,
+        right: null,
+      });
+    }
+
+    return out;
+  }, [isLandscape, pageRows]);
+
+  const totalSlides = isLandscape ? spreadRows.length : pageRows.length;
+
+  // En cas de rotation / changement de data, borner l’index courant.
+  useEffect(() => {
+    if (totalSlides <= 0) return;
+    setCurrentPageIndex(prev => (prev >= totalSlides ? totalSlides - 1 : prev));
+  }, [totalSlides]);
 
   const coverYearLabel = useMemo(() => coverJournalPeriodLabel(bookMemories), [bookMemories]);
 
@@ -638,25 +709,131 @@ export default function BookPreviewScreen() {
     [availH, renderMaquettePage, screenWidth]
   );
 
-  const currentPage = pageRows[currentPageIndex]?.page;
+  const renderSpreadItem: ListRenderItem<SpreadRow> = useCallback(
+    ({ item }) => {
+      const gap = 12;
+      const pageW = Math.floor((screenWidth - gap) / 2);
+
+      const left = item.left;
+      const right = item.right;
+
+      return (
+        <View style={[styles.pageSlide, { width: screenWidth, height: availH }]}>
+          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+            <View style={{ width: pageW, height: availH }}>
+              {left ? (
+                <MaquetteBookPages
+                  page={left.page}
+                  pageNum={left.pageNum}
+                  width={pageW}
+                  height={availH}
+                  child={child!}
+                  memory={memoryForMaquette(left.page, merge)}
+                  rotation={(() => {
+                    const m = memoryForMaquette(left.page, merge);
+                    return m ? rotations[m.id] ?? 0 : 0;
+                  })()}
+                  photoCrop={(() => {
+                    const m = memoryForMaquette(left.page, merge);
+                    return m && (left.page.type === 'photo-full' || left.page.type === 'photo-note' || left.page.type === 'audio')
+                      ? photoCrops[m.id]
+                      : undefined;
+                  })()}
+                  truncated={false}
+                  coverYearLabel={coverYearLabel}
+                  coverDisplayTitle={left.page.type === 'cover' ? (coverTitleLine ?? `Journal de ${child!.name}`) : undefined}
+                  coverPhotoUri={left.page.type === 'cover' ? coverPhotoUrl : null}
+                  coverPhotoCrop={photoCrops.cover}
+                  chapterDisplayTitle={left.page.type === 'chapter' ? (chapterTitleLine ?? undefined) : undefined}
+                  // Étape A: pas d’édition/crop/rotate en paysage.
+                  onRotate={() => {}}
+                  onRequestTextEdit={() => {}}
+                  qrUrl=""
+                />
+              ) : (
+                <View style={{ flex: 1, backgroundColor: '#FFFFFF' }} />
+              )}
+            </View>
+
+            <View style={{ width: gap }} />
+
+            <View style={{ width: pageW, height: availH }}>
+              {right ? (
+                <MaquetteBookPages
+                  page={right.page}
+                  pageNum={right.pageNum}
+                  width={pageW}
+                  height={availH}
+                  child={child!}
+                  memory={memoryForMaquette(right.page, merge)}
+                  rotation={(() => {
+                    const m = memoryForMaquette(right.page, merge);
+                    return m ? rotations[m.id] ?? 0 : 0;
+                  })()}
+                  photoCrop={(() => {
+                    const m = memoryForMaquette(right.page, merge);
+                    return m && (right.page.type === 'photo-full' || right.page.type === 'photo-note' || right.page.type === 'audio')
+                      ? photoCrops[m.id]
+                      : undefined;
+                  })()}
+                  truncated={false}
+                  coverYearLabel={coverYearLabel}
+                  coverDisplayTitle={right.page.type === 'cover' ? (coverTitleLine ?? `Journal de ${child!.name}`) : undefined}
+                  coverPhotoUri={right.page.type === 'cover' ? coverPhotoUrl : null}
+                  coverPhotoCrop={photoCrops.cover}
+                  chapterDisplayTitle={right.page.type === 'chapter' ? (chapterTitleLine ?? undefined) : undefined}
+                  // Étape A: pas d’édition/crop/rotate en paysage.
+                  onRotate={() => {}}
+                  onRequestTextEdit={() => {}}
+                  qrUrl=""
+                />
+              ) : (
+                <View style={{ flex: 1, backgroundColor: '#FFFFFF' }} />
+              )}
+            </View>
+          </View>
+        </View>
+      );
+    },
+    [
+      availH,
+      child,
+      chapterTitleLine,
+      coverPhotoUrl,
+      coverTitleLine,
+      coverYearLabel,
+      merge,
+      photoCrops,
+      rotations,
+      screenWidth,
+    ]
+  );
+
+  const currentPage = isLandscape
+    ? (spreadRows[currentPageIndex]?.right?.page ?? spreadRows[currentPageIndex]?.left?.page)
+    : pageRows[currentPageIndex]?.page;
+
+  const actionsDisabled = isLandscape;
 
   const photoOk =
-    currentPage?.type === 'photo-full' || currentPage?.type === 'photo-note';
+    !actionsDisabled && (currentPage?.type === 'photo-full' || currentPage?.type === 'photo-note');
   const editOk =
-    currentPage?.type === 'cover' ||
-    currentPage?.type === 'chapter' ||
-    currentPage?.type === 'photo-full' ||
-    currentPage?.type === 'photo-note' ||
-    currentPage?.type === 'quote' ||
-    currentPage?.type === 'audio' ||
-    currentPage?.type === 'video';
+    !actionsDisabled &&
+    (currentPage?.type === 'cover' ||
+      currentPage?.type === 'chapter' ||
+      currentPage?.type === 'photo-full' ||
+      currentPage?.type === 'photo-note' ||
+      currentPage?.type === 'quote' ||
+      currentPage?.type === 'audio' ||
+      currentPage?.type === 'video');
 
   const canDeletePage =
-    currentPage?.type === 'photo-full' ||
-    currentPage?.type === 'photo-note' ||
-    currentPage?.type === 'quote' ||
-    currentPage?.type === 'audio' ||
-    currentPage?.type === 'video';
+    !actionsDisabled &&
+    (currentPage?.type === 'photo-full' ||
+      currentPage?.type === 'photo-note' ||
+      currentPage?.type === 'quote' ||
+      currentPage?.type === 'audio' ||
+      currentPage?.type === 'video');
 
   const handleDeleteCurrentPage = useCallback(() => {
     if (!currentPage || !canDeletePage) return;
@@ -1308,9 +1485,10 @@ export default function BookPreviewScreen() {
 
       <FlatList
         ref={listRef}
-        data={pageRows}
+        key={isLandscape ? 'spread' : 'page'}
+        data={isLandscape ? spreadRows : pageRows}
         keyExtractor={(_, i) => i.toString()}
-        renderItem={renderPageItem}
+        renderItem={isLandscape ? (renderSpreadItem as any) : (renderPageItem as any)}
         horizontal
         pagingEnabled
         decelerationRate="fast"
@@ -1336,11 +1514,11 @@ export default function BookPreviewScreen() {
         <View style={styles.bottomIndicatorRow}>
           {showManyDots ? (
             <Text style={[styles.pageFraction, dm400 && { fontFamily: dm400 }]}>
-              {currentPageIndex + 1} / {pages.length}
+              {currentPageIndex + 1} / {Math.max(1, totalSlides)}
             </Text>
           ) : (
             <View style={styles.dotsRow}>
-              {pageRows.map((_, i) => (
+              {(isLandscape ? spreadRows : pageRows).map((_, i) => (
                 <View
                   key={i.toString()}
                   style={i === currentPageIndex ? styles.dotActive : styles.dotIdle}
@@ -1349,7 +1527,11 @@ export default function BookPreviewScreen() {
             </View>
           )}
           <Text style={[styles.bottomPageLabel, dm400 && { fontFamily: dm400 }]}>
-            {pages.length > 0 ? pageLabel(currentPageIndex + 1, pages.length) : ''}
+            {pages.length > 0
+              ? isLandscape
+                ? spreadLabel(spreadRows[currentPageIndex] ?? { kind: 'spread', spreadIndex: 0, left: null, right: null }, pages.length)
+                : pageLabel(currentPageIndex + 1, pages.length)
+              : ''}
           </Text>
         </View>
         <View style={styles.bottomButtonsRow}>
