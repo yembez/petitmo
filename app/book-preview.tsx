@@ -329,18 +329,28 @@ export default function BookPreviewScreen() {
     // Cover (page 1) seule à droite
     out.push({ kind: 'spread', spreadIndex: 0, left: null, right: pageRows[0] ?? null });
 
-    // Paires au milieu, sans inclure la back-cover si elle existe.
+    // Paires au milieu, sans inclure la quatrième de couverture.
     const endExclusive = hasBackCover ? pageRows.length - 1 : pageRows.length;
-    for (let i = 1; i < endExclusive; i += 2) {
+    let i = 1;
+    while (i + 1 < endExclusive) {
       out.push({
         kind: 'spread',
         spreadIndex: out.length,
         left: pageRows[i] ?? null,
         right: pageRows[i + 1] ?? null,
       });
+      i += 2;
+    }
+    if (i < endExclusive) {
+      out.push({
+        kind: 'spread',
+        spreadIndex: out.length,
+        left: pageRows[i] ?? null,
+        right: null,
+      });
     }
 
-    // Back cover seule à gauche
+    // Quatrième de couverture seule à gauche
     if (backCover) {
       out.push({
         kind: 'spread',
@@ -788,7 +798,6 @@ export default function BookPreviewScreen() {
     ({ item }) => {
       const left = item.left;
       const right = item.right;
-
       const layout = computeLandscapeSpreadLayout(left, right, screenWidth, availHLandscape);
 
       const leftMem = left ? memoryForMaquette(left.page, merge) : null;
@@ -837,7 +846,12 @@ export default function BookPreviewScreen() {
       const showSpine = Boolean(left && right && layout.spineWidth > 0);
 
       return (
-        <View style={[styles.pageSlide, styles.pageSlideSpread, { width: screenWidth, height: availHLandscape }]}>
+        <View
+          style={[
+            styles.pageSlide,
+            styles.pageSlideSpread,
+            { width: screenWidth, height: availHLandscape, backgroundColor: '#000000' },
+          ]}>
           <View style={styles.spreadRow}>
             {layout.left ? (
               <View style={[styles.spreadCell, layout.left]}>{renderSpreadMaquette(left!, layout.left, qrUrlLeft)}</View>
@@ -1818,10 +1832,10 @@ const styles = StyleSheet.create({
   },
   pageSlideSpread: {
     justifyContent: 'center',
+    alignItems: 'center',
     backgroundColor: '#000000',
   },
   spreadRow: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
