@@ -29,6 +29,7 @@ import {
   getSelectedChild,
   setCaptureTabChildSnapshot,
   setSelectedChild,
+  sanitizeChildLocalAvatarIfMissing,
 } from '@/services/children';
 import { feedChildHydrationSnapshot } from '@/services/tabScreensCache';
 import type { Child } from '@/types/local';
@@ -331,9 +332,10 @@ export default function CapturerScreen() {
           }
 
           if (selected) {
-            setChild(selected);
-            if (selected.photo_url?.trim() && !selected.local_photo_path?.trim()) {
-              void cacheRemoteChildProfilePhotoLocally(selected).then(refreshed => {
+            const cleaned = await sanitizeChildLocalAvatarIfMissing(selected);
+            setChild(cleaned);
+            if (cleaned.photo_url?.trim() && !cleaned.local_photo_path?.trim()) {
+              void cacheRemoteChildProfilePhotoLocally(cleaned).then(refreshed => {
                 if (!cancelled && refreshed.local_photo_path?.trim()) {
                   setChild(refreshed);
                 }

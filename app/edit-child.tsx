@@ -20,13 +20,19 @@ import { scale, verticalScale } from '@/utils/responsive';
 import { SPACING, FONT_SIZES, PROFILE_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
 import { getLocalChild } from '@/lib/localDb';
-import { getChildren, setSelectedChild, updateChild, uploadChildPhoto } from '@/services/children';
+import {
+  getChildren,
+  setSelectedChild,
+  updateChild,
+  uploadChildPhoto,
+  sanitizeChildLocalAvatarIfMissing,
+  resolveChildAvatarCropSourceUri,
+} from '@/services/children';
 import { getCachedUserMode } from '@/lib/userMode';
 import type { Child } from '@/types/local';
 import { resolveChildProfileImageUri } from '@/utils/childPhotoUri';
 import DatePicker from '@/components/DatePicker';
 import { CropModal } from '@/components/CropModal';
-import { ensureLocalImageForPalette } from '@/hooks/ensureLocalImageForPalette';
 
 export default function EditChildScreen() {
   const router = useRouter();
@@ -59,15 +65,16 @@ export default function EditChildScreen() {
 
       if (currentChild) {
         await setSelectedChild(currentChild.id);
-        setChild(currentChild);
-        setName(currentChild.name);
-        setBirthdate(currentChild.birthdate || '');
+        const cleaned = await sanitizeChildLocalAvatarIfMissing(currentChild);
+        setChild(cleaned);
+        setName(cleaned.name);
+        setBirthdate(cleaned.birthdate || '');
         const resolved =
-          resolveChildProfileImageUri(currentChild.local_photo_path, currentChild.photo_url) ?? '';
+          resolveChildProfileImageUri(cleaned.local_photo_path, cleaned.photo_url) ?? '';
         setPhotoUrl(resolved);
         // Récupère la source “originale” si dispo, sinon photo affichable (local ou URL).
         try {
-          const stored = await AsyncStorage.getItem(originalPhotoKey(currentChild.id));
+          const stored = await AsyncStorage.getItem(originalPhotoKey(cleaned.id));
           setOriginalPhotoUri((stored ?? resolved).trim());
         } catch {
           setOriginalPhotoUri(resolved.trim());
@@ -114,8 +121,13 @@ export default function EditChildScreen() {
     }
     try {
       setIsPreparingCrop(true);
-      const local = await ensureLocalImageForPalette(uri);
-      setRawImageUri(local);
+      if (!child) return;
+      const resolved = await resolveChildAvatarCropSourceUri(child, uri);
+      if (!resolved) {
+        await openImagePickerForCrop();
+        return;
+      }
+      setRawImageUri(resolved);
       setCropVisible(true);
     } finally {
       setIsPreparingCrop(false);

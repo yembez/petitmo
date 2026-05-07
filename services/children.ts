@@ -1,13 +1,15 @@
 import { supabase } from '@/lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
-import { copyAsync, documentDirectory, downloadAsync, makeDirectoryAsync } from 'expo-file-system/legacy';
+import { copyAsync, documentDirectory, downloadAsync, getInfoAsync, makeDirectoryAsync } from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 import type { Database } from '@/types/database';
 import type { Child as LocalChild } from '@/types/local';
 import { getCachedUserMode } from '@/lib/userMode';
 import { getLocalChild, listLocalChildren, upsertLocalChild } from '@/lib/localDb';
 import { getSignedMediaDisplayUrl } from '@/lib/mediaSignedUrl';
+import { resolveChildProfileImageUri } from '@/utils/childPhotoUri';
+import { ensureLocalImageForPalette } from '@/hooks/ensureLocalImageForPalette';
 
 type ChildRow = Database['public']['Tables']['children']['Row'];
 
@@ -25,7 +27,6 @@ function withLocalChildFields(row: ChildRow): LocalChild {
 
 /**
  * Copie la source (picker, crop, fichier sandbox) vers `petitmo_children/{id}.ext` (Petitmo+).
- * Retourne le chemin sandbox ou null (web / pas de stockage).
  */
 async function copyChildAvatarSourceToSandbox(childId: string, sourceUri: string): Promise<string | null> {
   if (Platform.OS === 'web' || !documentDirectory) return null;
@@ -50,12 +51,80 @@ async function copyChildAvatarSourceToSandbox(childId: string, sourceUri: string
 }
 
 /**
+ * Si `local_photo_path` pointe vers un fichier disparu (réinstall, purge sandbox), on nettoie SQLite
+ * pour retomber sur `photo_url` et éviter « File is not readable » dans ImageManipulator / Image.
+ */
+export async function sanitizeChildLocalAvatarIfMissing(child: LocalChild): Promise<LocalChild> {
+  if (Platform.OS === 'web') return child;
+  const lp = (child.local_photo_path ?? '').trim();
+  if (!lp) return child;
+
+  const uri = resolveChildProfileImageUri(lp, null);
+  if (!uri?.startsWith('file')) return child;
+
+  try {
+    const info = await getInfoAsync(uri);
+    if (info.exists && !info.isDirectory) return child;
+  } catch {
+    /* fichier inaccessible */
+  }
+
+  const next: LocalChild = { ...child, local_photo_path: null };
+  upsertLocalChild(next);
+  return next;
+}
+
+/**
+ * URI exploitable pour ouvrir le recadrage profil : fichier existant, ou copie cache depuis `photo_url`.
+ */
+export async function resolveChildAvatarCropSourceUri(
+  child: LocalChild,
+  preferredUri: string
+): Promise<string | null> {
+  const pref = preferredUri.trim();
+  const remote = (child.photo_url ?? '').trim();
+
+  if (/^https?:\/\//i.test(pref)) {
+    try {
+      return await ensureLocalImageForPalette(pref);
+    } catch {
+      return pref || null;
+    }
+  }
+
+  if (Platform.OS === 'web') return pref || remote || null;
+
+  if (pref) {
+    const fsUri = pref.startsWith('file') ? pref : resolveChildProfileImageUri(pref, null) ?? pref;
+    try {
+      const info = await getInfoAsync(fsUri);
+      if (info.exists && !info.isDirectory) return fsUri;
+    } catch {
+      /* */
+    }
+  }
+
+  if (remote) {
+    try {
+      const signed = await getSignedMediaDisplayUrl(remote);
+      return await ensureLocalImageForPalette(signed);
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+/**
  * Hydratation immédiate onglet Capturer : enfant déjà en SQLite (sans attendre Supabase).
  */
 export async function loadCaptureChildFromLocalDbFirst(): Promise<LocalChild | null> {
   const id = await getSelectedChild();
   if (!id?.trim()) return null;
-  return getLocalChild(id.trim());
+  const row = getLocalChild(id.trim());
+  if (!row) return null;
+  return sanitizeChildLocalAvatarIfMissing(row);
 }
 
 /**
@@ -63,11 +132,14 @@ export async function loadCaptureChildFromLocalDbFirst(): Promise<LocalChild | n
  */
 export async function cacheRemoteChildProfilePhotoLocally(child: LocalChild): Promise<LocalChild> {
   if (Platform.OS === 'web' || !documentDirectory) return child;
-  const remote = (child.photo_url ?? '').trim();
-  if (!remote) return child;
-  if ((child.local_photo_path ?? '').trim()) return child;
 
-  const dest = `${documentDirectory}petitmo_children/${child.id}.jpg`;
+  let row = await sanitizeChildLocalAvatarIfMissing(child);
+
+  const remote = (row.photo_url ?? '').trim();
+  if (!remote) return row;
+  if ((row.local_photo_path ?? '').trim()) return row;
+
+  const dest = `${documentDirectory}petitmo_children/${row.id}.jpg`;
   const root = `${documentDirectory}petitmo_children/`;
   await makeDirectoryAsync(root, { intermediates: true }).catch(() => {});
 
@@ -90,18 +162,18 @@ export async function cacheRemoteChildProfilePhotoLocally(child: LocalChild): Pr
       dest,
       headers && Object.keys(headers).length ? { headers } : undefined
     );
-    if (res.status !== 200) return child;
+    if (res.status !== 200) return row;
 
     const next: LocalChild = {
-      ...child,
+      ...row,
       local_photo_path: res.uri,
       updated_at: new Date().toISOString(),
     };
     upsertLocalChild(next);
     return next;
   } catch (e) {
-    console.warn('[children] cacheRemoteChildProfilePhotoLocally', child.id, e);
-    return child;
+    console.warn('[children] cacheRemoteChildProfilePhotoLocally', row.id, e);
+    return row;
   }
 }
 

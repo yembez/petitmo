@@ -103,6 +103,12 @@ export function initLocalDb(): void {
     add('voice_cover_path', 'TEXT');
     add('import_asset_id', 'TEXT');
     add('import_source_fingerprint', 'TEXT');
+    add('user_id', 'TEXT');
+    add('media_path', 'TEXT');
+    add('extra_photo_paths', 'TEXT');
+    add('thumbnail_path', 'TEXT');
+    add('poster_print_url', 'TEXT');
+    add('captured_overlay_ink', 'TEXT');
   } catch {
     // Silencieux (ne doit pas empêcher l’app de démarrer)
   }
@@ -275,23 +281,25 @@ export function upsertLocalMemory(memory: Memory, uploadStatus?: UploadStatus): 
 
   db.runSync(
     `INSERT OR REPLACE INTO memories (
-      id, child_id, type, content,
+      id, child_id, user_id, type, content,
       local_media_path, local_original_path, local_thumb_path, local_display_path, local_print_path,
       original_px_w, original_px_h, print_px_w, print_px_h,
-      media_url, thumb_url, display_url,
-      print_url, poster_url, thumbnail_url, voice_cover_url, voice_cover_path, voice_playback_start_sec,
-      edited_media_url, extra_photo_urls, favorite_photo_urls,
+      media_url, media_path, thumb_url, display_url,
+      print_url, poster_url, poster_print_url, thumbnail_url, thumbnail_path,
+      voice_cover_url, voice_cover_path, voice_playback_start_sec,
+      edited_media_url, extra_photo_urls, extra_photo_paths, favorite_photo_urls,
       extra_thumb_urls, extra_display_urls,
-      is_favorite, duration, file_size, location,
+      is_favorite, duration, file_size, location, captured_overlay_ink,
       created_at, inserted_at, updated_at,
       upload_status, sync_status, synced_at,
       import_asset_id, import_source_fingerprint
     ) VALUES (
-      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
     )`,
     [
       memory.id,
       memory.child_id,
+      (memory.user_id ?? '').trim() || '',
       memory.type,
       memory.content ?? null,
       memory.local_media_path ?? null,
@@ -304,16 +312,20 @@ export function upsertLocalMemory(memory: Memory, uploadStatus?: UploadStatus): 
       memory.print_px_w ?? null,
       memory.print_px_h ?? null,
       memory.media_url ?? null,
+      memory.media_path ?? null,
       memory.thumb_url ?? null,
       memory.display_url ?? null,
       memory.print_url ?? null,
       memory.poster_url ?? null,
+      memory.poster_print_url ?? null,
       memory.thumbnail_url ?? null,
+      memory.thumbnail_path ?? null,
       memory.voice_cover_url ?? null,
       memory.voice_cover_path ?? null,
       memory.voice_playback_start_sec ?? null,
       memory.edited_media_url ?? null,
       JSON.stringify(memory.extra_photo_urls ?? []),
+      JSON.stringify(memory.extra_photo_paths ?? []),
       JSON.stringify(memory.favorite_photo_urls ?? []),
       JSON.stringify(safeJsonArrayToStringArray(memory.extra_thumb_urls)),
       JSON.stringify(safeJsonArrayToStringArray(memory.extra_display_urls)),
@@ -321,6 +333,7 @@ export function upsertLocalMemory(memory: Memory, uploadStatus?: UploadStatus): 
       memory.duration ?? null,
       memory.file_size ?? null,
       memory.location ?? null,
+      memory.captured_overlay_ink ?? null,
       memory.created_at,
       memory.inserted_at,
       memory.updated_at ?? null,

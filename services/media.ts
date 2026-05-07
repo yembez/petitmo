@@ -1706,20 +1706,22 @@ export async function getFavoriteMemories(childId: string): Promise<MemoryRow[]>
 }
 
 export async function getMemories(childId: string): Promise<MemoryRow[]> {
-  const local = getLocalMemories(childId) as unknown as MemoryRow[];
+  const localBefore = getLocalMemories(childId) as unknown as MemoryRow[];
 
   if ((await getCachedUserMode()) === 'local') {
-    return local;
+    return localBefore;
   }
 
-  // Cloud : toujours attendre le pull — sinon le fil affiche un SQLite périmé (sans thumb/media)
-  // pendant que le pull finit en arrière-plan, ce qui laissait les photos vides.
+  // Cloud : attendre le pull pour mettre à jour SQLite (URLs signées / worker).
+  // IMPORTANT : renvoyer **tout** `getLocalMemories` après coup — pas seulement les lignes du JSON
+  // serveur. Sinon les souvenirs encore locaux (import / upload non terminé) disparaissent du fil
+  // et les doublons « déjà importés » laissent une base incohérente pour l’UI.
   try {
-    const merged = await pullMemoriesFromRemoteToLocal(childId);
-    return merged as unknown as MemoryRow[];
+    await pullMemoriesFromRemoteToLocal(childId);
   } catch {
-    return local;
+    /* hors ligne ou erreur réseau */
   }
+  return getLocalMemories(childId) as unknown as MemoryRow[];
 }
 
 export async function getMemoryById(memoryId: string) {

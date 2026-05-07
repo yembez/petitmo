@@ -48,6 +48,24 @@ function nonEmptyTrimmed(s: string | null | undefined): string | null {
   return t ? t : null
 }
 
+/** Pull encore incomplet (dérivés worker) : ne pas écraser les URLs déjà présentes en local. */
+function preferRemoteElseLocal(
+  remote: string | null | undefined,
+  local: string | null | undefined,
+): string | null {
+  const r = nonEmptyTrimmed(remote)
+  if (r) return remote!.trim()
+  const l = nonEmptyTrimmed(local)
+  return l ? local!.trim() : null
+}
+
+function preferJsonArray(remote: unknown, local: unknown): unknown {
+  const rr = Array.isArray(remote) ? remote.filter(Boolean) : []
+  if (rr.length > 0) return remote
+  const lr = Array.isArray(local) ? local.filter(Boolean) : []
+  return lr.length > 0 ? local : remote
+}
+
 /**
  * Le serveur ne stocke pas les fichiers sandbox ; après un pull, on **conserve** les pointeurs
  * déjà en SQLite pour rester local-first (affichage fil / offline) tant que l’appareil les a.
@@ -75,6 +93,20 @@ export function mergeServerMemoryRowWithExistingLocal(
 
   return {
     ...base,
+    media_url: preferRemoteElseLocal(base.media_url, existing.media_url),
+    media_path: preferRemoteElseLocal(base.media_path, existing.media_path),
+    thumb_url: preferRemoteElseLocal(base.thumb_url, existing.thumb_url),
+    display_url: preferRemoteElseLocal(base.display_url, existing.display_url),
+    print_url: preferRemoteElseLocal(base.print_url, existing.print_url),
+    edited_media_url: preferRemoteElseLocal(base.edited_media_url, existing.edited_media_url),
+    poster_url: preferRemoteElseLocal(base.poster_url, existing.poster_url),
+    poster_print_url: preferRemoteElseLocal(base.poster_print_url, existing.poster_print_url),
+    thumbnail_url: preferRemoteElseLocal(base.thumbnail_url, existing.thumbnail_url),
+    thumbnail_path: preferRemoteElseLocal(base.thumbnail_path, existing.thumbnail_path),
+    voice_cover_url: preferRemoteElseLocal(base.voice_cover_url, existing.voice_cover_url),
+    extra_photo_urls: preferJsonArray(base.extra_photo_urls, existing.extra_photo_urls) as Memory['extra_photo_urls'],
+    extra_thumb_urls: preferJsonArray(base.extra_thumb_urls, existing.extra_thumb_urls) as Memory['extra_thumb_urls'],
+    extra_display_urls: preferJsonArray(base.extra_display_urls, existing.extra_display_urls) as Memory['extra_display_urls'],
     local_media_path: pickPath(existing.local_media_path) ?? base.local_media_path,
     local_original_path: pickPath(existing.local_original_path) ?? base.local_original_path,
     local_thumb_path: pickPath(existing.local_thumb_path) ?? base.local_thumb_path,
