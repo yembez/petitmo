@@ -54,7 +54,13 @@ export function useFilRowActions(setMemories: Dispatch<SetStateAction<Memory[]>>
       setMemories(prev =>
         prev.map(m => (m.id === target.id ? { ...m, location: next ? next : null } : m))
       );
-      await updateMemoryLocation(target.id, next ? next : null);
+      const ok = await updateMemoryLocation(target.id, next ? next : null);
+      if (!ok) {
+        Alert.alert(
+          'Connexion',
+          "Ton lieu est bien enregistré sur l’app, mais la synchronisation a échoué. Réessaie plus tard."
+        );
+      }
     },
     [editingLocationMemory, setMemories]
   );

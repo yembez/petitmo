@@ -104,3 +104,18 @@ Fichier clé:
 ## Où retrouver ce récap
 - Fichier: `docs/notes/2026-05-06-recap-fil-audio-pdf.md`
 
+---
+
+## Évolutions à prévoir
+
+### iOS — Share Extension (Photos/Vidéos → import local-first)
+- **Objectif**: depuis iOS (Photos/partage), “Partager vers Petitmo” doit **créer directement un souvenir** (photo/vidéo) et l’afficher dans le fil (local-first), avec upload cloud asynchrone si applicable.
+- **Approche**:
+  - **Share Extension iOS** (nouveau target) acceptant `public.image` + `public.movie`
+  - **App Group** pour partager fichiers + état: l’extension **copie** les assets dans un dossier App Group + écrit une “inbox” JSON
+  - **Deep link** (ex. `petitmo://share-inbox`) pour ouvrir l’app après le partage
+  - **Import côté app**: lecture inbox → copie vers stockage local app → création `Memory` locale immédiate → rafraîchissement du fil → purge inbox
+- **Contraintes**:
+  - Pas supporté dans Expo Go; nécessite **Dev Build / EAS Build** + code natif iOS (idéalement via config plugin pour stabilité au `prebuild`)
+  - Gérer multi-sélection + vidéos lourdes (copies/temps d’exécution extension)
+

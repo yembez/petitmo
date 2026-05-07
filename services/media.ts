@@ -1931,12 +1931,17 @@ export async function updateMemoryContent(memoryId: string, content: string) {
 
 export async function updateMemoryLocation(memoryId: string, location: string | null) {
   try {
+    /**
+     * Offline-first: persister localement tout de suite.
+     * La sync Supabase peut échouer, mais l’app (fil + livre) doit rester cohérente.
+     */
+    const next = location?.trim() ? location.trim() : null;
+    updateLocalMemoryLocation(memoryId, next);
+
     if ((await getCachedUserMode()) === 'local') {
-      updateLocalMemoryLocation(memoryId, location);
       return true;
     }
 
-    const next = location?.trim() ? location.trim() : null;
     const { error } = await supabase
       .from('memories')
       .update({ location: next })
