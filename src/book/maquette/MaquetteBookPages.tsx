@@ -5,6 +5,7 @@ import {
   StyleSheet,
   Image,
   Pressable,
+  ScrollView,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import Svg, { Rect } from 'react-native-svg';
@@ -61,6 +62,30 @@ const MUTED = '#AEAEB2';
 const SAGE = '#6B8F7E';
 const VOCAL_BLUE = '#5C8FA6';
 const LINE = 'rgba(0,0,0,0.08)';
+
+/** Référence hauteur (~aperçu portrait page intérieure) pour échelle typo ; spread paysage réduit la hauteur → on compense. */
+const TYPO_REF_INTERIOR_H = 520;
+const TYPO_REF_COVER_H = TYPO_REF_INTERIOR_H * (142 / 216);
+
+function clampTypoScale(s: number): number {
+  return Math.max(0.5, Math.min(1.38, s));
+}
+
+/** Échelle typo selon le type de page et la hauteur rendue en px (couverture = référence plus basse). */
+function typographyScaleForMaquette(pageType: BookPage['type'], heightPx: number): number {
+  if (pageType === 'cover') {
+    return clampTypoScale(heightPx / TYPO_REF_COVER_H);
+  }
+  return clampTypoScale(heightPx / TYPO_REF_INTERIOR_H);
+}
+
+/** Taille de police / interligne cohérents avec l’échelle de la page. */
+function scaledTypo(scale: number, fontSize: number, lineHeight?: number): { fontSize: number; lineHeight?: number } {
+  const fs = Math.max(7.5, Math.round(fontSize * scale * 10) / 10);
+  if (lineHeight == null) return { fontSize: fs };
+  const lh = Math.max(fs + 2, Math.round(lineHeight * scale * 10) / 10);
+  return { fontSize: fs, lineHeight: lh };
+}
 
 function dateFrCaps(iso: string): string {
   const d = new Date(iso);
@@ -136,9 +161,18 @@ function barHeightsFromId(id: string): number[] {
   return heights;
 }
 
-function Folio({ n, dm400 }: { n: number; dm400?: string }) {
+function Folio({ n, dm400, typoScale }: { n: number; dm400?: string; typoScale: number }) {
   return (
-    <Text style={[styles.folio, dm400 ? { fontFamily: dm400 } : null]}>{n}</Text>
+    <Text
+      style={[
+        styles.folio,
+        scaledTypo(typoScale, 11),
+        { bottom: Math.max(6, Math.round(10 * typoScale)) },
+        dm400 ? { fontFamily: dm400 } : null,
+      ]}
+    >
+      {n}
+    </Text>
   );
 }
 
@@ -215,6 +249,7 @@ export default function MaquetteBookPages(props: Props) {
   const garamondIt = fontsLoaded ? 'EBGaramond_400Regular_Italic' : undefined;
 
   const pad = Math.min(28, width * 0.06);
+  const typoScale = typographyScaleForMaquette(page.type, height);
 
   switch (page.type) {
     case 'cover':
@@ -224,6 +259,7 @@ export default function MaquetteBookPages(props: Props) {
           width={width}
           height={height}
           pad={pad}
+          typoScale={typoScale}
           dm400={dm400}
           garamondIt={garamondIt}
           bookYearLabel={coverYearLabel}
@@ -238,24 +274,43 @@ export default function MaquetteBookPages(props: Props) {
     case 'chapter':
       return (
         <View style={[styles.paper, { width, height }]}>
-          <Pressable style={styles.chapterCenter} onPress={onRequestTextEdit} accessibilityRole="button">
-            <Text style={[styles.chapterMonth, dm400 && { fontFamily: dm400 }]}>
+          <Pressable
+            style={[styles.chapterCenter, { paddingHorizontal: Math.min(48, Math.round(32 * typoScale)) }]}
+            onPress={onRequestTextEdit}
+            accessibilityRole="button"
+          >
+            <Text
+              style={[
+                styles.chapterMonth,
+                scaledTypo(typoScale, 12),
+                dm400 && { fontFamily: dm400 },
+              ]}
+            >
               {monthYearCaps(page.month)}
             </Text>
             <Text
               style={[
                 styles.chapterTitle,
+                scaledTypo(typoScale, 28),
+                { marginTop: Math.round(12 * typoScale) },
                 garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
               ]}
             >
               {chapterDisplayTitle ?? 'Notre histoire'}
             </Text>
-            <View style={styles.chapterLine} />
-            <Text style={[styles.chapterSub, dm400 && { fontFamily: dm400 }]}>
+            <View style={[styles.chapterLine, { marginTop: Math.round(20 * typoScale), width: Math.round(56 * typoScale) }]} />
+            <Text
+              style={[
+                styles.chapterSub,
+                scaledTypo(typoScale, 12),
+                { marginTop: Math.round(16 * typoScale) },
+                dm400 && { fontFamily: dm400 },
+              ]}
+            >
               Chapitre {page.chapterNum}
             </Text>
           </Pressable>
-          <Folio n={pageNum} dm400={dm400} />
+          <Folio n={pageNum} dm400={dm400} typoScale={typoScale} />
         </View>
       );
     case 'photo-full':
@@ -266,6 +321,7 @@ export default function MaquetteBookPages(props: Props) {
           width={width}
           height={height}
           pad={pad}
+          typoScale={typoScale}
           pageNum={pageNum}
           rotation={rotation}
           photoCrop={photoCrop}
@@ -284,6 +340,7 @@ export default function MaquetteBookPages(props: Props) {
           width={width}
           height={height}
           pad={pad}
+          typoScale={typoScale}
           pageNum={pageNum}
           rotation={rotation}
           photoCrop={photoCrop}
@@ -303,6 +360,7 @@ export default function MaquetteBookPages(props: Props) {
           width={width}
           height={height}
           pad={pad}
+          typoScale={typoScale}
           pageNum={pageNum}
           truncated={truncated}
           onRequestTextEdit={onRequestTextEdit}
@@ -320,6 +378,7 @@ export default function MaquetteBookPages(props: Props) {
           width={width}
           height={height}
           pad={pad}
+          typoScale={typoScale}
           pageNum={pageNum}
           qrUrl={qrUrl}
           rotation={rotation}
@@ -340,6 +399,7 @@ export default function MaquetteBookPages(props: Props) {
           width={width}
           height={height}
           pad={pad}
+          typoScale={typoScale}
           pageNum={pageNum}
           qrUrl={qrUrl}
           onRequestTextEdit={onRequestTextEdit}
@@ -355,17 +415,18 @@ export default function MaquetteBookPages(props: Props) {
             <Text
               style={[
                 styles.backLine1,
+                scaledTypo(typoScale, 18),
                 garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
               ]}
             >
               Chaque moment compte.
             </Text>
-            <Text style={[styles.backLine2, dm400 && { fontFamily: dm400 }]}>
+            <Text style={[styles.backLine2, scaledTypo(typoScale, 12), dm400 && { fontFamily: dm400 }]}>
               petitmo · vos souvenirs pour toujours
             </Text>
-            <View style={styles.backRule} />
+            <View style={[styles.backRule, { marginTop: Math.round(20 * typoScale), width: Math.round(120 * typoScale) }]} />
           </View>
-          <Folio n={pageNum} dm400={dm400} />
+          <Folio n={pageNum} dm400={dm400} typoScale={typoScale} />
         </View>
       );
     default: {
@@ -380,6 +441,7 @@ function MaquetteCover({
   width,
   height,
   pad,
+  typoScale,
   dm400,
   garamondIt,
   bookYearLabel,
@@ -394,6 +456,7 @@ function MaquetteCover({
   width: number;
   height: number;
   pad: number;
+  typoScale: number;
   dm400?: string;
   garamondIt?: string;
   bookYearLabel: string;
@@ -411,7 +474,8 @@ function MaquetteCover({
   onPressTitle: () => void;
 }) {
   const photoUri = coverPhotoUri?.trim() || child.photo_url?.trim() || null;
-  const imgH = height * 0.68;
+  /** Aligné PDF (`bookPdf.ts`) : bande photo = 142 mm sur page 216 mm. */
+  const imgH = height * (142 / 216);
   const y = new Date().getFullYear();
   const periodLine = bookYearLabel || `${y - 1} – ${y}`;
 
@@ -445,19 +509,20 @@ function MaquetteCover({
           <View style={[styles.coverPh, { height: imgH }]} />
         )}
       </Pressable>
-      <View style={[styles.coverTextBlock, { paddingHorizontal: pad }]}>
+      <View style={[styles.coverTextBlock, { paddingHorizontal: pad, paddingTop: Math.round(8 * typoScale) }]}>
         <Pressable onPress={onPressTitle} accessibilityRole="button">
           <Text
             style={[
               styles.coverTitle,
+              scaledTypo(typoScale, 26),
               garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
             ]}
           >
             {titleLine}
           </Text>
         </Pressable>
-        <Text style={[styles.coverYears, dm400 && { fontFamily: dm400 }]}>{periodLine}</Text>
-        <View style={styles.coverHairline} />
+        <Text style={[styles.coverYears, scaledTypo(typoScale, 13), dm400 && { fontFamily: dm400 }]}>{periodLine}</Text>
+        <View style={[styles.coverHairline, { marginTop: Math.round(16 * typoScale) }]} />
       </View>
     </View>
   );
@@ -468,6 +533,7 @@ function MaquettePhotoSimple({
   width,
   height,
   pad,
+  typoScale,
   pageNum,
   rotation,
   photoCrop,
@@ -481,6 +547,7 @@ function MaquettePhotoSimple({
   width: number;
   height: number;
   pad: number;
+  typoScale: number;
   pageNum: number;
   rotation: number;
   photoCrop?: PhotoCrop;
@@ -517,8 +584,21 @@ function MaquettePhotoSimple({
                 accessibilityLabel="Recadrer la photo"
               />
             ) : null}
-            <Pressable style={styles.rotateOverlayBtn} onPress={onRotate} accessibilityLabel="Pivoter la photo">
-              <Text style={styles.rotateOverlayIcon}>↻</Text>
+            <Pressable
+              style={[
+                styles.rotateOverlayBtn,
+                {
+                  width: Math.max(28, Math.round(34 * typoScale)),
+                  height: Math.max(28, Math.round(34 * typoScale)),
+                  borderRadius: Math.max(14, Math.round(17 * typoScale)),
+                  bottom: Math.round(10 * typoScale),
+                  right: Math.round(10 * typoScale),
+                },
+              ]}
+              onPress={onRotate}
+              accessibilityLabel="Pivoter la photo"
+            >
+              <Text style={[styles.rotateOverlayIcon, scaledTypo(typoScale, 20)]}>↻</Text>
             </Pressable>
           </View>
         ) : (
@@ -531,12 +611,12 @@ function MaquettePhotoSimple({
         accessibilityRole="button"
       >
         <View style={styles.photoDateLocRow}>
-          <Text style={[styles.photoDate, dm400 && { fontFamily: dm400 }]}>
+          <Text style={[styles.photoDate, scaledTypo(typoScale, 11), dm400 && { fontFamily: dm400 }]}>
             {dateFrCaps(memory.created_at)}
           </Text>
           {bookLoc ? (
             <Text
-              style={[styles.photoLocationBook, dm400 && { fontFamily: dm400 }]}
+              style={[styles.photoLocationBook, scaledTypo(typoScale, 11), dm400 && { fontFamily: dm400 }]}
               numberOfLines={2}
             >
               {bookLoc}
@@ -547,6 +627,7 @@ function MaquettePhotoSimple({
           <Text
             style={[
               styles.photoCaption,
+              scaledTypo(typoScale, 17),
               garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
             ]}
             numberOfLines={3}
@@ -555,7 +636,7 @@ function MaquettePhotoSimple({
           </Text>
         ) : null}
       </Pressable>
-      <Folio n={pageNum} dm400={dm400} />
+      <Folio n={pageNum} dm400={dm400} typoScale={typoScale} />
     </View>
   );
 }
@@ -565,6 +646,7 @@ function MaquettePhotoNote({
   width,
   height,
   pad,
+  typoScale,
   pageNum,
   rotation,
   photoCrop,
@@ -579,6 +661,7 @@ function MaquettePhotoNote({
   width: number;
   height: number;
   pad: number;
+  typoScale: number;
   pageNum: number;
   rotation: number;
   photoCrop?: PhotoCrop;
@@ -596,13 +679,10 @@ function MaquettePhotoNote({
   garamondIt?: string;
 }) {
   const uri = getPrimaryPhotoUriForBookPreview(memory);
-  // Dans le viewer, sous la photo on n'affiche pas "titre + corps" : seulement une légende.
-  // On évite aussi le fallback "Sans titre" lié au découpage.
   const legend = (memory.content ?? '').trim();
-  const imgH = height * 0.6; // 3/5 de la page
-  const MAX_PHOTO_NOTE_CHARS = 420;
-  const legendLimited = legend.length > MAX_PHOTO_NOTE_CHARS ? `${legend.slice(0, MAX_PHOTO_NOTE_CHARS).trimEnd()}…` : legend;
+  const imgH = height * 0.6;
   const bookLoc = bookMaquetteLocationLabel(memory);
+  const pb = Math.max(28, Math.round(40 * typoScale));
 
   return (
     <View style={[styles.paper, { width, height }]}>
@@ -620,46 +700,69 @@ function MaquettePhotoNote({
                 accessibilityLabel="Recadrer la photo"
               />
             ) : null}
-            <Pressable style={styles.rotateOverlayBtn} onPress={onRotate} accessibilityLabel="Pivoter la photo">
-              <Text style={styles.rotateOverlayIcon}>↻</Text>
+            <Pressable
+              style={[
+                styles.rotateOverlayBtn,
+                {
+                  width: Math.max(28, Math.round(34 * typoScale)),
+                  height: Math.max(28, Math.round(34 * typoScale)),
+                  borderRadius: Math.max(14, Math.round(17 * typoScale)),
+                  bottom: Math.round(10 * typoScale),
+                  right: Math.round(10 * typoScale),
+                },
+              ]}
+              onPress={onRotate}
+              accessibilityLabel="Pivoter la photo"
+            >
+              <Text style={[styles.rotateOverlayIcon, scaledTypo(typoScale, 20)]}>↻</Text>
             </Pressable>
           </View>
         ) : (
           <View style={[styles.coverPh, { height: imgH }]} />
         )}
       </View>
-      <View style={[styles.page4TextBlock, { overflow: 'hidden' }]}>
-        <Pressable
-          onPress={onRequestTextEdit}
-          accessibilityRole="button"
-          style={[styles.page4ScrollContent, { paddingHorizontal: pad, paddingBottom: 40 }]}
+      <View style={[styles.page4TextBlock, { flex: 1, minHeight: 0 }]}>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{
+            paddingHorizontal: pad,
+            paddingTop: Math.round(14 * typoScale),
+            paddingBottom: pb,
+          }}
+          showsVerticalScrollIndicator={false}
+          nestedScrollEnabled
+          keyboardShouldPersistTaps="handled"
         >
-          <View style={styles.page4MetaRow}>
-            <Text style={[styles.page4Meta, dm400 && { fontFamily: dm400 }]}>
-              {dateFrCaps(memory.created_at)}
-            </Text>
-            {bookLoc ? (
+          <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
+            <View style={[styles.page4MetaRow, { marginBottom: Math.round(8 * typoScale) }]}>
+              <Text style={[styles.page4Meta, scaledTypo(typoScale, 11), dm400 && { fontFamily: dm400 }]}>
+                {dateFrCaps(memory.created_at)}
+              </Text>
+              {bookLoc ? (
+                <Text
+                  style={[styles.page4MetaLocation, scaledTypo(typoScale, 11), dm400 && { fontFamily: dm400 }]}
+                  numberOfLines={2}
+                >
+                  {bookLoc}
+                </Text>
+              ) : null}
+            </View>
+            {legend.length > 0 ? (
               <Text
-                style={[styles.page4MetaLocation, dm400 && { fontFamily: dm400 }]}
-                numberOfLines={2}
+                style={[
+                  styles.page4Body,
+                  scaledTypo(typoScale, 15, 24),
+                  { marginTop: Math.round(12 * typoScale) },
+                  garamondIt ? { fontFamily: garamondIt } : dm400 ? { fontFamily: dm400 } : null,
+                ]}
               >
-                {bookLoc}
+                {romanParagraphs(legend)}
               </Text>
             ) : null}
-          </View>
-          {legendLimited.length > 0 ? (
-            <Text
-              style={[
-                styles.page4Body,
-                garamondIt ? { fontFamily: garamondIt } : dm400 ? { fontFamily: dm400 } : null,
-              ]}
-            >
-              {romanParagraphs(legendLimited)}
-            </Text>
-          ) : null}
-        </Pressable>
+          </Pressable>
+        </ScrollView>
       </View>
-      <Folio n={pageNum} dm400={dm400} />
+      <Folio n={pageNum} dm400={dm400} typoScale={typoScale} />
     </View>
   );
 }
@@ -670,8 +773,9 @@ function MaquetteQuote({
   width,
   height,
   pad,
+  typoScale,
   pageNum,
-  truncated,
+  truncated: _truncated,
   onRequestTextEdit,
   dm400,
   dm600,
@@ -682,6 +786,7 @@ function MaquetteQuote({
   width: number;
   height: number;
   pad: number;
+  typoScale: number;
   pageNum: number;
   truncated: boolean;
   onRequestTextEdit: () => void;
@@ -759,73 +864,122 @@ function MaquetteQuote({
 
   const bookLoc = bookMaquetteLocationLabel(memory);
 
-  const bodyStyle =
-    fitLevel === 2 ? styles.quoteBodyFit2 : fitLevel === 1 ? styles.quoteBodyFit1 : styles.quoteBody;
+  const markScaled =
+    fitLevel === 2
+      ? scaledTypo(typoScale, 44, 44)
+      : fitLevel === 1
+        ? scaledTypo(typoScale, 50, 50)
+        : scaledTypo(typoScale, 56, 56);
+
+  const bodyScaled =
+    fitLevel === 2
+      ? scaledTypo(typoScale, 14, 21)
+      : fitLevel === 1
+        ? scaledTypo(typoScale, 15, 23)
+        : scaledTypo(typoScale, 16, 26);
 
   return (
-    <Pressable
-      style={[styles.paper, { width, height }]}
-      onPress={onRequestTextEdit}
-      accessibilityRole="button"
-    >
+    <View style={[styles.paper, { width, height }]}>
       <View style={[styles.quoteScreenCol, { paddingHorizontal: pad }]}>
-        <View style={styles.quoteHeader}>
+        <View style={[styles.quoteHeader, { paddingTop: Math.round(16 * typoScale) }]}>
           <View style={styles.quoteHeaderLeft}>
-            <View style={styles.sageDot} />
-            <Text style={[styles.quoteLabel, dm600 ? { fontFamily: dm600 } : { fontWeight: '600' }]}>
+            <View
+              style={[
+                styles.sageDot,
+                {
+                  width: Math.max(6, Math.round(8 * typoScale)),
+                  height: Math.max(6, Math.round(8 * typoScale)),
+                  borderRadius: Math.max(3, Math.round(4 * typoScale)),
+                },
+              ]}
+            />
+            <Text
+              style={[
+                styles.quoteLabel,
+                scaledTypo(typoScale, 13),
+                dm600 ? { fontFamily: dm600 } : { fontWeight: '600' },
+              ]}
+            >
               Petits mots
             </Text>
           </View>
         </View>
-        <View style={styles.quoteMid}>
-          <Text
-            style={[
-              styles.quoteMark,
-              fitLevel === 2 ? styles.quoteMarkFit2 : fitLevel === 1 ? styles.quoteMarkFit1 : null,
-              garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
-            ]}
-          >
-            {'\u201C'}
-          </Text>
-          <View
-            style={{
-              paddingHorizontal: 8,
-              overflow: 'hidden',
-            }}
-          >
-            <Text
-              style={[
-                bodyStyle,
-                garamondIt ? { fontFamily: garamondIt } : dmItalic ? { fontFamily: dmItalic } : { fontStyle: 'italic' },
-              ]}
-            >
-              {romanParagraphs(body)}
-            </Text>
-          </View>
-        </View>
-        <View style={styles.quoteFooter}>
-          <View style={styles.quoteRuleRow}>
-            <View style={styles.quoteRuleSeg} />
-            <View style={styles.quoteRuleDot} />
-            <View style={styles.quoteRuleSeg} />
-          </View>
-          <View style={styles.photoDateLocRow}>
-            <Text style={[styles.photoDate, dm400 && { fontFamily: dm400 }]}>
-              {dateFrCaps(memory.created_at)}
-            </Text>
-            {bookLoc ? (
+        <ScrollView
+          style={{ flex: 1, minHeight: 0 }}
+          contentContainerStyle={{
+            flexGrow: 1,
+            justifyContent: 'center',
+            paddingTop: Math.round(4 * typoScale),
+            paddingBottom: Math.round(8 * typoScale),
+          }}
+          nestedScrollEnabled
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
+            <View>
               <Text
-                style={[styles.photoLocationBook, dm400 && { fontFamily: dm400 }]}
-                numberOfLines={2}
+                style={[
+                  styles.quoteMark,
+                  markScaled,
+                  {
+                    marginLeft: Math.round(20 * typoScale),
+                    marginTop: Math.round(4 * typoScale),
+                  },
+                  garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
+                ]}
               >
-                {bookLoc}
+                {'\u201C'}
               </Text>
-            ) : null}
+              <View style={{ paddingHorizontal: Math.round(8 * typoScale) }}>
+                <Text
+                  style={[
+                    styles.quoteBody,
+                    bodyScaled,
+                    garamondIt ? { fontFamily: garamondIt } : dmItalic ? { fontFamily: dmItalic } : { fontStyle: 'italic' },
+                  ]}
+                >
+                  {romanParagraphs(body)}
+                </Text>
+              </View>
+            </View>
+          </Pressable>
+        </ScrollView>
+        <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
+          <View style={[styles.quoteFooter, { paddingBottom: Math.round(36 * typoScale) }]}>
+            <View style={[styles.quoteRuleRow, { marginTop: Math.round(8 * typoScale) }]}>
+              <View style={styles.quoteRuleSeg} />
+              <View
+                style={[
+                  styles.quoteRuleDot,
+                  {
+                    width: Math.max(4, Math.round(6 * typoScale)),
+                    height: Math.max(4, Math.round(6 * typoScale)),
+                    borderRadius: Math.max(2, Math.round(3 * typoScale)),
+                    marginHorizontal: Math.round(6 * typoScale),
+                  },
+                ]}
+              />
+              <View style={styles.quoteRuleSeg} />
+            </View>
+            <View style={styles.photoDateLocRow}>
+              <Text style={[styles.photoDate, scaledTypo(typoScale, 11), dm400 && { fontFamily: dm400 }]}>
+                {dateFrCaps(memory.created_at)}
+              </Text>
+              {bookLoc ? (
+                <Text
+                  style={[styles.photoLocationBook, scaledTypo(typoScale, 11), dm400 && { fontFamily: dm400 }]}
+                  numberOfLines={2}
+                >
+                  {bookLoc}
+                </Text>
+              ) : null}
+            </View>
           </View>
-        </View>
+        </Pressable>
       </View>
-      <Folio n={pageNum} dm400={dm400} />
-    </Pressable>
+      <Folio n={pageNum} dm400={dm400} typoScale={typoScale} />
+    </View>
   );
 }
 
@@ -834,6 +988,7 @@ function MaquetteAudio({
   width,
   height,
   pad,
+  typoScale,
   pageNum,
   qrUrl,
   rotation,
@@ -849,6 +1004,7 @@ function MaquetteAudio({
   width: number;
   height: number;
   pad: number;
+  typoScale: number;
   pageNum: number;
   qrUrl: string;
   rotation: number;
@@ -869,17 +1025,18 @@ function MaquetteAudio({
   const heights = useMemo(() => barHeightsFromId(memory.id), [memory.id]);
   const totalSec = memory.duration ?? 0;
   const durLabel = formatDuration(Math.max(0, Math.floor(totalSec)));
-  const waveW = BAR_COUNT * BAR_W + (BAR_COUNT - 1) * BAR_GAP;
+  const waveContentW = BAR_COUNT * BAR_W + (BAR_COUNT - 1) * BAR_GAP;
   const titleRaw = clampAudioBookAnnotation((memory.content ?? '').trim());
-  /** QR réduit pour laisser la place au bloc play + onde sous ~2 lignes de texte. */
-  const qrSize = Math.min(64, width * 0.19);
+  const qrSize = Math.max(40, Math.round(Math.min(64, width * 0.19) * Math.min(1.15, typoScale)));
   const coverUri = getVoiceCoverUriForBookPreview(memory);
-  const imgH = height * 0.54;
+  /** Même `.pn-image` que photo-note / PDF (`pageH * 0.6`). */
+  const imgH = height * 0.6;
   const bookLoc = bookMaquetteLocationLabel(memory);
-  const ringSize = 44;
-  const playerGap = 10;
-  const waveSvgH = 18;
-  const waveSvgW = Math.max(72, width - 2 * pad - ringSize - playerGap);
+  const ringSize = Math.max(32, Math.round(44 * typoScale));
+  const playerGap = Math.max(8, Math.round(10 * typoScale));
+  const waveSvgH = Math.max(14, Math.round(18 * typoScale));
+  const waveSvgW = Math.max(56, width - 2 * pad - ringSize - playerGap);
+  const dotSize = Math.max(6, Math.round(8 * typoScale));
 
   return (
     <View style={[styles.paper, { width, height }]}>
@@ -905,8 +1062,21 @@ function MaquetteAudio({
                 accessibilityLabel="Recadrer la photo"
               />
             ) : null}
-            <Pressable style={styles.rotateOverlayBtn} onPress={onRotate} accessibilityLabel="Pivoter la photo">
-              <Text style={styles.rotateOverlayIcon}>↻</Text>
+            <Pressable
+              style={[
+                styles.rotateOverlayBtn,
+                {
+                  width: Math.max(28, Math.round(34 * typoScale)),
+                  height: Math.max(28, Math.round(34 * typoScale)),
+                  borderRadius: Math.max(14, Math.round(17 * typoScale)),
+                  bottom: Math.round(10 * typoScale),
+                  right: Math.round(10 * typoScale),
+                },
+              ]}
+              onPress={onRotate}
+              accessibilityLabel="Pivoter la photo"
+            >
+              <Text style={[styles.rotateOverlayIcon, scaledTypo(typoScale, 20)]}>↻</Text>
             </Pressable>
           </View>
         ) : (
@@ -916,16 +1086,23 @@ function MaquetteAudio({
       <View style={styles.audioBelowPhoto}>
         <View style={[styles.audioMetaRow, { paddingHorizontal: pad }]}>
           <View style={styles.quoteHeaderLeft}>
-            <View style={styles.vocalDot} />
-            <Text style={[styles.vocalLabel, dm600 && { fontFamily: dm600 }]}>Vocal</Text>
+            <View
+              style={[
+                styles.vocalDot,
+                { width: dotSize, height: dotSize, borderRadius: dotSize / 2 },
+              ]}
+            />
+            <Text style={[styles.vocalLabel, scaledTypo(typoScale, 13), dm600 && { fontFamily: dm600 }]}>
+              Vocal
+            </Text>
           </View>
           <View style={[styles.page4MetaRow, { flex: 1, minWidth: 0 }]}>
-            <Text style={[styles.page4Meta, dm400 && { fontFamily: dm400 }]}>
+            <Text style={[styles.page4Meta, scaledTypo(typoScale, 11), dm400 && { fontFamily: dm400 }]}>
               {dateFrCaps(memory.created_at)}
             </Text>
             {bookLoc ? (
               <Text
-                style={[styles.page4MetaLocation, dm400 && { fontFamily: dm400 }]}
+                style={[styles.page4MetaLocation, scaledTypo(typoScale, 11), dm400 && { fontFamily: dm400 }]}
                 numberOfLines={2}
               >
                 {bookLoc}
@@ -933,33 +1110,70 @@ function MaquetteAudio({
             ) : null}
           </View>
         </View>
-        <View style={[styles.audioLower, { paddingHorizontal: pad, paddingBottom: 42 }]}>
-          <View style={styles.audioTopBlock}>
+        <View style={{ flex: 1, minHeight: 0 }}>
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={{
+              paddingHorizontal: pad,
+              paddingTop: Math.round(8 * typoScale),
+              paddingBottom: Math.round(8 * typoScale),
+            }}
+            showsVerticalScrollIndicator={false}
+            nestedScrollEnabled
+            keyboardShouldPersistTaps="handled"
+          >
             <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
               {titleRaw.length > 0 ? (
                 <Text
                   style={[
                     styles.audioCaption,
+                    scaledTypo(typoScale, 13, 19),
                     garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
                   ]}
-                  numberOfLines={2}
-                  ellipsizeMode="tail"
                 >
                   {romanParagraphs(titleRaw)}
                 </Text>
               ) : null}
-              <View style={styles.audioQrCenter}>
-                <QRCode value={qrUrl} size={qrSize} backgroundColor="#FFFFFF" color={INK} />
-                <Text style={[styles.audioQrHint, dm400 && { fontFamily: dm400 }]}>Scanner pour écouter</Text>
+              <View style={[styles.audioQrCenter, { marginTop: Math.round(8 * typoScale) }]}>
+                {qrUrl.trim().length > 0 ? (
+                  <QRCode value={qrUrl} size={qrSize} backgroundColor="#FFFFFF" color={INK} />
+                ) : (
+                  <View
+                    style={{
+                      width: qrSize,
+                      height: qrSize,
+                      borderRadius: 4,
+                      backgroundColor: '#EEEEEE',
+                    }}
+                  />
+                )}
+                <Text style={[styles.audioQrHint, scaledTypo(typoScale, 10), dm400 && { fontFamily: dm400 }]}>
+                  Scanner pour écouter
+                </Text>
               </View>
             </Pressable>
-          </View>
-          <View style={styles.audioPlayerRow}>
-            <View style={styles.audioRingInline}>
-              <Text style={styles.playGlyphInline}>▶</Text>
+          </ScrollView>
+          <View style={[styles.audioPlayerRow, { paddingHorizontal: pad, paddingTop: Math.round(6 * typoScale) }]}>
+            <View
+              style={[
+                styles.audioRingInline,
+                {
+                  width: ringSize,
+                  height: ringSize,
+                  borderRadius: ringSize / 2,
+                  borderWidth: Math.max(1, 1.5 * typoScale),
+                },
+              ]}
+            >
+              <Text style={[styles.playGlyphInline, scaledTypo(typoScale, 14)]}>▶</Text>
             </View>
             <View style={styles.audioWaveCol}>
-              <Svg width={waveSvgW} height={waveSvgH} viewBox={`0 0 ${waveW} 24`} preserveAspectRatio="xMidYMid meet">
+              <Svg
+                width={waveSvgW}
+                height={waveSvgH}
+                viewBox={`0 0 ${waveContentW} 24`}
+                preserveAspectRatio="xMidYMid meet"
+              >
                 {heights.map((h, i) => (
                   <Rect
                     key={i}
@@ -973,14 +1187,16 @@ function MaquetteAudio({
                 ))}
               </Svg>
               <View style={styles.audioDurRowWide}>
-                <Text style={[styles.audioDur, dm400 && { fontFamily: dm400 }]}>0:00</Text>
-                <Text style={[styles.audioDur, dm400 && { fontFamily: dm400 }]}>{durLabel}</Text>
+                <Text style={[styles.audioDur, scaledTypo(typoScale, 9), dm400 && { fontFamily: dm400 }]}>0:00</Text>
+                <Text style={[styles.audioDur, scaledTypo(typoScale, 9), dm400 && { fontFamily: dm400 }]}>
+                  {durLabel}
+                </Text>
               </View>
             </View>
           </View>
         </View>
       </View>
-      <Folio n={pageNum} dm400={dm400} />
+      <Folio n={pageNum} dm400={dm400} typoScale={typoScale} />
     </View>
   );
 }
@@ -990,6 +1206,7 @@ function MaquetteVideo({
   width,
   height,
   pad,
+  typoScale,
   pageNum,
   qrUrl,
   onRequestTextEdit,
@@ -1001,6 +1218,7 @@ function MaquetteVideo({
   width: number;
   height: number;
   pad: number;
+  typoScale: number;
   pageNum: number;
   qrUrl: string;
   onRequestTextEdit: () => void;
@@ -1014,6 +1232,7 @@ function MaquetteVideo({
   const title = videoTitleRaw || 'Vidéo';
   const sub = videoBodyRaw.trim() ? videoBodyRaw : 'Regarde ce moment en vidéo.';
   const bookLoc = bookMaquetteLocationLabel(memory);
+  const videoQrSize = Math.max(44, Math.round(Math.min(100, width * 0.26) * Math.min(1.1, typoScale)));
 
   return (
     <View style={[styles.paper, { width, height }]}>
@@ -1024,45 +1243,70 @@ function MaquetteVideo({
           <View style={[styles.coverPh, { height: imgH }]} />
         )}
       </View>
-      <View style={{ flex: 1, overflow: 'hidden', paddingHorizontal: pad, paddingTop: 20 }}>
-        <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
-          <View style={styles.noteMetaRow}>
-            <Text style={[styles.noteMeta, dm400 && { fontFamily: dm400 }]}>
-              {dateFrCaps(memory.created_at)}
-            </Text>
-            {bookLoc ? (
-              <Text
-                style={[styles.noteMetaLocation, dm400 && { fontFamily: dm400 }]}
-                numberOfLines={2}
-              >
-                {bookLoc}
+      <View style={{ flex: 1, minHeight: 0, paddingHorizontal: pad, paddingTop: Math.round(20 * typoScale) }}>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingBottom: Math.round(16 * typoScale) }}
+          showsVerticalScrollIndicator={false}
+          nestedScrollEnabled
+          keyboardShouldPersistTaps="handled"
+        >
+          <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
+            <View style={[styles.noteMetaRow, { marginBottom: Math.round(8 * typoScale) }]}>
+              <Text style={[styles.noteMeta, scaledTypo(typoScale, 11), dm400 && { fontFamily: dm400 }]}>
+                {dateFrCaps(memory.created_at)}
               </Text>
-            ) : null}
+              {bookLoc ? (
+                <Text
+                  style={[styles.noteMetaLocation, scaledTypo(typoScale, 11), dm400 && { fontFamily: dm400 }]}
+                  numberOfLines={2}
+                >
+                  {bookLoc}
+                </Text>
+              ) : null}
+            </View>
+            <Text
+              style={[
+                styles.videoTitle,
+                scaledTypo(typoScale, 18),
+                { marginTop: Math.round(4 * typoScale) },
+                dm600 && { fontFamily: dm600 },
+                garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
+              ]}
+            >
+              {title}
+            </Text>
+            <Text
+              style={[
+                styles.videoSub,
+                scaledTypo(typoScale, 14, 22),
+                { marginTop: Math.round(10 * typoScale) },
+                garamondIt ? { fontFamily: garamondIt } : dm400 ? { fontFamily: dm400 } : null,
+              ]}
+            >
+              {romanParagraphs(sub)}
+            </Text>
+          </Pressable>
+          <View style={{ alignItems: 'center', marginTop: Math.round(16 * typoScale) }}>
+            {qrUrl.trim().length > 0 ? (
+              <QRCode value={qrUrl} size={videoQrSize} backgroundColor="#FFFFFF" color={INK} />
+            ) : (
+              <View
+                style={{
+                  width: videoQrSize,
+                  height: videoQrSize,
+                  borderRadius: 4,
+                  backgroundColor: '#EEEEEE',
+                }}
+              />
+            )}
+            <Text style={[styles.audioQrHint, scaledTypo(typoScale, 10), dm400 && { fontFamily: dm400 }]}>
+              Scanner pour regarder
+            </Text>
           </View>
-          <Text
-            style={[
-              styles.videoTitle,
-              dm600 && { fontFamily: dm600 },
-              garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
-            ]}
-          >
-            {title}
-          </Text>
-          <Text
-            style={[
-              styles.videoSub,
-              garamondIt ? { fontFamily: garamondIt } : dm400 ? { fontFamily: dm400 } : null,
-            ]}
-          >
-            {romanParagraphs(sub)}
-          </Text>
-        </Pressable>
-        <View style={{ alignItems: 'center', marginTop: 16 }}>
-          <QRCode value={qrUrl} size={Math.min(100, width * 0.26)} backgroundColor="#FFFFFF" color={INK} />
-          <Text style={[styles.audioQrHint, dm400 && { fontFamily: dm400 }]}>Scanner pour regarder</Text>
-        </View>
+        </ScrollView>
       </View>
-      <Folio n={pageNum} dm400={dm400} />
+      <Folio n={pageNum} dm400={dm400} typoScale={typoScale} />
     </View>
   );
 }

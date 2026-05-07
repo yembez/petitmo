@@ -75,20 +75,62 @@ function bookPageAspectRatio(pageType: BookPage['type']): number {
   }
 }
 
-/** Agrandit au maximum la maquette dans la cellule sans rogner (mode paysage). */
-function fitMaquettePageDimensions(
-  pageType: BookPage['type'],
-  maxWidth: number,
-  maxHeight: number,
-): { width: number; height: number } {
-  const ar = bookPageAspectRatio(pageType);
-  let h = maxHeight;
-  let w = h * ar;
-  if (w > maxWidth) {
-    w = maxWidth;
-    h = w / ar;
+/**
+ * Spread paysage : deux pages → même gabarit **A5 plein** (154×216 mm à l’échelle), comme un livre ouvert.
+ * Les types « courts » (photo-note, audio) sont rendus dans cette même zone en maquette — pas deux hauteurs différentes.
+ * Couverture / quatrième seules : proportions spécifiques (`bookPageAspectRatio`).
+ */
+function computeLandscapeSpreadLayout(
+  left: PageRow | null,
+  right: PageRow | null,
+  availW: number,
+  availH: number,
+): {
+  left: { width: number; height: number } | null;
+  right: { width: number; height: number } | null;
+  spineWidth: number;
+  rowHeight: number;
+} {
+  const spineMargin = 6;
+  const hairline = Math.max(StyleSheet.hairlineWidth, 1);
+  const spineTotal = spineMargin + hairline + spineMargin;
+
+  const nominal = (row: PageRow) => {
+    const ar = bookPageAspectRatio(row.page.type);
+    return { w: BOOK_PAGE_W_MM, h: BOOK_PAGE_W_MM / ar };
+  };
+
+  const trimA5 = { w: BOOK_PAGE_W_MM, h: BOOK_PAGE_H_MM };
+
+  if (!left && !right) {
+    return { left: null, right: null, spineWidth: 0, rowHeight: 0 };
   }
-  return { width: Math.max(1, Math.floor(w)), height: Math.max(1, Math.floor(h)) };
+
+  if (!left && right) {
+    const R = nominal(right);
+    const s = Math.min(availW / R.w, availH / R.h);
+    const rw = Math.max(1, Math.floor(s * R.w));
+    const rh = Math.max(1, Math.floor(s * R.h));
+    return { left: null, right: { width: rw, height: rh }, spineWidth: 0, rowHeight: rh };
+  }
+
+  if (left && !right) {
+    const L = nominal(left);
+    const s = Math.min(availW / L.w, availH / L.h);
+    const lw = Math.max(1, Math.floor(s * L.w));
+    const lh = Math.max(1, Math.floor(s * L.h));
+    return { left: { width: lw, height: lh }, right: null, spineWidth: 0, rowHeight: lh };
+  }
+
+  const s = Math.min((availW - spineTotal) / (trimA5.w * 2), availH / trimA5.h);
+  const pw = Math.max(1, Math.floor(s * trimA5.w));
+  const ph = Math.max(1, Math.floor(s * trimA5.h));
+  return {
+    left: { width: pw, height: ph },
+    right: { width: pw, height: ph },
+    spineWidth: spineTotal,
+    rowHeight: ph,
+  };
 }
 
 type PageRow = { page: BookPage; pageNum: number };
@@ -744,95 +786,70 @@ export default function BookPreviewScreen() {
 
   const renderSpreadItem: ListRenderItem<SpreadRow> = useCallback(
     ({ item }) => {
-      const gap = 12;
-      const pageW = Math.floor((screenWidth - gap) / 2);
-
       const left = item.left;
       const right = item.right;
 
-      const leftDims = left
-        ? fitMaquettePageDimensions(left.page.type, pageW, availHLandscape)
-        : { width: pageW, height: availHLandscape };
-      const rightDims = right
-        ? fitMaquettePageDimensions(right.page.type, pageW, availHLandscape)
-        : { width: pageW, height: availHLandscape };
+      const layout = computeLandscapeSpreadLayout(left, right, screenWidth, availHLandscape);
+
+      const leftMem = left ? memoryForMaquette(left.page, merge) : null;
+      const rightMem = right ? memoryForMaquette(right.page, merge) : null;
+      const qrUrlLeft = leftMem ? `${QR_BASE}/${leftMem.id}` : '';
+      const qrUrlRight = rightMem ? `${QR_BASE}/${rightMem.id}` : '';
+
+      const renderSpreadMaquette = (
+        row: PageRow,
+        dims: { width: number; height: number },
+        qrUrl: string,
+      ) => {
+        const mem = memoryForMaquette(row.page, merge);
+        return (
+          <View style={[styles.spreadPageCenter, { width: dims.width, height: dims.height }]}>
+            <MaquetteBookPages
+              page={row.page}
+              pageNum={row.pageNum}
+              width={dims.width}
+              height={dims.height}
+              child={child!}
+              memory={mem}
+              rotation={mem ? rotations[mem.id] ?? 0 : 0}
+              photoCrop={
+                mem &&
+                (row.page.type === 'photo-full' ||
+                  row.page.type === 'photo-note' ||
+                  row.page.type === 'audio')
+                  ? photoCrops[mem.id]
+                  : undefined
+              }
+              truncated={false}
+              coverYearLabel={coverYearLabel}
+              coverDisplayTitle={row.page.type === 'cover' ? (coverTitleLine ?? `Journal de ${child!.name}`) : undefined}
+              coverPhotoUri={row.page.type === 'cover' ? coverPhotoUrl : null}
+              coverPhotoCrop={photoCrops.cover}
+              chapterDisplayTitle={row.page.type === 'chapter' ? (chapterTitleLine ?? undefined) : undefined}
+              onRotate={() => {}}
+              onRequestTextEdit={() => {}}
+              qrUrl={qrUrl}
+            />
+          </View>
+        );
+      };
+
+      const showSpine = Boolean(left && right && layout.spineWidth > 0);
 
       return (
         <View style={[styles.pageSlide, styles.pageSlideSpread, { width: screenWidth, height: availHLandscape }]}>
           <View style={styles.spreadRow}>
-            <View style={[styles.spreadCell, { width: pageW, height: availHLandscape }]}>
-              {left ? (
-                <View style={[styles.spreadPageCenter, { width: pageW, height: availHLandscape }]}>
-                  <MaquetteBookPages
-                    page={left.page}
-                    pageNum={left.pageNum}
-                    width={leftDims.width}
-                    height={leftDims.height}
-                    child={child!}
-                    memory={memoryForMaquette(left.page, merge)}
-                    rotation={(() => {
-                      const m = memoryForMaquette(left.page, merge);
-                      return m ? rotations[m.id] ?? 0 : 0;
-                    })()}
-                    photoCrop={(() => {
-                      const m = memoryForMaquette(left.page, merge);
-                      return m && (left.page.type === 'photo-full' || left.page.type === 'photo-note' || left.page.type === 'audio')
-                        ? photoCrops[m.id]
-                        : undefined;
-                    })()}
-                    truncated={false}
-                    coverYearLabel={coverYearLabel}
-                    coverDisplayTitle={left.page.type === 'cover' ? (coverTitleLine ?? `Journal de ${child!.name}`) : undefined}
-                    coverPhotoUri={left.page.type === 'cover' ? coverPhotoUrl : null}
-                    coverPhotoCrop={photoCrops.cover}
-                    chapterDisplayTitle={left.page.type === 'chapter' ? (chapterTitleLine ?? undefined) : undefined}
-                    onRotate={() => {}}
-                    onRequestTextEdit={() => {}}
-                    qrUrl=""
-                  />
-                </View>
-              ) : (
-                <View style={[styles.spreadBlank, { width: pageW, height: availHLandscape }]} />
-              )}
-            </View>
-
-            <View style={{ width: gap }} />
-
-            <View style={[styles.spreadCell, { width: pageW, height: availHLandscape }]}>
-              {right ? (
-                <View style={[styles.spreadPageCenter, { width: pageW, height: availHLandscape }]}>
-                  <MaquetteBookPages
-                    page={right.page}
-                    pageNum={right.pageNum}
-                    width={rightDims.width}
-                    height={rightDims.height}
-                    child={child!}
-                    memory={memoryForMaquette(right.page, merge)}
-                    rotation={(() => {
-                      const m = memoryForMaquette(right.page, merge);
-                      return m ? rotations[m.id] ?? 0 : 0;
-                    })()}
-                    photoCrop={(() => {
-                      const m = memoryForMaquette(right.page, merge);
-                      return m && (right.page.type === 'photo-full' || right.page.type === 'photo-note' || right.page.type === 'audio')
-                        ? photoCrops[m.id]
-                        : undefined;
-                    })()}
-                    truncated={false}
-                    coverYearLabel={coverYearLabel}
-                    coverDisplayTitle={right.page.type === 'cover' ? (coverTitleLine ?? `Journal de ${child!.name}`) : undefined}
-                    coverPhotoUri={right.page.type === 'cover' ? coverPhotoUrl : null}
-                    coverPhotoCrop={photoCrops.cover}
-                    chapterDisplayTitle={right.page.type === 'chapter' ? (chapterTitleLine ?? undefined) : undefined}
-                    onRotate={() => {}}
-                    onRequestTextEdit={() => {}}
-                    qrUrl=""
-                  />
-                </View>
-              ) : (
-                <View style={[styles.spreadBlank, { width: pageW, height: availHLandscape }]} />
-              )}
-            </View>
+            {layout.left ? (
+              <View style={[styles.spreadCell, layout.left]}>{renderSpreadMaquette(left!, layout.left, qrUrlLeft)}</View>
+            ) : null}
+            {showSpine ? (
+              <View style={[styles.spreadSpine, { width: layout.spineWidth, height: layout.rowHeight }]}>
+                <View style={styles.spreadSpineHairline} />
+              </View>
+            ) : null}
+            {layout.right ? (
+              <View style={[styles.spreadCell, layout.right]}>{renderSpreadMaquette(right!, layout.right, qrUrlRight)}</View>
+            ) : null}
           </View>
         </View>
       );
@@ -1801,6 +1818,7 @@ const styles = StyleSheet.create({
   },
   pageSlideSpread: {
     justifyContent: 'center',
+    backgroundColor: '#000000',
   },
   spreadRow: {
     flex: 1,
@@ -1815,9 +1833,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  spreadBlank: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
+  spreadSpine: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  spreadSpineHairline: {
+    width: Math.max(StyleSheet.hairlineWidth, 1),
+    height: '100%',
+    backgroundColor: 'rgba(255,255,255,0.28)',
   },
   bottomBar: {
     backgroundColor: 'rgba(10,10,14,0.96)',
