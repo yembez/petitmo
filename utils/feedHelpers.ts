@@ -24,6 +24,7 @@ export function filMemoryLiteKey(m: Memory): string {
     lx: m.extra_photo_paths,
     th: m.thumb_url,
     d: m.display_url,
+    pu: (m.print_url ?? '').trim(),
     eth: m.extra_thumb_urls,
     ed: m.extra_display_urls,
     epo: m.extra_photo_urls,

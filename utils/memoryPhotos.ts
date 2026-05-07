@@ -100,6 +100,7 @@ export function getAllPhotoUrlsForFeed(memory: Memory): string[] {
   const firstRemote = firstNonEmpty(
     memory.thumb_url,
     memory.display_url,
+    memory.print_url,
     memory.edited_media_url,
     memory.media_url,
     typeof memory.media_path === 'string' ? memory.media_path : '',
@@ -137,6 +138,7 @@ export function getAllPhotoUrlsForDisplay(memory: Memory): string[] {
     firstNonEmpty(
       memory.display_url,
       memory.thumb_url,
+      memory.print_url,
       memory.edited_media_url,
       memory.media_url,
       typeof memory.media_path === 'string' ? memory.media_path : '',
@@ -162,6 +164,7 @@ function photoVariantGroups(memory: Memory): string[][] {
   const g0 = [
     memory.display_url,
     memory.thumb_url,
+    memory.print_url,
     memory.edited_media_url,
     memory.media_url,
     typeof memory.media_path === 'string' ? memory.media_path : '',

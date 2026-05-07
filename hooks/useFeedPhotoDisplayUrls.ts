@@ -170,6 +170,7 @@ export function useFeedPhotoDisplayUrls(memory: Memory): string[] {
     memory.local_media_path,
     memory.thumb_url,
     memory.display_url,
+    memory.print_url,
     memory.edited_media_url,
     memory.media_url,
     memory.extra_photo_paths,
