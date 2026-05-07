@@ -68,14 +68,6 @@ function dateFrCaps(iso: string): string {
   return s.replace(/\b\w/g, c => c.toUpperCase());
 }
 
-function dateTimeFrCaps(iso: string): string {
-  const d = new Date(iso);
-  const date = d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
-  const time = d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', hour12: false });
-  const t = time.replace(':', 'H').replace(/\s/g, '');
-  return `${date} · ${t}`.toUpperCase();
-}
-
 function monthYearCaps(label: string): string {
   return label.replace(/\b\w/g, c => c.toUpperCase());
 }
@@ -644,7 +636,7 @@ function MaquettePhotoNote({
         >
           <View style={styles.page4MetaRow}>
             <Text style={[styles.page4Meta, dm400 && { fontFamily: dm400 }]}>
-              {dateTimeFrCaps(memory.created_at)}
+              {dateFrCaps(memory.created_at)}
             </Text>
             {bookLoc ? (
               <Text
@@ -765,10 +757,7 @@ function MaquetteQuote({
     return 0;
   }, [body]);
 
-  const time = new Date(memory.created_at).toLocaleTimeString('fr-FR', {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  const bookLoc = bookMaquetteLocationLabel(memory);
 
   const bodyStyle =
     fitLevel === 2 ? styles.quoteBodyFit2 : fitLevel === 1 ? styles.quoteBodyFit1 : styles.quoteBody;
@@ -820,14 +809,19 @@ function MaquetteQuote({
             <View style={styles.quoteRuleDot} />
             <View style={styles.quoteRuleSeg} />
           </View>
-          <Text style={[styles.quoteTime, dm400 && { fontFamily: dm400 }]}>
-            {new Date(memory.created_at).toLocaleDateString('fr-FR', {
-              day: 'numeric',
-              month: 'long',
-              year: 'numeric',
-            })}{' '}
-            · {time}
-          </Text>
+          <View style={styles.photoDateLocRow}>
+            <Text style={[styles.photoDate, dm400 && { fontFamily: dm400 }]}>
+              {dateFrCaps(memory.created_at)}
+            </Text>
+            {bookLoc ? (
+              <Text
+                style={[styles.photoLocationBook, dm400 && { fontFamily: dm400 }]}
+                numberOfLines={2}
+              >
+                {bookLoc}
+              </Text>
+            ) : null}
+          </View>
         </View>
       </View>
       <Folio n={pageNum} dm400={dm400} />
@@ -927,7 +921,7 @@ function MaquetteAudio({
           </View>
           <View style={[styles.page4MetaRow, { flex: 1, minWidth: 0 }]}>
             <Text style={[styles.page4Meta, dm400 && { fontFamily: dm400 }]}>
-              {dateTimeFrCaps(memory.created_at)}
+              {dateFrCaps(memory.created_at)}
             </Text>
             {bookLoc ? (
               <Text
@@ -1034,7 +1028,7 @@ function MaquetteVideo({
         <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
           <View style={styles.noteMetaRow}>
             <Text style={[styles.noteMeta, dm400 && { fontFamily: dm400 }]}>
-              {dateTimeFrCaps(memory.created_at)}
+              {dateFrCaps(memory.created_at)}
             </Text>
             {bookLoc ? (
               <Text
@@ -1205,12 +1199,14 @@ const styles = StyleSheet.create({
     paddingTop: 14,
     paddingBottom: 36,
     flex: 1,
+    minHeight: 36,
   },
   photoDateLocRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: 10,
+    flexShrink: 0,
   },
   photoDate: {
     fontSize: 11,
@@ -1338,13 +1334,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#D1D5DB',
     marginHorizontal: 6,
   },
-  quoteTime: {
-    alignSelf: 'flex-end',
-    textAlign: 'right',
-    marginTop: 8,
-    fontSize: 11,
-    color: MUTED,
-  },
   /** Même squelette que le PDF : photo-note en haut, bandeau (meta → texte → QR → play + onde). */
   audioBelowPhoto: {
     flex: 1,
@@ -1360,6 +1349,7 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: LINE,
+    gap: 14,
   },
   audioLower: {
     flex: 1,

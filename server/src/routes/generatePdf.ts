@@ -94,6 +94,7 @@ function mapGuestMemories(list: GuestMemoryForPdfPayload[], exportRequestId: str
       poster_print_url: g.poster_print_url ?? null,
       voice_cover_url: g.voice_cover_url ?? null,
       voice_cover_path: null,
+      location: g.location?.trim() ? g.location.trim() : null,
       created_at: now,
     });
   }
@@ -180,7 +181,7 @@ export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient,
       const { data: memories, error: memErr } = await supabase
         .from('memories')
         .select(
-          'id, child_id, user_id, type, content, media_url, media_path, edited_media_url, duration, thumbnail_url, display_url, print_url, poster_url, poster_print_url, voice_cover_url, voice_cover_path, created_at'
+          'id, child_id, user_id, type, content, media_url, media_path, edited_media_url, duration, thumbnail_url, display_url, print_url, poster_url, poster_print_url, voice_cover_url, voice_cover_path, location, created_at'
         )
         .eq('child_id', childId)
         .in('id', memoryIds);

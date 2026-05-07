@@ -11,8 +11,8 @@ import type { ChildRow, MemoryRow } from './memoryRow';
 import { clampAudioBookAnnotation } from './audioBookAnnotation';
 import {
   audioWaveformSvg,
+  bookPdfLocationLabel,
   dateFrCaps,
-  dateTimeFrCaps,
   normalizeQuoteBodyLikeMaquette,
   quoteFitLevelFromBody,
 } from './maquetteAlign';
@@ -100,11 +100,6 @@ function clampWithEllipsis(s: string, maxChars: number): string {
   return `${t.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
 }
 
-function dateFr(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
-}
-
 function monthCaps(label: string): string {
   return label.replace(/\b\w/g, c => c.toUpperCase());
 }
@@ -181,6 +176,7 @@ function pagePhotoFull(m: MemoryRow, rot: number, pageNum: number, crop: PhotoCr
   const rotCss = rot ? `transform: rotate(${rot}deg); transform-origin: center;` : '';
   const captionHtml = captionRaw ? romanHtml(captionRaw) : '';
   const imgCls = printBleed ? 'pf-image bleed-x' : 'pf-image';
+  const locLabel = bookPdfLocationLabel(m.location);
   return `<div class="page photo-full-stack">
   <div class="${imgCls}">
     ${
@@ -190,7 +186,10 @@ function pagePhotoFull(m: MemoryRow, rot: number, pageNum: number, crop: PhotoCr
     }
   </div>
   <div class="pf-footer">
-    <div class="pf-meta">${esc(dateFrCaps(m.created_at))}</div>
+    <div class="pf-meta-row">
+      <div class="pf-meta">${esc(dateFrCaps(m.created_at))}</div>
+      ${locLabel ? `<div class="pf-meta pf-meta-loc">${esc(locLabel)}</div>` : ''}
+    </div>
     ${captionHtml ? `<div class="pf-caption body">${captionHtml}</div>` : ''}
   </div>
   <div class="folio">${pageNum}</div>
@@ -202,6 +201,7 @@ function pagePhotoNote(m: MemoryRow, rot: number, pageNum: number, crop: PhotoCr
   const legend = clampWithEllipsis(sanitizeText((m.content ?? '').trim()), 420);
   const rotCss = rot ? `transform: rotate(${rot}deg); transform-origin: center;` : '';
   const pnCls = printBleed ? 'pn-image bleed-x' : 'pn-image';
+  const locLabel = bookPdfLocationLabel(m.location);
   return `<div class="page photo-note">
   <div class="${pnCls}">
     ${src
@@ -209,7 +209,10 @@ function pagePhotoNote(m: MemoryRow, rot: number, pageNum: number, crop: PhotoCr
       : '<div class="placeholder" style="width:100%;height:100%;"></div>'}
   </div>
   <div class="pn-text">
-    <div class="label">${esc(dateTimeFrCaps(m.created_at))}</div>
+    <div class="pn-meta-row">
+      <div class="label">${esc(dateFrCaps(m.created_at))}</div>
+      ${locLabel ? `<div class="label pn-meta-loc">${esc(locLabel)}</div>` : ''}
+    </div>
     ${legend ? `<div class="body">${romanHtml(legend)}</div>` : ''}
   </div>
   <div class="folio">${pageNum}</div>
@@ -220,8 +223,7 @@ function pageQuote(m: MemoryRow, pageNum: number): string {
   const raw = clampChars(sanitizeText((m.content ?? '').trim()), 600);
   const body = normalizeQuoteBodyLikeMaquette(raw);
   const fitLevel = quoteFitLevelFromBody(body);
-  const time = new Date(m.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-  const dateLabel = dateFr(m.created_at) + ' · ' + time;
+  const locLabel = bookPdfLocationLabel(m.location);
   return `<div class="page quote">
   <div class="inner quote-inner quote-fit-${fitLevel}">
     <div class="quote-header">
@@ -238,7 +240,10 @@ function pageQuote(m: MemoryRow, pageNum: number): string {
         <div class="quote-rule-dot"></div>
         <div class="quote-rule-seg"></div>
       </div>
-      <div class="label quote-date-label">${esc(dateLabel)}</div>
+      <div class="quote-meta-row">
+        <div class="label">${esc(dateFrCaps(m.created_at))}</div>
+        ${locLabel ? `<div class="label quote-meta-loc">${esc(locLabel)}</div>` : ''}
+      </div>
     </div>
   </div>
   <div class="folio">${pageNum}</div>
@@ -259,6 +264,7 @@ function pageAudio(
   const coverUrl = imgAttr(m.voice_cover_url);
   const rotCss = rot ? `transform: rotate(${rot}deg); transform-origin: center;` : '';
   const pnCls = printBleed ? 'pn-image bleed-x' : 'pn-image';
+  const locLabel = bookPdfLocationLabel(m.location);
   return `<div class="page audio audio-note-layout">
   <div class="${pnCls}">
     ${
@@ -273,7 +279,10 @@ function pageAudio(
         <span class="dot vocal"></span>
         <span class="label audio-type-label">Vocal</span>
       </div>
-      <span class="label">${esc(dateTimeFrCaps(m.created_at))}</span>
+      <div class="audio-meta-right">
+        <span class="label audio-meta-date">${esc(dateFrCaps(m.created_at))}</span>
+        ${locLabel ? `<span class="label audio-meta-loc">${esc(locLabel)}</span>` : ''}
+      </div>
     </div>
     ${titleHtml ? `<div class="audio-title-above-qr body">${titleHtml}</div>` : ''}
     <div class="audio-qr-block">
@@ -304,12 +313,16 @@ function pageVideo(m: MemoryRow, qrUrl: string, pageNum: number, printBleed: boo
   const sub = videoBodyRaw.trim() ? videoBodyRaw : 'Regarde ce moment en vidéo.';
   const thumbUrl = imgAttrFirst([m.thumbnail_url, m.poster_url]);
   const vtCls = printBleed ? 'video-thumb bleed-x' : 'video-thumb';
+  const locLabel = bookPdfLocationLabel(m.location);
   return `<div class="page video">
   <div class="${vtCls}">
     ${thumbUrl ? `<img src="${thumbUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;" />` : '<div class="placeholder" style="width:100%;height:100%;"></div>'}
   </div>
   <div class="inner video-text-block">
-    <div class="label">${esc(dateTimeFrCaps(m.created_at))}</div>
+    <div class="video-meta-row">
+      <div class="label">${esc(dateFrCaps(m.created_at))}</div>
+      ${locLabel ? `<div class="label video-meta-loc">${esc(locLabel)}</div>` : ''}
+    </div>
     <div class="video-title-line">${esc(vTitle)}</div>
     <div class="video-sub-line">${romanHtml(sub)}</div>
     <div class="audio-qr video-qr-bottom">
@@ -540,6 +553,15 @@ body.print-bleed .pf-footer {
   font-family:'DM Sans',sans-serif; font-size:7pt; font-weight:400;
   color:#AEAEB2; letter-spacing:.3pt; text-transform:uppercase;
 }
+.pf-meta-row {
+  display:flex; justify-content:space-between; align-items:flex-start;
+  gap:3mm; flex-shrink:0;
+}
+.pf-meta-loc {
+  font-family:'DM Sans',sans-serif; font-size:7pt; font-weight:600;
+  color:#3A3A3C; letter-spacing:.15pt; text-transform:none; text-align:right;
+  flex:1; min-width:0;
+}
 .pf-caption { margin-top:2.1mm; font-size:12.75pt; line-height:1.45; }
 .placeholder { background:#F2F2F7; }
 
@@ -552,6 +574,14 @@ body.print-bleed .pf-footer {
 body.print-bleed .pn-text {
   padding-left:var(--pad-x-safe);
   padding-right:var(--pad-x-safe);
+}
+.pn-meta-row {
+  display:flex; justify-content:space-between; align-items:flex-start;
+  gap:3mm; flex-shrink:0; margin-bottom:2mm;
+}
+.pn-meta-loc {
+  font-weight:600; color:#3A3A3C; letter-spacing:.15pt; text-transform:none;
+  text-align:right; flex:1; min-width:0;
 }
 
 body.print-bleed .bleed-x {
@@ -589,7 +619,14 @@ body.print-bleed .bleed-x {
   margin-top:auto;
   padding-top:2mm;
 }
-.quote-date-label { text-align:right; margin-top:6pt; }
+.quote-meta-row {
+  display:flex; justify-content:space-between; align-items:flex-start;
+  gap:3mm; margin-top:6pt; flex-shrink:0;
+}
+.quote-meta-loc {
+  font-weight:600; color:#3A3A3C; letter-spacing:.15pt; text-transform:none;
+  text-align:right; flex:1; min-width:0;
+}
 .quote-mark {
   font-family:'EB Garamond',serif; font-style:italic;
   font-size:42pt; color:rgba(0,0,0,.06); line-height:1; margin-bottom:1.5mm; margin-left:5mm;
@@ -618,8 +655,17 @@ body.print-bleed .bleed-x {
   justify-content:space-between;
   align-items:center;
   flex-shrink:0;
+  gap:4mm;
   padding-bottom:3mm;
   border-bottom:.3pt solid rgba(0,0,0,.08);
+}
+.audio-meta-right {
+  display:flex; flex-direction:column; align-items:flex-end; gap:1mm;
+  flex-shrink:0; margin-left:auto; text-align:right;
+}
+.audio-meta-date { flex-shrink:0; }
+.audio-meta-loc {
+  font-weight:600; color:#3A3A3C; letter-spacing:.15pt; text-transform:none;
 }
 .audio-type-pill {
   display:flex;
@@ -706,6 +752,14 @@ body.print-bleed .bleed-x {
 body.print-bleed .video-text-block {
   padding-left:var(--pad-x-safe);
   padding-right:var(--pad-x-safe);
+}
+.video-meta-row {
+  display:flex; justify-content:space-between; align-items:flex-start;
+  gap:3mm; flex-shrink:0;
+}
+.video-meta-loc {
+  font-weight:600; color:#3A3A3C; letter-spacing:.15pt; text-transform:none;
+  text-align:right; flex:1; min-width:0;
 }
 .video-title-line {
   margin-top:2.6mm;

@@ -114,10 +114,17 @@ export function dateFrCaps(iso: string): string {
   return s.replace(/\b\w/g, c => c.toUpperCase());
 }
 
-export function dateTimeFrCaps(iso: string): string {
-  const d = new Date(iso);
-  const date = d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
-  const time = d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', hour12: false });
-  const t = time.replace(':', 'H').replace(/\s/g, '');
-  return `${date} · ${t}`.toUpperCase();
+/** Même logique que l’app : retirer le suffixe « (région) » du géocodage. */
+export function formatBookLocationShort(location: string | null | undefined): string {
+  const raw = typeof location === 'string' ? location.trim() : '';
+  if (!raw) return '';
+  return raw.replace(/\s*\([^)]*\)\s*$/u, '').trim();
+}
+
+/** Libellé lieu PDF : court si possible, sinon texte brut. */
+export function bookPdfLocationLabel(location: string | null | undefined): string {
+  const raw = typeof location === 'string' ? location.trim() : '';
+  if (!raw) return '';
+  const short = formatBookLocationShort(location);
+  return (short || raw).trim();
 }
