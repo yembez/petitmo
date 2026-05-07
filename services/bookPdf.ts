@@ -5,6 +5,7 @@ import { cacheDirectory, downloadAsync, getInfoAsync, readAsStringAsync, Encodin
 import type { BookPage } from '@/src/book/BookEngine';
 import type { Child, Memory } from '@/types/local';
 import { splitVideoTitleBody } from '@/src/book/bookTextParts';
+import { formatBookLocationShort } from '@/utils/date';
 import {
   FONT_EB_GARAMOND_ITALIC_B64,
   FONT_DM_SANS_400_B64,
@@ -377,6 +378,13 @@ function dateFr(iso: string): string {
   return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
+function bookPdfLocationLabel(location: string | null | undefined): string {
+  const raw = typeof location === 'string' ? location.trim() : '';
+  if (!raw) return '';
+  const short = formatBookLocationShort(location);
+  return (short || raw).trim();
+}
+
 function dateTimeFr(iso: string): string {
   const d = new Date(iso);
   const date = d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
@@ -519,12 +527,16 @@ function pagePhotoFull(
   // Dans le PDF, on n'affiche pas de "titre" par défaut : seulement une légende si elle existe.
   const caption = sanitizeText((m.content ?? '').trim());
   const rotCss = rot ? `transform: rotate(${rot}deg); transform-origin: center;` : '';
+  const locLabel = bookPdfLocationLabel(m.location);
   return `<div class="page photo-full">
   ${src
     ? `<div class="full-bleed crop-frame"><img class="crop-img" src="${src}" style="${cropCss(crop)}${rotCss}" /></div>`
     : '<div class="full-bleed placeholder"></div>'}
   <div class="photo-full-overlay">
-    <div class="label">${esc(dateFr(m.created_at))}</div>
+    <div class="pf-meta-row">
+      <div class="label">${esc(dateFr(m.created_at))}</div>
+      ${locLabel ? `<div class="label pf-meta-loc">${esc(locLabel)}</div>` : ''}
+    </div>
     ${caption ? `<div class="body" style="margin-top:2pt;">${esc(caption)}</div>` : ''}
   </div>
   <div class="folio folio-white">${pageNum}</div>
@@ -856,6 +868,21 @@ img { display:block; }
   position:absolute; bottom:0; left:0; right:0;
   background:linear-gradient(transparent,rgba(255,255,255,.95) 40%);
   padding:5mm 15mm 14mm;
+}
+.pf-meta-row {
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:4mm;
+}
+.pf-meta-loc {
+  font-weight:600;
+  color:#3A3A3C;
+  text-transform:none;
+  letter-spacing:.15pt;
+  text-align:right;
+  flex:1;
+  min-width:0;
 }
 
 /* ── PHOTO NOTE ── */
