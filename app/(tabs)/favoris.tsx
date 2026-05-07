@@ -45,11 +45,15 @@ import {
   feedMemoriesHydrationSnapshot,
 } from '@/services/tabScreensCache';
 import type { Memory } from '@/types/local';
+import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import {
   getAllPhotoUrls,
   parseFavoritePhotoUrls,
   normalizePhotoUrlForCompare,
   mapPhotoUrlToThumb,
+  pickPrimaryPhotoNormalizedForFeedAndViewer,
+  getVoiceCoverUriForBookPreview,
+  getVideoPosterUriForBookPreview,
 } from '@/utils/memoryPhotos';
 import { AddToBookModal } from '@/components/AddToBookModal';
 
@@ -61,8 +65,8 @@ type FavListItem = {
 };
 
 function primaryDisplayThumb(m: Memory): string {
-  // Favoris = liste → jamais charger l'original HD.
-  if (m.type === 'photo') return m.thumb_url?.trim() || m.display_url?.trim() || '';
+  // Aligné sur le fil : dérivés + sandbox fantôme → URLs bucket (`pickPrimary*` / posters / covers).
+  if (m.type === 'photo') return pickPrimaryPhotoNormalizedForFeedAndViewer(m);
   return thumbUri(m) ?? '';
 }
 
@@ -142,6 +146,34 @@ const FAVORIS_TOP_GRADIENT_COLORS: [string, string, string] = [
 ];
 const FAVORIS_TOP_GRADIENT_LOCATIONS: [number, number, number] = [0, 0.42, 1];
 
+/** Diaporama : chemins bucket → URLs signées comme dans le fil. */
+function SlideshowSignedLayer({
+  rawUri,
+  onLoad,
+}: {
+  rawUri: string;
+  onLoad: () => void;
+}) {
+  const signed = useSignedMediaUrl(rawUri.trim() || null);
+  const uri = (signed ?? rawUri).trim();
+
+  useEffect(() => {
+    if (!uri) return;
+    void Image.prefetch(uri).catch(() => {});
+  }, [uri]);
+
+  if (!uri) return null;
+  return (
+    <Image
+      key={uri}
+      source={{ uri }}
+      style={StyleSheet.absoluteFillObject}
+      resizeMode="cover"
+      onLoad={onLoad}
+    />
+  );
+}
+
 /** Diaporama : double calque — l’image visible reste à l’écran pendant que la suivante se charge en dessous (pas d’écran noir). */
 function FavorisSlideshow({
   urls,
@@ -173,6 +205,11 @@ function FavorisSlideshow({
       : topLayer === 1
         ? (urls[visibleIdx] ?? '')
         : (urls[(visibleIdx + 1) % n] ?? '');
+
+  useEffect(() => {
+    readyRef.current[0] = false;
+    readyRef.current[1] = false;
+  }, [layer0Uri, layer1Uri]);
 
   useEffect(() => {
     if (isActive && n > 0) {
@@ -226,43 +263,6 @@ function FavorisSlideshow({
     setVisibleIdx(i => (i + 1) % n);
   }, [n]);
 
-  /**
-   * Opacity 0 sur la couche cachée : onLoad parfois absent → prefetch + readyRef pour débloquer tryAdvance.
-   */
-  useEffect(() => {
-    if (!isActive || n <= 1 || !layer0Uri) return;
-    let cancelled = false;
-    readyRef.current[0] = false;
-    void Image.prefetch(layer0Uri)
-      .then(() => {
-        if (!cancelled) {
-          readyRef.current[0] = true;
-          if (pendingAdvanceRef.current) tryAdvance();
-        }
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [layer0Uri, n, isActive, tryAdvance]);
-
-  useEffect(() => {
-    if (!isActive || n <= 1 || !layer1Uri) return;
-    let cancelled = false;
-    readyRef.current[1] = false;
-    void Image.prefetch(layer1Uri)
-      .then(() => {
-        if (!cancelled) {
-          readyRef.current[1] = true;
-          if (pendingAdvanceRef.current) tryAdvance();
-        }
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [layer1Uri, n, isActive, tryAdvance]);
-
   const onLayer0Load = useCallback(() => {
     readyRef.current[0] = true;
     if (pendingAdvanceRef.current) tryAdvance();
@@ -315,11 +315,8 @@ function FavorisSlideshow({
         pointerEvents="none"
       >
         {layer0Uri ? (
-          <Image
-            key={layer0Uri}
-            source={{ uri: layer0Uri }}
-            style={StyleSheet.absoluteFillObject}
-            resizeMode="cover"
+          <SlideshowSignedLayer
+            rawUri={layer0Uri}
             onLoad={n === 1 ? onSingleImageLoad : onLayer0Load}
           />
         ) : null}
@@ -337,13 +334,7 @@ function FavorisSlideshow({
           pointerEvents="none"
         >
           {layer1Uri ? (
-            <Image
-              key={layer1Uri}
-              source={{ uri: layer1Uri }}
-              style={StyleSheet.absoluteFillObject}
-              resizeMode="cover"
-              onLoad={onLayer1Load}
-            />
+            <SlideshowSignedLayer rawUri={layer1Uri} onLoad={onLayer1Load} />
           ) : null}
         </Reanimated.View>
       ) : null}
@@ -685,13 +676,14 @@ function TypeGlyph({ type }: { type: Memory['type'] }) {
 }
 
 function thumbUri(m: Memory): string | null {
-  if (m.type === 'voice' && m.voice_cover_url?.trim()) return m.voice_cover_url.trim();
-  if (m.type === 'video') {
-    if (m.thumbnail_url?.trim()) return m.thumbnail_url.trim();
-    if (m.poster_url?.trim()) return m.poster_url.trim();
-    return null;
+  if (m.type === 'voice') {
+    const u = getVoiceCoverUriForBookPreview(m);
+    return u.trim() || null;
   }
-  // Photo : pas de fallback sur `media_url` (évite HD + cohérent avec le fil qui n’affiche que les dérivés).
+  if (m.type === 'video') {
+    const u = getVideoPosterUriForBookPreview(m);
+    return u.trim() || null;
+  }
   return null;
 }
 
@@ -731,7 +723,9 @@ const GalleryTile = memo(function GalleryTile({
   onToggleSelect,
 }: GalleryTileProps) {
   const { memory, thumbUrl } = item;
-  const uri = thumbUrl.trim() || thumbUri(memory) || '';
+  const rawThumb = thumbUrl.trim() || thumbUri(memory) || '';
+  const signedThumb = useSignedMediaUrl(rawThumb || null);
+  const uri = (signedThumb ?? rawThumb).trim();
   const isMedia = memory.type === 'photo' || memory.type === 'video';
   const isText = memory.type === 'text';
   const isAudio = memory.type === 'voice';

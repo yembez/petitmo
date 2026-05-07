@@ -1,5 +1,6 @@
 import { useState, useCallback, type ReactNode } from 'react';
-import { View, Image, Text, StyleSheet, useWindowDimensions, Pressable } from 'react-native';
+import { View, Text, StyleSheet, useWindowDimensions, Pressable } from 'react-native';
+import { Image } from 'expo-image';
 import { MEDIA_CARD_INSET, MEDIA_CARD_RADIUS } from '@/constants/feedLayout';
 import { scale } from '@/utils/responsive';
 import PhotoGalleryModal from '@/components/PhotoGalleryModal';
@@ -76,18 +77,23 @@ export default function PhotoMosaic({
         accessibilityRole="image"
         accessibilityLabel="Ouvrir la photo en grand"
       >
-        <Image source={{ uri: urls[0] }} style={styles.singleImg} resizeMode="cover" />
+        <Image
+          source={{ uri: urls[0] }}
+          style={styles.singleImg}
+          contentFit="cover"
+          cachePolicy="disk"
+        />
       </Pressable>
     );
   } else if (n === 2) {
     grid = (
       <View style={[styles.wrap, styles.row, { width: W, borderRadius: MEDIA_CARD_RADIUS }]}>
         <Pressable onPress={() => openGallery(0)} style={[styles.fill, { width: cell, height: rowH }]}>
-          <Image source={{ uri: urls[0] }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+          <Image source={{ uri: urls[0] }} style={StyleSheet.absoluteFillObject} contentFit="cover" cachePolicy="disk" />
         </Pressable>
         <View style={{ width: GAP }} />
         <Pressable onPress={() => openGallery(1)} style={[styles.fill, { width: cell, height: rowH }]}>
-          <Image source={{ uri: urls[1] }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+          <Image source={{ uri: urls[1] }} style={StyleSheet.absoluteFillObject} contentFit="cover" cachePolicy="disk" />
         </Pressable>
       </View>
     );
@@ -97,15 +103,15 @@ export default function PhotoMosaic({
     grid = (
       <View style={[styles.wrap, styles.row, { width: W, height: H, borderRadius: MEDIA_CARD_RADIUS }]}>
         <Pressable onPress={() => openGallery(0)} style={[styles.fill, { width: cell, height: H }]}>
-          <Image source={{ uri: urls[0] }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+          <Image source={{ uri: urls[0] }} style={StyleSheet.absoluteFillObject} contentFit="cover" cachePolicy="disk" />
         </Pressable>
         <View style={{ width: GAP }} />
         <View style={{ width: cell, height: H }}>
           <Pressable onPress={() => openGallery(1)} style={[styles.fill, { width: cell, height: halfH, marginBottom: GAP }]}>
-            <Image source={{ uri: urls[1] }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+            <Image source={{ uri: urls[1] }} style={StyleSheet.absoluteFillObject} contentFit="cover" cachePolicy="disk" />
           </Pressable>
           <Pressable onPress={() => openGallery(2)} style={[styles.fill, { width: cell, height: halfH }]}>
-            <Image source={{ uri: urls[2] }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+            <Image source={{ uri: urls[2] }} style={StyleSheet.absoluteFillObject} contentFit="cover" cachePolicy="disk" />
           </Pressable>
         </View>
       </View>
@@ -115,16 +121,16 @@ export default function PhotoMosaic({
       <View style={[styles.wrap, { width: W, borderRadius: MEDIA_CARD_RADIUS }]}>
         <View style={[styles.row, { marginBottom: GAP }]}>
           <Pressable onPress={() => openGallery(0)} style={[styles.fill, { width: cell, height: rowH }]}>
-            <Image source={{ uri: urls[0] }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+            <Image source={{ uri: urls[0] }} style={StyleSheet.absoluteFillObject} contentFit="cover" cachePolicy="disk" />
           </Pressable>
           <View style={{ width: GAP }} />
           <Pressable onPress={() => openGallery(1)} style={[styles.fill, { width: cell, height: rowH }]}>
-            <Image source={{ uri: urls[1] }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+            <Image source={{ uri: urls[1] }} style={StyleSheet.absoluteFillObject} contentFit="cover" cachePolicy="disk" />
           </Pressable>
         </View>
         <View style={styles.row}>
           <Pressable onPress={() => openGallery(2)} style={[styles.fill, { width: cell, height: rowH }]}>
-            <Image source={{ uri: urls[2] }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+            <Image source={{ uri: urls[2] }} style={StyleSheet.absoluteFillObject} contentFit="cover" cachePolicy="disk" />
           </Pressable>
           <View style={{ width: GAP }} />
           <Pressable
@@ -132,7 +138,7 @@ export default function PhotoMosaic({
             style={[styles.fill, { width: cell, height: rowH, position: 'relative' }]}
             accessibilityLabel={fourthOverlay > 0 ? `Voir les ${n} photos` : 'Ouvrir la photo en grand'}
           >
-            <Image source={{ uri: urls[3] }} style={[StyleSheet.absoluteFillObject, styles.fill]} resizeMode="cover" />
+            <Image source={{ uri: urls[3] }} style={[StyleSheet.absoluteFillObject, styles.fill]} contentFit="cover" cachePolicy="disk" />
             {fourthOverlay > 0 ? (
               <View style={styles.overlay} pointerEvents="none">
                 <Text style={styles.overlayText}>+{fourthOverlay}</Text>

@@ -1,7 +1,12 @@
 import { supabase } from '@/lib/supabase';
 import { getCachedUserMode } from '@/lib/userMode';
 import * as FileSystem from 'expo-file-system';
-import { copyAsync, documentDirectory, makeDirectoryAsync } from 'expo-file-system/legacy';
+import {
+  copyAsync,
+  documentDirectory,
+  getInfoAsync,
+  makeDirectoryAsync,
+} from 'expo-file-system/legacy';
 import { DeviceEventEmitter, Platform } from 'react-native';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as VideoThumbnails from 'expo-video-thumbnails';
@@ -340,10 +345,27 @@ async function uploadVoiceCoverToStorage(
   childId: string,
   coverUri: string
 ): Promise<{ publicUrl: string; path: string } | null> {
-  const sourceUri = await prepareLocalUriForVoiceCoverUpload(coverUri);
+  const trimmedIn = coverUri.trim();
+  if (!trimmedIn) return null;
+
+  if (
+    Platform.OS !== 'web' &&
+    !/^https?:\/\//i.test(trimmedIn) &&
+    !trimmedIn.startsWith('blob:') &&
+    !trimmedIn.startsWith('data:')
+  ) {
+    try {
+      const info = await getInfoAsync(trimmedIn);
+      if (!info.exists || info.isDirectory) return null;
+    } catch {
+      return null;
+    }
+  }
+
+  const sourceUri = await prepareLocalUriForVoiceCoverUpload(trimmedIn);
   let fileData: Blob | Uint8Array;
   let fileExt = sourceUri.split('.').pop()?.split('?')[0] || 'jpg';
-  if (Platform.OS !== 'web' && sourceUri !== coverUri.trim()) {
+  if (Platform.OS !== 'web' && sourceUri !== trimmedIn) {
     fileExt = 'jpg';
   } else if (!['jpg', 'jpeg', 'png', 'webp', 'heic'].includes(fileExt.toLowerCase())) {
     fileExt = 'jpg';
@@ -702,7 +724,6 @@ async function syncCloudPhotoMemoryInBackground(params: {
       location: locationLabel,
       voice_cover_url: null,
       voice_cover_path: null,
-      voice_playback_start_sec: null,
       edited_media_url: null,
       is_favorite: false,
       inserted_at: insertedAt,
@@ -808,7 +829,6 @@ async function syncCloudVideoMemoryInBackground(params: {
       location: locationLabel,
       voice_cover_url: null,
       voice_cover_path: null,
-      voice_playback_start_sec: null,
       edited_media_url: null,
       is_favorite: false,
       inserted_at: insertedAt,
@@ -920,7 +940,6 @@ async function syncCloudVoiceMemoryInBackground(params: {
       location: locationLabel,
       voice_cover_url: voiceCoverPublicUrl,
       voice_cover_path: voiceCoverPath,
-      voice_playback_start_sec: voicePlaybackStartSec,
       edited_media_url: null,
       is_favorite: false,
       inserted_at: insertedAt,
@@ -945,6 +964,11 @@ async function syncCloudVoiceMemoryInBackground(params: {
     const base = withLocalFields(insertedRow, { clientUploadStatus: uploaded.upload_status });
     const out: Memory = {
       ...base,
+      voice_playback_start_sec:
+        prev?.voice_playback_start_sec ??
+        voicePlaybackStartSec ??
+        base.voice_playback_start_sec ??
+        null,
       local_media_path: prev?.local_media_path ?? localVoiceUri,
       local_original_path: prev?.local_original_path ?? localVoiceUri,
       local_thumb_path: prev?.local_thumb_path ?? null,
@@ -963,6 +987,96 @@ async function syncCloudVoiceMemoryInBackground(params: {
   } catch (e) {
     console.warn('[media] syncCloudVoiceMemoryInBackground', params.memoryId, e);
   }
+}
+
+/**
+ * Au redémarrage / retour au premier plan : si la ligne existe déjà sur Supabase, fusion SQLite ;
+ * sinon relance le même flux stratifié que la capture Petitmo+ interrompue (`sync_status` pending).
+ */
+export async function resumePetitmoPlusCloudCaptureOrMerge(
+  memory: Memory,
+  userId: string,
+  isPaid: boolean,
+): Promise<boolean> {
+  const { data: remote } = await supabase
+    .from('memories')
+    .select('*')
+    .eq('id', memory.id)
+    .maybeSingle();
+
+  if (remote?.id) {
+    const prev = getLocalMemoryById(memory.id);
+    const merged = mergeServerMemoryRowWithExistingLocal(remote as MemoryRowDb, prev ?? undefined);
+    upsertLocalMemory({ ...merged, sync_status: 'synced' });
+    DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId: memory.id });
+    return true;
+  }
+
+  const interruptedPetitmo =
+    memory.sync_status === 'pending' ||
+    (memory.sync_status == null &&
+      memory.upload_status === 'pending' &&
+      !!(memory.local_original_path ?? '').trim());
+
+  if (!interruptedPetitmo) {
+    return false;
+  }
+
+  if (memory.type === 'photo') {
+    const src = (memory.local_original_path ?? memory.local_media_path ?? '').trim();
+    if (!src) return false;
+    await syncCloudPhotoMemoryInBackground({
+      memoryId: memory.id,
+      childId: memory.child_id,
+      userId,
+      localOriginalUri: src,
+      isPaid,
+      capturedAtIso: memory.created_at,
+      locationLabel: memory.location ?? null,
+    });
+    return true;
+  }
+
+  if (memory.type === 'video') {
+    const src = (memory.local_original_path ?? memory.local_media_path ?? '').trim();
+    if (!src) return false;
+    await syncCloudVideoMemoryInBackground({
+      memoryId: memory.id,
+      childId: memory.child_id,
+      userId,
+      localOriginalUri: src,
+      isPaid,
+      durationSec: memory.duration ?? undefined,
+      mimeType: null,
+      fileName: null,
+      capturedAtIso: memory.created_at,
+      locationLabel: memory.location ?? null,
+    });
+    return true;
+  }
+
+  if (memory.type === 'voice') {
+    const src = (memory.local_original_path ?? memory.local_media_path ?? '').trim();
+    if (!src) return false;
+    const coverRaw = (memory.voice_cover_path ?? memory.voice_cover_url ?? '').trim();
+    const coverLocal =
+      coverRaw && !/^https?:\/\//i.test(coverRaw) ? coverRaw : null;
+    await syncCloudVoiceMemoryInBackground({
+      memoryId: memory.id,
+      childId: memory.child_id,
+      userId,
+      localVoiceUri: src,
+      localVoiceCoverUri: coverLocal,
+      isPaid,
+      durationSec: memory.duration,
+      voicePlaybackStartSec: memory.voice_playback_start_sec ?? null,
+      capturedAtIso: memory.created_at,
+      locationLabel: memory.location ?? null,
+    });
+    return true;
+  }
+
+  return false;
 }
 
 export async function uploadMedia({
@@ -1369,12 +1483,6 @@ export async function uploadMedia({
       location: locationLabel,
       voice_cover_url: voiceCoverPublicUrl,
       voice_cover_path: voiceCoverPath,
-      voice_playback_start_sec:
-        type === 'voice' &&
-        typeof voicePlaybackStartSec === 'number' &&
-        Number.isFinite(voicePlaybackStartSec)
-          ? voicePlaybackStartSec
-          : null,
       inserted_at: new Date().toISOString(),
     };
 

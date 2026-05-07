@@ -258,13 +258,15 @@ function ImmersivePage({
 }
 
 function ImmersivePhoto({ memory }: { memory: Memory }) {
-  const uri = getPrimaryPhotoUriForBookPreview(memory);
-  if (!uri?.trim()) {
+  const raw = getPrimaryPhotoUriForBookPreview(memory)?.trim() ?? '';
+  const signed = useSignedMediaUrl(raw || null);
+  const uri = (signed ?? raw).trim();
+  if (!uri) {
     return <View style={styles.mediaFallback} />;
   }
   return (
     <Image
-      source={{ uri: uri.trim() }}
+      source={{ uri }}
       style={styles.fullBleed}
       contentFit="cover"
       cachePolicy="disk"

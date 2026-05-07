@@ -36,6 +36,7 @@ import {
   hydrateTabScreensFromLocal,
   hydrateTabScreensFromSqliteSync,
 } from '@/services/tabScreensHydrate';
+import { flushPendingCloudUploadsOnce } from '@/services/pendingCloudFlush';
 
 export default function RootLayout() {
   useFrameworkReady();
@@ -184,8 +185,9 @@ export default function RootLayout() {
         void warmSelectedChildIdFromStorage()
           .then(() => {
             hydrateTabScreensFromSqliteSync();
-            return hydrateTabScreensFromLocal();
+            return flushPendingCloudUploadsOnce();
           })
+          .then(() => hydrateTabScreensFromLocal())
           .then(() => {
             DeviceEventEmitter.emit('petitmo:memories-invalidate');
           });
@@ -209,6 +211,7 @@ export default function RootLayout() {
       await backupBooksToSupabaseIfPremium();
       await warmSelectedChildIdFromStorage();
       hydrateTabScreensFromSqliteSync();
+      await flushPendingCloudUploadsOnce();
       await hydrateTabScreensFromLocal();
       DeviceEventEmitter.emit('petitmo:memories-invalidate');
     })();

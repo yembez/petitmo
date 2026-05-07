@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system';
+import { getInfoAsync } from 'expo-file-system/legacy';
 import { getLocalMemoryById, getLocalMemoriesPendingCloudSync, upsertLocalMemory } from '@/lib/localDb';
 import { setUserTier } from '@/lib/userTier';
 import { ensureLocalChildrenSyncedToSupabase } from '@/services/children';
@@ -32,7 +32,7 @@ function isDuplicateKeyError(error: unknown): boolean {
 
 async function fileExists(uri: string): Promise<boolean> {
   try {
-    const info = await FileSystem.getInfoAsync(uri);
+    const info = await getInfoAsync(uri);
     return info.exists && !info.isDirectory;
   } catch {
     return false;
