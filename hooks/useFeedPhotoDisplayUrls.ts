@@ -159,10 +159,19 @@ export function useFeedPhotoDisplayUrls(memory: Memory): string[] {
   }, [
     memory.type,
     memory.id,
+    memory.local_display_path,
+    memory.local_thumb_path,
+    memory.local_print_path,
+    memory.local_original_path,
+    memory.local_media_path,
     memory.thumb_url,
     memory.display_url,
+    memory.edited_media_url,
+    memory.media_url,
+    memory.extra_photo_paths,
     memory.extra_thumb_urls,
     memory.extra_display_urls,
+    memory.extra_photo_urls,
   ]);
 
   return merged;

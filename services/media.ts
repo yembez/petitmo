@@ -9,7 +9,11 @@ import type { Database } from '@/types/database';
 import type { Memory } from '@/types/local';
 import type { UploadStatus } from '@/types/local';
 import { ensureLocalPhotoDerivatives, persistOriginalToSandbox } from '@/services/memoryLocalStore';
-import { withLocalFields, type MemoryRowDb } from '@/services/memoryRowMapping';
+import {
+  mergeServerMemoryRowWithExistingLocal,
+  withLocalFields,
+  type MemoryRowDb,
+} from '@/services/memoryRowMapping';
 import { pullMemoriesFromRemoteToLocal } from '@/services/memoriesLocalSync';
 import { checkMemoryLimit, checkVideoLimit, MEDIA_BOOK_PRINT_MAX_WIDTH } from '@/lib/limits';
 import { getUserTier } from '@/lib/userTier';
@@ -1692,7 +1696,9 @@ export async function getFavoriteMemories(childId: string): Promise<MemoryRow[]>
       .order('created_at', { ascending: true });
 
     if (error) throw error;
-    return (data ?? []).map(row => withLocalFields(row));
+    return (data ?? []).map(row =>
+      mergeServerMemoryRowWithExistingLocal(row, getLocalMemoryById(row.id))
+    );
   } catch (error) {
     console.error('Get favorite memories error:', error);
     return [];
@@ -1706,16 +1712,14 @@ export async function getMemories(childId: string): Promise<MemoryRow[]> {
     return local;
   }
 
-  // ── 2. SYNC SUPABASE EN ARRIÈRE-PLAN ──
-  void pullMemoriesFromRemoteToLocal(childId).catch(() => {
-    // Silencieux si offline — local suffit
-  });
-
-  if (local.length === 0) {
-    return (await pullMemoriesFromRemoteToLocal(childId)) as unknown as MemoryRow[];
+  // Cloud : toujours attendre le pull — sinon le fil affiche un SQLite périmé (sans thumb/media)
+  // pendant que le pull finit en arrière-plan, ce qui laissait les photos vides.
+  try {
+    const merged = await pullMemoriesFromRemoteToLocal(childId);
+    return merged as unknown as MemoryRow[];
+  } catch {
+    return local;
   }
-
-  return local;
 }
 
 export async function getMemoryById(memoryId: string) {
@@ -1733,7 +1737,7 @@ export async function getMemoryById(memoryId: string) {
       .eq('id', id)
       .maybeSingle();
     if (error) throw error;
-    if (data) return withLocalFields(data);
+    if (data) return mergeServerMemoryRowWithExistingLocal(data, getLocalMemoryById(id));
 
     // Le fil / Favoris lisent souvent SQLite en premier ; la ligne peut ne pas être (encore) lisible via PostgREST.
     return getLocalMemoryById(id);
@@ -1763,7 +1767,13 @@ export async function fetchMemoriesByIds(ids: string[]): Promise<MemoryRow[]> {
       const chunk = unique.slice(i, i + FETCH_MEMORIES_BY_IDS_CHUNK);
       const { data, error } = await supabase.from('memories').select('*').in('id', chunk);
       if (error) throw error;
-      if (data?.length) out.push(...data.map(row => withLocalFields(row)));
+      if (data?.length) {
+        out.push(
+          ...data.map(row =>
+            mergeServerMemoryRowWithExistingLocal(row, getLocalMemoryById(row.id))
+          )
+        );
+      }
     }
     return out;
   } catch (error) {

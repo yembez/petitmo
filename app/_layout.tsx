@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { THEME } from '@/constants/theme';
 import { supabase, supabaseAnonKey, supabaseUrl } from '@/lib/supabase';
@@ -39,6 +40,17 @@ import {
 export default function RootLayout() {
   useFrameworkReady();
   const [isAuthReady, setIsAuthReady] = useState(false);
+
+  // Orientation globale: portrait (sauf écrans spécifiques qui unlock).
+  useEffect(() => {
+    void (async () => {
+      try {
+        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     initLocalDb();

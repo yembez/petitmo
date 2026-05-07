@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { supabase, supabaseUrl } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase';
 
 /** Affichage client : URLs courtes, re-signées au besoin via le cache. */
 export const MEDIA_DISPLAY_SIGNED_TTL_SEC = 3600;
@@ -17,6 +17,10 @@ const BARE_MEDIA_PATH_RE =
 /**
  * Extrait le chemin objet dans le bucket `media` à partir d’une URL Supabase Storage
  * ou d’un chemin nu (ex. `userId/childId/...`).
+ *
+ * Ne compare pas l’origine à `EXPO_PUBLIC_SUPABASE_URL` : en build, l’URL en base peut
+ * venir d’un autre sous-domaine / variante, ou `Constants.expoConfig` peut diverger — sans
+ * chemin extrait, `createSignedUrl` n’est jamais appelé et les images restent cassées.
  */
 export function extractMediaBucketPath(urlOrPath: string): string | null {
   const s = urlOrPath.trim();
@@ -25,17 +29,7 @@ export function extractMediaBucketPath(urlOrPath: string): string | null {
     if (BARE_MEDIA_PATH_RE.test(s)) return s;
     return null;
   }
-  const base = (supabaseUrl ?? '').replace(/\/$/, '');
-  if (!base) return null;
-  let origin: string;
-  try {
-    origin = new URL(s).origin;
-  } catch {
-    return null;
-  }
-  if (origin !== new URL(base).origin) return null;
-
-  const m = s.match(/\/storage\/v1\/object\/(?:public|sign|authenticated)\/media\/(.+?)(?:\?|$)/);
+  const m = s.match(/\/storage\/v1\/object\/(?:public|sign|authenticated)\/media\/(.+?)(?:\?|$)/i);
   if (!m?.[1]) return null;
   try {
     return decodeURIComponent(m[1]);

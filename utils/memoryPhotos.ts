@@ -17,6 +17,24 @@ function firstNonEmpty(...candidates: (string | null | undefined)[]): string {
   return '';
 }
 
+/** URI affichable pour Image / expo-image (chemins sandbox → `file://`). */
+function normalizeMemoryMediaUriForDisplay(u: string): string {
+  const t = u.trim();
+  if (!t) return '';
+  if (
+    /^https?:\/\//i.test(t) ||
+    t.startsWith('file:') ||
+    t.startsWith('content:') ||
+    t.startsWith('ph://') ||
+    t.startsWith('assets-library://') ||
+    t.startsWith('data:')
+  ) {
+    return t;
+  }
+  const path = t.startsWith('/') ? t : `/${t}`;
+  return `file://${path}`;
+}
+
 /**
  * URI principale pour l’aperçu maquette / livre : **fichiers locaux d’abord** (sandbox / dérivés),
  * puis URLs dérivées (`display_url`, `thumb_url`), puis originaux distants.
@@ -66,28 +84,39 @@ export function getAllPhotoUrls(memory: Memory): string[] {
 }
 
 /**
- * URLs optimisées pour le feed (réduit l’egress):
- * - jamais `media_url` / `extra_photo_urls` (originaux)
- * - `thumb_url` puis repli `display_url` (toujours des fichiers dérivés générés côté worker)
- * - album: même logique par index (`extra_thumb_urls` puis `extra_display_urls`)
+ * URLs pour le feed : **local-first** (colonnes SQLite / sandbox), puis dérivés distants
+ * (`thumb` / `display`), puis originaux — pour ne pas passer par le réseau si le fichier est déjà sur l’appareil.
  */
 export function getAllPhotoUrlsForFeed(memory: Memory): string[] {
-  const first =
-    memory.thumb_url?.trim() ||
-    memory.display_url?.trim() ||
-    undefined;
+  const firstLocal = firstNonEmpty(
+    memory.local_display_path,
+    memory.local_thumb_path,
+    memory.local_print_path,
+    memory.local_original_path,
+    memory.local_media_path,
+  );
+  const firstRemote = firstNonEmpty(
+    memory.thumb_url,
+    memory.display_url,
+    memory.edited_media_url,
+    memory.media_url,
+  );
+  const firstRaw = firstNonEmpty(firstLocal, firstRemote);
+  const first = firstRaw ? normalizeMemoryMediaUriForDisplay(firstRaw) : '';
 
+  const localExtras = asTrimmedStringArray(memory.extra_photo_paths);
   const thumbs = asTrimmedStringArray(memory.extra_thumb_urls);
   const displays = asTrimmedStringArray(memory.extra_display_urls);
+  const originals = asTrimmedStringArray(memory.extra_photo_urls);
 
-  const max = Math.max(thumbs.length, displays.length);
+  const max = Math.max(localExtras.length, thumbs.length, displays.length, originals.length);
   const cleaned: string[] = [];
   for (let i = 0; i < max; i++) {
-    const u = thumbs[i]?.trim() || displays[i]?.trim() || '';
-    if (u) cleaned.push(u);
+    const raw = firstNonEmpty(localExtras[i], thumbs[i], displays[i], originals[i]);
+    if (raw) cleaned.push(normalizeMemoryMediaUriForDisplay(raw));
   }
 
-  return [first, ...cleaned].filter((u): u is string => !!u && u.length > 0);
+  return [first, ...cleaned].filter(u => u.length > 0);
 }
 
 /** Album multi-photos dans le fil : garde la visionneuse galerie (pas le viewer vertical immersif). */

@@ -2,7 +2,7 @@ import { supabase } from '@/lib/supabase'
 import { getCachedUserMode } from '@/lib/userMode'
 import { getLocalMemories, getLocalMemoryById, upsertLocalMemories } from '@/lib/localDb'
 import type { Memory } from '@/types/local'
-import { withLocalFields } from '@/services/memoryRowMapping'
+import { mergeServerMemoryRowWithExistingLocal } from '@/services/memoryRowMapping'
 
 /**
  * Télécharge les souvenirs de l’enfant depuis Supabase et les enregistre dans le SQLite local.
@@ -25,10 +25,8 @@ export async function pullMemoriesFromRemoteToLocal(childId: string): Promise<Me
     const withLocal: Memory[] = data.map(row => {
       const existing = getLocalMemoryById(row.id)
       return {
-        ...withLocalFields(row),
+        ...mergeServerMemoryRowWithExistingLocal(row, existing),
         sync_status: 'synced' as const,
-        import_asset_id: existing?.import_asset_id ?? null,
-        import_source_fingerprint: existing?.import_source_fingerprint ?? null,
       }
     })
     upsertLocalMemories(withLocal, 'full')

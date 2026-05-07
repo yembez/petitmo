@@ -7,6 +7,7 @@ import type { Database } from '@/types/database';
 import type { Child as LocalChild } from '@/types/local';
 import { getCachedUserMode } from '@/lib/userMode';
 import { getLocalChild, listLocalChildren, upsertLocalChild } from '@/lib/localDb';
+import { getSignedMediaDisplayUrl } from '@/lib/mediaSignedUrl';
 
 type ChildRow = Database['public']['Tables']['children']['Row'];
 
@@ -83,7 +84,12 @@ export async function cacheRemoteChildProfilePhotoLocally(child: LocalChild): Pr
   }
 
   try {
-    const res = await downloadAsync(remote, dest, headers && Object.keys(headers).length ? { headers } : undefined);
+    const signedRemote = await getSignedMediaDisplayUrl(remote);
+    const res = await downloadAsync(
+      signedRemote,
+      dest,
+      headers && Object.keys(headers).length ? { headers } : undefined
+    );
     if (res.status !== 200) return child;
 
     const next: LocalChild = {

@@ -36,6 +36,7 @@ import PetitmoLogoManuscrit, { PETITMO_LOGO_VIEWBOX } from '@/components/Petitmo
 import { useCaptureHeroLogoColor } from '@/hooks/useCaptureHeroLogoColor';
 import { useCaptureHeroTopFillColor } from '@/hooks/useCaptureHeroTopFillColor';
 import { checkMemoryLimit } from '@/lib/limits';
+import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { resolveChildProfileImageUri } from '@/utils/childPhotoUri';
 
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -226,9 +227,23 @@ export default function CapturerScreen() {
   const [isLoading, setIsLoading] = useState(() => {
     return (getCaptureTabChildSnapshot() ?? feedChildHydrationSnapshot) === null;
   });
-  /** Mode local : photo dans `local_photo_path`, pas dans `photo_url`. */
-  const heroPhotoUri = child
+  /** Mode local : photo dans `local_photo_path` ; sinon `photo_url` (souvent signée, TTL) → re-signer comme le fil vocal. */
+  const heroRawUri = child
     ? resolveChildProfileImageUri(child.local_photo_path, child.photo_url)
+    : null;
+  const heroIsLocalAsset =
+    !!heroRawUri &&
+    (heroRawUri.startsWith('file:') ||
+      heroRawUri.startsWith('content:') ||
+      heroRawUri.startsWith('ph://') ||
+      (!heroRawUri.startsWith('http://') && !heroRawUri.startsWith('https://')));
+  const heroSignedRemote = useSignedMediaUrl(
+    child && heroRawUri && !heroIsLocalAsset ? heroRawUri : null
+  );
+  const heroPhotoUri = heroRawUri
+    ? heroIsLocalAsset
+      ? heroRawUri
+      : heroSignedRemote ?? heroRawUri
     : null;
   const heroLogo = useCaptureHeroLogoColor(heroPhotoUri);
   const heroTopFill = useCaptureHeroTopFillColor(heroPhotoUri);

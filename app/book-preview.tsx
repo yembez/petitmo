@@ -17,6 +17,7 @@ import {
 import { useFonts, DMSans_400Regular, DMSans_500Medium, DMSans_600SemiBold, DMSans_700Bold } from '@expo-google-fonts/dm-sans';
 import { Pencil, Trash2, X } from 'lucide-react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { buildBookPages, type BookPage } from '@/src/book/BookEngine';
@@ -57,6 +58,38 @@ const BOTTOM_H = 82;
 const QR_BASE = 'https://petitmo.app/m';
 const MIN_BOOK_SELECTION_KEYS = 5;
 const MAX_BOOK_SELECTION_KEYS = 80;
+
+/** Aligné sur `printFrameMmFor` — ratio largeur / hauteur de la page à l’impression. */
+const BOOK_PAGE_W_MM = 154;
+const BOOK_PAGE_H_MM = 216;
+
+function bookPageAspectRatio(pageType: BookPage['type']): number {
+  switch (pageType) {
+    case 'cover':
+      return BOOK_PAGE_W_MM / 142;
+    case 'photo-note':
+    case 'audio':
+      return BOOK_PAGE_W_MM / (BOOK_PAGE_H_MM * 0.6);
+    default:
+      return BOOK_PAGE_W_MM / BOOK_PAGE_H_MM;
+  }
+}
+
+/** Agrandit au maximum la maquette dans la cellule sans rogner (mode paysage). */
+function fitMaquettePageDimensions(
+  pageType: BookPage['type'],
+  maxWidth: number,
+  maxHeight: number,
+): { width: number; height: number } {
+  const ar = bookPageAspectRatio(pageType);
+  let h = maxHeight;
+  let w = h * ar;
+  if (w > maxWidth) {
+    w = maxWidth;
+    h = w / ar;
+  }
+  return { width: Math.max(1, Math.floor(w)), height: Math.max(1, Math.floor(h)) };
+}
 
 type PageRow = { page: BookPage; pageNum: number };
 
@@ -163,16 +196,6 @@ function memoryForMaquette(
 function pageLabel(current: number, total: number): string {
   return `Page ${current} · ${total} pages`;
 }
-
-function spreadLabel(row: SpreadRow, totalPages: number): string {
-  const l = row.left?.pageNum ?? null;
-  const r = row.right?.pageNum ?? null;
-  if (l && r) return `Pages ${l}–${r} · ${totalPages} pages`;
-  if (r) return `Page ${r} · ${totalPages} pages`;
-  if (l) return `Page ${l} · ${totalPages} pages`;
-  return `${totalPages} pages`;
-}
-
 
 export default function BookPreviewScreen() {
   const router = useRouter();
@@ -298,8 +321,10 @@ export default function BookPreviewScreen() {
 
   const coverYearLabel = useMemo(() => coverJournalPeriodLabel(bookMemories), [bookMemories]);
 
-  const availH =
+  /** Portrait : header + barre d’actions. Paysage : lecture seule — toute la hauteur sous le header. */
+  const availHPortrait =
     screenHeight - HEADER_H - BOTTOM_H - insets.top - insets.bottom;
+  const availHLandscape = screenHeight - HEADER_H - insets.top - insets.bottom;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -413,16 +438,36 @@ export default function BookPreviewScreen() {
 
   const getImagePx = useCallback(
     async (uri: string): Promise<{ w: number; h: number }> => {
-      const cached = imagePxCache[uri];
-      if (cached) return cached;
-      const size = await new Promise<{ w: number; h: number }>((resolve, reject) => {
+      const key = uri.trim();
+      if (!key) throw new Error('URI image vide');
+      const cached = imagePxCache[key];
+      if (cached && cached.w > 0 && cached.h > 0) return cached;
+
+      const fromRn = await new Promise<{ w: number; h: number } | null>(resolve => {
         Image.getSize(
-          uri,
-          (w, h) => resolve({ w, h }),
-          err => reject(err)
+          key,
+          (w, h) => {
+            if (w > 0 && h > 0) resolve({ w, h });
+            else resolve(null);
+          },
+          () => resolve(null)
         );
       });
-      setImagePxCache(prev => ({ ...prev, [uri]: size }));
+      if (fromRn) {
+        setImagePxCache(prev => ({ ...prev, [key]: fromRn }));
+        return fromRn;
+      }
+
+      // `Image.getSize` échoue souvent sur certaines URL signées / chemins sandbox — expo-image-manipulator décode et expose les pixels.
+      const decoded = await ImageManipulator.manipulateAsync(key, [], {
+        compress: 1,
+        format: ImageManipulator.SaveFormat.JPEG,
+      });
+      const w = decoded.width;
+      const h = decoded.height;
+      if (!(w > 0 && h > 0)) throw new Error('Dimensions image introuvables');
+      const size = { w, h };
+      setImagePxCache(prev => ({ ...prev, [key]: size }));
       return size;
     },
     [imagePxCache]
@@ -450,17 +495,25 @@ export default function BookPreviewScreen() {
           const px = await getImagePx(payload.uri);
           setBookCropSession({ ...payload, imgPxW: px.w, imgPxH: px.h, printMmW: mm.w, printMmH: mm.h });
         } catch {
-          setBookCropSession({ ...payload, imgPxW: 0, imgPxH: 0, printMmW: mm.w, printMmH: mm.h });
+          const id = payload.storageKey.trim();
+          const mem = id && id !== 'cover' ? bookMemories.find(m => m.id === id) : null;
+          const ow = mem?.original_px_w;
+          const oh = mem?.original_px_h;
+          if (typeof ow === 'number' && typeof oh === 'number' && ow > 0 && oh > 0) {
+            setBookCropSession({ ...payload, imgPxW: ow, imgPxH: oh, printMmW: mm.w, printMmH: mm.h });
+          } else {
+            setBookCropSession({ ...payload, imgPxW: 0, imgPxH: 0, printMmW: mm.w, printMmH: mm.h });
+          }
         }
       })();
     },
-    [getImagePx]
+    [bookMemories, getImagePx]
   );
 
   useEffect(() => {
     void (async () => {
       try {
-        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.ALL);
       } catch {
         /* */
       }
@@ -526,12 +579,13 @@ export default function BookPreviewScreen() {
    */
   const onBookPagerMomentumEnd = useCallback(
     (e: { nativeEvent: { contentOffset: { x: number } } }) => {
-      if (pageRows.length === 0) return;
+      const slideCount = isLandscape ? spreadRows.length : pageRows.length;
+      if (slideCount <= 0) return;
       const x = e.nativeEvent.contentOffset.x;
-      const ix = Math.max(0, Math.min(Math.round(x / screenWidth), pageRows.length - 1));
+      const ix = Math.max(0, Math.min(Math.round(x / screenWidth), slideCount - 1));
       setCurrentPageIndex(prev => (prev === ix ? prev : ix));
     },
-    [pageRows.length, screenWidth]
+    [isLandscape, pageRows.length, screenWidth, spreadRows.length]
   );
 
   const merge = useCallback((m: Memory) => mergeMemory(m, localEdits), [localEdits]);
@@ -615,7 +669,7 @@ export default function BookPreviewScreen() {
           page={page}
           pageNum={pageNum}
           width={screenWidth}
-          height={availH}
+          height={availHPortrait}
           child={child!}
           memory={m}
           rotation={rot}
@@ -649,7 +703,7 @@ export default function BookPreviewScreen() {
       );
     },
     [
-      availH,
+      availHPortrait,
       child,
       coverPhotoUrl,
       coverTitleLine,
@@ -702,11 +756,11 @@ export default function BookPreviewScreen() {
 
   const renderPageItem: ListRenderItem<PageRow> = useCallback(
     ({ item }) => (
-      <View style={[styles.pageSlide, { width: screenWidth, height: availH }]}>
+      <View style={[styles.pageSlide, { width: screenWidth, height: availHPortrait }]}>
         {renderMaquettePage(item)}
       </View>
     ),
-    [availH, renderMaquettePage, screenWidth]
+    [availHPortrait, renderMaquettePage, screenWidth]
   );
 
   const renderSpreadItem: ListRenderItem<SpreadRow> = useCallback(
@@ -717,78 +771,87 @@ export default function BookPreviewScreen() {
       const left = item.left;
       const right = item.right;
 
+      const leftDims = left
+        ? fitMaquettePageDimensions(left.page.type, pageW, availHLandscape)
+        : { width: pageW, height: availHLandscape };
+      const rightDims = right
+        ? fitMaquettePageDimensions(right.page.type, pageW, availHLandscape)
+        : { width: pageW, height: availHLandscape };
+
       return (
-        <View style={[styles.pageSlide, { width: screenWidth, height: availH }]}>
-          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
-            <View style={{ width: pageW, height: availH }}>
+        <View style={[styles.pageSlide, styles.pageSlideSpread, { width: screenWidth, height: availHLandscape }]}>
+          <View style={styles.spreadRow}>
+            <View style={[styles.spreadCell, { width: pageW, height: availHLandscape }]}>
               {left ? (
-                <MaquetteBookPages
-                  page={left.page}
-                  pageNum={left.pageNum}
-                  width={pageW}
-                  height={availH}
-                  child={child!}
-                  memory={memoryForMaquette(left.page, merge)}
-                  rotation={(() => {
-                    const m = memoryForMaquette(left.page, merge);
-                    return m ? rotations[m.id] ?? 0 : 0;
-                  })()}
-                  photoCrop={(() => {
-                    const m = memoryForMaquette(left.page, merge);
-                    return m && (left.page.type === 'photo-full' || left.page.type === 'photo-note' || left.page.type === 'audio')
-                      ? photoCrops[m.id]
-                      : undefined;
-                  })()}
-                  truncated={false}
-                  coverYearLabel={coverYearLabel}
-                  coverDisplayTitle={left.page.type === 'cover' ? (coverTitleLine ?? `Journal de ${child!.name}`) : undefined}
-                  coverPhotoUri={left.page.type === 'cover' ? coverPhotoUrl : null}
-                  coverPhotoCrop={photoCrops.cover}
-                  chapterDisplayTitle={left.page.type === 'chapter' ? (chapterTitleLine ?? undefined) : undefined}
-                  // Étape A: pas d’édition/crop/rotate en paysage.
-                  onRotate={() => {}}
-                  onRequestTextEdit={() => {}}
-                  qrUrl=""
-                />
+                <View style={[styles.spreadPageCenter, { width: pageW, height: availHLandscape }]}>
+                  <MaquetteBookPages
+                    page={left.page}
+                    pageNum={left.pageNum}
+                    width={leftDims.width}
+                    height={leftDims.height}
+                    child={child!}
+                    memory={memoryForMaquette(left.page, merge)}
+                    rotation={(() => {
+                      const m = memoryForMaquette(left.page, merge);
+                      return m ? rotations[m.id] ?? 0 : 0;
+                    })()}
+                    photoCrop={(() => {
+                      const m = memoryForMaquette(left.page, merge);
+                      return m && (left.page.type === 'photo-full' || left.page.type === 'photo-note' || left.page.type === 'audio')
+                        ? photoCrops[m.id]
+                        : undefined;
+                    })()}
+                    truncated={false}
+                    coverYearLabel={coverYearLabel}
+                    coverDisplayTitle={left.page.type === 'cover' ? (coverTitleLine ?? `Journal de ${child!.name}`) : undefined}
+                    coverPhotoUri={left.page.type === 'cover' ? coverPhotoUrl : null}
+                    coverPhotoCrop={photoCrops.cover}
+                    chapterDisplayTitle={left.page.type === 'chapter' ? (chapterTitleLine ?? undefined) : undefined}
+                    onRotate={() => {}}
+                    onRequestTextEdit={() => {}}
+                    qrUrl=""
+                  />
+                </View>
               ) : (
-                <View style={{ flex: 1, backgroundColor: '#FFFFFF' }} />
+                <View style={[styles.spreadBlank, { width: pageW, height: availHLandscape }]} />
               )}
             </View>
 
             <View style={{ width: gap }} />
 
-            <View style={{ width: pageW, height: availH }}>
+            <View style={[styles.spreadCell, { width: pageW, height: availHLandscape }]}>
               {right ? (
-                <MaquetteBookPages
-                  page={right.page}
-                  pageNum={right.pageNum}
-                  width={pageW}
-                  height={availH}
-                  child={child!}
-                  memory={memoryForMaquette(right.page, merge)}
-                  rotation={(() => {
-                    const m = memoryForMaquette(right.page, merge);
-                    return m ? rotations[m.id] ?? 0 : 0;
-                  })()}
-                  photoCrop={(() => {
-                    const m = memoryForMaquette(right.page, merge);
-                    return m && (right.page.type === 'photo-full' || right.page.type === 'photo-note' || right.page.type === 'audio')
-                      ? photoCrops[m.id]
-                      : undefined;
-                  })()}
-                  truncated={false}
-                  coverYearLabel={coverYearLabel}
-                  coverDisplayTitle={right.page.type === 'cover' ? (coverTitleLine ?? `Journal de ${child!.name}`) : undefined}
-                  coverPhotoUri={right.page.type === 'cover' ? coverPhotoUrl : null}
-                  coverPhotoCrop={photoCrops.cover}
-                  chapterDisplayTitle={right.page.type === 'chapter' ? (chapterTitleLine ?? undefined) : undefined}
-                  // Étape A: pas d’édition/crop/rotate en paysage.
-                  onRotate={() => {}}
-                  onRequestTextEdit={() => {}}
-                  qrUrl=""
-                />
+                <View style={[styles.spreadPageCenter, { width: pageW, height: availHLandscape }]}>
+                  <MaquetteBookPages
+                    page={right.page}
+                    pageNum={right.pageNum}
+                    width={rightDims.width}
+                    height={rightDims.height}
+                    child={child!}
+                    memory={memoryForMaquette(right.page, merge)}
+                    rotation={(() => {
+                      const m = memoryForMaquette(right.page, merge);
+                      return m ? rotations[m.id] ?? 0 : 0;
+                    })()}
+                    photoCrop={(() => {
+                      const m = memoryForMaquette(right.page, merge);
+                      return m && (right.page.type === 'photo-full' || right.page.type === 'photo-note' || right.page.type === 'audio')
+                        ? photoCrops[m.id]
+                        : undefined;
+                    })()}
+                    truncated={false}
+                    coverYearLabel={coverYearLabel}
+                    coverDisplayTitle={right.page.type === 'cover' ? (coverTitleLine ?? `Journal de ${child!.name}`) : undefined}
+                    coverPhotoUri={right.page.type === 'cover' ? coverPhotoUrl : null}
+                    coverPhotoCrop={photoCrops.cover}
+                    chapterDisplayTitle={right.page.type === 'chapter' ? (chapterTitleLine ?? undefined) : undefined}
+                    onRotate={() => {}}
+                    onRequestTextEdit={() => {}}
+                    qrUrl=""
+                  />
+                </View>
               ) : (
-                <View style={{ flex: 1, backgroundColor: '#FFFFFF' }} />
+                <View style={[styles.spreadBlank, { width: pageW, height: availHLandscape }]} />
               )}
             </View>
           </View>
@@ -796,7 +859,7 @@ export default function BookPreviewScreen() {
       );
     },
     [
-      availH,
+      availHLandscape,
       child,
       chapterTitleLine,
       coverPhotoUrl,
@@ -1457,17 +1520,21 @@ export default function BookPreviewScreen() {
         <Text style={[styles.headerTitle, dm600 && { fontFamily: dm600 }]} numberOfLines={1}>
           {child.name} · {pages.length} pages
         </Text>
-        <Pressable
-          onPress={() => void handleExportBook()}
-          hitSlop={12}
-          style={[styles.headerCta, (exporting || guestExportSubmitting) && { opacity: 0.5 }]}
-          disabled={exporting || guestExportSubmitting}
-          accessibilityRole="button"
-        >
-          <Text style={[styles.headerCtaText, dm700 && { fontFamily: dm700 }]}>
-            {exporting || guestExportSubmitting ? 'Export…' : 'Exporter'}
-          </Text>
-        </Pressable>
+        {isLandscape ? (
+          <View style={styles.headerRightSpacer} accessibilityElementsHidden />
+        ) : (
+          <Pressable
+            onPress={() => void handleExportBook()}
+            hitSlop={12}
+            style={[styles.headerCta, (exporting || guestExportSubmitting) && { opacity: 0.5 }]}
+            disabled={exporting || guestExportSubmitting}
+            accessibilityRole="button"
+          >
+            <Text style={[styles.headerCtaText, dm700 && { fontFamily: dm700 }]}>
+              {exporting || guestExportSubmitting ? 'Export…' : 'Exporter'}
+            </Text>
+          </Pressable>
+        )}
       </View>
 
       {(loading || exporting || guestExportSubmitting) ? (
@@ -1510,56 +1577,54 @@ export default function BookPreviewScreen() {
         removeClippedSubviews={false}
       />
 
-      <View style={styles.bottomBar}>
-        <View style={styles.bottomIndicatorRow}>
-          {showManyDots ? (
-            <Text style={[styles.pageFraction, dm400 && { fontFamily: dm400 }]}>
-              {currentPageIndex + 1} / {Math.max(1, totalSlides)}
+      {!isLandscape ? (
+        <View style={styles.bottomBar}>
+          <View style={styles.bottomIndicatorRow}>
+            {showManyDots ? (
+              <Text style={[styles.pageFraction, dm400 && { fontFamily: dm400 }]}>
+                {currentPageIndex + 1} / {Math.max(1, totalSlides)}
+              </Text>
+            ) : (
+              <View style={styles.dotsRow}>
+                {pageRows.map((_, i) => (
+                  <View
+                    key={i.toString()}
+                    style={i === currentPageIndex ? styles.dotActive : styles.dotIdle}
+                  />
+                ))}
+              </View>
+            )}
+            <Text style={[styles.bottomPageLabel, dm400 && { fontFamily: dm400 }]}>
+              {pages.length > 0 ? pageLabel(currentPageIndex + 1, pages.length) : ''}
             </Text>
-          ) : (
-            <View style={styles.dotsRow}>
-              {(isLandscape ? spreadRows : pageRows).map((_, i) => (
-                <View
-                  key={i.toString()}
-                  style={i === currentPageIndex ? styles.dotActive : styles.dotIdle}
-                />
-              ))}
-            </View>
-          )}
-          <Text style={[styles.bottomPageLabel, dm400 && { fontFamily: dm400 }]}>
-            {pages.length > 0
-              ? isLandscape
-                ? spreadLabel(spreadRows[currentPageIndex] ?? { kind: 'spread', spreadIndex: 0, left: null, right: null }, pages.length)
-                : pageLabel(currentPageIndex + 1, pages.length)
-              : ''}
-          </Text>
-        </View>
-        <View style={styles.bottomButtonsRow}>
-          {canDeletePage ? (
+          </View>
+          <View style={styles.bottomButtonsRow}>
+            {canDeletePage ? (
+              <Pressable
+                style={styles.pill}
+                onPress={handleDeleteCurrentPage}
+                accessibilityRole="button"
+              >
+                <View style={styles.pillInner}>
+                  <Trash2 size={14} color="rgba(255,255,255,0.7)" strokeWidth={2} />
+                  <Text style={[styles.pillText, dm400 && { fontFamily: dm400 }]}>Supprimer</Text>
+                </View>
+              </Pressable>
+            ) : null}
             <Pressable
-              style={styles.pill}
-              onPress={handleDeleteCurrentPage}
+              style={[styles.pill, !editOk && styles.pillDisabled]}
+              onPress={handleToolbarEdit}
+              disabled={!editOk}
               accessibilityRole="button"
             >
               <View style={styles.pillInner}>
-                <Trash2 size={14} color="rgba(255,255,255,0.7)" strokeWidth={2} />
-                <Text style={[styles.pillText, dm400 && { fontFamily: dm400 }]}>Supprimer</Text>
+                <Pencil size={14} color="rgba(255,255,255,0.7)" strokeWidth={2} />
+                <Text style={[styles.pillText, dm400 && { fontFamily: dm400 }]}>Modifier</Text>
               </View>
             </Pressable>
-          ) : null}
-          <Pressable
-            style={[styles.pill, !editOk && styles.pillDisabled]}
-            onPress={handleToolbarEdit}
-            disabled={!editOk}
-            accessibilityRole="button"
-          >
-            <View style={styles.pillInner}>
-              <Pencil size={14} color="rgba(255,255,255,0.7)" strokeWidth={2} />
-              <Text style={[styles.pillText, dm400 && { fontFamily: dm400 }]}>Modifier</Text>
-            </View>
-          </Pressable>
+          </View>
         </View>
-      </View>
+      ) : null}
 
       {isTitleBodyModal ? (
         <EditTextModal
@@ -1742,6 +1807,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
+  /** Équilibre le header quand le CTA Exporter est masqué (paysage). */
+  headerRightSpacer: {
+    minWidth: 88,
+    height: 1,
+  },
   list: {
     flex: 1,
   },
@@ -1749,6 +1819,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'flex-start',
     backgroundColor: '#1C1C1E',
+  },
+  pageSlideSpread: {
+    justifyContent: 'center',
+  },
+  spreadRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  spreadCell: {
+    overflow: 'hidden',
+  },
+  spreadPageCenter: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  spreadBlank: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
   },
   bottomBar: {
     backgroundColor: 'rgba(10,10,14,0.96)',
