@@ -5,6 +5,15 @@ import { getUserTier } from '@/lib/userTier';
 import { supabase } from '@/lib/supabase';
 import { FREE_TIER_BOOK_AUDIO_MAX_COUNT, FREE_TIER_BOOK_VOICE_MAX_DURATION } from '@/lib/limits';
 
+export class BookUpgradeRequiredError extends Error {
+  code: 'BOOK_VIDEO_REQUIRES_PLUS';
+  constructor(message: string) {
+    super(message);
+    this.name = 'BookUpgradeRequiredError';
+    this.code = 'BOOK_VIDEO_REQUIRES_PLUS';
+  }
+}
+
 export type Book = {
   id: string;
   /** Nom affiché dans les pilules / modales */
@@ -287,7 +296,9 @@ export async function addMemoriesToBook(bookId: string, memoryIds: string[]): Pr
       .filter(Boolean) as Array<{ id: string; type: string; duration?: number | null }>;
 
     if (memories.some(m => m.type === 'video')) {
-      throw new Error("Les vidéos ne sont pas disponibles dans les livres avec le plan gratuit.");
+      throw new BookUpgradeRequiredError(
+        'Pour pouvoir ajouter une vidéo dans le livre et la revoir à tout moment grâce au QR Code, passer à Petitmo+.'
+      );
     }
 
     const audios = memories.filter(m => m.type === 'voice');

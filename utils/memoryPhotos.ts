@@ -94,7 +94,29 @@ export function getPrimaryPhotoUriForBookPreview(memory: Memory): string {
   const boot = peekFeedBootstrapDisplayUrls(memory.id)?.[0]?.trim();
   if (boot) return boot;
 
-  return pickPrimaryPhotoNormalizedForFeedAndViewer(memory);
+  // Livre = destination impression : préférer `print` (résolution plus haute) de façon cohérente.
+  // On garde quand même la logique "sandbox fantôme" (réinstall) : si le local est mort, basculer sur le remote.
+  const localPick = firstNonEmpty(
+    memory.local_print_path,
+    memory.local_display_path,
+    memory.local_thumb_path,
+    memory.local_original_path,
+    memory.local_media_path,
+  );
+  const remotePick = firstNonEmpty(
+    memory.print_url,
+    memory.display_url,
+    memory.thumb_url,
+    memory.edited_media_url,
+    memory.media_url,
+    typeof memory.media_path === 'string' ? memory.media_path : '',
+  );
+  const ghostLocal = !!localPick.trim() && isProbablyStalePetitmoSandboxPath(localPick);
+  const raw =
+    ghostLocal && remotePick.trim()
+      ? remotePick.trim()
+      : localPick.trim() || remotePick.trim();
+  return raw ? normalizeMemoryMediaUriForDisplay(raw) : '';
 }
 
 /** Photo de fond d’un vocal : sandbox d’abord, sauf chemin Petitmo fantôme → URL cloud. */

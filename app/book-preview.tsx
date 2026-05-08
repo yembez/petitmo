@@ -45,6 +45,8 @@ import { GuestPdfExportModal } from '@/components/GuestPdfExportModal';
 import { parseFavoritePhotoUrls, mapPhotoUrlToThumb, getAllPhotoUrls } from '@/utils/memoryPhotos';
 import { runBookExportPrepInBackground } from '@/services/bookExportPrep';
 import { getBookExportPrepIssues } from '@/services/bookExportPrep';
+import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
+import { isLocalMediaUriReadable, isProbablyStalePetitmoSandboxPath } from '@/utils/localMediaReadable';
 
 import type { Child, Memory } from '@/types/local';
 import { getUserTier } from '@/lib/userTier';
@@ -378,6 +380,9 @@ export default function BookPreviewScreen() {
     screenHeight - HEADER_H - BOTTOM_H - insets.top - insets.bottom;
   const availHLandscape = screenHeight - HEADER_H - insets.top - insets.bottom;
 
+  const signedCoverPhotoUrl = useSignedMediaUrl(coverPhotoUrl);
+  const coverPhotoDisplayUri = (signedCoverPhotoUrl ?? coverPhotoUrl ?? null)?.trim() ? (signedCoverPhotoUrl ?? coverPhotoUrl ?? null) : null;
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -412,7 +417,14 @@ export default function BookPreviewScreen() {
         }
         // Le titre du livre sert de titre PDF/couverture dans l’aperçu.
         setCoverTitleLine(b.title);
-        setCoverPhotoUrl((b.coverPhotoUrl ?? null) ? (b.coverPhotoUrl ?? null) : null);
+        const rawCover = typeof b.coverPhotoUrl === 'string' ? b.coverPhotoUrl.trim() : '';
+        // Réinstall / purge sandbox : un `file://...petitmo_memories/...` peut rester en base alors que le fichier n’existe plus.
+        if (rawCover && isProbablyStalePetitmoSandboxPath(rawCover)) {
+          const ok = await isLocalMediaUriReadable(rawCover);
+          setCoverPhotoUrl(ok ? rawCover : null);
+        } else {
+          setCoverPhotoUrl(rawCover || null);
+        }
         if (b.rotations) setRotations(b.rotations);
         if (b.photoCrops) setPhotoCrops(b.photoCrops);
         if (b.textEdits) {
@@ -712,7 +724,7 @@ export default function BookPreviewScreen() {
           truncated={false}
           coverYearLabel={coverYearLabel}
           coverDisplayTitle={page.type === 'cover' ? coverDisplayTitle : undefined}
-          coverPhotoUri={page.type === 'cover' ? coverPhotoUrl : null}
+          coverPhotoUri={page.type === 'cover' ? coverPhotoDisplayUri : null}
           coverPhotoCrop={photoCrops.cover}
           onRequestCoverPhoto={
             page.type === 'cover'
@@ -736,7 +748,7 @@ export default function BookPreviewScreen() {
     [
       availHPortrait,
       child,
-      coverPhotoUrl,
+      coverPhotoDisplayUri,
       coverTitleLine,
       coverYearLabel,
       openBookCrop,
@@ -832,7 +844,7 @@ export default function BookPreviewScreen() {
               truncated={false}
               coverYearLabel={coverYearLabel}
               coverDisplayTitle={row.page.type === 'cover' ? (coverTitleLine ?? `Journal de ${child!.name}`) : undefined}
-              coverPhotoUri={row.page.type === 'cover' ? coverPhotoUrl : null}
+              coverPhotoUri={row.page.type === 'cover' ? coverPhotoDisplayUri : null}
               coverPhotoCrop={photoCrops.cover}
               chapterDisplayTitle={row.page.type === 'chapter' ? (chapterTitleLine ?? undefined) : undefined}
               onRotate={() => {}}
@@ -872,7 +884,7 @@ export default function BookPreviewScreen() {
       availHLandscape,
       child,
       chapterTitleLine,
-      coverPhotoUrl,
+      coverPhotoDisplayUri,
       coverTitleLine,
       coverYearLabel,
       merge,

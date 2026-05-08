@@ -1368,7 +1368,42 @@ export default function FavorisScreen() {
                     const { createBook, addMemoriesToBook, upsertBook } = await import('@/services/books');
                     const { getLocalMemoryById } = await import('@/lib/localDb');
                     const created = await createBook(createBookFlowTitle);
-                    const updated = await addMemoriesToBook(created.id, selectedMemoryIds);
+                    let updated = null;
+                    try {
+                      updated = await addMemoriesToBook(created.id, selectedMemoryIds);
+                    } catch (e) {
+                      if (e instanceof Error && e.name === 'BookUpgradeRequiredError') {
+                        Alert.alert(
+                          'Petitmo+',
+                          'Pour pouvoir ajouter une vidéo dans le livre et la revoir à tout moment grâce au QR Code, passer à Petitmo+.',
+                          [
+                            {
+                              text: 'Annuler',
+                              style: 'cancel',
+                              onPress: () => {
+                                // Rester sur Favoris, et retirer les vidéos de la sélection.
+                                setSelectedIds(prev => {
+                                  const next = new Set(prev);
+                                  for (const it of galleryItems) {
+                                    if (!next.has(it.key)) continue;
+                                    if (it.memory.type === 'video') next.delete(it.key);
+                                  }
+                                  return next;
+                                });
+                              },
+                            },
+                            {
+                              text: 'Passer à Petitmo+',
+                              style: 'default',
+                              onPress: () => router.push({ pathname: '/paywall', params: { context: 'BOOK_VIDEO' } }),
+                            },
+                          ]
+                        );
+                        return;
+                      }
+                      Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
+                      return;
+                    }
                     // Couverture par défaut: première photo sélectionnée (source, jamais un thumb).
                     for (const id of selectedMemoryIds) {
                       const m = getLocalMemoryById(id);

@@ -21,6 +21,7 @@ import { scale, verticalScale } from '@/utils/responsive';
 import type { Book } from '@/services/books';
 import {
   addMemoriesToBook,
+  BookUpgradeRequiredError,
   createBook,
   dedupeMemoryIds,
   listBooks,
@@ -95,6 +96,24 @@ export function AddToBookModal({
     }
   }, [closeModal, didAdd, redirectToBooksOnDone, router]);
 
+  const showBookVideoPaywallAlert = useCallback(() => {
+    Alert.alert(
+      'Petitmo+',
+      'Pour pouvoir ajouter une vidéo dans le livre et la revoir à tout moment grâce au QR Code, passer à Petitmo+.',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Passer à Petitmo+',
+          style: 'default',
+          onPress: () => {
+            closeModal();
+            router.push({ pathname: '/paywall', params: { context: 'BOOK_VIDEO' } });
+          },
+        },
+      ]
+    );
+  }, [closeModal, router]);
+
   const coverUriForBook = useCallback(
     (b: Book): string | null => {
       const direct = (b.coverPhotoUrl ?? '').trim();
@@ -131,6 +150,10 @@ export function AddToBookModal({
       try {
         await addMemoriesToBook(bookId, toAdd);
       } catch (e) {
+        if (e instanceof BookUpgradeRequiredError && e.code === 'BOOK_VIDEO_REQUIRES_PLUS') {
+          showBookVideoPaywallAlert();
+          return;
+        }
         Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
         return;
       }
@@ -163,6 +186,10 @@ export function AddToBookModal({
     try {
       updated = await addMemoriesToBook(created.id, selectionMemoryIds);
     } catch (e) {
+      if (e instanceof BookUpgradeRequiredError && e.code === 'BOOK_VIDEO_REQUIRES_PLUS') {
+        showBookVideoPaywallAlert();
+        return;
+      }
       Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
       return;
     }
@@ -189,7 +216,7 @@ export function AddToBookModal({
     setCreateBookMode(false);
     setAddedBookIds([created.id]);
     setDidAdd(true);
-  }, [newBookTitle, refreshBooks, selectionMemoryIds]);
+  }, [newBookTitle, refreshBooks, selectionMemoryIds, showBookVideoPaywallAlert]);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={closeModalToBooks}>
