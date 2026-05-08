@@ -1566,7 +1566,9 @@ export async function uploadMedia({
         throw error;
       }
     }
-    console.error('Upload error:', error);
+    const detail =
+      error instanceof Error ? error.message : typeof error === 'string' ? error : String(error);
+    console.error('[uploadMedia] échec (retour null):', detail, error);
     return null;
   }
 }

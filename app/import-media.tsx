@@ -73,6 +73,11 @@ async function importSeparatePhotosWithConcurrency(
       } catch (e) {
         if (e instanceof Error && e.message === IMPORT_DUPLICATE_ASSET) {
           duplicateSkipped += 1;
+        } else if (
+          e instanceof Error &&
+          (e.message === 'LIMIT_REACHED' || e.message === 'VIDEO_LIMIT_REACHED')
+        ) {
+          throw e;
         } else {
           otherFailed += 1;
           console.warn('[import-media] importSeparatePhotos', asset?.uri, e);
@@ -85,6 +90,13 @@ async function importSeparatePhotosWithConcurrency(
   const n = Math.min(SEPARATE_PHOTOS_IMPORT_CONCURRENCY, assets.length);
   await Promise.all(Array.from({ length: n }, () => worker()));
   const memories = results.filter((x): x is Row => x != null);
+  if (memories.length === 0 && assets.length > 0) {
+    console.warn('[import-media] aucun souvenir après import lot', {
+      photos: assets.length,
+      duplicateSkipped,
+      otherFailed,
+    });
+  }
   return { memories, duplicateSkipped, otherFailed };
 }
 
