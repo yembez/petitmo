@@ -1,12 +1,6 @@
 import { useEffect, useState } from 'react';
-import {
-  heroLogoFillFromLuminance,
-  luminanceFromHex,
-} from '@/hooks/dominantImagePalette';
-import {
-  fetchImageColorsResult,
-  pickBrightnessSampleHex,
-} from '@/hooks/imageColorsFetch';
+// NOTE: le logo Capture est forcé en blanc. On garde ces imports/commentaires
+// comme historique de l'approche “adaptative”, mais ils ne sont plus nécessaires.
 
 const DEFAULT_FILL = '#FFFFFF' as const;
 
@@ -19,6 +13,8 @@ export function useCaptureHeroLogoColor(photoUri: string | null | undefined): {
   /** Halo noir uniquement derrière le tracé blanc */
   shadow: boolean;
 } {
+  // On force le logo en blanc : le scrim (dégradé foncé) du haut garantit le contraste.
+  // Évite des bascules blanc/noir qui font “clignoter” l’identité visuelle.
   const [color, setColor] = useState<string>(DEFAULT_FILL);
 
   useEffect(() => {
@@ -31,15 +27,10 @@ export function useCaptureHeroLogoColor(photoUri: string | null | undefined): {
     let cancelled = false;
 
     const run = async () => {
-      const result = await fetchImageColorsResult(uri);
-      if (cancelled) return;
-      if (!result) {
-        setColor(DEFAULT_FILL);
-        return;
-      }
-      const sample = pickBrightnessSampleHex(result);
-      const L = luminanceFromHex(sample);
-      setColor(heroLogoFillFromLuminance(L));
+      // Conserve la structure (future) mais fixe la couleur pour l’instant.
+      // (On garde le code de palette commenté/retiré seulement si on le réactive plus tard.)
+      void uri;
+      if (!cancelled) setColor(DEFAULT_FILL);
     };
 
     run();

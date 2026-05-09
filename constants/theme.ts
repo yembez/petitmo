@@ -9,8 +9,12 @@ export const THEME = {
   textPrimary: '#1C1C1E',
   textMuted: '#6B7280',
   textSecondary: '#8E8E93',
+  /** Couleur de marque terracotta (charte) */
+  brandTerracotta: '#D06235',
+  /** Overlay terracotta foncé (onboarding) */
+  brandTerracottaTopOverlay: 'rgba(68, 28, 16, 0.55)',
   /** Cœur favori **plein** sous un post du fil (terracotta brique) */
-  feedFavoriteTerracotta: '#D4784A',
+  feedFavoriteTerracotta: '#D06235',
   /** CTA primaires, liens, spinners (hors cœur du fil) — noir (remplace le bleu). */
   accent: '#1C1C1E',
   /** Variations plus douces (utile pour hover / badges / backgrounds). */

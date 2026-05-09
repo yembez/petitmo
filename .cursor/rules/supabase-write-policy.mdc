@@ -1,0 +1,56 @@
+---
+description: Quand a-t-on le droit d'écrire dans Supabase. Garde-fou code de la règle d'or.
+globs: services/**,lib/**,app/**/*.tsx,hooks/**,contexts/**
+alwaysApply: false
+---
+
+# Politique d'écriture Supabase
+
+Conséquence directe de la règle d'or local/cloud (`architecture.mdc`). Avant toute écriture distante, vérifier que le contexte est explicitement autorisé.
+
+## Lectures Supabase
+
+Autorisées partout où c'est utile — la lecture cloud n'efface rien en local.
+**MAIS** : pour lire les souvenirs, préférer `pullMemoriesFromRemoteToLocal` (`services/memoriesLocalSync.ts`) à un `supabase.from('memories').select(...)` ad hoc, pour bénéficier du merge `mergeServerMemoryRowWithExistingLocal` (cf. `local-first-media.mdc` règle 3).
+
+## Écritures Supabase (`.insert`, `.update`, `.upsert`, `.delete`)
+
+### En mode CLOUD (`getUserMode() === 'cloud'`, soit `userTier === 'paid'`)
+
+Autorisées dans les fichiers suivants (état actuel du code) :
+- `services/media.ts` — upload + patch dérivés sur `memories`.
+- `services/children.ts` — sync profil enfant.
+- `services/migration.ts` — migration locale → cloud lors d'un upgrade.
+- `app/edit-photo.tsx` — upload version éditée d'une photo.
+
+Toute nouvelle écriture cloud doit être **encadrée** par `if ((await getCachedUserMode()) === 'cloud') { … }` ou par `isSupabaseAllowed(...)` (cf. `lib/userMode.ts`).
+
+### En mode LOCAL (gratuit) — **deux exceptions, et seulement deux**
+
+1. **Commande livre / achat PDF**. Flux dédiés :
+   - `services/books.ts`
+   - `services/printBookOrder.ts`
+   - `lib/digitalExportPurchase.ts`
+   - `services/initExportApi.ts`
+2. **Stockage cloud d'un audio pour QR pérenne** dans un livre commandé (sous-cas du flux livre).
+
+Le device-user Supabase auto-créé dans `app/_layout.tsx` est la mécanique technique pour ces deux cas. Il n'est **jamais** présenté à l'utilisatrice gratuite comme un compte.
+
+### Toute autre écriture en gratuit est interdite
+
+Pas de "petite sync gentille en arrière-plan". Pas de backup auto. Pas de `.upsert` "au cas où". Pas de telemetry, pas d'opt-in marketing tant que ce n'est pas explicitement listé ici.
+
+## Comment écrire un nouveau code qui touche Supabase
+
+1. **Toujours** lire le tier/mode d'abord :
+   ```ts
+   const mode = await getCachedUserMode(); // 'local' | 'cloud'
+   ```
+2. Si l'écriture relève d'une exception gratuit, passer par les services dédiés ci-dessus — **ne pas appeler `supabase.from(...)` directement** depuis un screen ou un hook.
+3. Si l'écriture est cloud-only, garder explicitement par `if (mode !== 'cloud') return;`. Pas de "best effort silencieux".
+4. Un `try/catch` qui avale silencieusement une erreur d'écriture cloud n'est **pas** un garde-fou — c'est un piège qui masque un bug à 100 % du temps. Préférer un retour explicite + log.
+5. Si on rajoute une exception, l'ajouter à cette règle **et** à `AGENTS.md` dans le même PR.
+
+## Edge functions et server/
+
+Hors périmètre de cette règle : `supabase/functions/**` et `server/**` sont du backend (Deno / Node). Ils ont leur propre politique. Mais ils ne **doivent jamais** déclencher une écriture sur `memories` ou `children` pour le compte d'un utilisateur gratuit hors d'un flux livre/PDF/QR.

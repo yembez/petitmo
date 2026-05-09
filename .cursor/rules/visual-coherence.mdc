@@ -1,0 +1,52 @@
+---
+description: Cohérence visuelle — couleurs, dimensions, typo via les constantes.
+globs: components/**,app/**/*.tsx,src/book/**
+alwaysApply: false
+---
+
+# Cohérence visuelle
+
+Petitmo a un système visuel **centralisé**. Toute valeur visuelle nouvelle doit passer par les constantes — pas de hex, pas de pixel à la main.
+
+> Le chantier visuel complet (refonte, audit) viendra plus tard. Ces règles posent le cadre **pour ne pas accumuler de la dette en attendant**.
+
+## Couleurs
+
+- Source unique : `constants/theme.ts` → `THEME.bg`, `THEME.bgScreen`, `THEME.textPrimary`, `THEME.textMuted`, `THEME.textSecondary`, `THEME.accent`, `THEME.accentMuted`, `THEME.accentDeep`, `THEME.accentSoft`, `THEME.feedFavoriteTerracotta`.
+- Si une nuance manque, **ajouter une clé dans `THEME`** plutôt qu'écrire un hex en local.
+
+### Exceptions tolérées (pour l'instant)
+
+- `'transparent'` (overlays, hitSlop, fonds neutres).
+- `'#fff'` / `'#FFFFFF'` et `'#000'` / `'#000000'` purs **uniquement** pour overlays, ombres, masques d'image.
+- Couleur d'état système non encore nommée dans `THEME` (ex. rouge d'erreur ponctuel) : tolérée localement, à remonter dans `THEME` lors du chantier visuel.
+- Tout autre hex (gris, beige, bleu, orange…) est **interdit en nouveau code**.
+
+## Dimensions
+
+- Source unique : `constants/sizes.ts` → `SPACING`, `FONT_SIZES`, `ICON_SIZES`, `BUTTON_SIZES`, `PROFILE_SIZES`, `HEADER_HEIGHT`, `TAB_BAR_HEIGHT`.
+- Toutes les dimensions passent par `scale()` / `verticalScale()` / `moderateScale()` (`utils/responsive.ts`). Ne **jamais** écrire un nombre brut pour `padding`, `margin`, `width`, `height`, `fontSize`, `borderRadius`.
+- Si la dimension n'existe pas, **ajouter une clé** dans `SPACING` / `FONT_SIZES` / etc. Pas de magic number.
+
+### Exceptions tolérées
+
+- `0`, `1` (séparateurs), `StyleSheet.hairlineWidth`.
+- `borderRadius: 9999` (ou très grand) pour pills parfaitement rondes.
+- Dimensions dérivées d'une mesure runtime (`Dimensions`, `useWindowDimensions`).
+- Constantes locales d'un fichier (`const PHOTO_RATIO = 4 / 3`) si la valeur n'a aucun sens en dehors du composant — préférer quand même `constants/`.
+
+## Typographie
+
+Familles autorisées (chargées via `expo-font` / `@expo-google-fonts/*`) :
+
+- `DMSans_400Regular`, `DMSans_600SemiBold` — texte courant.
+- `EBGaramond_400Regular_Italic` — italique manuscrit (favoris, mises en exergue).
+- `Lora_*` — uniquement si déjà utilisé pour un usage défini.
+
+Pas d'autre `fontFamily` inventée. Pas de `fontWeight: '700'` sur DMSans Regular — utiliser la variante chargée. Toujours guarder le rendu sur `fontsLoaded` quand pertinent (cf. patterns dans `src/book/pages/*.tsx`).
+
+## Composition
+
+- `StyleSheet.create` plutôt que styles inline pour les blocs ré-utilisés ; inline OK pour des valeurs dynamiques.
+- Préférer `style={[a, b]}` à `style={{ ...a, ...b }}` (RN gère mieux les arrays).
+- Pas d'`absolute fill` à la main si `StyleSheet.absoluteFillObject` ou `StyleSheet.absoluteFill` font l'affaire.

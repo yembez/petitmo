@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, ImageBackground, TouchableOpacity, Dimensions } from 'react-native';
+import { Alert, Dimensions, ImageBackground, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useEffect } from 'react';
@@ -12,6 +12,12 @@ import { getChildren } from '@/services/children';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
+/**
+ * Règle d'or (cf. AGENTS.md / docs/specs/architecture-locale-cloud.md) :
+ * - Plan gratuit = local pur, AUCUN compte → CTA "Commencer".
+ * - Plan Petitmo+ uniquement = un vrai compte cloud → CTA "Restaurer mon compte Petitmo+"
+ *   (libellé explicite pour qu'aucune utilisatrice gratuite ne le clique par erreur).
+ */
 export default function OnboardingScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -27,39 +33,63 @@ export default function OnboardingScreen() {
     checkExistingChild();
   }, []);
 
+  /** TODO(plan dédié) : modale login Google / Apple / email + mot de passe pour Petitmo+. */
+  const handleRestoreAccount = () => {
+    Alert.alert(
+      'Restaurer mon compte Petitmo+',
+      "La connexion à un compte Petitmo+ arrive bientôt. Si tu n'es pas encore abonnée, commence simplement avec « Commencer » : tes souvenirs restent sur ton téléphone, sans création de compte.",
+      [{ text: 'OK', style: 'default' }]
+    );
+  };
+
   return (
     <View style={styles.container}>
       <ImageBackground
-        source={require('@/assets/images/1_photo_mere_enfant_2.png')}
+        source={require('@/assets/images/onboarding_mother_child_3.jpg')}
         style={styles.backgroundImage}
         imageStyle={styles.backgroundImageStyle}
       >
         <LinearGradient
-          colors={['rgba(255, 255, 255, 0.6)', 'rgba(255, 255, 255, 0)', 'rgba(0, 0, 0, 0.7)']}
-          locations={[0, 0.5, 1]}
-          style={StyleSheet.absoluteFillObject}
+          colors={[THEME.brandTerracottaTopOverlay, 'transparent']}
+          locations={[0, 1]}
+          style={[styles.topOverlay, { height: insets.top + verticalScale(140) }]}
+          pointerEvents="none"
         />
 
-        <View style={[styles.contentContainer, { paddingTop: insets.top + verticalScale(20) }]}>
+        <View style={[styles.contentContainer, { paddingTop: insets.top + verticalScale(12) }]}>
           <View style={styles.logoContainer}>
-            <PetitmoLogoManuscrit width={scale(168)} height={scale(50)} color="#FFFFFF" />
+            <PetitmoLogoManuscrit width={scale(150)} height={scale(45)} color="#FFFFFF" />
+          </View>
+
+          <View style={styles.topTaglineBlock}>
+            <Text style={styles.taglineTop}>
+              Les souvenirs qui comptent{'\n'}ne se perdent plus.
+            </Text>
           </View>
 
           <View style={styles.bottomContent}>
-            <Text style={styles.tagline}>
-              Les souvenirs qui comptent{'\n'}ne se perdent plus.
-            </Text>
-
             <Text style={styles.subtitle}>
-              Capturez, gardez et retrouvez les moments avec votre enfant.
+              Capturez, gardez et retrouvez{'\n'}les moments avec votre enfant.
             </Text>
 
             <TouchableOpacity
               style={styles.ctaButton}
               onPress={() => router.push('/create-child')}
               activeOpacity={0.9}
+              accessibilityRole="button"
+              accessibilityLabel="Commencer à créer mes souvenirs sans compte"
             >
-              <Text style={styles.ctaButtonText}>Créer vos premiers souvenirs</Text>
+              <Text style={styles.ctaButtonText}>Commencer</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.ctaButtonSecondary}
+              onPress={handleRestoreAccount}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="Restaurer mon compte Petitmo Plus"
+            >
+              <Text style={styles.ctaButtonSecondaryText}>J&apos;ai déjà un compte</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -87,6 +117,13 @@ const styles = StyleSheet.create({
   },
   backgroundImageStyle: {
     resizeMode: 'cover',
+    transform: [{ scale: 1.08 }, { translateY: verticalScale(-10) }],
+  },
+  topOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
   },
   contentContainer: {
     flex: 1,
@@ -95,13 +132,17 @@ const styles = StyleSheet.create({
   },
   logoContainer: {
     alignItems: 'center',
-    paddingTop: verticalScale(16),
+    paddingTop: verticalScale(0),
+  },
+  topTaglineBlock: {
+    marginTop: verticalScale(6),
+    alignItems: 'center',
   },
   bottomContent: {
     flex: 1,
     justifyContent: 'flex-end',
     alignItems: 'center',
-    paddingBottom: verticalScale(80),
+    paddingBottom: verticalScale(36),
   },
   tagline: {
     fontSize: FONT_SIZES.xl,
@@ -109,27 +150,39 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     textAlign: 'center',
     marginBottom: verticalScale(12),
-    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    // Ombre plus diffuse + un peu plus foncée : contraste lisible sans “tache” visible.
+    textShadowColor: 'rgba(0, 0, 0, 0.34)',
     textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 8,
+    textShadowRadius: 22,
     lineHeight: scale(26),
   },
+  taglineTop: {
+    fontSize: FONT_SIZES.lg,
+    fontWeight: '500',
+    color: '#FFFFFF',
+    textAlign: 'center',
+    marginBottom: verticalScale(10),
+    lineHeight: scale(24),
+  },
   subtitle: {
-    fontSize: FONT_SIZES.sm,
-    color: 'rgba(255, 255, 255, 0.9)',
+    fontSize: FONT_SIZES.lg,
+    color: '#FFFFFF',
     textAlign: 'center',
     marginBottom: verticalScale(32),
     maxWidth: scale(300),
-    textShadowColor: 'rgba(0, 0, 0, 0.3)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
-    lineHeight: scale(20),
+    // Ombre marron foncé, très diffuse (halo autour des lettres, sans “tache”).
+    textShadowColor: 'rgba(52, 24, 12, 0.46)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 22,
+    lineHeight: scale(26),
   },
   ctaButton: {
     width: '100%',
     maxWidth: scale(320),
-    backgroundColor: THEME.accent,
+    backgroundColor: THEME.brandTerracotta,
     borderRadius: scale(100),
+    borderWidth: 0,
+    borderColor: 'transparent',
     paddingVertical: verticalScale(16),
     paddingHorizontal: SPACING.lg,
     alignItems: 'center',
@@ -143,6 +196,24 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZES.md,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  ctaButtonSecondary: {
+    marginTop: verticalScale(12),
+    width: '100%',
+    maxWidth: scale(320),
+    backgroundColor: '#FFFFFF',
+    borderRadius: scale(100),
+    paddingVertical: verticalScale(16),
+    paddingHorizontal: SPACING.lg,
+    alignItems: 'center',
+    borderWidth: 0,
+    borderColor: 'transparent',
+  },
+  ctaButtonSecondaryText: {
+    fontSize: FONT_SIZES.md,
+    fontWeight: '600',
+    color: THEME.brandTerracotta,
+    textAlign: 'center',
   },
   privacyBadge: {
     position: 'absolute',

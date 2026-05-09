@@ -1,0 +1,33 @@
+---
+description: Imports et arborescence — toujours `@/...`, où range-t-on quoi.
+alwaysApply: true
+---
+
+# Imports & arborescence
+
+- Alias TypeScript : `@/*` configuré (`tsconfig.json`). **Toujours** importer en `@/...`.
+- Imports relatifs (`./voisin`) autorisés **uniquement** entre fichiers d'un même sous-dossier proche.
+- Pas de `../../foo`. Si on a besoin de remonter, utiliser l'alias.
+
+## Où range-t-on quoi
+
+| Dossier | Contenu |
+|---|---|
+| `app/` | Écrans expo-router (un fichier = une route). Pas de logique métier ici, juste la composition. |
+| `app/(tabs)/` | Onglets bas (`fil`, `favoris`, `livres`, `index`). |
+| `components/` | Composants UI réutilisables (modals, players, icônes, blocs visuels). |
+| `components/feed/` | Composants spécifiques au fil. |
+| `services/` | Logique métier (souvenirs, livres, médias, sync). Effets de bord OK. |
+| `lib/` | Sources de vérité et clients (Supabase, SQLite, `userTier`, `userMode`, `limits`). |
+| `hooks/` | Hooks React. Préfixés `use…`. |
+| `utils/` | Helpers purs, sans état, sans I/O réseau. |
+| `types/` | Types TS partagés (`local.ts`, `database.ts`, `shared.ts`). |
+| `constants/` | Valeurs gelées (`theme`, `sizes`, `feedLayout`, `iconSizes`). |
+| `contexts/` | React contexts. |
+| `assets/` | Images / SVG / fonts statiques. |
+| `supabase/migrations/` | Migrations SQL. |
+| `supabase/functions/` | Edge functions Deno (backend, hors `tsconfig` client). |
+| `server/` | Backend Node (PDF, workers, routes — hors `tsconfig` client). |
+| `src/book/` | Pages de livre rendues (composition PDF / preview). |
+
+Avant de créer un fichier : `Grep` rapidement par nom proche pour vérifier qu'il n'existe pas déjà ailleurs. Si un helper existe presque, **étendre l'existant** plutôt que dupliquer.

@@ -1,0 +1,51 @@
+---
+description: Règle d'or Petitmo — gratuit = local pur, payant = cloud. À respecter pour TOUTE modification.
+alwaysApply: true
+---
+
+# Règle d'or Petitmo
+
+Petitmo a **deux modes** et deux modes seulement.
+
+## 1. MODE LOCAL (gratuit, AUCUN compte)
+
+- Souvenirs et profils enfant **uniquement** dans SQLite (`lib/localDb.ts`) + sandbox (`documentDirectory/petitmo_memories/`).
+- **Aucun cloud**, aucun backup, aucune sync, aucune création de compte email/mot de passe.
+- Perte du téléphone = perte des données (assumé produit).
+- Souvenirs autorisés : texte, photo (seule ou album), audio.
+- Livre : couverture + photos + audio (QR audio). **La vidéo dans un livre = Petitmo+** — lever `BookUpgradeRequiredError` (`services/books.ts`).
+
+### Exceptions Supabase autorisées en gratuit (et UNIQUEMENT celles-ci)
+
+1. Achat PDF / commande livre — flux `services/books.ts`, `services/printBookOrder.ts`, `lib/digitalExportPurchase.ts`.
+2. Stockage cloud d'un audio pour QR pérenne dans un livre commandé.
+
+Le device-user Supabase auto-créé dans `app/_layout.tsx` est une **mécanique technique** pour ces deux cas — il n'est jamais présenté à l'utilisatrice gratuite comme un compte. Voir `supabase-write-policy.mdc` pour la liste exacte.
+
+## 2. MODE CLOUD (Petitmo+ payant)
+
+L'abonnement (`lib/userTier.ts`) déverrouille : sync cloud, restauration, multi-device, QR vidéo, exports serveur.
+
+## UX (conséquences non négociables)
+
+- On peut afficher **"J'ai déjà un compte"** (login classique).
+  Si l'email n'a pas de **compte cloud Petitmo+** (même si l'email existe en base à cause d'une commande),
+  afficher : **"Cette adresse e-mail n'a pas de compte cloud payant associé"** + CTA **"Créer un compte"**.
+- Aucun parcours gratuit ne déclenche de création de compte email/mot de passe.
+- Aucun texte type "tes souvenirs sont sauvegardés" en gratuit.
+
+## Sources de vérité
+
+- `lib/userTier.ts` — `free | paid` (source de vérité du plan).
+- `lib/userMode.ts` — `local | cloud` (dérivé du tier).
+- `lib/limits.ts` — limites gratuit (20 souvenirs, 10 vidéos, durées audio).
+- `services/localOnlyMemoryCapture.ts` — capture 100 % locale.
+- `services/books.ts` — `BookUpgradeRequiredError`.
+- `docs/specs/architecture-locale-cloud.md` — référence canonique.
+- `AGENTS.md` — version longue de la règle d'or.
+
+## Comportement attendu
+
+1. **Citer la règle d'or en une ligne** au début de tout plan ou patch touchant : import, souvenirs, livres, paywall, auth, sync, écran d'accueil, paramètres.
+2. Si une demande entre en conflit avec la règle d'or, **signaler le conflit** plutôt qu'implémenter en silence.
+3. Toute écriture cloud doit correspondre à un cas explicitement autorisé — voir `supabase-write-policy.mdc`.

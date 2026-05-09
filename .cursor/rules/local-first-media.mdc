@@ -1,0 +1,82 @@
+---
+description: Local-first média — comment lire et écrire les souvenirs/photos sans casser les écrans.
+globs: services/memory*.ts,services/media.ts,services/localOnlyMemoryCapture.ts,services/memoriesLocalSync.ts,services/memoryRowMapping.ts,services/feedLocalPhotoCache.ts,services/tabScreens*.ts,services/pendingCloudFlush.ts,services/pendingRawGuestUploads.ts,utils/memoryPhotos.ts,utils/feedHelpers.ts,utils/localMediaReadable.ts,utils/childPhotoUri.ts,hooks/useFeed*.ts,hooks/useFil*.ts,hooks/useMigrationProgress.ts,lib/localDb.ts,app/(tabs)/fil.tsx,app/(tabs)/favoris.tsx,app/(tabs)/livres.tsx,app/(tabs)/index.tsx,app/memory-view*.tsx,app/book-*.tsx,app/import-media.tsx,components/feed/**
+alwaysApply: false
+---
+
+# Local-first — souvenirs, photos, fil, livre
+
+## Modèle mental
+
+Un souvenir a **deux familles de pointeurs en parallèle**, dans la même ligne `memories` (le SQLite local et la table Supabase ont la même forme) :
+
+- **Locaux (sandbox du téléphone, `documentDirectory/petitmo_memories/{memoryId}/`)** :
+  `local_original_path`, `local_thumb_path`, `local_display_path`, `local_print_path`,
+  `local_media_path`, `voice_cover_path`, `extra_photo_paths`.
+- **Distants** :
+  `media_url`, `thumb_url`, `display_url`, `print_url`, `edited_media_url`,
+  `poster_url`, `poster_print_url`, `thumbnail_url`, `voice_cover_url`,
+  `extra_thumb_urls`, `extra_display_urls`, `extra_photo_urls`.
+
+Les deux peuvent être renseignés en même temps (mode cloud après upload). En **mode local**, seuls les `local_*` sont fiables.
+
+Chaque écran a une **hiérarchie de fallback différente** :
+- Fil : `display` → `thumb` → `print` → `original` → `media`.
+- Livre / PDF : `print` → `display` → `thumb` → `original` → `media`.
+- Détail : `display` → `thumb` → `print` → `edited` → `media`.
+
+## Règles
+
+### 1. Ne jamais écrire son propre fallback à la main
+
+Pas de `memory.media_url || memory.local_media_path`. Toujours passer par les helpers de `utils/memoryPhotos.ts` :
+
+- **Fil** : `getAllPhotoUrlsForFeed(memory)` ou `pickPrimaryPhotoNormalizedForFeedAndViewer(memory)`.
+- **Repli cloud** (sandbox réinstallée, fichiers locaux disparus) : `getAllPhotoUrlsForFeedRemoteOnly(memory)`.
+- **Détail / galerie** : `getAllPhotoUrlsForDisplay(memory)`.
+- **Aperçu livre / PDF** : `getPrimaryPhotoUriForBookPreview(memory)`, `getVoiceCoverUriForBookPreview(memory)`, `getVideoPosterUriForBookPreview(memory)`.
+
+Si un nouveau besoin n'est pas couvert : **étendre `utils/memoryPhotos.ts`** et nommer le helper par écran cible. Pas de logique de fallback en ligne dans un composant.
+
+### 2. Ne jamais composer une URI `file://` à la main
+
+La normalisation (`file://`, `content://`, `ph://`, `assets-library://`, `data:`, http, chemin bucket Storage) est centralisée dans `normalizeMemoryMediaUriForDisplay` (`utils/memoryPhotos.ts`). Les helpers du point 1 l'appellent déjà.
+
+### 3. Pull serveur → toujours via `mergeServerMemoryRowWithExistingLocal`
+
+`pullMemoriesFromRemoteToLocal` (`services/memoriesLocalSync.ts`) est la **seule entrée légitime** du pull cloud → local. Elle utilise `mergeServerMemoryRowWithExistingLocal` (`services/memoryRowMapping.ts`) qui **préserve** les `local_*` existants.
+
+Tout mapping ad hoc (style `data.map(row => row)`) sur des données serveur écrase les `local_*` à `null` → **les photos disparaissent du fil après le moindre refresh**. C'est la cause racine n°1 des bugs "souvenirs perdus dans tel onglet".
+
+### 4. Sandbox fantôme (post-réinstall)
+
+Si un `local_*` pointe vers un fichier disparu (réinstall), basculer sur la chaîne distante. C'est l'heuristique `isProbablyStalePetitmoSandboxPath` (`utils/localMediaReadable.ts`). Les helpers du point 1 l'appliquent déjà — ne pas la dupliquer dans un composant.
+
+### 5. Capture en gratuit ≠ capture en cloud
+
+- Mode local (gratuit) : `services/localOnlyMemoryCapture.ts` **uniquement**. Il persiste dans le sandbox via `persistOriginalToSandbox` + `ensureLocalPhotoDerivatives` (`services/memoryLocalStore.ts`) et insère dans le SQLite local.
+- Mode cloud (Petitmo+) : `services/media.ts` (uploads, dérivés serveur, patches sur `memories`).
+
+Toujours vérifier `await getCachedUserMode()` avant un upload réseau. Voir aussi `supabase-write-policy.mdc`.
+
+### 6. Dérivés photo : tailles fixes
+
+`ensureLocalPhotoDerivatives` génère 3 dérivés à 480 / 1400 / 2600 px (thumb / display / print). **Ne pas changer ces tailles** sans accord — elles sont alignées sur la cible A5 240 dpi de l'impression livre et sur `MEDIA_BOOK_PRINT_MAX_WIDTH` (`lib/limits.ts`).
+
+### 7. Écriture en SQLite local : objet complet
+
+Tout `upsertLocalMemories` (`lib/localDb.ts`) doit recevoir un `Memory` **complet** — passer par `withLocalFields` ou `mergeServerMemoryRowWithExistingLocal` (tous deux dans `services/memoryRowMapping.ts`). Un objet partiel met à `null` les colonnes manquantes.
+
+## Avant de toucher à un écran qui affiche des médias
+
+Dans le plan, lister explicitement :
+
+1. Quel helper de `utils/memoryPhotos.ts` est utilisé.
+2. Quelle hiérarchie de fallback s'applique pour cet écran.
+3. Si on lit un champ `local_*` ou `*_url` brut, **expliquer pourquoi** ce n'est pas un helper qui le fait.
+
+Bug type "la photo ne s'affiche plus dans tel onglet" → vérifier d'abord, dans cet ordre :
+- Quels champs de la ligne SQLite sont renseignés (`SELECT * FROM memories WHERE id = ?`) ?
+- Le helper utilisé regarde-t-il ces champs ?
+- Un pull récent a-t-il pu écraser un `local_*` ? (point 3)
+- Le fichier du `local_*` existe-t-il encore sur disque ? (point 4)
