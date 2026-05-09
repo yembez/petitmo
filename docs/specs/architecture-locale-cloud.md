@@ -89,7 +89,7 @@ Un **compte cloud Petitmo+** = identité (email/Apple/Google) **liée à un abon
 autorisant **sync**, **restauration** et **multi-device**.\n
 \n
 Source de vérité : **serveur** (ex. flag `subscriptionTier=paid` sur l'identité auth Supabase),\n
-alimenté par validation paiement (webhook Stripe / validation receipt IAP via Edge Function).\n
+alimenté par webhook **RevenueCat** → Edge Function Supabase (Apple IAP / StoreKit sur iOS, Google Play Billing sur Android à venir). **Stripe n'intervient pas dans les abonnements in-app.**\n
 Le tier en AsyncStorage est un **cache UX**, jamais une preuve.\n
 \n
 Conséquence UX : sur login, si l'email est connu côté commande/CRM mais **sans compte payant**,\n
@@ -150,7 +150,21 @@ Si l'utilisatrice clique sur un CTA "S'abonner" ou "Créer un compte" alors qu'u
 - CTA unique : **"Me connecter"** → redirige vers l'écran de login normal.
 - Ce cas doit être détecté **avant** d'ouvrir le paywall si possible (vérification serveur), sinon au moment de l'auth post-paiement.
 
-### 5.5 Sélection du tier
+### 5.5 Paiements et source de vérité du tier
+
+**Stack paiement (règle absolue) :**
+- **iOS** : Apple In-App Purchase (StoreKit)
+- **Android** *(à venir)* : Google Play Billing
+- **Middleware** : RevenueCat — valide les receipts, gère les renouvellements, envoie les webhooks
+- **Stripe n'intervient pas** dans les abonnements in-app
+
+**Où vit `subscriptionTier=paid` :**
+- Dans `auth.users.app_metadata` sur Supabase (option A — standard RevenueCat + Supabase).
+- Mis à jour par une Edge Function déclenchée par webhook RevenueCat à chaque événement (achat, renouvellement, expiration, remboursement).
+- `app_metadata` est côté serveur uniquement — jamais modifiable par le client.
+- L'app le cache dans AsyncStorage (`petitmo:userTier`) via `lib/userTier.ts` — cache UX uniquement, jamais source de vérité.
+
+### 5.6 Sélection du tier (code)
 
 - `lib/userTier.ts` lit la valeur `petitmo:userTier` dans AsyncStorage
   (`'free'` ou `'paid'`).

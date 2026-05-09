@@ -6,6 +6,30 @@
 
 ---
 
+## Paiements — règle absolue
+
+Les abonnements Petitmo+ sont gérés **exclusivement via les stores natifs** :
+
+- **iOS** : Apple In-App Purchase (StoreKit)
+- **Android** *(à venir)* : Google Play Billing
+- **Middleware** : RevenueCat gère les deux, valide les receipts et envoie les webhooks à une Edge Function Supabase
+
+**Stripe n'a aucun rôle dans les abonnements in-app.** Toute mention de Stripe dans ce contexte est une erreur à corriger.
+
+La seule exception possible à terme : un achat web (livre, PDF) hors store — mais ce n'est pas encore en place.
+
+### Où vit `subscriptionTier=paid` ?
+
+**Réponse : option A — `app_metadata` sur `auth.users` dans Supabase.**
+
+C'est la solution standard de l'intégration officielle RevenueCat + Supabase :
+1. RevenueCat envoie un webhook à une Edge Function Supabase à chaque événement (achat, renouvellement, expiration, remboursement).
+2. L'Edge Function met à jour `auth.users.app_metadata` avec `{ "subscriptionTier": "paid" }` (ou `"free"` à l'expiration).
+3. `app_metadata` est accessible dans les RLS policies et côté serveur — jamais modifiable par le client.
+4. L'app lit ce statut via l'API Supabase et le cache en local dans AsyncStorage (`petitmo:userTier`) comme cache UX uniquement.
+
+---
+
 ## Règle d'or (non négociable)
 
 Petitmo a **deux modes** et **deux modes seulement** :
@@ -82,7 +106,7 @@ Aucune autre écriture cloud n'est permise en gratuit. Pas de "petite sync genti
 - Un **email peut exister en base** pour des raisons **commande/CRM** (gratuit) sans être un **compte cloud**.
 - **Compte cloud Petitmo+** = email (ou Apple/Google) **associé à un abonnement payant** et donnant droit à la sync/restauration.
 - La **source de vérité** de ce statut est **serveur** (ex. `subscriptionTier=paid` sur l'identité auth Supabase),
-  alimenté par validation paiement (webhook Stripe / validation receipt IAP via Edge Function). L'AsyncStorage local n'est qu'un cache UX.
+  alimenté par webhook **RevenueCat** → Edge Function Supabase (Apple IAP / StoreKit sur iOS, Google Play Billing sur Android à venir). Stripe n'intervient pas dans les abonnements in-app. L'AsyncStorage local n'est qu'un cache UX.
 - En gratuit : l'email sert au **suivi de commande**, aux **QR audio** du livre commandé, et au **CRM** (marketing futur),
   mais **ne doit jamais** être traité comme un identifiant de restauration.
 
