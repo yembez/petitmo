@@ -21,15 +21,18 @@ import {
   DMSans_600SemiBold,
   DMSans_700Bold,
 } from '@expo-google-fonts/dm-sans'
-import { BookOpen, ChevronRight, Cloud, Lock, X } from 'lucide-react-native'
+import { BookOpen, ChevronRight, Cloud, Heart, Lock, X } from 'lucide-react-native'
 import PetitmoLogoManuscrit, { PETITMO_LOGO_VIEWBOX } from '@/components/PetitmoLogoManuscrit'
 import { setUserTier } from '@/lib/userTier'
 import { ensureLocalChildrenSyncedToSupabase } from '@/services/children'
 import { grantDigitalExportPurchase } from '@/lib/digitalExportPurchase'
 import { FREE_TIER_LIMIT } from '@/lib/limits'
+import { THEME } from '@/constants/theme'
 import { hp, scale, screenHeight, screenWidth, verticalScale } from '@/utils/responsive'
 
 export type PaywallContext =
+  /** Ouverture volontaire (onboarding, découvert…) — hero neutre, sans mention du quota souvenirs. */
+  | 'GENERAL'
   | 'LIMIT_REACHED'
   | 'VIDEO_LIMIT_REACHED'
   | 'VOICE_LIMIT_REACHED'
@@ -46,6 +49,36 @@ type PaywallParams = {
   childName?: string
 }
 
+/** Hero souscription hors quota souvenirs : pas de « X premiers souvenirs » (cf. AGENTS.md). */
+/** Saut de ligne après « moment », puis ligne suivante + cœur Lucide terracotta. */
+const PAYWALL_NEUTRAL_HEAD_LINE1 = 'Préservez chaque moment'
+const PAYWALL_NEUTRAL_HEAD_LINE2_TEXT = 'avec votre enfant, sans limite'
+
+const VALID_PAYWALL_CONTEXTS = [
+  'GENERAL',
+  'LIMIT_REACHED',
+  'VIDEO_LIMIT_REACHED',
+  'VOICE_LIMIT_REACHED',
+  'EXPORT_PAYWALL',
+  'EXPORT_DIGITAL_PDF',
+  'BOOK_ORDER',
+  'DAY_30',
+  'DAY_60',
+  'DAY_90',
+] as const satisfies readonly PaywallContext[]
+
+function normalizePaywallContext(raw: unknown): PaywallContext {
+  if (typeof raw !== 'string' || !raw.trim()) return 'GENERAL'
+  const key = raw.trim()
+  if (key === 'BOOK_ORDER_DISCOUNT') return 'BOOK_ORDER'
+  /** Vidéo dans un livre (gratuit) → même hero neutre que l’onboarding. */
+  if (key === 'BOOK_VIDEO') return 'GENERAL'
+  if ((VALID_PAYWALL_CONTEXTS as readonly string[]).includes(key)) {
+    return key as PaywallContext
+  }
+  return 'GENERAL'
+}
+
 const PAYWALL_MESSAGES: Record<
   PaywallContext,
   {
@@ -54,6 +87,12 @@ const PAYWALL_MESSAGES: Record<
     subtitle: string
   }
 > = {
+  GENERAL: {
+    eyebrow: 'Petitmo+',
+    title: () =>
+      `${PAYWALL_NEUTRAL_HEAD_LINE1}\n${PAYWALL_NEUTRAL_HEAD_LINE2_TEXT}`,
+    subtitle: '',
+  },
   LIMIT_REACHED: {
     eyebrow: 'Petitmo+',
     title: n => `Tu as atteint tes ${FREE_TIER_LIMIT} souvenirs de ${n}.`,
@@ -105,9 +144,9 @@ const PAYWALL_MESSAGES: Record<
 type Plan = 'yearly' | 'monthly'
 
 const PAYWALL_BG = '#F6F4F1'
-/** Brique charte (`CHARTE.eyebrow` sur l’accueil). */
-const ACCENT = '#C4784A'
-const ACCENT_SOFT = 'rgba(196,120,74,0.14)'
+/** Terracotta charte (`THEME.brandTerracotta`). */
+const ACCENT = THEME.brandTerracotta
+const ACCENT_SOFT = 'rgba(208, 98, 53, 0.14)'
 const CARD = '#FFFFFF'
 const MUTED = '#6B7280'
 const LINE = 'rgba(0,0,0,0.08)'
@@ -126,10 +165,7 @@ export default function PaywallScreen() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
   const params = useLocalSearchParams<PaywallParams>()
-  const context: PaywallContext =
-    (typeof params.context === 'string' && params.context in PAYWALL_MESSAGES
-      ? (params.context as PaywallContext)
-      : 'LIMIT_REACHED')
+  const context: PaywallContext = normalizePaywallContext(params.context)
 
   const [selectedPlan, setSelectedPlan] = useState<Plan>('yearly')
   const [isLoading, setIsLoading] = useState(false)
@@ -177,9 +213,7 @@ export default function PaywallScreen() {
   const dm600 = dmLoaded ? 'DMSans_600SemiBold' : undefined
   const dm700 = dmLoaded ? 'DMSans_700Bold' : undefined
 
-  const headlineCount = context === 'LIMIT_REACHED' ? FREE_TIER_LIMIT : 50
-  const headlinePrefix = 'Vous avez capturé vos '
-  const headlineSuffix = ' premiers souvenirs'
+  const showMemoryLimitHero = context === 'LIMIT_REACHED'
 
   const contentBottomPad = Math.max(28, insets.bottom + 16)
   const contentPadH = { paddingLeft: 20 + insets.left, paddingRight: 20 + insets.right }
@@ -291,14 +325,56 @@ export default function PaywallScreen() {
           </>
         ) : (
           <>
-        <Text style={[styles.headline, dm700 && { fontFamily: dm700 }]}>
-          Vous avez capturé vos{'\n'}
-          <Text style={styles.headlineCount}>{headlineCount}</Text> premiers souvenirs{' '}
-          <Text style={styles.headlineHeart}>♥</Text>
-        </Text>
-        <Text style={[styles.subline, dm500 && { fontFamily: dm500 }]}>
-          Continuez à préserver chaque moment, {'\n'}sans limite.
-        </Text>
+        {showMemoryLimitHero ? (
+          <>
+            <Text style={[styles.headline, dm700 && { fontFamily: dm700 }]}>
+              Vous avez capturé vos{'\n'}
+              <Text style={styles.headlineCount}>{FREE_TIER_LIMIT}</Text> premiers souvenirs{' '}
+              <Text style={styles.headlineHeart}>♥</Text>
+            </Text>
+            <Text style={[styles.subline, dm500 && { fontFamily: dm500 }]}>
+              Continuez à préserver chaque moment, {'\n'}sans limite.
+            </Text>
+          </>
+        ) : (
+          <>
+            <View
+              style={styles.headlineNeutralWrap}
+              accessibilityRole="header"
+              accessibilityLabel={`${PAYWALL_NEUTRAL_HEAD_LINE1}. ${PAYWALL_NEUTRAL_HEAD_LINE2_TEXT}`}
+            >
+              <Text
+                style={[styles.headlineNeutralLine1, dm700 && { fontFamily: dm700 }]}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.78}
+                maxFontSizeMultiplier={1.35}
+              >
+                {PAYWALL_NEUTRAL_HEAD_LINE1}
+              </Text>
+              <View style={styles.headlineNeutralRow2}>
+                <Text
+                  style={[styles.headlineNeutralLine2Text, dm700 && { fontFamily: dm700 }]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.74}
+                  maxFontSizeMultiplier={1.35}
+                >
+                  {PAYWALL_NEUTRAL_HEAD_LINE2_TEXT}
+                </Text>
+                <Heart
+                  size={scale(20)}
+                  color={THEME.brandTerracotta}
+                  fill={THEME.brandTerracotta}
+                  strokeWidth={2}
+                  accessibilityElementsHidden
+                  importantForAccessibility="no"
+                />
+              </View>
+            </View>
+            <View style={styles.neutralHeadlineSpacer} />
+          </>
+        )}
 
         <View style={styles.plansRow}>
           <Pressable
@@ -354,7 +430,6 @@ export default function PaywallScreen() {
                   </Text>
                 </View>
               </View>
-              <Text style={[styles.planFine, dm500 && { fontFamily: dm500 }]}>Résiliable à tout moment</Text>
             </View>
           </Pressable>
         </View>
@@ -561,11 +636,48 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 22,
   },
+  /** Paywall « générique » : deux `Text` séparés + `adjustsFontSizeToFit` sur L1 → jamais de coupure en 3 lignes */
+  headlineNeutralWrap: {
+    alignSelf: 'center',
+    width: screenWidth - 48,
+    maxWidth: screenWidth - 48,
+  },
+  headlineNeutralLine1: {
+    textAlign: 'center',
+    fontSize: scale(18),
+    lineHeight: scale(24),
+    letterSpacing: -0.28,
+    color: '#1C1C1E',
+    textShadowColor: 'rgba(255,255,255,1)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 16,
+  },
+  headlineNeutralRow2: {
+    marginTop: verticalScale(5),
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexWrap: 'nowrap',
+    gap: scale(5),
+    maxWidth: screenWidth - 48,
+    alignSelf: 'center',
+  },
+  headlineNeutralLine2Text: {
+    flexShrink: 1,
+    textAlign: 'center',
+    fontSize: scale(18),
+    lineHeight: scale(24),
+    letterSpacing: -0.28,
+    color: '#1C1C1E',
+    textShadowColor: 'rgba(255,255,255,1)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 16,
+  },
   headlineCount: {
     color: ACCENT,
   },
   headlineHeart: {
-    color: ACCENT,
+    color: THEME.brandTerracotta,
     textShadowColor: 'transparent',
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 0,
@@ -578,6 +690,9 @@ const styles = StyleSheet.create({
     color: MUTED,
     alignSelf: 'center',
     maxWidth: screenWidth - 56,
+  },
+  neutralHeadlineSpacer: {
+    height: verticalScale(12),
   },
   benefitsCard: {
     marginTop: verticalScale(12),
@@ -751,7 +866,7 @@ const styles = StyleSheet.create({
     marginTop: verticalScale(22),
     height: 54,
     borderRadius: 14,
-    backgroundColor: '#1C1C1E',
+    backgroundColor: THEME.brandTerracotta,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 20,

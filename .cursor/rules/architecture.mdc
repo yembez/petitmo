@@ -33,10 +33,12 @@ L'abonnement (`lib/userTier.ts`) déverrouille : sync cloud, restauration, multi
   afficher : **"Cette adresse e-mail n'a pas de compte cloud payant associé"** + CTA **"Créer un compte"**.
 - Aucun parcours gratuit ne déclenche de création de compte email/mot de passe.
 - Aucun texte type "tes souvenirs sont sauvegardés" en gratuit.
+- Paywall abonnement : hero « X premiers souvenirs » **uniquement** si `LIMIT_REACHED` ; sinon hero neutre : ligne 1 jusqu’à « moment », ligne 2 « avec votre enfant, sans limite » + cœur Lucide terracotta ; CTA **terracotta charte**. Voir `AGENTS.md` et `app/paywall.tsx`.
 
 ## Sources de vérité
 
-- `lib/userTier.ts` — `free | paid` (source de vérité du plan).
+- **Serveur (option A)** : `subscriptionTier` (`paid` / `free`) dans **`auth.users.app_metadata`** sur Supabase — mis à jour par Edge Function (webhook RevenueCat / validation IAP). Jamais modifiable par le client.
+- `lib/userTier.ts` — lit et met en cache ce tier pour l’UX (AsyncStorage) ; **pas** la source de vérité absolue.
 - `lib/userMode.ts` — `local | cloud` (dérivé du tier).
 - `lib/limits.ts` — limites gratuit (20 souvenirs, 10 vidéos, durées audio).
 - `services/localOnlyMemoryCapture.ts` — capture 100 % locale.

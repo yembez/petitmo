@@ -62,7 +62,7 @@ export default function DatePicker({ value, onChange, placeholder = 'JJ/MM/AAAA'
         <Text style={[styles.inputText, !value && styles.placeholder]}>
           {value ? formatDisplayDate(value) : placeholder}
         </Text>
-        <Calendar size={20} color="#8791A1" strokeWidth={2} />
+        <Calendar size={20} color={THEME.textMuted} strokeWidth={2} />
       </TouchableOpacity>
 
       <Modal
@@ -76,7 +76,7 @@ export default function DatePicker({ value, onChange, placeholder = 'JJ/MM/AAAA'
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Sélectionner une date</Text>
               <TouchableOpacity onPress={() => setIsModalVisible(false)}>
-                <X size={24} color="#3F4A5A" strokeWidth={2} />
+                <X size={24} color={THEME.textPrimary} strokeWidth={2} />
               </TouchableOpacity>
             </View>
 
@@ -177,19 +177,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: THEME.bg,
     borderRadius: scale(100),
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.md,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: THEME.familyFlowLine,
   },
   inputText: {
     fontSize: FONT_SIZES.base,
-    color: '#3F4A5A',
+    color: THEME.textPrimary,
   },
   placeholder: {
-    color: '#8791A1',
+    color: THEME.textMuted,
   },
   modalOverlay: {
     flex: 1,
@@ -215,12 +215,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: SPACING.lg,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    borderBottomColor: THEME.familyFlowLine,
   },
   modalTitle: {
     fontSize: FONT_SIZES.lg,
     fontWeight: '600',
-    color: '#3F4A5A',
+    color: THEME.textPrimary,
   },
   pickersContainer: {
     flexDirection: 'row',
@@ -233,13 +233,13 @@ const styles = StyleSheet.create({
   pickerLabel: {
     fontSize: FONT_SIZES.sm,
     fontWeight: '600',
-    color: '#3F4A5A',
+    color: THEME.textMuted,
     textAlign: 'center',
     marginBottom: SPACING.xs,
   },
   picker: {
     height: verticalScale(200),
-    backgroundColor: '#F9FAFB',
+    backgroundColor: THEME.familyFlowScreenBg,
     borderRadius: scale(8),
   },
   pickerItem: {
@@ -248,13 +248,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   pickerItemSelected: {
-    backgroundColor: THEME.accent,
+    backgroundColor: THEME.brandTerracotta,
     marginHorizontal: SPACING.xs,
     borderRadius: scale(6),
   },
   pickerItemText: {
     fontSize: FONT_SIZES.sm,
-    color: '#3F4A5A',
+    color: THEME.textPrimary,
   },
   pickerItemTextSelected: {
     color: '#FFFFFF',
@@ -265,7 +265,7 @@ const styles = StyleSheet.create({
     gap: SPACING.md,
     padding: SPACING.lg,
     borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
+    borderTopColor: THEME.familyFlowLine,
   },
   modalButton: {
     flex: 1,
@@ -277,12 +277,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#F3F4F6',
   },
   confirmButton: {
-    backgroundColor: THEME.accent,
+    backgroundColor: THEME.brandTerracotta,
   },
   cancelButtonText: {
     fontSize: FONT_SIZES.base,
     fontWeight: '600',
-    color: '#3F4A5A',
+    color: THEME.textPrimary,
   },
   confirmButtonText: {
     fontSize: FONT_SIZES.base,

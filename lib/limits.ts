@@ -3,10 +3,13 @@ import { getCachedUserMode } from '@/lib/userMode'
 import { getLocalMemories } from '@/lib/localDb'
 import { pullMemoriesFromRemoteToLocal } from '@/services/memoriesLocalSync'
 
+/** TEST ONLY — prod : 50. Valeur réduite à 20 pour faciliter les tests en développement. Ne pas changer sans décision produit explicite. */
 export const FREE_TIER_LIMIT = 20
-export const FREE_TIER_VIDEO_LIMIT = 10
+/** TEST ONLY — prod : 5. */
+export const FREE_TIER_VIDEO_LIMIT = 5
 export const FREE_TIER_VIDEO_MAX_DURATION = 30 // secondes
-export const FREE_TIER_VOICE_MAX_DURATION = 120 // secondes (création de souvenirs audio)
+export const FREE_TIER_VOICE_LIMIT = 5 // max souvenirs audio en gratuit
+export const FREE_TIER_VOICE_MAX_DURATION = 60 // secondes (création de souvenirs audio)
 export const FREE_TIER_BOOK_VOICE_MAX_DURATION = 60 // secondes (livres : QR audio)
 /** Max souvenirs audio avec QR dans un livre / PDF (plan gratuit). Aligné serveur `FREE_TIER_QR_AV_MAX_PER_BOOK`. */
 export const FREE_TIER_BOOK_AUDIO_MAX_COUNT = 5

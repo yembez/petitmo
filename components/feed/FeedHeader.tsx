@@ -2,30 +2,26 @@ import { memo } from 'react';
 import { View, Text, TouchableOpacity, Platform, StyleSheet } from 'react-native';
 import { Image } from 'expo-image';
 import { BlurView } from 'expo-blur';
-import { Plus } from 'lucide-react-native';
+import { Menu } from 'lucide-react-native';
 import { calculateAge } from '@/utils/date';
 import { scale, verticalScale } from '@/utils/responsive';
 import type { Child } from '@/utils/feedHelpers';
-import {
-  CAN_USE_AVATAR_BW_FILTER,
-  HEADER_AVATAR_PX,
-  HEADER_AVATAR_CM_STYLE,
-  styles,
-} from '@/components/feed/feedStyles';
-import { ColorMatrix, grayscale } from 'react-native-color-matrix-image-filters';
+import { styles } from '@/components/feed/feedStyles';
+import { THEME } from '@/constants/theme';
 import { resolveChildProfileImageUri } from '@/utils/childPhotoUri';
 
 export type FeedHeaderProps = {
   child: Child | null;
   paddingTop: number;
-  onAddPress: () => void;
+  /** Ouvre l’espace parent (même entrée que le menu burger sur l’onglet Capturer). */
+  onMenuPress: () => void;
 };
 
-/** Aligné sur `styles.headerRow` + `styles.headerContent` (minHeight + paddingBottom + bordure) pour éviter un saut de layout quand `child` arrive après `router.replace` (import). */
+/** Aligné sur `styles.headerRow` + `styles.headerContent` (avatar agrandi + paddingBottom + bordure). */
 const HEADER_INNER_RESERVE_H =
-  verticalScale(48) + verticalScale(8) + StyleSheet.hairlineWidth;
+  verticalScale(68) + verticalScale(10) + StyleSheet.hairlineWidth;
 
-export const FeedHeader = memo(function FeedHeader({ child, paddingTop, onAddPress }: FeedHeaderProps) {
+export const FeedHeader = memo(function FeedHeader({ child, paddingTop, onMenuPress }: FeedHeaderProps) {
   if (!child) {
     return (
       <View
@@ -33,7 +29,7 @@ export const FeedHeader = memo(function FeedHeader({ child, paddingTop, onAddPre
         style={{
           paddingTop,
           minHeight: paddingTop + HEADER_INNER_RESERVE_H,
-          backgroundColor: '#F0F2F5',
+          backgroundColor: THEME.familyFlowScreenBg,
         }}
       />
     );
@@ -48,25 +44,13 @@ export const FeedHeader = memo(function FeedHeader({ child, paddingTop, onAddPre
       <View style={styles.headerLeft}>
         {photoUri ? (
           <View style={styles.headerAvatarImg}>
-            {CAN_USE_AVATAR_BW_FILTER ? (
-              <ColorMatrix matrix={grayscale()} style={HEADER_AVATAR_CM_STYLE}>
-                <Image
-                  source={{ uri: photoUri }}
-                  style={{ width: HEADER_AVATAR_PX, height: HEADER_AVATAR_PX }}
-                  contentFit="cover"
-                  cachePolicy="memory-disk"
-                  recyclingKey={child.id}
-                />
-              </ColorMatrix>
-            ) : (
-              <Image
-                source={{ uri: photoUri }}
-                style={StyleSheet.absoluteFillObject}
-                contentFit="cover"
-                cachePolicy="memory-disk"
-                recyclingKey={child.id}
-              />
-            )}
+            <Image
+              source={{ uri: photoUri }}
+              style={StyleSheet.absoluteFillObject}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              recyclingKey={child.id}
+            />
           </View>
         ) : (
           <View style={styles.headerAvatarPlaceholder}>
@@ -87,12 +71,13 @@ export const FeedHeader = memo(function FeedHeader({ child, paddingTop, onAddPre
       </View>
       <TouchableOpacity
         style={styles.headerAddBtn}
-        onPress={onAddPress}
+        onPress={onMenuPress}
         activeOpacity={0.75}
         accessibilityRole="button"
-        accessibilityLabel="Ouvrir la capture"
+        accessibilityLabel="Menu"
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
       >
-        <Plus size={scale(22)} color="#3A3A3C" strokeWidth={2} />
+        <Menu size={scale(20)} color={THEME.textPrimary} strokeWidth={2} />
       </TouchableOpacity>
     </View>
   );

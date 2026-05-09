@@ -17,6 +17,10 @@ export const THEME = {
   feedFavoriteTerracotta: '#D06235',
   /** CTA primaires, liens, spinners (hors cœur du fil) — noir (remplace le bleu). */
   accent: '#1C1C1E',
+  /** Fond type paywall — espace parent, création / édition profil enfant */
+  familyFlowScreenBg: '#F6F4F1',
+  /** Séparateurs légers (cartes header) alignés paywall */
+  familyFlowLine: 'rgba(0,0,0,0.08)',
   /** Variations plus douces (utile pour hover / badges / backgrounds). */
   accentMuted: '#3A3A3C',
   accentDeep: '#0A0A0A',

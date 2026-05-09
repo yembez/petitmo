@@ -1,5 +1,4 @@
 import { Platform, StyleSheet } from 'react-native';
-import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { scale, verticalScale } from '@/utils/responsive';
 import { THEME } from '@/constants/theme';
 import { FONT_SIZES } from '@/constants/sizes';
@@ -10,17 +9,7 @@ import {
   TEXT_POST_CARD_RADIUS,
 } from '@/constants/feedLayout';
 
-/** Expo Go n’inclut pas le module natif du filtre couleur → crash / écran blanc si on l’utilise. */
-const CAN_USE_AVATAR_BW_FILTER =
-  Platform.OS !== 'web' && Constants.executionEnvironment !== ExecutionEnvironment.StoreClient;
-
-const HEADER_AVATAR_PX = scale(52);
-/** Requis par react-native-color-matrix-image-filters si un style est passé au filtre */
-const HEADER_AVATAR_CM_STYLE = {
-  width: HEADER_AVATAR_PX,
-  height: HEADER_AVATAR_PX,
-  backgroundColor: '#fff0' as const,
-};
+const HEADER_AVATAR_PX = scale(68);
 /** Marge horizontale (ex. audio sans visuel) — référencé par `styles` */
 const FEED_GUTTER = scale(20);
 /** Posts texte : colonne étroite façon livre */
@@ -34,13 +23,13 @@ const GREY_ACTIVE_BORDER = '#D1D5DB';
 /** Hauteur du bloc « traits + date · âge » — alignée sur `styles.daySeparatorBlock` (chaque post) */
 const DAY_SEPARATOR_BLOCK_H = verticalScale(46);
 
-/** Séparation entre posts (très marquée, type fil social). */
-const FEED_POST_DIVIDER = '#121212';
+/** Séparation entre blocs post — alignée charte (paywall / espace famille). */
+const FEED_POST_DIVIDER = THEME.familyFlowLine;
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F0F2F5',
+    backgroundColor: THEME.familyFlowScreenBg,
   },
   /** Header hors liste : le scroll ne passe pas « sous » le bandeau — pas de double comptage pour snap */
   headerShell: {
@@ -63,23 +52,23 @@ const styles = StyleSheet.create({
     }),
   },
   headerContent: {
-    backgroundColor: 'rgba(255,255,255,0.88)',
+    backgroundColor: 'rgba(246,244,241,0.94)',
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(0,0,0,0.06)',
+    borderBottomColor: THEME.familyFlowLine,
     paddingHorizontal: scale(20),
     paddingBottom: verticalScale(8),
   },
   headerBlur: {
-    backgroundColor: 'rgba(255,255,255,0.72)',
+    backgroundColor: 'rgba(246,244,241,0.78)',
   },
   headerAndroid: {
-    backgroundColor: 'rgba(255,255,255,0.96)',
+    backgroundColor: THEME.familyFlowScreenBg,
   },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    minHeight: verticalScale(48),
+    minHeight: verticalScale(52),
   },
   headerLeft: {
     flexDirection: 'row',
@@ -93,20 +82,20 @@ const styles = StyleSheet.create({
     height: HEADER_AVATAR_PX,
     borderRadius: HEADER_AVATAR_PX / 2,
     overflow: 'hidden',
-    backgroundColor: '#F2F2F7',
+    backgroundColor: 'rgba(208, 98, 53, 0.08)',
   },
   headerAvatarPlaceholder: {
     width: HEADER_AVATAR_PX,
     height: HEADER_AVATAR_PX,
     borderRadius: HEADER_AVATAR_PX / 2,
-    backgroundColor: '#E8E8ED',
+    backgroundColor: 'rgba(208, 98, 53, 0.14)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   headerAvatarLetter: {
-    fontSize: scale(22),
+    fontSize: scale(26),
     fontWeight: '600',
-    color: '#636366',
+    color: THEME.brandTerracotta,
   },
   headerNameBlock: {
     flex: 1,
@@ -116,20 +105,20 @@ const styles = StyleSheet.create({
   headerTitleLine: {
     fontSize: scale(17),
     letterSpacing: -0.25,
-    color: '#1C1C1E',
+    color: THEME.textPrimary,
   },
   headerChildName: {
     fontWeight: '500',
-    color: '#1C1C1E',
+    color: THEME.textPrimary,
   },
   headerDot: {
     fontWeight: '400',
-    color: '#C7C7CC',
+    color: THEME.textMuted,
   },
   headerChildAge: {
     fontWeight: '400',
     fontSize: scale(15),
-    color: '#8E8E93',
+    color: THEME.textMuted,
   },
   headerAddBtn: {
     width: scale(40),
@@ -149,9 +138,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
   },
   pillsScroll: {
-    backgroundColor: '#F0F2F5',
+    backgroundColor: THEME.familyFlowScreenBg,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(0,0,0,0.06)',
+    borderBottomColor: THEME.familyFlowLine,
     flexGrow: 0,
     flexShrink: 0,
   },
@@ -165,7 +154,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: scale(12),
     borderRadius: scale(999),
     borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.10)',
+    borderColor: THEME.familyFlowLine,
     backgroundColor: '#FFFFFF',
     maxWidth: scale(170),
   },
@@ -177,9 +166,9 @@ const styles = StyleSheet.create({
   pillText: {
     fontSize: FONT_SIZES.sm,
     fontWeight: '600',
-    color: '#1C1C1E',
+    color: THEME.textPrimary,
   },
-  pillTextActive: { color: '#1C1C1E' },
+  pillTextActive: { color: THEME.textPrimary },
   pillBookInner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -532,20 +521,20 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: scale(16),
-    color: '#8791A1',
+    color: THEME.textMuted,
     textAlign: 'center',
     marginBottom: verticalScale(6),
   },
   emptySubText: {
     fontSize: scale(13),
-    color: '#8791A1',
+    color: THEME.textMuted,
     textAlign: 'center',
   },
   createButton: {
     marginTop: verticalScale(18),
     paddingHorizontal: scale(24),
     paddingVertical: verticalScale(12),
-    backgroundColor: '#C4784A',
+    backgroundColor: THEME.brandTerracotta,
     borderRadius: scale(100),
   },
   createButtonText: {
@@ -556,9 +545,7 @@ const styles = StyleSheet.create({
 });
 
 export {
-  CAN_USE_AVATAR_BW_FILTER,
   HEADER_AVATAR_PX,
-  HEADER_AVATAR_CM_STYLE,
   FEED_GUTTER,
   TEXT_POST_GUTTER,
   DAY_SEPARATOR_BLOCK_H,

@@ -22,6 +22,7 @@ import { useFilFeedList } from '@/hooks/useFilFeedList';
 import { useFilLayout } from '@/hooks/useFilLayout';
 import { useFilRowActions } from '@/hooks/useFilRowActions';
 import { styles } from '@/components/feed/feedStyles';
+import { THEME } from '@/constants/theme';
 import { FeedHeader } from '@/components/feed/FeedHeader';
 import type { FeedListItem } from '@/components/feed/FilMemoryRow';
 import { peekSilentInitialFilLoadArmed } from '@/services/feedAfterImportFlags';
@@ -74,8 +75,8 @@ export default function FilScreen() {
     () => ({ itemVisiblePercentThreshold: 50, minimumViewTime: 300 }),
     []
   );
-  const onFeedHeaderAddPress = useCallback(() => {
-    router.push({ pathname: '/camera', params: { from: 'fil' } });
+  const onFeedHeaderMenuPress = useCallback(() => {
+    router.push('/parent-space');
   }, [router]);
   const listRef = useRef<FlatList<FeedListItem> | null>(null);
   const immersiveLaunchRef = useRef<(index: number) => void>(() => {});
@@ -127,7 +128,7 @@ export default function FilScreen() {
     return (
       <View style={[styles.container, styles.centered]}>
         <StatusBar style="dark" />
-        <ActivityIndicator size="large" color="#FF7F74" />
+        <ActivityIndicator size="large" color={THEME.brandTerracotta} />
       </View>
     );
   }
@@ -151,7 +152,7 @@ export default function FilScreen() {
         <FeedHeader
           child={child}
           paddingTop={insets.top + verticalScale(6)}
-          onAddPress={onFeedHeaderAddPress}
+          onMenuPress={onFeedHeaderMenuPress}
         />
       </View>
       <View style={styles.feedViewport} onLayout={onFeedViewportLayout}>
@@ -171,7 +172,7 @@ export default function FilScreen() {
           showsVerticalScrollIndicator={false}
           ItemSeparatorComponent={() => <View style={localStyles.postDivider} />}
           refreshControl={
-            <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="#C4784A" />
+            <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor={THEME.brandTerracotta} />
           }
           ListEmptyComponent={
             feedData.length === 0 ? (
@@ -252,8 +253,8 @@ export default function FilScreen() {
 
 const localStyles = StyleSheet.create({
   postDivider: {
-    height: 1.5,
-    backgroundColor: '#2A2A2A',
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: THEME.familyFlowLine,
   },
   nudgeBanner: {
     position: 'absolute',
@@ -273,7 +274,7 @@ const localStyles = StyleSheet.create({
     flex: 1,
   },
   nudgeCta: {
-    color: '#C4784A',
+    color: THEME.brandTerracotta,
     fontSize: 13,
     fontWeight: '600',
     marginLeft: 8,

@@ -118,7 +118,7 @@ Attendu :
 ### B0bis — Email connu “commande/CRM” mais PAS abonné Petitmo+
 
 1. Sur l’onboarding : “J’ai déjà un compte”.
-2. Saisir un email qui existe en base (commande livre / CRM) mais **sans** `subscriptionTier=paid`.
+2. Saisir un email qui existe en base (commande livre / CRM) mais **sans** `subscriptionTier=paid` dans **`auth.users.app_metadata`**.
 
 Attendu :
 - Message : **“Cette adresse e-mail n’a pas de compte cloud payant associé”**

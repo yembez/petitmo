@@ -18,6 +18,44 @@ Les abonnements Petitmo+ sont gérés **exclusivement via les stores natifs** :
 
 La seule exception possible à terme : un achat web (livre, PDF) hors store — mais ce n'est pas encore en place.
 
+### Initialisation RevenueCat
+
+RevenueCat s'initialise **dès le premier lancement de l'app**, pour toutes les utilisatrices y compris gratuites, en silence total. Il crée un ID anonyme lié à l'appareil sur ses propres serveurs — **aucune écriture Supabase**, aucune donnée personnelle collectée. C'est obligatoire et intentionnel : ne jamais supprimer cette initialisation au prétexte du mode local.
+
+---
+
+### Séquence de paiement — ordre non négociable
+
+```
+1. Paywall s'ouvre
+2. Utilisatrice choisit mensuel / annuel
+3. Apple IAP (StoreKit) gère le paiement
+4. ── PAIEMENT CONFIRMÉ ── ← seul déclencheur de la suite
+5. Écran "Crée ton compte" → Google / Apple / email + mot de passe
+6. Compte Supabase créé
+7. Purchases.logIn(supabaseUser.id) → lie l'achat RevenueCat au compte
+8. Webhook RevenueCat → Edge Function → app_metadata { subscriptionTier: "paid" }
+9. AsyncStorage mis à jour → userTier = 'paid'
+10. Upload silencieux des souvenirs locaux vers Supabase
+```
+
+**Si le paiement échoue :** rien n'est créé côté Supabase, utilisatrice reste sur le paywall.
+**Si elle abandonne :** idem, retour en mode gratuit sans trace.
+
+Le compte Supabase ne se crée **jamais** avant l'étape 4. Tout compte créé avant paiement confirmé est une erreur.
+
+---
+
+### Migration des souvenirs locaux au passage payant (étape 10)
+
+- Upload en arrière-plan, sans bloquer la navigation.
+- Afficher pendant l'upload : **"Merci de t'être abonnée 🤍 Nous sécurisons tous tes souvenirs sur petitmo cloud. Merci de ne pas fermer l'app pendant quelques instants."**
+- Ordre d'upload : textes → photos → audios → vidéos (du plus léger au plus lourd).
+- Si coupure réseau : reprendre silencieusement à la reconnexion, sans re-solliciter l'utilisatrice.
+- Volume garanti raisonnable en gratuit : max 50 souvenirs (20 en test), 5 vidéos de 30s max, 5 audios de 60s max.
+
+---
+
 ### Où vit `subscriptionTier=paid` ?
 
 **Réponse : option A — `app_metadata` sur `auth.users` dans Supabase.**
@@ -84,6 +122,13 @@ Aucune autre écriture cloud n'est permise en gratuit. Pas de "petite sync genti
 - En gratuit : la vidéo dans un livre est **bloquée** avec message clair vers le paywall
   (cf. `BookUpgradeRequiredError` dans `services/books.ts`).
 
+### Paywall — hero selon le contexte (`app/paywall.tsx`)
+
+- **Quota souvenirs gratuit atteint** (`context=LIMIT_REACHED` uniquement) : hero chiffré du type « Vous avez capturé vos N premiers souvenirs » + sous-texte du type « Continuez à préserver… » — pour que le message soit **factuel** et lié au plafond gratuit.
+- **Toute autre entrée** (onboarding « S’abonner », vidéo dans un livre, export, audio/vidéo hors quota souvenirs, nudges J+30…, ou absence de `context`) : hero **neutre**, sans évoquer un nombre de souvenirs capturés : ligne 1 **« Préservez chaque moment »** (saut après *moment*), ligne 2 **« avec votre enfant, sans limite »** + pictogramme **cœur Lucide** plein **terracotta charte** (`THEME.brandTerracotta`). CTA principal paywall en **terracotta charte**.
+- Exception UI : flux **export PDF numérique à l’acte** (`EXPORT_DIGITAL_PDF`) conserve son propre titre / sous-titre (achat hors abonnement).
+- Passer explicitement `params.context` depuis chaque écran ; défaut = **`GENERAL`** (plus **`LIMIT_REACHED`** si param absent).
+
 ---
 
 ## Architecture — pointeurs code à connaître
@@ -97,6 +142,7 @@ Aucune autre écriture cloud n'est permise en gratuit. Pas de "petite sync genti
 | Garde-fou livre gratuit + erreur upgrade | [`services/books.ts`](services/books.ts) |
 | Création device-user Supabase (mécanique technique) | [`app/_layout.tsx`](app/_layout.tsx) |
 | Écran d'accueil | [`app/onboarding.tsx`](app/onboarding.tsx) |
+| Paywall (contexte hero, `GENERAL` / `LIMIT_REACHED`…) | [`app/paywall.tsx`](app/paywall.tsx) |
 | Référence canonique complète | [`docs/specs/architecture-locale-cloud.md`](docs/specs/architecture-locale-cloud.md) |
 
 ---
@@ -105,7 +151,7 @@ Aucune autre écriture cloud n'est permise en gratuit. Pas de "petite sync genti
 
 - Un **email peut exister en base** pour des raisons **commande/CRM** (gratuit) sans être un **compte cloud**.
 - **Compte cloud Petitmo+** = email (ou Apple/Google) **associé à un abonnement payant** et donnant droit à la sync/restauration.
-- La **source de vérité** de ce statut est **serveur** (ex. `subscriptionTier=paid` sur l'identité auth Supabase),
+- La **source de vérité** de ce statut est **serveur** : `subscriptionTier=paid` dans **`auth.users.app_metadata`** (Supabase),
   alimenté par webhook **RevenueCat** → Edge Function Supabase (Apple IAP / StoreKit sur iOS, Google Play Billing sur Android à venir). Stripe n'intervient pas dans les abonnements in-app. L'AsyncStorage local n'est qu'un cache UX.
 - En gratuit : l'email sert au **suivi de commande**, aux **QR audio** du livre commandé, et au **CRM** (marketing futur),
   mais **ne doit jamais** être traité comme un identifiant de restauration.

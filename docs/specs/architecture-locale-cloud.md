@@ -79,21 +79,22 @@ flowchart LR
 
 ## 3.1 Distinction critique : email de commande vs compte cloud Petitmo+
 
-Un **email peut exister en base** (gratuit) pour :\n
-- associer une **commande de livre** et ses **QR codes audio**,\n
-- alimenter le **CRM** (suivi de commande + marketing futur).\n
-\n
-Cela ne signifie **pas** qu'il existe un **compte cloud Petitmo+** pour cet email.\n
-\n
-Un **compte cloud Petitmo+** = identité (email/Apple/Google) **liée à un abonnement payant**,\n
-autorisant **sync**, **restauration** et **multi-device**.\n
-\n
-Source de vérité : **serveur** (ex. flag `subscriptionTier=paid` sur l'identité auth Supabase),\n
-alimenté par webhook **RevenueCat** → Edge Function Supabase (Apple IAP / StoreKit sur iOS, Google Play Billing sur Android à venir). **Stripe n'intervient pas dans les abonnements in-app.**\n
-Le tier en AsyncStorage est un **cache UX**, jamais une preuve.\n
-\n
-Conséquence UX : sur login, si l'email est connu côté commande/CRM mais **sans compte payant**,\n
-montrer : **\"Cette adresse e-mail n'a pas de compte cloud payant associé\"** + CTA **\"Créer un compte\"**.\n
+Un **email peut exister en base** (gratuit) pour :
+
+- associer une **commande de livre** et ses **QR codes audio** ;
+- alimenter le **CRM** (suivi de commande + marketing futur).
+
+Cela ne signifie **pas** qu'il existe un **compte cloud Petitmo+** pour cet email.
+
+Un **compte cloud Petitmo+** = identité (email/Apple/Google) **liée à un abonnement payant**,
+autorisant **sync**, **restauration** et **multi-device**.
+
+Source de vérité : **serveur** — champ **`subscriptionTier=paid`** dans **`auth.users.app_metadata`** (Supabase),
+alimenté par webhook **RevenueCat** → Edge Function Supabase (Apple IAP / StoreKit sur iOS, Google Play Billing sur Android à venir). **Stripe n'intervient pas dans les abonnements in-app.**
+Le tier en AsyncStorage est un **cache UX**, jamais une preuve.
+
+Conséquence UX : sur login, si l'email est connu côté commande/CRM mais **sans compte payant**,
+montrer : **"Cette adresse e-mail n'a pas de compte cloud payant associé"** + CTA **"Créer un compte"**.
 
 ## 4. Pointeurs code
 

@@ -13,7 +13,7 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Camera } from 'lucide-react-native';
+import { ArrowLeft, Camera, Menu } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { scale, verticalScale } from '@/utils/responsive';
@@ -33,10 +33,12 @@ import type { Child } from '@/types/local';
 import { resolveChildProfileImageUri } from '@/utils/childPhotoUri';
 import DatePicker from '@/components/DatePicker';
 import { CropModal } from '@/components/CropModal';
+import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
 
 export default function EditChildScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { loaded: fontsLoaded, dm500, dm600, dm700 } = useDmSansFamilyFlowFonts();
   const params = useLocalSearchParams();
   const [child, setChild] = useState<Child | null>(null);
   const [name, setName] = useState('');
@@ -194,10 +196,18 @@ export default function EditChildScreen() {
     }
   };
 
+  if (!fontsLoaded) {
+    return (
+      <View style={[styles.container, styles.loadingContainer]}>
+        <ActivityIndicator size="large" color={THEME.brandTerracotta} />
+      </View>
+    );
+  }
+
   if (isLoading) {
     return (
       <View style={[styles.container, styles.loadingContainer]}>
-        <ActivityIndicator size="large" color={THEME.accent} />
+        <ActivityIndicator size="large" color={THEME.brandTerracotta} />
       </View>
     );
   }
@@ -210,10 +220,19 @@ export default function EditChildScreen() {
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <ArrowLeft size={24} color="#3F4A5A" strokeWidth={2} />
+          <ArrowLeft size={24} color={THEME.textPrimary} strokeWidth={2} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Modifier le profil</Text>
-        <View style={styles.backButton} />
+        <Text style={[styles.headerTitle, dm600 ? { fontFamily: dm600 } : null]}>Modifier le profil</Text>
+        <TouchableOpacity
+          onPress={() => router.push('/parent-space')}
+          style={styles.backButton}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Menu"
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Menu size={scale(22)} color={THEME.textPrimary} strokeWidth={2} />
+        </TouchableOpacity>
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
@@ -230,7 +249,7 @@ export default function EditChildScreen() {
               />
             ) : (
               <View style={[styles.photo, styles.photoPlaceholder]}>
-                <Text style={styles.photoPlaceholderText}>
+                <Text style={[styles.photoPlaceholderText, dm700 ? { fontFamily: dm700 } : null]}>
                   {name.charAt(0).toUpperCase()}
                 </Text>
               </View>
@@ -249,23 +268,23 @@ export default function EditChildScreen() {
               </View>
             )}
           </TouchableOpacity>
-          <Text style={styles.photoHint}>Appuyez pour recadrer</Text>
+          <Text style={[styles.photoHint, dm500 ? { fontFamily: dm500 } : null]}>Appuyez pour recadrer</Text>
         </View>
 
         <View style={styles.formSection}>
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Prénom</Text>
+            <Text style={[styles.label, dm500 ? { fontFamily: dm500 } : null]}>Prénom</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, dm500 ? { fontFamily: dm500 } : null]}
               value={name}
               onChangeText={setName}
               placeholder="Prénom de l'enfant"
-              placeholderTextColor="#8791A1"
+              placeholderTextColor={THEME.textMuted}
             />
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Date de naissance</Text>
+            <Text style={[styles.label, dm500 ? { fontFamily: dm500 } : null]}>Date de naissance</Text>
             <DatePicker
               value={birthdate}
               onChange={setBirthdate}
@@ -282,7 +301,7 @@ export default function EditChildScreen() {
           {isSaving ? (
             <ActivityIndicator size="small" color="#FFFFFF" />
           ) : (
-            <Text style={styles.saveButtonText}>Enregistrer</Text>
+            <Text style={[styles.saveButtonText, dm600 ? { fontFamily: dm600 } : null]}>Enregistrer</Text>
           )}
         </TouchableOpacity>
       </ScrollView>
@@ -311,7 +330,7 @@ export default function EditChildScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: THEME.bgScreen,
+    backgroundColor: THEME.familyFlowScreenBg,
   },
   loadingContainer: {
     justifyContent: 'center',
@@ -324,7 +343,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.md,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    borderBottomColor: THEME.familyFlowLine,
   },
   backButton: {
     width: scale(40),
@@ -334,7 +353,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: FONT_SIZES.lg,
     fontWeight: '600',
-    color: '#3F4A5A',
+    color: THEME.textPrimary,
   },
   content: {
     flex: 1,
@@ -354,7 +373,7 @@ const styles = StyleSheet.create({
     borderRadius: PROFILE_SIZES.large / 2,
   },
   photoPlaceholder: {
-    backgroundColor: THEME.accent,
+    backgroundColor: THEME.brandTerracotta,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -374,7 +393,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 3,
-    borderColor: THEME.bgScreen,
+    borderColor: THEME.familyFlowScreenBg,
   },
   photoIconContainer: {
     position: 'absolute',
@@ -383,15 +402,15 @@ const styles = StyleSheet.create({
     width: scale(40),
     height: scale(40),
     borderRadius: scale(20),
-    backgroundColor: THEME.accent,
+    backgroundColor: THEME.brandTerracotta,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 3,
-    borderColor: THEME.bgScreen,
+    borderColor: THEME.familyFlowScreenBg,
   },
   photoHint: {
     fontSize: FONT_SIZES.sm,
-    color: '#8791A1',
+    color: THEME.textMuted,
     marginTop: SPACING.sm,
   },
   formSection: {
@@ -403,18 +422,18 @@ const styles = StyleSheet.create({
   label: {
     fontSize: FONT_SIZES.base,
     fontWeight: '500',
-    color: '#3F4A5A',
+    color: THEME.textMuted,
     marginBottom: SPACING.xs,
   },
   input: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: THEME.bg,
     borderRadius: scale(100),
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.md,
     fontSize: FONT_SIZES.base,
-    color: '#3F4A5A',
+    color: THEME.textPrimary,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: THEME.familyFlowLine,
   },
   hint: {
     fontSize: FONT_SIZES.xs,
@@ -422,7 +441,7 @@ const styles = StyleSheet.create({
     marginTop: SPACING.xs,
   },
   saveButton: {
-    backgroundColor: THEME.accent,
+    backgroundColor: THEME.brandTerracotta,
     borderRadius: scale(100),
     paddingVertical: SPACING.md,
     alignItems: 'center',

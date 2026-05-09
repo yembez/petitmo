@@ -15,7 +15,7 @@ import {
 import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ImageIcon } from 'lucide-react-native';
+import { ChevronLeft, ImageIcon } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { scale, verticalScale } from '@/utils/responsive';
 import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
@@ -23,10 +23,12 @@ import { THEME } from '@/constants/theme';
 import { createChild, setSelectedChild } from '@/services/children';
 import DatePicker from '@/components/DatePicker';
 import PetitmoLogoManuscrit from '@/components/PetitmoLogoManuscrit';
+import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
 
 export default function CreateChildScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { loaded: fontsLoaded, dm500, dm600, dm700 } = useDmSansFamilyFlowFonts();
   const { height: windowH } = useWindowDimensions();
   const [childName, setChildName] = useState('');
   const [birthDate, setBirthDate] = useState('');
@@ -74,6 +76,14 @@ export default function CreateChildScreen() {
     }
   };
 
+  if (!fontsLoaded) {
+    return (
+      <View style={[styles.container, styles.fontsGate]}>
+        <ActivityIndicator color={THEME.brandTerracotta} size="large" />
+      </View>
+    );
+  }
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -84,7 +94,7 @@ export default function CreateChildScreen() {
         contentContainerStyle={[
           styles.scrollContent,
           {
-            paddingTop: insets.top + verticalScale(20),
+            paddingTop: insets.top + verticalScale(8),
             paddingBottom: Math.max(insets.bottom, verticalScale(16)) + verticalScale(32),
             minHeight: windowH - insets.top - insets.bottom,
           },
@@ -93,11 +103,25 @@ export default function CreateChildScreen() {
         keyboardDismissMode="on-drag"
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.logoContainer}>
-          <PetitmoLogoManuscrit width={scale(132)} height={scale(40)} />
+        <View style={styles.topBar}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.backButton}
+            accessibilityRole="button"
+            accessibilityLabel="Retour"
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            <ChevronLeft size={ICON_SIZES.lg} color={THEME.textPrimary} strokeWidth={2} />
+          </TouchableOpacity>
         </View>
 
-        <Text style={styles.title}>Créer le profil de votre enfant</Text>
+        <View style={styles.logoContainer}>
+          <PetitmoLogoManuscrit width={scale(132)} height={scale(40)} color={THEME.textPrimary} />
+        </View>
+
+        <Text style={[styles.title, dm700 ? { fontFamily: dm700 } : null]}>
+          Créer le profil de votre enfant
+        </Text>
 
         <View style={styles.photoSection}>
           {photoUri ? (
@@ -110,31 +134,33 @@ export default function CreateChildScreen() {
               style={styles.photoPlaceholder}
               activeOpacity={0.8}
             >
-              <ImageIcon size={ICON_SIZES.xl} color="#B8B2A8" strokeWidth={2} />
+              <ImageIcon size={ICON_SIZES.xl} color={THEME.textMuted} strokeWidth={2} />
             </TouchableOpacity>
           )}
 
           <TouchableOpacity onPress={handlePhotoUpload} activeOpacity={0.7}>
-            <Text style={styles.addPhotoText}>Ajouter une photo</Text>
+            <Text style={[styles.addPhotoText, dm500 ? { fontFamily: dm500 } : null]}>Ajouter une photo</Text>
           </TouchableOpacity>
         </View>
 
         <View style={styles.formSection}>
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Prénom de l'enfant</Text>
+            <Text style={[styles.label, dm500 ? { fontFamily: dm500 } : null]}>Prénom de l'enfant</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, dm500 ? { fontFamily: dm500 } : null]}
               value={childName}
               onChangeText={setChildName}
               placeholder="Prénom"
-              placeholderTextColor="#B8B2A8"
+              placeholderTextColor={THEME.textMuted}
               autoCapitalize="words"
               autoCorrect={false}
             />
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Date de naissance (optionnelle)</Text>
+            <Text style={[styles.label, dm500 ? { fontFamily: dm500 } : null]}>
+              Date de naissance (optionnelle)
+            </Text>
             <DatePicker
               value={birthDate}
               onChange={setBirthDate}
@@ -152,7 +178,13 @@ export default function CreateChildScreen() {
           {isCreating ? (
             <ActivityIndicator color="#FFFFFF" />
           ) : (
-            <Text style={[styles.ctaButtonText, !childName.trim() && styles.ctaButtonTextDisabled]}>
+            <Text
+              style={[
+                styles.ctaButtonText,
+                dm600 ? { fontFamily: dm600 } : null,
+                !childName.trim() && styles.ctaButtonTextDisabled,
+              ]}
+            >
               Continuer
             </Text>
           )}
@@ -165,7 +197,11 @@ export default function CreateChildScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fffffc',
+    backgroundColor: THEME.familyFlowScreenBg,
+  },
+  fontsGate: {
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   scrollView: {
     flex: 1,
@@ -174,14 +210,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.lg,
     paddingBottom: verticalScale(40),
   },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: verticalScale(12),
+  },
+  backButton: {
+    width: scale(44),
+    height: scale(44),
+    justifyContent: 'center',
+  },
   logoContainer: {
     alignItems: 'center',
-    marginBottom: verticalScale(32),
+    marginBottom: verticalScale(24),
   },
   title: {
     fontSize: FONT_SIZES.xl,
-    fontWeight: '600',
-    color: '#5E7C88',
+    fontWeight: '700',
+    color: THEME.textPrimary,
     textAlign: 'center',
     marginBottom: verticalScale(32),
   },
@@ -193,7 +239,7 @@ const styles = StyleSheet.create({
     width: scale(112),
     height: scale(112),
     borderRadius: scale(56),
-    backgroundColor: THEME.bgScreen,
+    backgroundColor: 'rgba(208, 98, 53, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: verticalScale(16),
@@ -206,7 +252,7 @@ const styles = StyleSheet.create({
   },
   addPhotoText: {
     fontSize: FONT_SIZES.sm,
-    color: '#5E7C88',
+    color: THEME.brandTerracotta,
     fontWeight: '500',
     marginBottom: verticalScale(8),
   },
@@ -222,23 +268,23 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: scale(13),
-    color: '#5E7C88',
+    color: THEME.textMuted,
     fontWeight: '500',
     marginBottom: verticalScale(8),
   },
   input: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: THEME.bg,
     borderWidth: 1,
-    borderColor: '#E5E5E5',
+    borderColor: THEME.familyFlowLine,
     borderRadius: scale(100),
     paddingHorizontal: SPACING.md,
     paddingVertical: verticalScale(14),
     fontSize: FONT_SIZES.md,
-    color: '#5E7C88',
+    color: THEME.textPrimary,
   },
   ctaButton: {
     width: '100%',
-    backgroundColor: THEME.accent,
+    backgroundColor: THEME.brandTerracotta,
     borderRadius: scale(100),
     paddingVertical: verticalScale(16),
     alignItems: 'center',
@@ -249,7 +295,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   ctaButtonDisabled: {
-    backgroundColor: THEME.accent,
+    backgroundColor: THEME.brandTerracotta,
     opacity: 0.4,
   },
   ctaButtonText: {

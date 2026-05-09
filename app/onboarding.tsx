@@ -1,4 +1,12 @@
-import { Alert, Dimensions, ImageBackground, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  Alert,
+  ImageBackground,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useEffect } from 'react';
@@ -10,17 +18,25 @@ import { THEME } from '@/constants/theme';
 import { LinearGradient } from 'expo-linear-gradient';
 import { getChildren } from '@/services/children';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-
 /**
  * Règle d'or (cf. AGENTS.md / docs/specs/architecture-locale-cloud.md) :
- * - Plan gratuit = local pur, AUCUN compte → CTA "Commencer".
- * - Plan Petitmo+ uniquement = un vrai compte cloud → CTA "Restaurer mon compte Petitmo+"
- *   (libellé explicite pour qu'aucune utilisatrice gratuite ne le clique par erreur).
+ * - Gratuit = local pur, pas de compte obligatoire → "Commencer gratuitement".
+ * - Petitmo+ = paywall puis compte → "S'abonner maintenant" (/paywall).
+ * - Déjà abonnée → lien discret "J'ai déjà un compte" (login / restore — flux dédié).
  */
 export default function OnboardingScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  /**
+   * Début du bloc « Capturez… » + CTA : plus `top` est grand, plus le texte descend.
+   * Plafond pour garder assez de place aux boutons sur très petits écrans.
+   */
+  const captureFooterReserve = verticalScale(274) + insets.bottom;
+  const captureBlockTop = Math.min(
+    Math.max(insets.top + verticalScale(618), windowHeight * 0.69),
+    windowHeight - captureFooterReserve,
+  );
 
   useEffect(() => {
     const checkExistingChild = async () => {
@@ -33,11 +49,11 @@ export default function OnboardingScreen() {
     checkExistingChild();
   }, []);
 
-  /** TODO(plan dédié) : modale login Google / Apple / email + mot de passe pour Petitmo+. */
-  const handleRestoreAccount = () => {
+  /** TODO(plan dédié) : modale login Google / Apple / email pour compte Petitmo+. */
+  const handleExistingAccount = () => {
     Alert.alert(
-      'Restaurer mon compte Petitmo+',
-      "La connexion à un compte Petitmo+ arrive bientôt. Si tu n'es pas encore abonnée, commence simplement avec « Commencer » : tes souvenirs restent sur ton téléphone, sans création de compte.",
+      'J’ai déjà un compte',
+      "La connexion à un compte Petitmo+ arrive bientôt. Si tu n'es pas encore abonnée, utilise « Commencer gratuitement » : tes souvenirs restent sur ton téléphone, sans création de compte.",
       [{ text: 'OK', style: 'default' }]
     );
   };
@@ -56,6 +72,13 @@ export default function OnboardingScreen() {
           pointerEvents="none"
         />
 
+        <LinearGradient
+          colors={['transparent', THEME.brandTerracottaTopOverlay]}
+          locations={[0, 1]}
+          style={[styles.bottomOverlay, { height: insets.bottom + verticalScale(140) }]}
+          pointerEvents="none"
+        />
+
         <View style={[styles.contentContainer, { paddingTop: insets.top + verticalScale(12) }]}>
           <View style={styles.logoContainer}>
             <PetitmoLogoManuscrit width={scale(150)} height={scale(45)} color="#FFFFFF" />
@@ -66,39 +89,59 @@ export default function OnboardingScreen() {
               Les souvenirs qui comptent{'\n'}ne se perdent plus.
             </Text>
           </View>
-
-          <View style={styles.bottomContent}>
-            <Text style={styles.subtitle}>
-              Capturez, gardez et retrouvez{'\n'}les moments avec votre enfant.
-            </Text>
-
-            <TouchableOpacity
-              style={styles.ctaButton}
-              onPress={() => router.push('/create-child')}
-              activeOpacity={0.9}
-              accessibilityRole="button"
-              accessibilityLabel="Commencer à créer mes souvenirs sans compte"
-            >
-              <Text style={styles.ctaButtonText}>Commencer</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.ctaButtonSecondary}
-              onPress={handleRestoreAccount}
-              activeOpacity={0.85}
-              accessibilityRole="button"
-              accessibilityLabel="Restaurer mon compte Petitmo Plus"
-            >
-              <Text style={styles.ctaButtonSecondaryText}>J&apos;ai déjà un compte</Text>
-            </TouchableOpacity>
-          </View>
         </View>
 
-        <View style={[styles.privacyBadge, { bottom: insets.bottom + verticalScale(16) }]}>
-          <Lock size={scale(19)} color="rgba(255, 255, 255, 0.6)" strokeWidth={2} />
-          <Text style={styles.privacyText}>
-            Confidentialité 100% préservée, jamais exploitée.
+        <View
+          style={[
+            styles.captureBlock,
+            {
+              top: captureBlockTop,
+              paddingBottom: insets.bottom + verticalScale(14),
+            },
+          ]}
+        >
+          <Text style={styles.subtitle}>
+            Capturez, gardez et retrouvez{'\n'}les moments avec votre enfant.
           </Text>
+
+          <TouchableOpacity
+            style={styles.ctaButton}
+            onPress={() => router.push('/create-child')}
+            activeOpacity={0.9}
+            accessibilityRole="button"
+            accessibilityLabel="Commencer gratuitement sans compte"
+          >
+            <Text style={styles.ctaButtonText}>Commencer gratuitement</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.ctaButtonSecondary}
+            onPress={() =>
+              router.push({ pathname: '/paywall', params: { context: 'GENERAL' } })
+            }
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="S’abonner à Petitmo Plus"
+          >
+            <Text style={styles.ctaButtonSecondaryText}>S&apos;abonner maintenant</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.linkTertiaryWrap}
+            onPress={handleExistingAccount}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="J’ai déjà un compte Petitmo Plus"
+          >
+            <Text style={styles.linkTertiary}>J&apos;ai déjà un compte</Text>
+          </TouchableOpacity>
+
+          <View style={styles.privacyBadge}>
+            <Lock size={scale(19)} color="rgba(255, 255, 255, 0.6)" strokeWidth={2} />
+            <Text style={styles.privacyText}>
+              Confidentialité 100% préservée.
+            </Text>
+          </View>
         </View>
       </ImageBackground>
     </View>
@@ -125,10 +168,17 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
   },
+  bottomOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+  },
   contentContainer: {
     flex: 1,
     paddingHorizontal: SPACING.lg,
-    paddingBottom: verticalScale(60),
+    paddingBottom: verticalScale(12),
+    pointerEvents: 'box-none',
   },
   logoContainer: {
     alignItems: 'center',
@@ -138,11 +188,13 @@ const styles = StyleSheet.create({
     marginTop: verticalScale(6),
     alignItems: 'center',
   },
-  bottomContent: {
-    flex: 1,
-    justifyContent: 'flex-end',
+  captureBlock: {
+    position: 'absolute',
+    left: SPACING.lg,
+    right: SPACING.lg,
+    bottom: 0,
+    justifyContent: 'flex-start',
     alignItems: 'center',
-    paddingBottom: verticalScale(36),
   },
   tagline: {
     fontSize: FONT_SIZES.xl,
@@ -168,7 +220,7 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZES.lg,
     color: '#FFFFFF',
     textAlign: 'center',
-    marginBottom: verticalScale(32),
+    marginBottom: verticalScale(14),
     maxWidth: scale(300),
     // Ombre marron foncé, très diffuse (halo autour des lettres, sans “tache”).
     textShadowColor: 'rgba(52, 24, 12, 0.46)',
@@ -215,15 +267,27 @@ const styles = StyleSheet.create({
     color: THEME.brandTerracotta,
     textAlign: 'center',
   },
+  linkTertiaryWrap: {
+    marginTop: verticalScale(18),
+    marginBottom: verticalScale(10),
+    paddingVertical: verticalScale(8),
+    paddingHorizontal: SPACING.md,
+  },
+  linkTertiary: {
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '500',
+    color: 'rgba(255, 255, 255, 0.72)',
+    textAlign: 'center',
+    textDecorationLine: 'underline',
+    textDecorationColor: 'rgba(255, 255, 255, 0.35)',
+  },
   privacyBadge: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: scale(8),
     paddingHorizontal: SPACING.md,
+    alignSelf: 'stretch',
   },
   privacyText: {
     fontSize: scale(12),
