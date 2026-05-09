@@ -30,6 +30,26 @@ import {
   getVideoPosterUriForBookPreview,
   getVoiceCoverUriForBookPreview,
 } from '@/utils/memoryPhotos';
+import { memoryBookDisplayDateIso } from '@/utils/memoryBookDisplayDate';
+import { normalizeQuoteBodyLikeMaquette, quoteFitLevelFromBody } from '@/src/book/quoteFitLevel';
+import {
+  pdfBodyStyle,
+  pdfChapterMonthStyle,
+  pdfChapterSubStyle,
+  pdfChapterTitleStyle,
+  pdfCoverPeriodStyle,
+  pdfCoverTitleStyle,
+  pdfFolioStyle,
+  pdfLabelStyle,
+  pdfMmToPreviewPxH,
+  pdfMmToPreviewPxW,
+  pdfPhotoCaptionStyle,
+  pdfPtToPreviewPx,
+  pdfQuoteBodyStyle,
+  pdfQuoteMarkStyle,
+  pdfVideoSubStyle,
+  pdfVideoTitleStyle,
+} from '@/src/book/pdfPreviewTypo';
 
 /** Alinéa (cadratin) en début de paragraphe — typographie roman. */
 const EM_QUAD = '\u2003';
@@ -161,13 +181,23 @@ function barHeightsFromId(id: string): number[] {
   return heights;
 }
 
-function Folio({ n, dm400, typoScale }: { n: number; dm400?: string; typoScale: number }) {
+function Folio({
+  n,
+  dm400,
+  pageWidthPx,
+  pageHeightPx,
+}: {
+  n: number;
+  dm400?: string;
+  pageWidthPx: number;
+  pageHeightPx: number;
+}) {
+  const folio = pdfFolioStyle(pageWidthPx, pageHeightPx);
   return (
     <Text
       style={[
         styles.folio,
-        scaledTypo(typoScale, 11),
-        { bottom: Math.max(6, Math.round(10 * typoScale)) },
+        { fontSize: folio.fontSize, bottom: folio.bottom },
         dm400 ? { fontFamily: dm400 } : null,
       ]}
     >
@@ -282,7 +312,7 @@ export default function MaquetteBookPages(props: Props) {
             <Text
               style={[
                 styles.chapterMonth,
-                scaledTypo(typoScale, 12),
+                pdfChapterMonthStyle(width),
                 dm400 && { fontFamily: dm400 },
               ]}
             >
@@ -291,26 +321,26 @@ export default function MaquetteBookPages(props: Props) {
             <Text
               style={[
                 styles.chapterTitle,
-                scaledTypo(typoScale, 28),
-                { marginTop: Math.round(12 * typoScale) },
+                pdfChapterTitleStyle(width),
+                { marginTop: pdfMmToPreviewPxH(8, height) },
                 garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
               ]}
             >
               {chapterDisplayTitle ?? 'Notre histoire'}
             </Text>
-            <View style={[styles.chapterLine, { marginTop: Math.round(20 * typoScale), width: Math.round(56 * typoScale) }]} />
+            <View style={[styles.chapterLine, { marginTop: pdfMmToPreviewPxH(14, height), width: pdfMmToPreviewPxW(20, width) }]} />
             <Text
               style={[
                 styles.chapterSub,
-                scaledTypo(typoScale, 12),
-                { marginTop: Math.round(16 * typoScale) },
+                pdfChapterSubStyle(width),
+                { marginTop: pdfMmToPreviewPxH(10, height) },
                 dm400 && { fontFamily: dm400 },
               ]}
             >
               Chapitre {page.chapterNum}
             </Text>
           </Pressable>
-          <Folio n={pageNum} dm400={dm400} typoScale={typoScale} />
+          <Folio n={pageNum} dm400={dm400} pageWidthPx={width} pageHeightPx={height} />
         </View>
       );
     case 'photo-full':
@@ -415,18 +445,18 @@ export default function MaquetteBookPages(props: Props) {
             <Text
               style={[
                 styles.backLine1,
-                scaledTypo(typoScale, 18),
+                { fontSize: pdfPtToPreviewPx(13, width), lineHeight: pdfPtToPreviewPx(13 * 1.4, width) },
                 garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
               ]}
             >
               Chaque moment compte.
             </Text>
-            <Text style={[styles.backLine2, scaledTypo(typoScale, 12), dm400 && { fontFamily: dm400 }]}>
+            <Text style={[styles.backLine2, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
               petitmo · vos souvenirs pour toujours
             </Text>
-            <View style={[styles.backRule, { marginTop: Math.round(20 * typoScale), width: Math.round(120 * typoScale) }]} />
+            <View style={[styles.backRule, { marginTop: pdfPtToPreviewPx(12, width), width: pdfMmToPreviewPxW(20, width) }]} />
           </View>
-          <Folio n={pageNum} dm400={dm400} typoScale={typoScale} />
+          <Folio n={pageNum} dm400={dm400} pageWidthPx={width} pageHeightPx={height} />
         </View>
       );
     default: {
@@ -514,14 +544,14 @@ function MaquetteCover({
           <Text
             style={[
               styles.coverTitle,
-              scaledTypo(typoScale, 26),
+              pdfCoverTitleStyle(width),
               garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
             ]}
           >
             {titleLine}
           </Text>
         </Pressable>
-        <Text style={[styles.coverYears, scaledTypo(typoScale, 13), dm400 && { fontFamily: dm400 }]}>{periodLine}</Text>
+        <Text style={[styles.coverYears, pdfCoverPeriodStyle(width), dm400 && { fontFamily: dm400 }]}>{periodLine}</Text>
         <View style={[styles.coverHairline, { marginTop: Math.round(16 * typoScale) }]} />
       </View>
     </View>
@@ -611,12 +641,12 @@ function MaquettePhotoSimple({
         accessibilityRole="button"
       >
         <View style={styles.photoDateLocRow}>
-          <Text style={[styles.photoDate, scaledTypo(typoScale, 11), dm400 && { fontFamily: dm400 }]}>
-            {dateFrCaps(memory.created_at)}
+          <Text style={[styles.photoDate, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
+            {dateFrCaps(memoryBookDisplayDateIso(memory))}
           </Text>
           {bookLoc ? (
             <Text
-              style={[styles.photoLocationBook, scaledTypo(typoScale, 11), dm400 && { fontFamily: dm400 }]}
+              style={[styles.photoLocationBook, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}
               numberOfLines={2}
             >
               {bookLoc}
@@ -627,7 +657,7 @@ function MaquettePhotoSimple({
           <Text
             style={[
               styles.photoCaption,
-              scaledTypo(typoScale, 17),
+              pdfPhotoCaptionStyle(width),
               garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
             ]}
             numberOfLines={3}
@@ -636,7 +666,7 @@ function MaquettePhotoSimple({
           </Text>
         ) : null}
       </Pressable>
-      <Folio n={pageNum} dm400={dm400} typoScale={typoScale} />
+      <Folio n={pageNum} dm400={dm400} pageWidthPx={width} pageHeightPx={height} />
     </View>
   );
 }
@@ -735,12 +765,12 @@ function MaquettePhotoNote({
         >
           <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
             <View style={[styles.page4MetaRow, { marginBottom: Math.round(8 * typoScale) }]}>
-              <Text style={[styles.page4Meta, scaledTypo(typoScale, 11), dm400 && { fontFamily: dm400 }]}>
-                {dateFrCaps(memory.created_at)}
+              <Text style={[styles.page4Meta, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
+                {dateFrCaps(memoryBookDisplayDateIso(memory))}
               </Text>
               {bookLoc ? (
                 <Text
-                  style={[styles.page4MetaLocation, scaledTypo(typoScale, 11), dm400 && { fontFamily: dm400 }]}
+                  style={[styles.page4MetaLocation, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}
                   numberOfLines={2}
                 >
                   {bookLoc}
@@ -751,8 +781,8 @@ function MaquettePhotoNote({
               <Text
                 style={[
                   styles.page4Body,
-                  scaledTypo(typoScale, 15, 24),
-                  { marginTop: Math.round(12 * typoScale) },
+                  pdfBodyStyle(width),
+                  { marginTop: pdfMmToPreviewPxH(4, height) },
                   garamondIt ? { fontFamily: garamondIt } : dm400 ? { fontFamily: dm400 } : null,
                 ]}
               >
@@ -762,7 +792,7 @@ function MaquettePhotoNote({
           </Pressable>
         </ScrollView>
       </View>
-      <Folio n={pageNum} dm400={dm400} typoScale={typoScale} />
+      <Folio n={pageNum} dm400={dm400} pageWidthPx={width} pageHeightPx={height} />
     </View>
   );
 }
@@ -796,107 +826,33 @@ function MaquetteQuote({
   garamondIt?: string;
 }) {
   const raw = memory.content ?? '';
-  const body = useMemo(() => {
-    const t = raw.trim();
-    if (!t) return '';
-    /**
-     * Objectif:
-     * - garder les paragraphes "roman" même si l'utilisateur a mis un seul retour ligne,
-     * - éviter les retours "parasites" au milieu des phrases (copier/coller, wrapping).
-     *
-     * Heuristique:
-     * - double retour = nouveau paragraphe (toujours),
-     * - retour simple => paragraphe si la ligne précédente "se termine" (ponctuation) ou si la suivante
-     *   ressemble à un nouveau départ (majuscule), sinon on concatène avec un espace.
-     */
-    const norm = t.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n');
-    const lines = norm.split('\n');
-    const paragraphs: string[] = [];
-    let current = '';
-    const startsNew = (s: string) => /^[A-ZÀ-ÖØ-Þ0-9“"'\(\[]/u.test(s);
-    const endsSentence = (s: string) => /[.!?…:;)]\s*$/u.test(s);
-
-    for (let i = 0; i < lines.length; i++) {
-      const rawLine = lines[i];
-      const line = rawLine.trim();
-      if (!line) {
-        if (current.trim()) paragraphs.push(current.trim());
-        current = '';
-        continue;
-      }
-
-      if (!current) {
-        current = line;
-        continue;
-      }
-
-      const nextNonEmpty = (() => {
-        for (let j = i + 1; j < lines.length; j++) {
-          const cand = lines[j].trim();
-          if (cand) return cand;
-          // stop at blank => paragraph break in source
-          break;
-        }
-        return '';
-      })();
-
-      const shouldBreakParagraph = endsSentence(current) || (nextNonEmpty && startsNew(line));
-      if (shouldBreakParagraph) {
-        paragraphs.push(current.trim());
-        current = line;
-      } else {
-        current = `${current.trim()} ${line}`;
-      }
-    }
-    if (current.trim()) paragraphs.push(current.trim());
-
-    return paragraphs.join('\n\n');
-  }, [raw]);
-
-  const fitLevel = useMemo<0 | 1 | 2>(() => {
-    if (!body) return 0;
-    const paragraphCount = body.split(/\n{2,}/).filter(p => p.trim()).length;
-    const approxLines = Math.ceil(body.length / 42) + paragraphCount * 2;
-    if (approxLines >= 22 || body.length >= 520 || paragraphCount >= 5) return 2;
-    if (approxLines >= 18 || body.length >= 420 || paragraphCount >= 3) return 1;
-    return 0;
-  }, [body]);
+  const body = useMemo(() => normalizeQuoteBodyLikeMaquette(raw), [raw]);
+  const fitLevel = quoteFitLevelFromBody(body);
 
   const bookLoc = bookMaquetteLocationLabel(memory);
 
-  const markScaled =
-    fitLevel === 2
-      ? scaledTypo(typoScale, 44, 44)
-      : fitLevel === 1
-        ? scaledTypo(typoScale, 50, 50)
-        : scaledTypo(typoScale, 56, 56);
-
-  const bodyScaled =
-    fitLevel === 2
-      ? scaledTypo(typoScale, 14, 21)
-      : fitLevel === 1
-        ? scaledTypo(typoScale, 15, 23)
-        : scaledTypo(typoScale, 16, 26);
+  const markScaled = pdfQuoteMarkStyle(fitLevel, width);
+  const bodyScaled = pdfQuoteBodyStyle(fitLevel, width);
 
   return (
     <View style={[styles.paper, { width, height }]}>
       <View style={[styles.quoteScreenCol, { paddingHorizontal: pad }]}>
-        <View style={[styles.quoteHeader, { paddingTop: Math.round(16 * typoScale) }]}>
+        <View style={[styles.quoteHeader, { paddingTop: pdfMmToPreviewPxH(14, height) }]}>
           <View style={styles.quoteHeaderLeft}>
             <View
               style={[
                 styles.sageDot,
                 {
-                  width: Math.max(6, Math.round(8 * typoScale)),
-                  height: Math.max(6, Math.round(8 * typoScale)),
-                  borderRadius: Math.max(3, Math.round(4 * typoScale)),
+                  width: Math.max(4, pdfPtToPreviewPx(6, width)),
+                  height: Math.max(4, pdfPtToPreviewPx(6, width)),
+                  borderRadius: Math.max(2, pdfPtToPreviewPx(3, width)),
                 },
               ]}
             />
             <Text
               style={[
                 styles.quoteLabel,
-                scaledTypo(typoScale, 13),
+                pdfLabelStyle(width),
                 dm600 ? { fontFamily: dm600 } : { fontWeight: '600' },
               ]}
             >
@@ -923,15 +879,15 @@ function MaquetteQuote({
                   styles.quoteMark,
                   markScaled,
                   {
-                    marginLeft: Math.round(20 * typoScale),
-                    marginTop: Math.round(4 * typoScale),
+                    marginLeft: pdfMmToPreviewPxW(5, width),
+                    marginTop: pdfMmToPreviewPxH(1.5, height),
                   },
                   garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
                 ]}
               >
                 {'\u201C'}
               </Text>
-              <View style={{ paddingHorizontal: Math.round(8 * typoScale) }}>
+              <View style={{ paddingHorizontal: pdfMmToPreviewPxW(3, width) }}>
                 <Text
                   style={[
                     styles.quoteBody,
@@ -963,12 +919,12 @@ function MaquetteQuote({
               <View style={styles.quoteRuleSeg} />
             </View>
             <View style={styles.photoDateLocRow}>
-              <Text style={[styles.photoDate, scaledTypo(typoScale, 11), dm400 && { fontFamily: dm400 }]}>
-                {dateFrCaps(memory.created_at)}
+              <Text style={[styles.photoDate, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
+                {dateFrCaps(memoryBookDisplayDateIso(memory))}
               </Text>
               {bookLoc ? (
                 <Text
-                  style={[styles.photoLocationBook, scaledTypo(typoScale, 11), dm400 && { fontFamily: dm400 }]}
+                  style={[styles.photoLocationBook, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}
                   numberOfLines={2}
                 >
                   {bookLoc}
@@ -978,7 +934,7 @@ function MaquetteQuote({
           </View>
         </Pressable>
       </View>
-      <Folio n={pageNum} dm400={dm400} typoScale={typoScale} />
+      <Folio n={pageNum} dm400={dm400} pageWidthPx={width} pageHeightPx={height} />
     </View>
   );
 }
@@ -1092,17 +1048,17 @@ function MaquetteAudio({
                 { width: dotSize, height: dotSize, borderRadius: dotSize / 2 },
               ]}
             />
-            <Text style={[styles.vocalLabel, scaledTypo(typoScale, 13), dm600 && { fontFamily: dm600 }]}>
+            <Text style={[styles.vocalLabel, pdfLabelStyle(width), dm600 && { fontFamily: dm600 }]}>
               Vocal
             </Text>
           </View>
           <View style={[styles.page4MetaRow, { flex: 1, minWidth: 0 }]}>
-            <Text style={[styles.page4Meta, scaledTypo(typoScale, 11), dm400 && { fontFamily: dm400 }]}>
-              {dateFrCaps(memory.created_at)}
+            <Text style={[styles.page4Meta, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
+              {dateFrCaps(memoryBookDisplayDateIso(memory))}
             </Text>
             {bookLoc ? (
               <Text
-                style={[styles.page4MetaLocation, scaledTypo(typoScale, 11), dm400 && { fontFamily: dm400 }]}
+                style={[styles.page4MetaLocation, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}
                 numberOfLines={2}
               >
                 {bookLoc}
@@ -1127,7 +1083,7 @@ function MaquetteAudio({
                 <Text
                   style={[
                     styles.audioCaption,
-                    scaledTypo(typoScale, 13, 19),
+                    pdfBodyStyle(width),
                     garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
                   ]}
                 >
@@ -1147,7 +1103,7 @@ function MaquetteAudio({
                     }}
                   />
                 )}
-                <Text style={[styles.audioQrHint, scaledTypo(typoScale, 10), dm400 && { fontFamily: dm400 }]}>
+                <Text style={[styles.audioQrHint, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
                   Scanner pour écouter
                 </Text>
               </View>
@@ -1165,7 +1121,7 @@ function MaquetteAudio({
                 },
               ]}
             >
-              <Text style={[styles.playGlyphInline, scaledTypo(typoScale, 14)]}>▶</Text>
+              <Text style={[styles.playGlyphInline, { fontSize: pdfPtToPreviewPx(11, width) }]}>▶</Text>
             </View>
             <View style={styles.audioWaveCol}>
               <Svg
@@ -1187,8 +1143,8 @@ function MaquetteAudio({
                 ))}
               </Svg>
               <View style={styles.audioDurRowWide}>
-                <Text style={[styles.audioDur, scaledTypo(typoScale, 9), dm400 && { fontFamily: dm400 }]}>0:00</Text>
-                <Text style={[styles.audioDur, scaledTypo(typoScale, 9), dm400 && { fontFamily: dm400 }]}>
+                <Text style={[styles.audioDur, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>0:00</Text>
+                <Text style={[styles.audioDur, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
                   {durLabel}
                 </Text>
               </View>
@@ -1196,7 +1152,7 @@ function MaquetteAudio({
           </View>
         </View>
       </View>
-      <Folio n={pageNum} dm400={dm400} typoScale={typoScale} />
+      <Folio n={pageNum} dm400={dm400} pageWidthPx={width} pageHeightPx={height} />
     </View>
   );
 }
@@ -1253,12 +1209,12 @@ function MaquetteVideo({
         >
           <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
             <View style={[styles.noteMetaRow, { marginBottom: Math.round(8 * typoScale) }]}>
-              <Text style={[styles.noteMeta, scaledTypo(typoScale, 11), dm400 && { fontFamily: dm400 }]}>
-                {dateFrCaps(memory.created_at)}
+              <Text style={[styles.noteMeta, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
+                {dateFrCaps(memoryBookDisplayDateIso(memory))}
               </Text>
               {bookLoc ? (
                 <Text
-                  style={[styles.noteMetaLocation, scaledTypo(typoScale, 11), dm400 && { fontFamily: dm400 }]}
+                  style={[styles.noteMetaLocation, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}
                   numberOfLines={2}
                 >
                   {bookLoc}
@@ -1268,7 +1224,7 @@ function MaquetteVideo({
             <Text
               style={[
                 styles.videoTitle,
-                scaledTypo(typoScale, 18),
+                pdfVideoTitleStyle(width),
                 { marginTop: Math.round(4 * typoScale) },
                 dm600 && { fontFamily: dm600 },
                 garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
@@ -1279,7 +1235,7 @@ function MaquetteVideo({
             <Text
               style={[
                 styles.videoSub,
-                scaledTypo(typoScale, 14, 22),
+                pdfVideoSubStyle(width),
                 { marginTop: Math.round(10 * typoScale) },
                 garamondIt ? { fontFamily: garamondIt } : dm400 ? { fontFamily: dm400 } : null,
               ]}
@@ -1300,13 +1256,13 @@ function MaquetteVideo({
                 }}
               />
             )}
-            <Text style={[styles.audioQrHint, scaledTypo(typoScale, 10), dm400 && { fontFamily: dm400 }]}>
+            <Text style={[styles.audioQrHint, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
               Scanner pour regarder
             </Text>
           </View>
         </ScrollView>
       </View>
-      <Folio n={pageNum} dm400={dm400} typoScale={typoScale} />
+      <Folio n={pageNum} dm400={dm400} pageWidthPx={width} pageHeightPx={height} />
     </View>
   );
 }

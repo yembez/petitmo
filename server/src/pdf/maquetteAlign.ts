@@ -52,7 +52,10 @@ export function audioWaveformSvg(memoryId: string, viewBoxH = 24): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" class="audio-wave-svg" viewBox="0 0 ${waveW} ${viewBoxH}" preserveAspectRatio="xMidYMid meet">${rects.join('')}</svg>`;
 }
 
-/** Normalisation des paragraphes comme `MaquetteQuote` (useMemo body). */
+/**
+ * Normalisation des paragraphes comme `MaquetteQuote` (useMemo body).
+ * Miroir obligatoire : `src/book/quoteFitLevel.ts` (aperçu app) — toute divergence casse l’alignement PDF / preview.
+ */
 export function normalizeQuoteBodyLikeMaquette(raw: string): string {
   const t = raw.trim();
   if (!t) return '';
@@ -99,6 +102,7 @@ export function normalizeQuoteBodyLikeMaquette(raw: string): string {
   return paragraphs.join('\n\n');
 }
 
+/** Miroir : `src/book/quoteFitLevel.ts` — garder les seuils identiques. */
 export function quoteFitLevelFromBody(body: string): 0 | 1 | 2 {
   if (!body.trim()) return 0;
   const paragraphCount = body.split(/\n{2,}/).filter(p => p.trim()).length;

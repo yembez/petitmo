@@ -41,6 +41,8 @@ export type GuestMemoryForPdfPayload = {
   poster_print_url?: string | null;
   voice_cover_url?: string | null;
   location?: string | null;
+  /** Date événement / prise (`memories.created_at`) — requis pour PDF = aperçu ; fallback serveur si absent. */
+  created_at?: string;
 };
 
 export type GenerateBookPdfPayload = {

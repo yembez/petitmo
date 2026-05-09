@@ -8,6 +8,7 @@ import {
 import type { BookPageServer } from '../types/contracts';
 import { splitVideoTitleBody } from './bookTextParts';
 import type { ChildRow, MemoryRow } from './memoryRow';
+import { memoryBookDisplayDateIso } from './memoryBookDisplayDate';
 import { clampAudioBookAnnotation } from './audioBookAnnotation';
 import {
   audioWaveformSvg,
@@ -187,7 +188,7 @@ function pagePhotoFull(m: MemoryRow, rot: number, pageNum: number, crop: PhotoCr
   </div>
   <div class="pf-footer">
     <div class="pf-meta-row">
-      <div class="pf-meta">${esc(dateFrCaps(m.created_at))}</div>
+      <div class="pf-meta">${esc(dateFrCaps(memoryBookDisplayDateIso(m)))}</div>
       ${locLabel ? `<div class="pf-meta pf-meta-loc">${esc(locLabel)}</div>` : ''}
     </div>
     ${captionHtml ? `<div class="pf-caption body">${captionHtml}</div>` : ''}
@@ -210,7 +211,7 @@ function pagePhotoNote(m: MemoryRow, rot: number, pageNum: number, crop: PhotoCr
   </div>
   <div class="pn-text">
     <div class="pn-meta-row">
-      <div class="label">${esc(dateFrCaps(m.created_at))}</div>
+      <div class="label">${esc(dateFrCaps(memoryBookDisplayDateIso(m)))}</div>
       ${locLabel ? `<div class="label pn-meta-loc">${esc(locLabel)}</div>` : ''}
     </div>
     ${legend ? `<div class="body">${romanHtml(legend)}</div>` : ''}
@@ -241,7 +242,7 @@ function pageQuote(m: MemoryRow, pageNum: number): string {
         <div class="quote-rule-seg"></div>
       </div>
       <div class="quote-meta-row">
-        <div class="label">${esc(dateFrCaps(m.created_at))}</div>
+        <div class="label">${esc(dateFrCaps(memoryBookDisplayDateIso(m)))}</div>
         ${locLabel ? `<div class="label quote-meta-loc">${esc(locLabel)}</div>` : ''}
       </div>
     </div>
@@ -280,7 +281,7 @@ function pageAudio(
         <span class="label audio-type-label">Vocal</span>
       </div>
       <div class="audio-meta-right">
-        <span class="label audio-meta-date">${esc(dateFrCaps(m.created_at))}</span>
+        <span class="label audio-meta-date">${esc(dateFrCaps(memoryBookDisplayDateIso(m)))}</span>
         ${locLabel ? `<span class="label audio-meta-loc">${esc(locLabel)}</span>` : ''}
       </div>
     </div>
@@ -320,7 +321,7 @@ function pageVideo(m: MemoryRow, qrUrl: string, pageNum: number, printBleed: boo
   </div>
   <div class="inner video-text-block">
     <div class="video-meta-row">
-      <div class="label">${esc(dateFrCaps(m.created_at))}</div>
+      <div class="label">${esc(dateFrCaps(memoryBookDisplayDateIso(m)))}</div>
       ${locLabel ? `<div class="label video-meta-loc">${esc(locLabel)}</div>` : ''}
     </div>
     <div class="video-title-line">${esc(vTitle)}</div>

@@ -14,6 +14,31 @@ export const MAX_TEXT_CHARS = 600;
  */
 export const MAX_VISUAL_LINES = 16;
 
+/** Avant enregistrement si `clampText` raccourcit le texte (contrainte page livre A5). */
+export const TEXT_TRUNCATION_ALERT_TITLE =
+  'Ton texte complet ne tient pas sur une page du livre';
+
+export const TEXT_TRUNCATION_ALERT_MESSAGE =
+  'Petitmo limite la longueur des souvenirs texte pour qu’ils s’affichent bien dans le livre (nombre de caractères et de lignes). La fin de ton message serait donc coupée à l’enregistrement — ce n’est pas un bug.\n\nTu peux revenir au texte pour le raccourcir toi-même, ou enregistrer seulement ce qui tiendra dans le livre.';
+
+export const TEXT_TRUNCATION_MODIFY_LABEL = 'Modifier le texte';
+export const TEXT_TRUNCATION_SAVE_LABEL = 'Enregistrer la version courte';
+
+export const TEXT_SAVE_FAILED_ALERT_TITLE = 'Enregistrement impossible';
+
+export const TEXT_SAVE_FAILED_ALERT_MESSAGE =
+  'Ton texte n’a pas été sauvegardé. Réessaie dans un instant. Si ça bloque encore, copie ton texte dans les Notes du téléphone pour ne rien perdre.';
+
+/**
+ * Pendant la saisie (clavier / dictée système iOS) : limite uniquement le nombre de caractères.
+ * Ne pas appeler `clampText` à chaque `onChangeText` : la dictée envoie des remplacements successifs du
+ * champ contrôlé ; tronquer aussi sur les « lignes livre » provoque des sauts et des pertes apparentes.
+ * Utiliser `clampText` au moment de valider (enregistrer / fermer le modal).
+ */
+export function clampTextCharBudget(text: string): string {
+  return text.length > MAX_TEXT_CHARS ? text.slice(0, MAX_TEXT_CHARS) : text;
+}
+
 /**
  * Largeur moyenne en caractères d'une ligne dans MaquetteQuote.
  * Basé sur fontSize 16, EB Garamond Italic, ~335pt de large.
@@ -50,6 +75,7 @@ export function estimateVisualLines(text: string): number {
 /**
  * Applique la double contrainte (caractères + lignes visuelles).
  * Retourne le texte accepté (éventuellement tronqué).
+ * Préférer `clampTextCharBudget` pendant la frappe ; appeler ceci à l'enregistrement.
  */
 export function clampText(text: string): string {
   let clamped = text.length > MAX_TEXT_CHARS

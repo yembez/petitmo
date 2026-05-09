@@ -30,6 +30,7 @@ import {
 } from '@/src/book/bookTextParts';
 import EditTextModal from '@/components/EditTextModal';
 import { BookPhotoCropModal } from '@/components/BookPhotoCropModal';
+import { BookPreviewZoomWrap } from '@/components/BookPreviewZoomWrap';
 import { getChildren, getOrSelectFirstChild } from '@/services/children';
 import { getMemories } from '@/services/media';
 import { loadBookSelectionKeys, memoryIdFromBookSelectionKey } from '@/services/bookSelection';
@@ -65,22 +66,10 @@ const MAX_BOOK_SELECTION_KEYS = 80;
 const BOOK_PAGE_W_MM = 154;
 const BOOK_PAGE_H_MM = 216;
 
-function bookPageAspectRatio(pageType: BookPage['type']): number {
-  switch (pageType) {
-    case 'cover':
-      return BOOK_PAGE_W_MM / 142;
-    case 'photo-note':
-    case 'audio':
-      return BOOK_PAGE_W_MM / (BOOK_PAGE_H_MM * 0.6);
-    default:
-      return BOOK_PAGE_W_MM / BOOK_PAGE_H_MM;
-  }
-}
-
 /**
  * Spread paysage : deux pages → même gabarit **A5 plein** (154×216 mm à l’échelle), comme un livre ouvert.
- * Les types « courts » (photo-note, audio) sont rendus dans cette même zone en maquette — pas deux hauteurs différentes.
- * Couverture / quatrième seules : proportions spécifiques (`bookPageAspectRatio`).
+ * Page seule (couverture à droite, quatrième à gauche, dernière page impaire) : **même A5** que les demi-pages
+ * du double page — la maquette (couverture incluse) attend width/height au ratio 154:216, pas un cadre 154:142.
  */
 function computeLandscapeSpreadLayout(
   left: PageRow | null,
@@ -97,11 +86,6 @@ function computeLandscapeSpreadLayout(
   const hairline = Math.max(StyleSheet.hairlineWidth, 1);
   const spineTotal = spineMargin + hairline + spineMargin;
 
-  const nominal = (row: PageRow) => {
-    const ar = bookPageAspectRatio(row.page.type);
-    return { w: BOOK_PAGE_W_MM, h: BOOK_PAGE_W_MM / ar };
-  };
-
   const trimA5 = { w: BOOK_PAGE_W_MM, h: BOOK_PAGE_H_MM };
 
   if (!left && !right) {
@@ -109,18 +93,16 @@ function computeLandscapeSpreadLayout(
   }
 
   if (!left && right) {
-    const R = nominal(right);
-    const s = Math.min(availW / R.w, availH / R.h);
-    const rw = Math.max(1, Math.floor(s * R.w));
-    const rh = Math.max(1, Math.floor(s * R.h));
+    const s = Math.min(availW / trimA5.w, availH / trimA5.h);
+    const rw = Math.max(1, Math.floor(s * trimA5.w));
+    const rh = Math.max(1, Math.floor(s * trimA5.h));
     return { left: null, right: { width: rw, height: rh }, spineWidth: 0, rowHeight: rh };
   }
 
   if (left && !right) {
-    const L = nominal(left);
-    const s = Math.min(availW / L.w, availH / L.h);
-    const lw = Math.max(1, Math.floor(s * L.w));
-    const lh = Math.max(1, Math.floor(s * L.h));
+    const s = Math.min(availW / trimA5.w, availH / trimA5.h);
+    const lw = Math.max(1, Math.floor(s * trimA5.w));
+    const lh = Math.max(1, Math.floor(s * trimA5.h));
     return { left: { width: lw, height: lh }, right: null, spineWidth: 0, rowHeight: lh };
   }
 
@@ -798,16 +780,22 @@ export default function BookPreviewScreen() {
   );
 
   const renderPageItem: ListRenderItem<PageRow> = useCallback(
-    ({ item }) => (
+    ({ item, index }) => (
       <View style={[styles.pageSlide, { width: screenWidth, height: availHPortrait }]}>
-        {renderMaquettePage(item)}
+        <BookPreviewZoomWrap
+          width={screenWidth}
+          height={availHPortrait}
+          isPagerActive={index === currentPageIndex}
+        >
+          {renderMaquettePage(item)}
+        </BookPreviewZoomWrap>
       </View>
     ),
-    [availHPortrait, renderMaquettePage, screenWidth]
+    [availHPortrait, currentPageIndex, renderMaquettePage, screenWidth]
   );
 
   const renderSpreadItem: ListRenderItem<SpreadRow> = useCallback(
-    ({ item }) => {
+    ({ item, index }) => {
       const left = item.left;
       const right = item.right;
       const layout = computeLandscapeSpreadLayout(left, right, screenWidth, availHLandscape);
@@ -863,20 +851,33 @@ export default function BookPreviewScreen() {
             styles.pageSlide,
             styles.pageSlideSpread,
             { width: screenWidth, height: availHLandscape, backgroundColor: '#000000' },
-          ]}>
-          <View style={styles.spreadRow}>
-            {layout.left ? (
-              <View style={[styles.spreadCell, layout.left]}>{renderSpreadMaquette(left!, layout.left, qrUrlLeft)}</View>
-            ) : null}
-            {showSpine ? (
-              <View style={[styles.spreadSpine, { width: layout.spineWidth, height: layout.rowHeight }]}>
-                <View style={styles.spreadSpineHairline} />
+          ]}
+        >
+          <BookPreviewZoomWrap
+            width={screenWidth}
+            height={availHLandscape}
+            isPagerActive={index === currentPageIndex}
+          >
+            <View style={styles.spreadZoomInner}>
+              <View style={styles.spreadRow}>
+                {layout.left ? (
+                  <View style={[styles.spreadCell, layout.left]}>
+                    {renderSpreadMaquette(left!, layout.left, qrUrlLeft)}
+                  </View>
+                ) : null}
+                {showSpine ? (
+                  <View style={[styles.spreadSpine, { width: layout.spineWidth, height: layout.rowHeight }]}>
+                    <View style={styles.spreadSpineHairline} />
+                  </View>
+                ) : null}
+                {layout.right ? (
+                  <View style={[styles.spreadCell, layout.right]}>
+                    {renderSpreadMaquette(right!, layout.right, qrUrlRight)}
+                  </View>
+                ) : null}
               </View>
-            ) : null}
-            {layout.right ? (
-              <View style={[styles.spreadCell, layout.right]}>{renderSpreadMaquette(right!, layout.right, qrUrlRight)}</View>
-            ) : null}
-          </View>
+            </View>
+          </BookPreviewZoomWrap>
         </View>
       );
     },
@@ -887,6 +888,7 @@ export default function BookPreviewScreen() {
       coverPhotoDisplayUri,
       coverTitleLine,
       coverYearLabel,
+      currentPageIndex,
       merge,
       photoCrops,
       rotations,
@@ -1846,6 +1848,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#000000',
+  },
+  /** Contenu du spread (pages + dos) zoomé ensemble, centré dans la slide paysage. */
+  spreadZoomInner: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   spreadRow: {
     flexDirection: 'row',

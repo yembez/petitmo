@@ -20,7 +20,19 @@ import { supabase } from '@/lib/supabase';
 import { getCachedUserMode } from '@/lib/userMode';
 import { checkMemoryLimit } from '@/lib/limits';
 import { getOrSelectFirstChild } from '@/services/children';
-import { MAX_TEXT_CHARS, MAX_VISUAL_LINES, estimateVisualLines, clampText } from '@/utils/textLimits';
+import {
+  MAX_TEXT_CHARS,
+  MAX_VISUAL_LINES,
+  estimateVisualLines,
+  clampText,
+  clampTextCharBudget,
+  TEXT_TRUNCATION_ALERT_TITLE,
+  TEXT_TRUNCATION_ALERT_MESSAGE,
+  TEXT_TRUNCATION_MODIFY_LABEL,
+  TEXT_TRUNCATION_SAVE_LABEL,
+  TEXT_SAVE_FAILED_ALERT_TITLE,
+  TEXT_SAVE_FAILED_ALERT_MESSAGE,
+} from '@/utils/textLimits';
 import { upsertLocalMemory } from '@/lib/localDb';
 import { buildLocalTextMemory } from '@/services/localOnlyMemoryCapture';
 import { withLocalFields } from '@/services/memoryRowMapping';
@@ -84,7 +96,7 @@ export default function WriteScreen() {
           }
 
           if (finalTranscript) {
-            setContent(prev => prev + finalTranscript);
+            setContent(prev => clampTextCharBudget(prev + finalTranscript));
           }
         };
 
@@ -139,33 +151,26 @@ export default function WriteScreen() {
     }
   };
 
-  const handleSave = async () => {
-    if (!content.trim()) {
-      Alert.alert('Erreur', 'Veuillez saisir du texte');
-      return;
-    }
-
+  const executeSave = async (textToSave: string) => {
     try {
       setIsSaving(true);
+      setContent(textToSave);
 
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         Alert.alert('Erreur', 'Utilisateur non authentifié');
-        setIsSaving(false);
         return;
       }
 
       const childId = await getOrSelectFirstChild();
       if (!childId) {
         Alert.alert('Aucun enfant trouvé', 'Veuillez d\'abord créer un profil d\'enfant');
-        setIsSaving(false);
         router.push('/create-child');
         return;
       }
 
       const limitCheck = await checkMemoryLimit(childId);
       if (!limitCheck.canCreate) {
-        setIsSaving(false);
         router.push({ pathname: '/paywall', params: { context: 'LIMIT_REACHED' } });
         return;
       }
@@ -174,7 +179,7 @@ export default function WriteScreen() {
         const mem = buildLocalTextMemory({
           childId,
           userId: user.id,
-          content: content.trim(),
+          content: textToSave,
           location: null,
         });
         upsertLocalMemory(mem);
@@ -186,7 +191,7 @@ export default function WriteScreen() {
             child_id: childId,
             user_id: user.id,
             type: 'text',
-            content: content.trim(),
+            content: textToSave,
             location: null,
             inserted_at: new Date().toISOString(),
           })
@@ -205,10 +210,29 @@ export default function WriteScreen() {
       router.push('/(tabs)/fil');
     } catch (error) {
       console.error('Error saving text:', error);
-      Alert.alert('Erreur', 'Impossible de sauvegarder le moment');
+      Alert.alert(TEXT_SAVE_FAILED_ALERT_TITLE, TEXT_SAVE_FAILED_ALERT_MESSAGE);
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const handleSave = async () => {
+    const trimmed = content.trim();
+    const textToSave = clampText(trimmed);
+    if (!textToSave) {
+      Alert.alert('Erreur', 'Veuillez saisir du texte');
+      return;
+    }
+
+    if (textToSave !== trimmed) {
+      Alert.alert(TEXT_TRUNCATION_ALERT_TITLE, TEXT_TRUNCATION_ALERT_MESSAGE, [
+        { text: TEXT_TRUNCATION_MODIFY_LABEL, style: 'cancel' },
+        { text: TEXT_TRUNCATION_SAVE_LABEL, onPress: () => void executeSave(textToSave) },
+      ]);
+      return;
+    }
+
+    await executeSave(textToSave);
   };
 
   return (
@@ -235,7 +259,7 @@ export default function WriteScreen() {
           placeholder="Écris-lui ce que tu aimerais lui dire aujourd'hui…"
           placeholderTextColor="#0F0F0F"
           value={content}
-          onChangeText={(t) => setContent(clampText(t))}
+          onChangeText={(t) => setContent(clampTextCharBudget(t))}
           autoFocus
           textAlignVertical="top"
         />

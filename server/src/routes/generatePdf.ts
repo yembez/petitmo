@@ -77,6 +77,7 @@ function mapGuestMemories(list: GuestMemoryForPdfPayload[], exportRequestId: str
   const map = new Map<string, MemoryRow>();
   const now = new Date().toISOString();
   for (const g of list) {
+    const createdRaw = typeof g.created_at === 'string' ? g.created_at.trim() : '';
     map.set(g.id, {
       id: g.id,
       child_id: PLACEHOLDER_CHILD_UUID,
@@ -95,7 +96,8 @@ function mapGuestMemories(list: GuestMemoryForPdfPayload[], exportRequestId: str
       voice_cover_url: g.voice_cover_url ?? null,
       voice_cover_path: null,
       location: g.location?.trim() ? g.location.trim() : null,
-      created_at: now,
+      // Aligné maquette : date de prise (`memories.created_at`), pas l’instant d’export ni `inserted_at`.
+      created_at: createdRaw.length > 0 ? createdRaw : now,
     });
   }
   return map;

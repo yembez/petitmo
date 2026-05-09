@@ -10,13 +10,24 @@ import {
   Platform,
   Dimensions,
   ScrollView,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X, Check } from 'lucide-react-native';
 import { scale } from '@/utils/responsive';
 import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
-import { MAX_TEXT_CHARS, MAX_VISUAL_LINES, estimateVisualLines, clampText } from '@/utils/textLimits';
+import {
+  MAX_TEXT_CHARS,
+  MAX_VISUAL_LINES,
+  estimateVisualLines,
+  clampText,
+  clampTextCharBudget,
+  TEXT_TRUNCATION_ALERT_TITLE,
+  TEXT_TRUNCATION_ALERT_MESSAGE,
+  TEXT_TRUNCATION_MODIFY_LABEL,
+  TEXT_TRUNCATION_SAVE_LABEL,
+} from '@/utils/textLimits';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const SCREEN_HEIGHT = Dimensions.get('window').height;
@@ -62,9 +73,28 @@ export default function EditTextModal(props: EditTextModalProps) {
   const handleSave = () => {
     if (props.variant === 'title-body') {
       props.onSave(fieldTitle, fieldBody);
-    } else {
-      props.onSave(text);
+      props.onClose();
+      return;
     }
+
+    const raw = text.trim();
+    const finalText = clampText(raw);
+
+    if (finalText !== raw) {
+      Alert.alert(TEXT_TRUNCATION_ALERT_TITLE, TEXT_TRUNCATION_ALERT_MESSAGE, [
+        { text: TEXT_TRUNCATION_MODIFY_LABEL, style: 'cancel' },
+        {
+          text: TEXT_TRUNCATION_SAVE_LABEL,
+          onPress: () => {
+            props.onSave(finalText);
+            props.onClose();
+          },
+        },
+      ]);
+      return;
+    }
+
+    props.onSave(finalText);
     props.onClose();
   };
 
@@ -156,7 +186,7 @@ export default function EditTextModal(props: EditTextModalProps) {
                     {...TEXT_INPUT_WEB_LANG}
                     style={styles.input}
                     value={text}
-                    onChangeText={(t) => setText(clampText(t))}
+                    onChangeText={(t) => setText(clampTextCharBudget(t))}
                     placeholder="Ajouter un texte..."
                     placeholderTextColor="#9CA3AF"
                     multiline

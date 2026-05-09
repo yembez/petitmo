@@ -43,6 +43,11 @@ export type GuestMemoryForPdfPayload = {
   poster_print_url?: string | null;
   /** Photo de fond optionnelle sur une page vocal (aligné `voice_cover_url` / maquette). */
   voice_cover_url?: string | null;
+  /**
+   * Date de prise / événement (alignée `memories.created_at` + maquette). **Requis** pour un PDF
+   * cohérent avec l’aperçu ; sinon le serveur tombait sur « maintenant » (date d’export).
+   */
+  created_at?: string;
 };
 
 export type GenerateBookPdfPayload = {

@@ -151,7 +151,7 @@ async function ensureVoiceCoversPersistedForServerPdf(
     try {
       const url = await persistVoiceCoverToCloudForPdfExport(m.id, childId, coverUri);
       if (url) {
-        overrides.push({ id: m.id, type: 'voice', voice_cover_url: url });
+        overrides.push({ id: m.id, type: 'voice', voice_cover_url: url, created_at: m.created_at });
       }
     } catch (e) {
       console.warn('[bookPdfServer] ensureVoiceCoversPersistedForServerPdf', m.id, e);
@@ -193,6 +193,7 @@ function memoryToGuestPayload(m: Memory): GuestMemoryForPdfPayload {
     poster_url: m.poster_url ?? null,
     poster_print_url: m.poster_print_url ?? null,
     voice_cover_url: m.voice_cover_url ?? null,
+    created_at: m.created_at,
   };
 }
 

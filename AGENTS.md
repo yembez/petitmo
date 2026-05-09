@@ -145,6 +145,12 @@ Aucune autre écriture cloud n'est permise en gratuit. Pas de "petite sync genti
 | Paywall (contexte hero, `GENERAL` / `LIMIT_REACHED`…) | [`app/paywall.tsx`](app/paywall.tsx) |
 | Référence canonique complète | [`docs/specs/architecture-locale-cloud.md`](docs/specs/architecture-locale-cloud.md) |
 
+### Livre et PDF — date affichée (photo, vidéo, audio, légendes)
+
+- Sous les **médias** et partout où le livre affiche une **date de souvenir**, la source est **`memories.created_at`** : date de **prise / de l’événement** (EXIF, fichier, enregistrement…).
+- **`inserted_at`** sert uniquement à l’**ordre du fil** (date d’ajout dans l’app) — **ne jamais** l’utiliser pour ce libellé dans la maquette, `services/bookPdf.ts`, le serveur PDF (`server/src/pdf/htmlBook.ts`), ni le payload **`guestMemories`** (`created_at` obligatoire côté client pour aligner PDF exporté et aperçu ; voir `mapGuestMemories` dans `server/src/routes/generatePdf.ts`).
+- Helper unique côté app : [`utils/memoryBookDisplayDate.ts`](utils/memoryBookDisplayDate.ts) (`memoryBookDisplayDateIso`). Côté serveur : `server/src/pdf/memoryBookDisplayDate.ts`.
+
 ---
 
 ## Distinction critique : email de commande vs compte cloud Petitmo+

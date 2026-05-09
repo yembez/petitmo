@@ -45,6 +45,7 @@ L'abonnement (`lib/userTier.ts`) déverrouille : sync cloud, restauration, multi
 - `services/books.ts` — `BookUpgradeRequiredError`.
 - `docs/specs/architecture-locale-cloud.md` — référence canonique.
 - `AGENTS.md` — version longue de la règle d'or.
+- **Livre / PDF** : date sous photo·vidéo·audio = `created_at` (prise / événement), **pas** `inserted_at` ; payload guest `created_at` + `utils/memoryBookDisplayDate.ts`.
 
 ## Comportement attendu
 

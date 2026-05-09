@@ -6,6 +6,7 @@ import type { BookPage } from '@/src/book/BookEngine';
 import type { Child, Memory } from '@/types/local';
 import { splitVideoTitleBody } from '@/src/book/bookTextParts';
 import { formatBookLocationShort } from '@/utils/date';
+import { memoryBookDisplayDateIso } from '@/utils/memoryBookDisplayDate';
 import {
   FONT_EB_GARAMOND_ITALIC_B64,
   FONT_DM_SANS_400_B64,
@@ -534,7 +535,7 @@ function pagePhotoFull(
     : '<div class="full-bleed placeholder"></div>'}
   <div class="photo-full-overlay">
     <div class="pf-meta-row">
-      <div class="label">${esc(dateFr(m.created_at))}</div>
+      <div class="label">${esc(dateFr(memoryBookDisplayDateIso(m)))}</div>
       ${locLabel ? `<div class="label pf-meta-loc">${esc(locLabel)}</div>` : ''}
     </div>
     ${caption ? `<div class="body" style="margin-top:2pt;">${esc(caption)}</div>` : ''}
@@ -572,7 +573,7 @@ function pagePhotoNote(
       : '<div class="placeholder" style="width:100%;height:100%;"></div>'}
   </div>
   <div class="pn-text">
-    <div class="label">${esc(dateTimeFr(m.created_at))}</div>
+    <div class="label">${esc(dateTimeFr(memoryBookDisplayDateIso(m)))}</div>
     ${legend ? `<div class="body">${romanHtml(legend)}</div>` : ''}
   </div>
   <div class="folio">${pageNum}</div>
@@ -582,8 +583,8 @@ function pagePhotoNote(
 /* ─── QUOTE (texte pur) ─── */
 function pageQuote(m: Memory, pageNum: number): string {
   const { text: raw, fitLevel } = normalizeTextOnlyForPdf((m.content ?? '').trim(), { maxChars: 600 });
-  const time = new Date(m.created_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-  const dateLabel = dateFr(m.created_at) + ' · ' + time;
+  const time = new Date(memoryBookDisplayDateIso(m)).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  const dateLabel = dateFr(memoryBookDisplayDateIso(m)) + ' · ' + time;
   return `<div class="page quote">
   <div class="inner quote-inner quote-fit-${fitLevel}">
     <div class="quote-header">
@@ -631,7 +632,7 @@ function pageAudio(
         <span class="dot vocal"></span>
         <span class="label audio-type-label">Vocal</span>
       </div>
-      <span class="label">${esc(dateTimeFr(m.created_at))}</span>
+      <span class="label">${esc(dateTimeFr(memoryBookDisplayDateIso(m)))}</span>
     </div>
     ${titleHtml ? `<div class="audio-title-above-qr body">${titleHtml}</div>` : ''}
     <div class="audio-qr-block">
@@ -670,7 +671,7 @@ function pageVideo(m: Memory, qrUrl: string, pageNum: number, images: Map<string
     ${src ? `<img src="${src}" style="width:100%;height:100%;object-fit:cover;display:block;" />` : '<div class="placeholder" style="width:100%;height:100%;"></div>'}
   </div>
   <div class="inner" style="flex:1;padding-top:5mm;">
-    <div class="label">${esc(dateTimeFr(m.created_at))}</div>
+    <div class="label">${esc(dateTimeFr(memoryBookDisplayDateIso(m)))}</div>
     ${legend ? `<div class="body" style="margin-top:4pt;">${romanHtml(legend)}</div>` : ''}
     <div class="audio-qr" style="margin-top:auto;padding-bottom:4mm;">
       ${qrImgTag(qrUrl, images)}
