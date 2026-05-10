@@ -33,6 +33,7 @@ import { getVoiceCoverUriForBookPreview } from '@/utils/memoryPhotos';
 import { resolveServerPdfEntitlements } from '@/lib/digitalExportPurchase';
 import { MEDIA_BOOK_PRINT_MAX_WIDTH } from '@/lib/limits';
 import { isInitExportConfigured, postInitExport, postGuestUploadUrls } from '@/services/initExportApi';
+import { generateBookPdf } from '@/services/bookPdf';
 
 function pdfServerBaseUrl(): string | null {
   const raw = process.env.EXPO_PUBLIC_PDF_SERVER_URL?.trim();
@@ -620,6 +621,57 @@ export type GenerateBookPdfServerInput = {
   exportMode: 'screen' | 'print';
 };
 
+function isPdfServerGatewayError(status: number): boolean {
+  return status === 502 || status === 503 || status === 504;
+}
+
+/**
+ * Si le service Railway / PDF est down (502…), en __DEV__ on retombe sur expo-print pour ne pas bloquer les tests.
+ * En prod, l’app doit recevoir une erreur explicite (déploiement, timeout Playwright, etc.).
+ */
+async function tryLocalPdfFallbackDev(
+  input: GenerateBookPdfServerInput
+): Promise<{ localUri: string; response: GenerateBookPdfResponse } | null> {
+  if (!__DEV__) return null;
+  console.warn('[bookPdfServer] Serveur PDF indisponible — repli dev : generateBookPdf (expo-print).');
+  let authToken: string | null = null;
+  try {
+    const { data } = await supabase.auth.getSession();
+    authToken = data.session?.access_token ?? null;
+  } catch {
+    authToken = null;
+  }
+  const localUri = await generateBookPdf({
+    pages: input.pages,
+    child: input.child,
+    coverPhotoUrl: input.coverPhotoUrl,
+    authToken,
+    coverTitle: input.coverTitle,
+    coverYearLabel: input.coverYearLabel,
+    chapterTitle: input.chapterTitle,
+    rotations: input.rotations,
+    photoCrops: input.photoCrops,
+    textEdits: input.localEdits,
+    qrBaseUrl: publicMediaBaseUrl(),
+    exportMode: input.exportMode,
+  });
+  return {
+    localUri,
+    response: { pdfUrlSigned: '', pdfStoragePath: null },
+  };
+}
+
+function pdfServerHttpErrorMessage(status: number, detail: string): string {
+  if (detail.trim()) return detail.trim();
+  if (status === 502) {
+    return 'Le service PDF ne répond pas (erreur 502). Souvent : serveur arrêté, timeout ou surcharge. Vérifie le déploiement (logs Railway) ou réessaie plus tard.';
+  }
+  if (status === 503 || status === 504) {
+    return `Le service PDF est temporairement indisponible (${status}). Réessaie dans quelques minutes.`;
+  }
+  return `Erreur serveur PDF (${status}).`;
+}
+
 /**
  * Appelle POST /v1/books/generate-pdf, télécharge le PDF signé vers le cache local, retourne l’URI fichier.
  */
@@ -684,6 +736,10 @@ export async function generateBookPdfViaServer(input: GenerateBookPdfServerInput
   }
 
   if (!res.ok) {
+    if (isPdfServerGatewayError(res.status)) {
+      const fb = await tryLocalPdfFallbackDev(input);
+      if (fb) return fb;
+    }
     let detail = res.statusText;
     try {
       const j = (await res.json()) as { error?: string; detail?: string };
@@ -691,7 +747,7 @@ export async function generateBookPdfViaServer(input: GenerateBookPdfServerInput
     } catch {
       /* ignore */
     }
-    throw new Error(detail || `Erreur serveur PDF (${res.status})`);
+    throw new Error(pdfServerHttpErrorMessage(res.status, detail));
   }
 
   const json = (await res.json()) as GenerateBookPdfResponse;
@@ -933,6 +989,10 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
   }
 
   if (!res.ok) {
+    if (isPdfServerGatewayError(res.status)) {
+      const fb = await tryLocalPdfFallbackDev(input);
+      if (fb) return fb;
+    }
     let detail = res.statusText;
     try {
       const j = (await res.json()) as { error?: string; detail?: string };
@@ -940,7 +1000,7 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
     } catch {
       /* ignore */
     }
-    throw new Error(detail || `Erreur serveur PDF (${res.status})`);
+    throw new Error(pdfServerHttpErrorMessage(res.status, detail));
   }
 
   const json = (await res.json()) as GenerateBookPdfResponse;

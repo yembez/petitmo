@@ -6,6 +6,7 @@ import type { BookPage } from '@/src/book/BookEngine';
 import type { Child, Memory } from '@/types/local';
 import { splitVideoTitleBody } from '@/src/book/bookTextParts';
 import { formatBookLocationShort } from '@/utils/date';
+import { getPrimaryPhotoUriForBookPreview } from '@/utils/memoryPhotos';
 import { memoryBookDisplayDateIso } from '@/utils/memoryBookDisplayDate';
 import {
   FONT_EB_GARAMOND_ITALIC_B64,
@@ -197,15 +198,9 @@ function collectImageUrls(
     // - Audio pages: cover vocale + QR (pas le fichier audio)
     // - Quote pages: pas d'image
     if (page.type === 'photo-full' || page.type === 'photo-note') {
-      // Offline-first : préférer le print local, puis l’original local, puis remote.
-      const mainUrl =
-        m.local_print_path ??
-        m.local_original_path ??
-        m.local_media_path ??
-        m.print_url ??
-        m.display_url ??
-        m.edited_media_url ??
-        m.media_url;
+      // Même URI que la maquette livre (`getPrimaryPhotoUriForBookPreview`) : évite preview OK / PDF gris
+      // quand `local_print_path` est mort mais `local_display_path` ou le remote est bon.
+      const mainUrl = getPrimaryPhotoUriForBookPreview(m);
       if (mainUrl) urls.add(mainUrl);
     } else if (page.type === 'video') {
       if (m.thumbnail_url) urls.add(m.thumbnail_url);
@@ -515,16 +510,7 @@ function pagePhotoFull(
   images: Map<string, string>,
   crop?: PhotoCrop
 ): string {
-  const src = imgSrc(
-    m.local_print_path ??
-      m.local_original_path ??
-      m.local_media_path ??
-      m.print_url ??
-      m.display_url ??
-      m.edited_media_url ??
-      m.media_url,
-    images
-  );
+  const src = imgSrc(getPrimaryPhotoUriForBookPreview(m), images);
   // Dans le PDF, on n'affiche pas de "titre" par défaut : seulement une légende si elle existe.
   const caption = sanitizeText((m.content ?? '').trim());
   const rotCss = rot ? `transform: rotate(${rot}deg); transform-origin: center;` : '';
@@ -552,16 +538,7 @@ function pagePhotoNote(
   images: Map<string, string>,
   crop?: PhotoCrop
 ): string {
-  const src = imgSrc(
-    m.local_print_path ??
-      m.local_original_path ??
-      m.local_media_path ??
-      m.print_url ??
-      m.display_url ??
-      m.edited_media_url ??
-      m.media_url,
-    images
-  );
+  const src = imgSrc(getPrimaryPhotoUriForBookPreview(m), images);
   // PDF: sous la photo, on n'affiche jamais un "titre" séparé. On garde uniquement la légende (texte complet).
   // Important: on évite les fallback type "Sans titre" provenant du découpage titre/corps.
   const legend = clampWithEllipsis(sanitizeText((m.content ?? '').trim()), 420);
