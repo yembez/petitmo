@@ -47,6 +47,7 @@ L'abonnement (`lib/userTier.ts`) déverrouille : sync cloud, restauration, multi
 - `AGENTS.md` — version longue de la règle d'or.
 - **Livre / PDF** : date sous photo·vidéo·audio = `created_at` (prise / événement), **pas** `inserted_at` ; payload guest `created_at` + `utils/memoryBookDisplayDate.ts`.
 - **Export PDF livre** : génération **uniquement** via `bookPdfServer.ts` + URL configurée — **jamais** expo-print / PDF sur l’appareil (`bookPdf.ts` = partage seulement) ; absence serveur ou erreur = message (`PDF_EXPORT_REQUIRES_SERVER_MESSAGE` / `EXPORT_SERVER_FAILED_CONTACT_MESSAGE`).
+- **Parité schéma Supabase ↔ serveur PDF (`server/`)** : toute colonne/table utilisée par le code Railway doit exister **en prod** avant ou au même moment que le déploiement (`supabase/migrations/`). Sinon les écritures échouent et le client peut voir des **502** sans détail (ex. `public_media_tokens.expires_at`, migration `20260505120000_public_media_tokens_expires_at.sql`).
 
 ## Comportement attendu
 

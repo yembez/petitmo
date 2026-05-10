@@ -43,6 +43,7 @@ import {
   isInitExportConfigured,
   PDF_EXPORT_REQUIRES_SERVER_MESSAGE,
 } from '@/services/bookPdfServer';
+import { BookPdfGeneratingOverlay } from '@/components/BookPdfGeneratingOverlay';
 import { GuestPdfExportModal } from '@/components/GuestPdfExportModal';
 import { parseFavoritePhotoUrls, mapPhotoUrlToThumb, getAllPhotoUrls } from '@/utils/memoryPhotos';
 import { runBookExportPrepInBackground } from '@/services/bookExportPrep';
@@ -253,7 +254,6 @@ export default function BookPreviewScreen() {
   const [chapterTitleLine, setChapterTitleLine] = useState<string | null>(null);
   const [textEditTarget, setTextEditTarget] = useState<TextEditTarget | null>(null);
   const [exporting, setExporting] = useState(false);
-  const [exportProgress, setExportProgress] = useState('');
   const [allMemories, setAllMemories] = useState<Memory[]>([]);
   const [guestExportModalVisible, setGuestExportModalVisible] = useState(false);
   const [guestExportSubmitting, setGuestExportSubmitting] = useState(false);
@@ -1181,7 +1181,6 @@ export default function BookPreviewScreen() {
 
       if (accessToken) {
         setExporting(true);
-        setExportProgress('Génération du PDF (serveur)…');
         try {
           const { localUri } = await generateBookPdfViaServer({
             bookId: bookId ?? `draft-${child.id}`,
@@ -1197,13 +1196,11 @@ export default function BookPreviewScreen() {
             localEdits: textEditsForPdf,
             exportMode,
           });
-          setExportProgress('');
-          setExporting(false);
           await shareBookPdf(localUri);
         } catch (e) {
-          setExporting(false);
-          setExportProgress('');
           Alert.alert('Erreur', e instanceof Error ? e.message : 'Export impossible');
+        } finally {
+          setExporting(false);
         }
         return;
       }
@@ -1357,8 +1354,8 @@ export default function BookPreviewScreen() {
   const onGuestExportSubmit = useCallback(
     async ({ email, marketingOptIn }: { email: string; marketingOptIn: boolean }) => {
       if (!child) return;
+      setGuestExportModalVisible(false);
       setGuestExportSubmitting(true);
-      setExportProgress('Génération du PDF (serveur)…');
       const textEditsForPdf: Record<string, Partial<Memory>> = {};
       for (const [id, e] of Object.entries(localEdits)) {
         if (e.content !== undefined) textEditsForPdf[id] = { content: e.content };
@@ -1384,11 +1381,10 @@ export default function BookPreviewScreen() {
             marketingOptIn,
           },
         });
-        setGuestExportModalVisible(false);
-        setExportProgress('');
         await setLastGuestExportEmail(email);
         await shareBookPdf(localUri);
       } catch (e) {
+        setGuestExportModalVisible(true);
         if (e instanceof Error && e.message === 'PREP_NOT_READY') {
           Alert.alert(
             'Préparation des médias',
@@ -1399,7 +1395,6 @@ export default function BookPreviewScreen() {
         }
       } finally {
         setGuestExportSubmitting(false);
-        setExportProgress('');
       }
     },
     [
@@ -1511,12 +1506,9 @@ export default function BookPreviewScreen() {
         )}
       </View>
 
-      {(loading || exporting || guestExportSubmitting) ? (
+      {loading ? (
         <View style={styles.loadingMid}>
           <ActivityIndicator color="#FFFFFF" />
-          {(exporting || guestExportSubmitting) && exportProgress ? (
-            <Text style={styles.exportProgressText}>{exportProgress}</Text>
-          ) : null}
         </View>
       ) : null}
 
@@ -1697,6 +1689,8 @@ export default function BookPreviewScreen() {
         }}
         onSubmit={onGuestExportSubmit}
       />
+
+      <BookPdfGeneratingOverlay visible={exporting || guestExportSubmitting} />
     </View>
   );
 }
@@ -1716,11 +1710,6 @@ const styles = StyleSheet.create({
   loadingMid: {
     paddingVertical: 8,
     alignItems: 'center',
-  },
-  exportProgressText: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 12,
-    marginTop: 4,
   },
   bannerErr: {
     color: '#FFB4AB',

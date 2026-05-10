@@ -16,7 +16,6 @@ import EditTextModal from '@/components/EditTextModal';
 import { usePrefetchMemories } from '@/hooks/usePrefetchMemories';
 import { usePendingMediaUploads } from '@/contexts/PendingMediaUploadsContext';
 import { useFeedData } from '@/hooks/useFeedData';
-import { ENABLE_FEED_SNAP } from '@/hooks/useFeedSnap';
 import { useToggleFavorite } from '@/hooks/useToggleFavorite';
 import { useFilFeedList } from '@/hooks/useFilFeedList';
 import { useFilLayout } from '@/hooks/useFilLayout';
@@ -47,11 +46,7 @@ export default function FilScreen() {
     memoryFlatListKeyByIdRef,
   } = useFeedData(pendingUploads);
 
-  const { setPostHeights, onFeedViewportLayout, snapOffsets, headerSnapOffsetsIos } = useFilLayout({
-    memories,
-    insetsTop: insets.top,
-    insetsBottom: insets.bottom,
-  });
+  const { setPostHeights } = useFilLayout({ memories });
 
   const {
     swipeRefs,
@@ -155,7 +150,7 @@ export default function FilScreen() {
           onMenuPress={onFeedHeaderMenuPress}
         />
       </View>
-      <View style={styles.feedViewport} onLayout={onFeedViewportLayout}>
+      <View style={styles.feedViewport}>
         <FlatList<FeedListItem>
           ref={listRef}
           data={feedData}
@@ -182,20 +177,6 @@ export default function FilScreen() {
               </View>
             ) : null
           }
-          {...(ENABLE_FEED_SNAP && snapOffsets && snapOffsets.length > 1 && pendingUploads.length === 0
-            ? {
-                snapToOffsets: snapOffsets,
-                snapToAlignment: 'start' as const,
-                decelerationRate: 'normal' as const,
-              }
-            : {})}
-          {...(headerSnapOffsetsIos && pendingUploads.length === 0
-            ? {
-                snapToOffsets: headerSnapOffsetsIos,
-                snapToAlignment: 'start' as const,
-                decelerationRate: 0.994 as const,
-              }
-            : {})}
           removeClippedSubviews={false}
           maintainVisibleContentPosition={{
             minIndexForVisible: 0,

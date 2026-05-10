@@ -5,7 +5,6 @@ import {
   StyleSheet,
   Image,
   Pressable,
-  ScrollView,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import Svg, { Rect } from 'react-native-svg';
@@ -752,16 +751,13 @@ function MaquettePhotoNote({
         )}
       </View>
       <View style={[styles.page4TextBlock, { flex: 1, minHeight: 0 }]}>
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={{
+        <View
+          style={{
+            flex: 1,
             paddingHorizontal: pad,
             paddingTop: Math.round(14 * typoScale),
             paddingBottom: pb,
           }}
-          showsVerticalScrollIndicator={false}
-          nestedScrollEnabled
-          keyboardShouldPersistTaps="handled"
         >
           <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
             <View style={[styles.page4MetaRow, { marginBottom: Math.round(8 * typoScale) }]}>
@@ -790,7 +786,7 @@ function MaquettePhotoNote({
               </Text>
             ) : null}
           </Pressable>
-        </ScrollView>
+        </View>
       </View>
       <Folio n={pageNum} dm400={dm400} pageWidthPx={width} pageHeightPx={height} />
     </View>
@@ -860,17 +856,14 @@ function MaquetteQuote({
             </Text>
           </View>
         </View>
-        <ScrollView
-          style={{ flex: 1, minHeight: 0 }}
-          contentContainerStyle={{
-            flexGrow: 1,
+        <View
+          style={{
+            flex: 1,
+            minHeight: 0,
             justifyContent: 'center',
             paddingTop: Math.round(4 * typoScale),
             paddingBottom: Math.round(8 * typoScale),
           }}
-          nestedScrollEnabled
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
         >
           <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
             <View>
@@ -900,7 +893,7 @@ function MaquetteQuote({
               </View>
             </View>
           </Pressable>
-        </ScrollView>
+        </View>
         <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
           <View style={[styles.quoteFooter, { paddingBottom: Math.round(36 * typoScale) }]}>
             <View style={[styles.quoteRuleRow, { marginTop: Math.round(8 * typoScale) }]}>
@@ -1067,16 +1060,13 @@ function MaquetteAudio({
           </View>
         </View>
         <View style={{ flex: 1, minHeight: 0 }}>
-          <ScrollView
-            style={{ flex: 1 }}
-            contentContainerStyle={{
+          <View
+            style={{
+              flex: 1,
               paddingHorizontal: pad,
               paddingTop: Math.round(8 * typoScale),
               paddingBottom: Math.round(8 * typoScale),
             }}
-            showsVerticalScrollIndicator={false}
-            nestedScrollEnabled
-            keyboardShouldPersistTaps="handled"
           >
             <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
               {titleRaw.length > 0 ? (
@@ -1108,7 +1098,7 @@ function MaquetteAudio({
                 </Text>
               </View>
             </Pressable>
-          </ScrollView>
+          </View>
           <View style={[styles.audioPlayerRow, { paddingHorizontal: pad, paddingTop: Math.round(6 * typoScale) }]}>
             <View
               style={[
@@ -1200,13 +1190,7 @@ function MaquetteVideo({
         )}
       </View>
       <View style={{ flex: 1, minHeight: 0, paddingHorizontal: pad, paddingTop: Math.round(20 * typoScale) }}>
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={{ paddingBottom: Math.round(16 * typoScale) }}
-          showsVerticalScrollIndicator={false}
-          nestedScrollEnabled
-          keyboardShouldPersistTaps="handled"
-        >
+        <View style={{ flex: 1, paddingBottom: Math.round(16 * typoScale) }}>
           <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
             <View style={[styles.noteMetaRow, { marginBottom: Math.round(8 * typoScale) }]}>
               <Text style={[styles.noteMeta, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
@@ -1260,7 +1244,7 @@ function MaquetteVideo({
               Scanner pour regarder
             </Text>
           </View>
-        </ScrollView>
+        </View>
       </View>
       <Folio n={pageNum} dm400={dm400} pageWidthPx={width} pageHeightPx={height} />
     </View>

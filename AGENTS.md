@@ -157,6 +157,8 @@ Aucune autre écriture cloud n'est permise en gratuit. Pas de "petite sync genti
 - Si `EXPO_PUBLIC_PDF_SERVER_URL` est absent ou injoignable : message utilisateur (`PDF_EXPORT_REQUIRES_SERVER_MESSAGE` ou `EXPORT_SERVER_FAILED_CONTACT_MESSAGE`) ; **pas** de PDF produit localement.
 - [`services/bookPdf.ts`](services/bookPdf.ts) ne contient plus que **`shareBookPdf`** (partage d’un fichier déjà obtenu du serveur).
 
+**Parité déploiement Supabase — service PDF Railway** : le Node `server/` utilise la **service role** sur les tables du flux export (ex. `public_media_tokens`). Dès qu’une PR ajoute ou utilise une **colonne ou table** côté serveur, il doit exister une migration sous [`supabase/migrations/`](supabase/migrations/) et elle doit être **appliquée en prod** avant ou avec le push Railway. Sinon les inserts échouent ; symptôme historique : **502** sur `generate-pdf` alors que `/health` répond 200 (ex. colonne manquante `expires_at` → migration `20260505120000_public_media_tokens_expires_at.sql`).
+
 ---
 
 ## Distinction critique : email de commande vs compte cloud Petitmo+

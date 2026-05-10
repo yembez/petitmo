@@ -1,22 +1,13 @@
-import { useState, useEffect, useCallback, useMemo, type Dispatch, type SetStateAction } from 'react';
-import type { LayoutChangeEvent } from 'react-native';
-import { useFeedSnap } from '@/hooks/useFeedSnap';
+import { useState, useEffect, useMemo, type Dispatch, type SetStateAction } from 'react';
 import type { Memory } from '@/utils/feedHelpers';
 
 export function useFilLayout(args: {
   memories: Memory[];
-  insetsTop: number;
-  insetsBottom: number;
 }): {
   postHeights: number[];
   setPostHeights: Dispatch<SetStateAction<number[]>>;
-  feedViewportHeight: number;
-  onFeedViewportLayout: (e: LayoutChangeEvent) => void;
-  snapOffsets: number[] | undefined;
-  headerSnapOffsetsIos: number[] | undefined;
 } {
   const [postHeights, setPostHeights] = useState<number[]>([]);
-  const [feedViewportHeight, setFeedViewportHeight] = useState(0);
 
   const memoryIdsKey = useMemo(() => args.memories.map(m => m.id).join('|'), [args.memories]);
 
@@ -35,25 +26,8 @@ export function useFilLayout(args: {
     });
   }, [memoryIdsKey]);
 
-  const onFeedViewportLayout = useCallback((e: LayoutChangeEvent) => {
-    const h = e.nativeEvent.layout.height;
-    if (h <= 0) return;
-    setFeedViewportHeight(prev => (Math.abs(h - prev) > 1 ? h : prev));
-  }, []);
-
-  const { snapOffsets, headerSnapOffsetsIos } = useFeedSnap({
-    memories: args.memories,
-    postHeights,
-    feedViewportHeight,
-    insets: { top: args.insetsTop, bottom: args.insetsBottom },
-  });
-
   return {
     postHeights,
     setPostHeights,
-    feedViewportHeight,
-    onFeedViewportLayout,
-    snapOffsets,
-    headerSnapOffsetsIos,
   };
 }

@@ -1,6 +1,6 @@
 ---
 description: Quand a-t-on le droit d'écrire dans Supabase. Garde-fou code de la règle d'or.
-globs: services/**,lib/**,app/**/*.tsx,hooks/**,contexts/**
+globs: services/**,lib/**,app/**/*.tsx,hooks/**,contexts/**,server/**
 alwaysApply: false
 ---
 
@@ -53,4 +53,10 @@ Pas de "petite sync gentille en arrière-plan". Pas de backup auto. Pas de `.ups
 
 ## Edge functions et server/
 
-Hors périmètre de cette règle : `supabase/functions/**` et `server/**` sont du backend (Deno / Node). Ils ont leur propre politique. Mais ils ne **doivent jamais** déclencher une écriture sur `memories` ou `children` pour le compte d'un utilisateur gratuit hors d'un flux livre/PDF/QR.
+`supabase/functions/**` et `server/**` sont du backend (Deno / Node). Ils ne **doivent jamais** déclencher une écriture sur `memories` ou `children` pour le compte d'un utilisateur gratuit hors d'un flux livre/PDF/QR.
+
+### Déploiement `server/` (Railway) et migrations Supabase
+
+Si une PR modifie des `insert`/`update` ou des types alignés sur le schéma Postgres : **vérifier qu’une migration existe** sous `supabase/migrations/` et qu’elle est **appliquée sur le projet Supabase prod** avant ou en même temps que le déploiement du service PDF. Un décalage (code qui envoie une colonne inexistante, ex. `expires_at` sur `public_media_tokens`) fait échouer la route `generate-pdf` et peut produire des **502** côté edge.
+
+Après correction serveur (handlers async), l’erreur peut devenir un **500 JSON** avec `detail` — le problème reste **schéma / RLS**, pas Railway « vide ».

@@ -28,6 +28,7 @@ import {
   generateBookPdfViaServerAsGuest,
   collectMemoriesFromPagesForPdf,
 } from '@/services/bookPdfServer';
+import { BookPdfGeneratingOverlay } from '@/components/BookPdfGeneratingOverlay';
 import { getBookExportPrepIssues, runBookExportPrepInBackground } from '@/services/bookExportPrep';
 import {
   clearPendingBookOrderPdfPayload,
@@ -712,6 +713,8 @@ export default function BookOrderScreen() {
           )}
         </Pressable>
       </ScrollView>
+
+      <BookPdfGeneratingOverlay visible={submitting && exportMode === 'pdf'} />
     </KeyboardAvoidingView>
   );
 }
