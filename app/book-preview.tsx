@@ -35,12 +35,13 @@ import { getChildren, getOrSelectFirstChild } from '@/services/children';
 import { getMemories } from '@/services/media';
 import { loadBookSelectionKeys, memoryIdFromBookSelectionKey } from '@/services/bookSelection';
 import { dedupeMemoryIds, getBook, upsertBook } from '@/services/books';
-import { generateBookPdf, shareBookPdf, type BookPdfInput } from '@/services/bookPdf';
+import { shareBookPdf } from '@/services/bookPdf';
 import {
   generateBookPdfViaServer,
   generateBookPdfViaServerAsGuest,
   isBookPdfServerConfigured,
   isInitExportConfigured,
+  PDF_EXPORT_REQUIRES_SERVER_MESSAGE,
 } from '@/services/bookPdfServer';
 import { GuestPdfExportModal } from '@/components/GuestPdfExportModal';
 import { parseFavoritePhotoUrls, mapPhotoUrlToThumb, getAllPhotoUrls } from '@/utils/memoryPhotos';
@@ -50,7 +51,6 @@ import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { isLocalMediaUriReadable, isProbablyStalePetitmoSandboxPath } from '@/utils/localMediaReadable';
 
 import type { Child, Memory } from '@/types/local';
-import { getUserTier } from '@/lib/userTier';
 import { canExportBookPdfViaServer } from '@/lib/digitalExportPurchase';
 import { setLastGuestExportEmail } from '@/lib/guestExportPrefs';
 import { setPendingBookOrderPdfPayload } from '@/lib/pendingBookOrderPdf';
@@ -1074,22 +1074,18 @@ export default function BookPreviewScreen() {
   const doExportPdf = useCallback(
     async (exportMode: 'screen' | 'print') => {
       if (exporting || guestExportModalVisible || pages.length === 0 || !child) return;
-      if (isBookPdfServerConfigured()) {
-        // En dev, on n'applique pas le paywall pour pouvoir tester l'export serveur (Hetzner).
-        if (!__DEV__) {
-          const can = await canExportBookPdfViaServer();
-          if (!can) {
-            router.push({
-              pathname: '/paywall',
-              params: { context: 'EXPORT_DIGITAL_PDF', childName: child.name },
-            });
-            return;
-          }
-        }
-      } else if (!__DEV__) {
-        const tier = await getUserTier();
-        if (tier === 'free') {
-          router.push({ pathname: '/paywall', params: { context: 'EXPORT_PAYWALL' } });
+      if (!isBookPdfServerConfigured()) {
+        Alert.alert('Export PDF indisponible', PDF_EXPORT_REQUIRES_SERVER_MESSAGE);
+        return;
+      }
+      // Export livre = toujours le service PDF distant ; pas de génération expo-print sur l’appareil.
+      if (!__DEV__) {
+        const can = await canExportBookPdfViaServer();
+        if (!can) {
+          router.push({
+            pathname: '/paywall',
+            params: { context: 'EXPORT_DIGITAL_PDF', childName: child.name },
+          });
           return;
         }
       }
@@ -1183,90 +1179,44 @@ export default function BookPreviewScreen() {
       const { data: sessData } = await supabase.auth.getSession();
       const accessToken = sessData.session?.access_token ?? null;
 
-      if (isBookPdfServerConfigured()) {
-        if (accessToken) {
-          setExporting(true);
-          setExportProgress('Génération du PDF (serveur)…');
-          try {
-            const { localUri } = await generateBookPdfViaServer({
-              bookId: bookId ?? `draft-${child.id}`,
-              childId: child.id,
-              child,
-              coverPhotoUrl,
-              coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
-              coverYearLabel,
-              chapterTitle: chapterTitleLine ?? 'Notre histoire',
-              pages,
-              rotations,
-              photoCrops,
-              localEdits: textEditsForPdf,
-              exportMode,
-            });
-            setExportProgress('');
-            setExporting(false);
-            await shareBookPdf(localUri);
-          } catch (e) {
-            setExporting(false);
-            setExportProgress('');
-            Alert.alert('Erreur', e instanceof Error ? e.message : 'Export impossible');
-          }
-          return;
+      if (accessToken) {
+        setExporting(true);
+        setExportProgress('Génération du PDF (serveur)…');
+        try {
+          const { localUri } = await generateBookPdfViaServer({
+            bookId: bookId ?? `draft-${child.id}`,
+            childId: child.id,
+            child,
+            coverPhotoUrl,
+            coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
+            coverYearLabel,
+            chapterTitle: chapterTitleLine ?? 'Notre histoire',
+            pages,
+            rotations,
+            photoCrops,
+            localEdits: textEditsForPdf,
+            exportMode,
+          });
+          setExportProgress('');
+          setExporting(false);
+          await shareBookPdf(localUri);
+        } catch (e) {
+          setExporting(false);
+          setExportProgress('');
+          Alert.alert('Erreur', e instanceof Error ? e.message : 'Export impossible');
         }
-
-        // Le flux guest gère désormais photo + audio + vidéo via upload vers le serveur PDF (ticket),
-        // donc on ne bloque plus ici sur des médias locaux.
-        if (!isInitExportConfigured()) {
-          Alert.alert(
-            'Connexion ou configuration',
-            'Export serveur sans compte : configure EXPO_PUBLIC_SUPABASE_URL et EXPO_PUBLIC_SUPABASE_ANON_KEY, ou connecte-toi pour exporter.'
-          );
-          return;
-        }
-        pendingGuestExportMode.current = exportMode;
-        setGuestExportModalVisible(true);
         return;
       }
 
-      setExporting(true);
-      setExportProgress('Chargement des images…');
-
-      try {
-        let authToken: string | null = null;
-        try {
-          const { data } = await supabase.auth.getSession();
-          authToken = data.session?.access_token ?? null;
-        } catch {
-          authToken = null;
-        }
-
-        const pdfInput: BookPdfInput = {
-          pages,
-          child,
-        coverPhotoUrl,
-          authToken,
-          coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
-          coverYearLabel,
-          chapterTitle: chapterTitleLine ?? 'Notre histoire',
-          rotations,
-          photoCrops,
-          textEdits: textEditsForPdf,
-          qrBaseUrl: QR_BASE,
-          exportMode,
-          onProgress: (cur, total) => {
-            setExportProgress(`Image ${cur}/${total}…`);
-          },
-        };
-
-        setExportProgress('Génération du PDF…');
-        const pdfUri = await generateBookPdf(pdfInput);
-        setExportProgress('');
-        setExporting(false);
-        await shareBookPdf(pdfUri);
-      } catch (e) {
-        setExporting(false);
-        setExportProgress('');
-        Alert.alert('Erreur', e instanceof Error ? e.message : 'Export impossible');
+      if (!isInitExportConfigured()) {
+        Alert.alert(
+          'Connexion ou configuration',
+          'Export serveur sans compte : configure EXPO_PUBLIC_SUPABASE_URL et EXPO_PUBLIC_SUPABASE_ANON_KEY, ou connecte-toi pour exporter.'
+        );
+        return;
       }
+      pendingGuestExportMode.current = exportMode;
+      setGuestExportModalVisible(true);
     },
     [
       chapterTitleLine,

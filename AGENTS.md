@@ -148,8 +148,14 @@ Aucune autre écriture cloud n'est permise en gratuit. Pas de "petite sync genti
 ### Livre et PDF — date affichée (photo, vidéo, audio, légendes)
 
 - Sous les **médias** et partout où le livre affiche une **date de souvenir**, la source est **`memories.created_at`** : date de **prise / de l’événement** (EXIF, fichier, enregistrement…).
-- **`inserted_at`** sert uniquement à l’**ordre du fil** (date d’ajout dans l’app) — **ne jamais** l’utiliser pour ce libellé dans la maquette, `services/bookPdf.ts`, le serveur PDF (`server/src/pdf/htmlBook.ts`), ni le payload **`guestMemories`** (`created_at` obligatoire côté client pour aligner PDF exporté et aperçu ; voir `mapGuestMemories` dans `server/src/routes/generatePdf.ts`).
+- **`inserted_at`** sert uniquement à l’**ordre du fil** (date d’ajout dans l’app) — **ne jamais** l’utiliser pour ce libellé dans la maquette, le serveur PDF (`server/src/pdf/htmlBook.ts`), ni le payload **`guestMemories`** (`created_at` obligatoire côté client pour aligner PDF exporté et aperçu ; voir `mapGuestMemories` dans `server/src/routes/generatePdf.ts`).
 - Helper unique côté app : [`utils/memoryBookDisplayDate.ts`](utils/memoryBookDisplayDate.ts) (`memoryBookDisplayDateIso`). Côté serveur : `server/src/pdf/memoryBookDisplayDate.ts`.
+
+### Export livre PDF — **uniquement** le service distant (aucune génération sur l’appareil)
+
+- La **génération** d’un PDF livre depuis l’app se fait **exclusivement** via [`services/bookPdfServer.ts`](services/bookPdfServer.ts) (Playwright / Chromium sur Railway ou équivalent). **`expo-print` et tout rendu HTML→PDF sur le téléphone sont interdits** — pas d’exception « dev », pas de repli si l’URL serveur est absente.
+- Si `EXPO_PUBLIC_PDF_SERVER_URL` est absent ou injoignable : message utilisateur (`PDF_EXPORT_REQUIRES_SERVER_MESSAGE` ou `EXPORT_SERVER_FAILED_CONTACT_MESSAGE`) ; **pas** de PDF produit localement.
+- [`services/bookPdf.ts`](services/bookPdf.ts) ne contient plus que **`shareBookPdf`** (partage d’un fichier déjà obtenu du serveur).
 
 ---
 
@@ -184,3 +190,4 @@ flowchart LR
 2. **Citer la règle d'or en une ligne** au début de tout plan ou patch touchant : import, souvenirs, livres, paywall, auth, sync, écran d'accueil, paramètres.
 3. Si une demande utilisateur entre en conflit avec la règle d'or, **lever le drapeau immédiatement** plutôt que de l'exécuter en silence.
 4. Pour toute exception Supabase en gratuit, vérifier qu'elle correspond bien à un des **deux cas autorisés** (achat PDF/livre, audio QR pérenne).
+5. Export PDF livre : **uniquement** serveur — voir **« Export livre PDF — uniquement le service distant »** ci-dessus ; jamais `expo-print` / génération locale.

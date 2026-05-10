@@ -88,7 +88,7 @@ function pickAlbumExtraSlotNormalized(
 /**
  * URI principale pour l’aperçu maquette / livre : **fichiers locaux d’abord** (sandbox / dérivés),
  * puis URLs dérivées (`display_url`, `thumb_url`), puis originaux distants.
- * Aligné sur l’esprit `collectImageUrls` dans `bookPdf.ts`, pour ne pas dépendre de `media_url` (souvent null en gratuit).
+ * Chaîne d’URI cohérente avec l’export PDF serveur : préférer fichiers locaux puis URLs dérivées, sans dépendre seulement de `media_url`.
  */
 export function getPrimaryPhotoUriForBookPreview(memory: Memory): string {
   const boot = peekFeedBootstrapDisplayUrls(memory.id)?.[0]?.trim();

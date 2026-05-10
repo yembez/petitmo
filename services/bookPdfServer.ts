@@ -1,6 +1,6 @@
 /**
- * Export PDF via le service Railway (Playwright) — spec « PDF server ».
- * Preview locale : toujours `services/bookPdf.ts` + expo-print.
+ * Export PDF livre — **uniquement** via le service distant (Playwright / Chromium).
+ * Aucune génération PDF sur l’appareil (expo-print) : voir AGENTS.md / `.cursor/rules/architecture.mdc`.
  */
 import { downloadAsync, documentDirectory, makeDirectoryAsync } from 'expo-file-system/legacy';
 import { readAsStringAsync, EncodingType } from 'expo-file-system/legacy';
@@ -33,7 +33,14 @@ import { getVoiceCoverUriForBookPreview } from '@/utils/memoryPhotos';
 import { resolveServerPdfEntitlements } from '@/lib/digitalExportPurchase';
 import { MEDIA_BOOK_PRINT_MAX_WIDTH } from '@/lib/limits';
 import { isInitExportConfigured, postInitExport, postGuestUploadUrls } from '@/services/initExportApi';
-import { generateBookPdf } from '@/services/bookPdf';
+
+/** Erreur HTTP / téléchargement après appel au service PDF. */
+export const EXPORT_SERVER_FAILED_CONTACT_MESSAGE =
+  'L’export PDF a échoué (service indisponible ou erreur serveur). Réessaie plus tard. Si le problème persiste, contacte le support Petitmo depuis les Réglages de l’app.';
+
+/** URL serveur absente ou export sans passer par le service — PDF livre impossible depuis l’app. */
+export const PDF_EXPORT_REQUIRES_SERVER_MESSAGE =
+  'L’export PDF livre n’est disponible que via le service Petitmo (même rendu que la commande). Ce service n’est pas configuré dans cette version de l’app : vérifie la configuration build (EXPO_PUBLIC_PDF_SERVER_URL) ou réessaie plus tard.';
 
 function pdfServerBaseUrl(): string | null {
   const raw = process.env.EXPO_PUBLIC_PDF_SERVER_URL?.trim();
@@ -621,55 +628,15 @@ export type GenerateBookPdfServerInput = {
   exportMode: 'screen' | 'print';
 };
 
-function isPdfServerGatewayError(status: number): boolean {
-  return status === 502 || status === 503 || status === 504;
-}
-
-/**
- * Si le service Railway / PDF est down (502…), en __DEV__ on retombe sur expo-print pour ne pas bloquer les tests.
- * En prod, l’app doit recevoir une erreur explicite (déploiement, timeout Playwright, etc.).
- */
-async function tryLocalPdfFallbackDev(
-  input: GenerateBookPdfServerInput
-): Promise<{ localUri: string; response: GenerateBookPdfResponse } | null> {
-  if (!__DEV__) return null;
-  console.warn('[bookPdfServer] Serveur PDF indisponible — repli dev : generateBookPdf (expo-print).');
-  let authToken: string | null = null;
-  try {
-    const { data } = await supabase.auth.getSession();
-    authToken = data.session?.access_token ?? null;
-  } catch {
-    authToken = null;
-  }
-  const localUri = await generateBookPdf({
-    pages: input.pages,
-    child: input.child,
-    coverPhotoUrl: input.coverPhotoUrl,
-    authToken,
-    coverTitle: input.coverTitle,
-    coverYearLabel: input.coverYearLabel,
-    chapterTitle: input.chapterTitle,
-    rotations: input.rotations,
-    photoCrops: input.photoCrops,
-    textEdits: input.localEdits,
-    qrBaseUrl: publicMediaBaseUrl(),
-    exportMode: input.exportMode,
-  });
-  return {
-    localUri,
-    response: { pdfUrlSigned: '', pdfStoragePath: null },
-  };
-}
-
 function pdfServerHttpErrorMessage(status: number, detail: string): string {
-  if (detail.trim()) return detail.trim();
-  if (status === 502) {
-    return 'Le service PDF ne répond pas (erreur 502). Souvent : serveur arrêté, timeout ou surcharge. Vérifie le déploiement (logs Railway) ou réessaie plus tard.';
+  const d = detail.trim();
+  const gateway = status === 502 || status === 503 || status === 504;
+  if (gateway) {
+    if (d) return `${d}\n\n${EXPORT_SERVER_FAILED_CONTACT_MESSAGE}`;
+    return EXPORT_SERVER_FAILED_CONTACT_MESSAGE;
   }
-  if (status === 503 || status === 504) {
-    return `Le service PDF est temporairement indisponible (${status}). Réessaie dans quelques minutes.`;
-  }
-  return `Erreur serveur PDF (${status}).`;
+  if (d) return d;
+  return `${EXPORT_SERVER_FAILED_CONTACT_MESSAGE} (code ${status}).`;
 }
 
 /**
@@ -736,10 +703,6 @@ export async function generateBookPdfViaServer(input: GenerateBookPdfServerInput
   }
 
   if (!res.ok) {
-    if (isPdfServerGatewayError(res.status)) {
-      const fb = await tryLocalPdfFallbackDev(input);
-      if (fb) return fb;
-    }
     let detail = res.statusText;
     try {
       const j = (await res.json()) as { error?: string; detail?: string };
@@ -752,7 +715,7 @@ export async function generateBookPdfViaServer(input: GenerateBookPdfServerInput
 
   const json = (await res.json()) as GenerateBookPdfResponse;
   if (!json.pdfUrlSigned?.trim()) {
-    throw new Error('Réponse serveur invalide (pdfUrlSigned manquant).');
+    throw new Error(EXPORT_SERVER_FAILED_CONTACT_MESSAGE);
   }
 
   const safeBook = input.bookId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
@@ -768,7 +731,7 @@ export async function generateBookPdfViaServer(input: GenerateBookPdfServerInput
 
   const dl = await downloadAsync(json.pdfUrlSigned, dest);
   if (dl.status !== 200) {
-    throw new Error(`Téléchargement PDF échoué (${dl.status})`);
+    throw new Error(EXPORT_SERVER_FAILED_CONTACT_MESSAGE);
   }
 
   return { localUri: dl.uri, response: json };
@@ -989,10 +952,6 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
   }
 
   if (!res.ok) {
-    if (isPdfServerGatewayError(res.status)) {
-      const fb = await tryLocalPdfFallbackDev(input);
-      if (fb) return fb;
-    }
     let detail = res.statusText;
     try {
       const j = (await res.json()) as { error?: string; detail?: string };
@@ -1005,7 +964,7 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
 
   const json = (await res.json()) as GenerateBookPdfResponse;
   if (!json.pdfUrlSigned?.trim()) {
-    throw new Error('Réponse serveur invalide (pdfUrlSigned manquant).');
+    throw new Error(EXPORT_SERVER_FAILED_CONTACT_MESSAGE);
   }
 
   // Upload AV brut après succès PDF : lancé tout de suite pour chevaucher le téléchargement du PDF,
@@ -1025,7 +984,7 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
 
   const dl = await downloadAsync(json.pdfUrlSigned, dest);
   if (dl.status !== 200) {
-    throw new Error(`Téléchargement PDF échoué (${dl.status})`);
+    throw new Error(EXPORT_SERVER_FAILED_CONTACT_MESSAGE);
   }
 
   await avUploadPromise;
