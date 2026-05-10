@@ -217,49 +217,49 @@ export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient,
       }
     }
 
-    const qrResult = await preparePublicTokensForBook({
-      supabase,
-      userId,
-      childId,
-      bookId: body.bookId,
-      pages: body.pages,
-      memoriesById,
-      subscriptionTier: body.subscriptionTier,
-    });
-
-    if (!qrResult.ok) {
-      res.status(qrResult.status).json({ error: qrResult.message });
-      return;
-    }
-
-    const expectedPages = countRenderedBookPages(body.pages, memoriesById);
-    if (expectedPages < 1) {
-      res.status(400).json({ error: 'Aucune page livre à rendre (pages vides ou souvenirs manquants).' });
-      return;
-    }
-
-    const memoriesForHtml = await signMemoriesMapForPdfRender(supabase, projectOrigin, memoriesById);
-    const childForHtml = await signChildRowForPdfRender(supabase, projectOrigin, child as ChildRow);
-    const coverRaw = body.coverPhotoUrl ?? null;
-    const coverForHtml =
-      typeof coverRaw === 'string' && coverRaw.trim()
-        ? ((await signUrlForPdfRender(supabase, projectOrigin, coverRaw)) ?? coverRaw)
-        : null;
-
-    const html = buildBookHtml({
-      coverTitle: body.coverTitle,
-      coverYearLabel: body.coverYearLabel,
-      chapterTitle: body.chapterTitle,
-      qrBaseUrl: body.qrBaseUrl,
-      exportMode: 'digital',
-      pages: body.pages,
-      child: childForHtml,
-      coverPhotoUrl: coverForHtml,
-      memoriesById: memoriesForHtml,
-      qrTokensByMemoryId: qrResult.tokensByMemoryId,
-    });
-
     try {
+      const qrResult = await preparePublicTokensForBook({
+        supabase,
+        userId,
+        childId,
+        bookId: body.bookId,
+        pages: body.pages,
+        memoriesById,
+        subscriptionTier: body.subscriptionTier,
+      });
+
+      if (!qrResult.ok) {
+        res.status(qrResult.status).json({ error: qrResult.message });
+        return;
+      }
+
+      const expectedPages = countRenderedBookPages(body.pages, memoriesById);
+      if (expectedPages < 1) {
+        res.status(400).json({ error: 'Aucune page livre à rendre (pages vides ou souvenirs manquants).' });
+        return;
+      }
+
+      const memoriesForHtml = await signMemoriesMapForPdfRender(supabase, projectOrigin, memoriesById);
+      const childForHtml = await signChildRowForPdfRender(supabase, projectOrigin, child as ChildRow);
+      const coverRaw = body.coverPhotoUrl ?? null;
+      const coverForHtml =
+        typeof coverRaw === 'string' && coverRaw.trim()
+          ? ((await signUrlForPdfRender(supabase, projectOrigin, coverRaw)) ?? coverRaw)
+          : null;
+
+      const html = buildBookHtml({
+        coverTitle: body.coverTitle,
+        coverYearLabel: body.coverYearLabel,
+        chapterTitle: body.chapterTitle,
+        qrBaseUrl: body.qrBaseUrl,
+        exportMode: 'digital',
+        pages: body.pages,
+        child: childForHtml,
+        coverPhotoUrl: coverForHtml,
+        memoriesById: memoriesForHtml,
+        qrTokensByMemoryId: qrResult.tokensByMemoryId,
+      });
+
       const pdf = await htmlToDigitalPdfBuffer(html, expectedPages);
       const saved = await saveBookPdfAndSign(supabase, {
         userId,
@@ -400,53 +400,54 @@ async function handleTicketPdf(
   }
 
   const qrTier = row.subscription_tier === 'paid' ? 'premium' : 'free';
-  const qrResult = await preparePublicTokensForExportRequest({
-    supabase,
-    exportRequestId: ticket.export_request_id,
-    bookId: body.bookId,
-    pages: body.pages,
-    memoriesById,
-    subscriptionTier: qrTier,
-  });
-
-  if (!qrResult.ok) {
-    await supabase
-      .from('export_requests')
-      .update({ status: 'failed', last_error: qrResult.message.slice(0, 2000) })
-      .eq('id', ticket.export_request_id);
-    res.status(qrResult.status).json({ error: qrResult.message });
-    return;
-  }
-
-  const child: ChildRow = {
-    id: body.childId,
-    user_id: ticket.export_request_id,
-    name: body.guestChild.name,
-    photo_url: body.guestChild.photo_url ?? null,
-  };
-
-  const memoriesForHtml = await signMemoriesMapForPdfRender(supabase, projectOrigin, memoriesById);
-  const childForHtml = await signChildRowForPdfRender(supabase, projectOrigin, child);
-  const coverRawTicket = body.coverPhotoUrl ?? null;
-  const coverForHtmlTicket =
-    typeof coverRawTicket === 'string' && coverRawTicket.trim()
-      ? ((await signUrlForPdfRender(supabase, projectOrigin, coverRawTicket)) ?? coverRawTicket)
-      : null;
-
-  const html = buildBookHtml({
-    coverTitle: body.coverTitle,
-    coverYearLabel: body.coverYearLabel,
-    chapterTitle: body.chapterTitle,
-    qrBaseUrl: body.qrBaseUrl,
-    exportMode: body.exportMode,
-    pages: body.pages,
-    child: childForHtml,
-    coverPhotoUrl: coverForHtmlTicket,
-    memoriesById: memoriesForHtml,
-    qrTokensByMemoryId: qrResult.tokensByMemoryId,
-  });
 
   try {
+    const qrResult = await preparePublicTokensForExportRequest({
+      supabase,
+      exportRequestId: ticket.export_request_id,
+      bookId: body.bookId,
+      pages: body.pages,
+      memoriesById,
+      subscriptionTier: qrTier,
+    });
+
+    if (!qrResult.ok) {
+      await supabase
+        .from('export_requests')
+        .update({ status: 'failed', last_error: qrResult.message.slice(0, 2000) })
+        .eq('id', ticket.export_request_id);
+      res.status(qrResult.status).json({ error: qrResult.message });
+      return;
+    }
+
+    const child: ChildRow = {
+      id: body.childId,
+      user_id: ticket.export_request_id,
+      name: body.guestChild.name,
+      photo_url: body.guestChild.photo_url ?? null,
+    };
+
+    const memoriesForHtml = await signMemoriesMapForPdfRender(supabase, projectOrigin, memoriesById);
+    const childForHtml = await signChildRowForPdfRender(supabase, projectOrigin, child);
+    const coverRawTicket = body.coverPhotoUrl ?? null;
+    const coverForHtmlTicket =
+      typeof coverRawTicket === 'string' && coverRawTicket.trim()
+        ? ((await signUrlForPdfRender(supabase, projectOrigin, coverRawTicket)) ?? coverRawTicket)
+        : null;
+
+    const html = buildBookHtml({
+      coverTitle: body.coverTitle,
+      coverYearLabel: body.coverYearLabel,
+      chapterTitle: body.chapterTitle,
+      qrBaseUrl: body.qrBaseUrl,
+      exportMode: body.exportMode,
+      pages: body.pages,
+      child: childForHtml,
+      coverPhotoUrl: coverForHtmlTicket,
+      memoriesById: memoriesForHtml,
+      qrTokensByMemoryId: qrResult.tokensByMemoryId,
+    });
+
     const pdf =
       body.exportMode === 'digital'
         ? await htmlToDigitalPdfBuffer(html, expectedPagesTicket)
@@ -589,53 +590,54 @@ async function handleTicketPrintPdf(
   }
 
   const qrTier = row.subscription_tier === 'paid' ? 'premium' : 'free';
-  const qrResult = await preparePublicTokensForExportRequest({
-    supabase,
-    exportRequestId: ticket.export_request_id,
-    bookId: body.bookId,
-    pages: body.pages,
-    memoriesById,
-    subscriptionTier: qrTier,
-  });
-
-  if (!qrResult.ok) {
-    await supabase
-      .from('export_requests')
-      .update({ status: 'failed', last_error: qrResult.message.slice(0, 2000) })
-      .eq('id', ticket.export_request_id);
-    res.status(qrResult.status).json({ error: qrResult.message });
-    return;
-  }
-
-  const child: ChildRow = {
-    id: body.childId,
-    user_id: ticket.export_request_id,
-    name: body.guestChild.name,
-    photo_url: body.guestChild.photo_url ?? null,
-  };
-
-  const memoriesForHtmlPrint = await signMemoriesMapForPdfRender(supabase, projectOrigin, memoriesById);
-  const childForHtmlPrint = await signChildRowForPdfRender(supabase, projectOrigin, child);
-  const coverRawPrint = body.coverPhotoUrl ?? null;
-  const coverForHtmlPrint =
-    typeof coverRawPrint === 'string' && coverRawPrint.trim()
-      ? ((await signUrlForPdfRender(supabase, projectOrigin, coverRawPrint)) ?? coverRawPrint)
-      : null;
-
-  const html = buildBookHtml({
-    coverTitle: body.coverTitle,
-    coverYearLabel: body.coverYearLabel,
-    chapterTitle: body.chapterTitle,
-    qrBaseUrl: body.qrBaseUrl,
-    exportMode: 'print',
-    pages: body.pages,
-    child: childForHtmlPrint,
-    coverPhotoUrl: coverForHtmlPrint,
-    memoriesById: memoriesForHtmlPrint,
-    qrTokensByMemoryId: qrResult.tokensByMemoryId,
-  });
 
   try {
+    const qrResult = await preparePublicTokensForExportRequest({
+      supabase,
+      exportRequestId: ticket.export_request_id,
+      bookId: body.bookId,
+      pages: body.pages,
+      memoriesById,
+      subscriptionTier: qrTier,
+    });
+
+    if (!qrResult.ok) {
+      await supabase
+        .from('export_requests')
+        .update({ status: 'failed', last_error: qrResult.message.slice(0, 2000) })
+        .eq('id', ticket.export_request_id);
+      res.status(qrResult.status).json({ error: qrResult.message });
+      return;
+    }
+
+    const child: ChildRow = {
+      id: body.childId,
+      user_id: ticket.export_request_id,
+      name: body.guestChild.name,
+      photo_url: body.guestChild.photo_url ?? null,
+    };
+
+    const memoriesForHtmlPrint = await signMemoriesMapForPdfRender(supabase, projectOrigin, memoriesById);
+    const childForHtmlPrint = await signChildRowForPdfRender(supabase, projectOrigin, child);
+    const coverRawPrint = body.coverPhotoUrl ?? null;
+    const coverForHtmlPrint =
+      typeof coverRawPrint === 'string' && coverRawPrint.trim()
+        ? ((await signUrlForPdfRender(supabase, projectOrigin, coverRawPrint)) ?? coverRawPrint)
+        : null;
+
+    const html = buildBookHtml({
+      coverTitle: body.coverTitle,
+      coverYearLabel: body.coverYearLabel,
+      chapterTitle: body.chapterTitle,
+      qrBaseUrl: body.qrBaseUrl,
+      exportMode: 'print',
+      pages: body.pages,
+      child: childForHtmlPrint,
+      coverPhotoUrl: coverForHtmlPrint,
+      memoriesById: memoriesForHtmlPrint,
+      qrTokensByMemoryId: qrResult.tokensByMemoryId,
+    });
+
     const pdf = await htmlToPdfBuffer(html);
     const saved = await saveBookPdfForExportRequest(supabase, {
       exportRequestId: ticket.export_request_id,

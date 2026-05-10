@@ -65,6 +65,33 @@ function errorMessageFromPdfServerJson(
   return fallback;
 }
 
+/** Logs Expo / Xcode — indispensable quand l’UI ne montre que le message générique contact support. */
+function logPdfExportFailure(phase: string, info: Record<string, unknown>): void {
+  console.warn(`[bookPdfServer] ${phase}`, JSON.stringify(info));
+}
+
+function appendDevExportHint(message: string, hint: string): string {
+  if (!__DEV__) return message;
+  return `${message}\n\n[Débug] ${hint}`;
+}
+
+/**
+ * Corps d’erreur lu une seule fois (502 Railway renvoie souvent du HTML : `res.json()` échouait et on perdait le détail).
+ */
+async function parseGeneratePdfErrorBody(res: Response): Promise<string> {
+  let detail = res.statusText || '';
+  const raw = await res.text();
+  const trimmed = raw.trim();
+  if (!trimmed) return detail;
+  try {
+    const j = JSON.parse(trimmed) as { error?: string; detail?: string };
+    return errorMessageFromPdfServerJson(j, detail);
+  } catch {
+    const snippet = trimmed.replace(/\s+/g, ' ').slice(0, 280);
+    return snippet || detail;
+  }
+}
+
 export function isBookPdfServerConfigured(): boolean {
   return pdfServerBaseUrl() != null;
 }
@@ -632,11 +659,22 @@ function pdfServerHttpErrorMessage(status: number, detail: string): string {
   const d = detail.trim();
   const gateway = status === 502 || status === 503 || status === 504;
   if (gateway) {
-    if (d) return `${d}\n\n${EXPORT_SERVER_FAILED_CONTACT_MESSAGE}`;
-    return EXPORT_SERVER_FAILED_CONTACT_MESSAGE;
+    if (d) {
+      return appendDevExportHint(
+        `${d}\n\n${EXPORT_SERVER_FAILED_CONTACT_MESSAGE}`,
+        `HTTP ${status}`
+      );
+    }
+    return appendDevExportHint(
+      EXPORT_SERVER_FAILED_CONTACT_MESSAGE,
+      `HTTP ${status} (souvent service PDF Railway arrêté, timeout Playwright ou proxy). Voir logs serveur [generate-pdf].`
+    );
   }
-  if (d) return d;
-  return `${EXPORT_SERVER_FAILED_CONTACT_MESSAGE} (code ${status}).`;
+  if (d) return appendDevExportHint(d, `HTTP ${status}`);
+  return appendDevExportHint(
+    `${EXPORT_SERVER_FAILED_CONTACT_MESSAGE} (code ${status}).`,
+    `HTTP ${status}`
+  );
 }
 
 /**
@@ -703,19 +741,26 @@ export async function generateBookPdfViaServer(input: GenerateBookPdfServerInput
   }
 
   if (!res.ok) {
-    let detail = res.statusText;
-    try {
-      const j = (await res.json()) as { error?: string; detail?: string };
-      detail = errorMessageFromPdfServerJson(j, detail);
-    } catch {
-      /* ignore */
-    }
+    const detail = await parseGeneratePdfErrorBody(res);
+    logPdfExportFailure('generate-pdf (session)', {
+      httpStatus: res.status,
+      detailPreview: detail.slice(0, 400),
+      pdfServerHost: base.replace(/^https?:\/\//i, '').split('/')[0],
+    });
     throw new Error(pdfServerHttpErrorMessage(res.status, detail));
   }
 
   const json = (await res.json()) as GenerateBookPdfResponse;
   if (!json.pdfUrlSigned?.trim()) {
-    throw new Error(EXPORT_SERVER_FAILED_CONTACT_MESSAGE);
+    logPdfExportFailure('generate-pdf (session) réponse 200 sans pdfUrlSigned', {
+      keys: json && typeof json === 'object' ? Object.keys(json) : [],
+    });
+    throw new Error(
+      appendDevExportHint(
+        EXPORT_SERVER_FAILED_CONTACT_MESSAGE,
+        'Réponse 200 mais pdfUrlSigned vide — voir logs serveur / bucket books-pdf.'
+      )
+    );
   }
 
   const safeBook = input.bookId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
@@ -731,7 +776,16 @@ export async function generateBookPdfViaServer(input: GenerateBookPdfServerInput
 
   const dl = await downloadAsync(json.pdfUrlSigned, dest);
   if (dl.status !== 200) {
-    throw new Error(EXPORT_SERVER_FAILED_CONTACT_MESSAGE);
+    logPdfExportFailure('téléchargement pdfUrlSigned (session)', {
+      downloadStatus: dl.status,
+      urlHost: json.pdfUrlSigned.replace(/^https?:\/\//i, '').split('/')[0],
+    });
+    throw new Error(
+      appendDevExportHint(
+        EXPORT_SERVER_FAILED_CONTACT_MESSAGE,
+        `Téléchargement du PDF signé : statut ${dl.status}`
+      )
+    );
   }
 
   return { localUri: dl.uri, response: json };
@@ -952,19 +1006,28 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
   }
 
   if (!res.ok) {
-    let detail = res.statusText;
-    try {
-      const j = (await res.json()) as { error?: string; detail?: string };
-      detail = errorMessageFromPdfServerJson(j, detail);
-    } catch {
-      /* ignore */
-    }
+    const detail = await parseGeneratePdfErrorBody(res);
+    logPdfExportFailure('generate-pdf (guest ticket)', {
+      httpStatus: res.status,
+      detailPreview: detail.slice(0, 400),
+      pdfServerHost: base.replace(/^https?:\/\//i, '').split('/')[0],
+      bookId: input.bookId,
+    });
     throw new Error(pdfServerHttpErrorMessage(res.status, detail));
   }
 
   const json = (await res.json()) as GenerateBookPdfResponse;
   if (!json.pdfUrlSigned?.trim()) {
-    throw new Error(EXPORT_SERVER_FAILED_CONTACT_MESSAGE);
+    logPdfExportFailure('generate-pdf (guest) réponse 200 sans pdfUrlSigned', {
+      keys: json && typeof json === 'object' ? Object.keys(json) : [],
+      exportRequestId: init.exportRequestId,
+    });
+    throw new Error(
+      appendDevExportHint(
+        EXPORT_SERVER_FAILED_CONTACT_MESSAGE,
+        'Réponse 200 mais pdfUrlSigned vide — voir export_requests / logs Railway.'
+      )
+    );
   }
 
   // Upload AV brut après succès PDF : lancé tout de suite pour chevaucher le téléchargement du PDF,
@@ -984,7 +1047,17 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
 
   const dl = await downloadAsync(json.pdfUrlSigned, dest);
   if (dl.status !== 200) {
-    throw new Error(EXPORT_SERVER_FAILED_CONTACT_MESSAGE);
+    logPdfExportFailure('téléchargement pdfUrlSigned (guest)', {
+      downloadStatus: dl.status,
+      urlHost: json.pdfUrlSigned.replace(/^https?:\/\//i, '').split('/')[0],
+      exportRequestId: init.exportRequestId,
+    });
+    throw new Error(
+      appendDevExportHint(
+        EXPORT_SERVER_FAILED_CONTACT_MESSAGE,
+        `Téléchargement du PDF signé : statut ${dl.status}`
+      )
+    );
   }
 
   await avUploadPromise;
