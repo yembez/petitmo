@@ -94,7 +94,8 @@ export function CropModal({ visible, imageUri, onCancel, onConfirm, onChangePhot
     if (!imgSize) return;
     imgW.value = imgSize.width;
     imgH.value = imgSize.height;
-    baseScaleSv.value = Math.max(cropRect.width / imgSize.width, cropRect.height / imgSize.height);
+    /** « Contain » : toute la photo visible au zoom 1 (pas de crop imposé comme avec Math.max / cover). */
+    baseScaleSv.value = Math.min(cropRect.width / imgSize.width, cropRect.height / imgSize.height);
   }, [baseScaleSv, cropRect.height, cropRect.width, imgH, imgSize, imgW, visible]);
 
   const clampTranslate = () => {
@@ -102,8 +103,8 @@ export function CropModal({ visible, imageUri, onCancel, onConfirm, onChangePhot
     const dispScale = baseScaleSv.value * scale.value;
     const dispW = imgW.value * dispScale;
     const dispH = imgH.value * dispScale;
-    const maxTx = Math.max(0, (dispW - cropRect.width) / 2);
-    const maxTy = Math.max(0, (dispH - cropRect.height) / 2);
+    const maxTx = Math.abs(dispW - cropRect.width) / 2;
+    const maxTy = Math.abs(dispH - cropRect.height) / 2;
     translateX.value = clamp(translateX.value, -maxTx, maxTx);
     translateY.value = clamp(translateY.value, -maxTy, maxTy);
   };
@@ -122,12 +123,11 @@ export function CropModal({ visible, imageUri, onCancel, onConfirm, onChangePhot
           clampTranslate();
         })
         .onEnd(() => {
-          // snap léger si on dépasse
           const dispScale = baseScaleSv.value * scale.value;
           const dispW = imgW.value * dispScale;
           const dispH = imgH.value * dispScale;
-          const maxTx = Math.max(0, (dispW - cropRect.width) / 2);
-          const maxTy = Math.max(0, (dispH - cropRect.height) / 2);
+          const maxTx = Math.abs(dispW - cropRect.width) / 2;
+          const maxTy = Math.abs(dispH - cropRect.height) / 2;
           translateX.value = withSpring(clamp(translateX.value, -maxTx, maxTx), SPRING);
           translateY.value = withSpring(clamp(translateY.value, -maxTy, maxTy), SPRING);
         }),
@@ -203,8 +203,8 @@ export function CropModal({ visible, imageUri, onCancel, onConfirm, onChangePhot
               height: Math.round(safeH),
             },
           },
-          // Recadrage pour l’usage “hero” (4:5). Taille raisonnable pour upload.
-          { resize: { width: 800, height: 1000 } },
+          /** Largeur max seulement : conserve le ratio (évite d’écraser une photo entière non 4:5). */
+          { resize: { width: 800 } },
         ],
         { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
       );
@@ -272,7 +272,7 @@ export function CropModal({ visible, imageUri, onCancel, onConfirm, onChangePhot
                     <Image
                       source={{ uri: imageUri }}
                       style={StyleSheet.absoluteFillObject}
-                      contentFit="cover"
+                      contentFit="fill"
                     />
                   </Animated.View>
                 )}

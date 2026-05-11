@@ -11,16 +11,15 @@ import {
   DeviceEventEmitter,
   FlatList,
   TouchableOpacity,
+  Alert,
   type ListRenderItem,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Reanimated, {
   cancelAnimation,
   Easing,
-  Extrapolation,
   SlideInDown,
   SlideOutDown,
-  interpolate,
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
@@ -432,67 +431,20 @@ function FavorisSlideshow({
   );
 }
 
-type HeroListHeaderProps = {
+type HeroSlideshowListHeaderProps = {
   scrollY: SharedValue<number>;
   slideshowItems: FavListItem[];
   heroHeight: number;
-  heroBaseH: number;
-  heroGradientHeight: number;
-  insetTop: number;
-  selectionMode: boolean;
-  selectionHeaderTitle: string;
-  onExitSelection: () => void;
-  onEnterSelection: () => void;
 };
 
-/**
- * En-tête liste : diaporama + chrome, calé sur le flux de la grille.
- * Parallaxe + fondu du titrage (comportement proche de la grande prévisualisation
- * en haut des albums dans la Photothèque iOS, qui glisse sous la grille au scroll).
- */
-function HeroListHeader({
-  scrollY,
-  slideshowItems,
-  heroHeight,
-  heroBaseH,
-  heroGradientHeight,
-  insetTop,
-  selectionMode,
-  selectionHeaderTitle,
-  onExitSelection,
-  onEnterSelection,
-}: HeroListHeaderProps) {
-  /** Pas de translateY ici : le parallaxe décalait l’image et révélait des bandes noires (haut/bas) sur le fond du héros. */
+/** Diaporama seul dans l’en-tête de liste (titre + CTAs : barre fixe au-dessus de la FlatList). */
+function HeroSlideshowListHeader({ scrollY, slideshowItems, heroHeight }: HeroSlideshowListHeaderProps) {
   const imageMotionStyle = useAnimatedStyle(() => {
     const y = scrollY.value;
     const pulled = y < 0 ? y : 0;
     const scale = 1 + -pulled * HERO_PULL_SCALE_PER_PX;
     return {
       transform: [{ scale }],
-    };
-  });
-
-  const titleFadeStyle = useAnimatedStyle(() => {
-    const y = Math.max(0, scrollY.value);
-    return {
-      opacity: interpolate(
-        y,
-        [0, heroBaseH * 0.28, heroBaseH * 0.62],
-        [1, 0.5, 0],
-        Extrapolation.CLAMP
-      ),
-    };
-  });
-
-  const chromeFadeStyle = useAnimatedStyle(() => {
-    const y = Math.max(0, scrollY.value);
-    return {
-      opacity: interpolate(
-        y,
-        [0, heroBaseH * 0.36, heroBaseH * 0.58],
-        [1, 0.4, 0],
-        Extrapolation.CLAMP
-      ),
     };
   });
 
@@ -504,89 +456,6 @@ function HeroListHeader({
         <Reanimated.View style={[styles.heroSlideshowLayer, imageMotionStyle]}>
           <FavorisSlideshow items={slideshowItems} height={heroHeight} isActive={heroHeight > 8} />
         </Reanimated.View>
-        {!selectionMode ? (
-          <Reanimated.View style={[StyleSheet.absoluteFill, { zIndex: 14 }, titleFadeStyle]} pointerEvents="none">
-            <LinearGradient
-              colors={['rgba(0,0,0,0.78)', 'rgba(0,0,0,0.38)', 'rgba(0,0,0,0)']}
-              locations={[0, 0.42, 1]}
-              pointerEvents="none"
-              style={[styles.favorisTitleGradient, { height: heroGradientHeight }]}
-            />
-            <View
-              pointerEvents="none"
-              style={[
-                styles.favorisTitleWrap,
-                { top: insetTop + verticalScale(6), left: SPACING.md },
-              ]}
-            >
-              <Text style={styles.favorisTitleIos}>Favoris</Text>
-            </View>
-          </Reanimated.View>
-        ) : null}
-        {selectionMode ? (
-          <Reanimated.View
-            style={[styles.topChrome, styles.topChromeOnHero, chromeFadeStyle]}
-            pointerEvents="box-none"
-          >
-            <LinearGradient
-              colors={FAVORIS_TOP_GRADIENT_COLORS}
-              locations={FAVORIS_TOP_GRADIENT_LOCATIONS}
-              pointerEvents="none"
-              style={[styles.favorisFloatingChromeGradient, { height: heroGradientHeight }]}
-            />
-            <View
-              style={[
-                styles.topChromeRow,
-                styles.topChromeRowOverGradient,
-                { paddingTop: insetTop + verticalScale(10) },
-              ]}
-              pointerEvents="box-none"
-            >
-              <Pressable
-                onPress={onExitSelection}
-                style={styles.topChromeSideBtn}
-                hitSlop={12}
-                accessibilityRole="button"
-                accessibilityLabel="Annuler la sélection"
-              >
-                <Text style={styles.topChromeBtnTextLight}>Annuler</Text>
-              </Pressable>
-              <Text style={styles.topChromeCenterTitleLight} numberOfLines={1}>
-                {selectionHeaderTitle}
-              </Text>
-              <View style={styles.topChromeSideSpacer} />
-            </View>
-          </Reanimated.View>
-        ) : (
-          <Reanimated.View
-            style={[
-              styles.topChrome,
-              styles.topChromeOnHero,
-              {
-                paddingTop: insetTop + verticalScale(10),
-                backgroundColor: 'transparent',
-              },
-              chromeFadeStyle,
-            ]}
-            pointerEvents="box-none"
-          >
-            <View style={styles.topChromeRow} pointerEvents="box-none">
-              <View style={styles.topChromeFlex} />
-              <Pressable
-                onPress={onEnterSelection}
-                hitSlop={8}
-                style={({ pressed }) => [styles.topChromeSelectCta, pressed && { opacity: 0.88 }]}
-                accessibilityRole="button"
-                accessibilityLabel="Mode sélection"
-              >
-                <View style={styles.topChromeSelectCtaContent}>
-                  <BookOpen size={scale(18)} color="#FFFFFF" strokeWidth={2.2} />
-                  <Text style={styles.topChromeBtnTextLight}>Sélectionner</Text>
-                </View>
-              </Pressable>
-            </View>
-          </Reanimated.View>
-        )}
       </View>
       <View style={styles.heroGridWhiteGap} pointerEvents="none" />
     </View>
@@ -596,51 +465,26 @@ function HeroListHeader({
 const INK = '#1C1C1E';
 const MUTED = '#6B7280';
 
-type FavorisStickyGalleryChromeProps = {
-  scrollY: SharedValue<number>;
-  heroBaseH: number;
+type FavorisFixedTopChromeProps = {
   insetTop: number;
   gradientHeight: number;
   selectionMode: boolean;
   selectionHeaderTitle: string;
-  pointerEventsActive: boolean;
   onExitSelection: () => void;
   onEnterSelection: () => void;
 };
 
-/**
- * Barre au-dessus de la grille quand le diaporama a défilé hors vue : titre « Favoris » réduit
- * + accès permanent au mode sélection (même logique que la variante sans diaporama).
- */
-function FavorisStickyGalleryChrome({
-  scrollY,
-  heroBaseH,
+/** Titre + CTAs toujours visibles (hors scroll). */
+function FavorisFixedTopChrome({
   insetTop,
   gradientHeight,
   selectionMode,
   selectionHeaderTitle,
-  pointerEventsActive,
   onExitSelection,
   onEnterSelection,
-}: FavorisStickyGalleryChromeProps) {
-  const stickyFadeStyle = useAnimatedStyle(() => {
-    const y = Math.max(0, scrollY.value);
-    const hb = Math.max(heroBaseH, 1);
-    return {
-      opacity: interpolate(
-        y,
-        [hb * 0.48, hb * 0.64],
-        [0, 1],
-        Extrapolation.CLAMP
-      ),
-    };
-  });
-
+}: FavorisFixedTopChromeProps) {
   return (
-    <Reanimated.View
-      style={[styles.topChrome, styles.topChromeFloatingGradient, stickyFadeStyle]}
-      pointerEvents={pointerEventsActive ? 'box-none' : 'none'}
-    >
+    <View style={styles.favorisFixedTopChrome} pointerEvents="box-none">
       <View
         style={[styles.stickyChromeInner, { minHeight: gradientHeight }]}
         collapsable={false}
@@ -656,6 +500,7 @@ function FavorisStickyGalleryChrome({
           style={[
             styles.topChromeRow,
             styles.topChromeRowOverGradient,
+            selectionMode ? styles.topChromeRowSelecting : null,
             { paddingTop: insetTop + verticalScale(10) },
           ]}
           pointerEvents="box-none"
@@ -698,7 +543,7 @@ function FavorisStickyGalleryChrome({
           )}
         </View>
       </View>
-    </Reanimated.View>
+    </View>
   );
 }
 
@@ -709,15 +554,12 @@ const SCREEN_H = Dimensions.get('window').height;
 const SLIDESHOW_PULL_MAX_PX = 168;
 /** Hauteur de base du héros / diaporama : ~50 % de l’écran (jusqu’à la moitié). */
 const HERO_BASE_RATIO = 0.5;
-/** Seuil de scroll (fraction de la hauteur de base du héros) : barre compacte + Sélectionner collants */
-const STICKY_CHROME_SCROLL_THRESHOLD_RATIO = 0.57;
 /** Bonus de hauteur max quand on tire (fraction de l’écran) */
 const HERO_BONUS_RATIO = 0.1;
 /** Zoom léger quand on tire au-delà du haut (rubber-band proche iOS) */
 const HERO_PULL_SCALE_PER_PX = 0.00135;
 /**
- * Écart entre les tuiles de la grille (`galleryRow`) — la bande sous le diaporama
- * utilise la même épaisseur pour rester visuellement alignée.
+ * Écart entre les tuiles (`galleryRow`) ; ligne fine sous le diaporama pour l’alignement grille.
  */
 const GALLERY_TILE_GAP = 1;
 
@@ -1015,11 +857,8 @@ export default function FavorisScreen() {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const galleryListRef = useRef<FlatList<FavListItem> | null>(null);
-  /** Offset de scroll (UI thread) : parallaxe / fondu type Photothèque iOS */
+  /** Offset de scroll (UI thread) : zoom léger au pull sur le héros */
   const galleryScrollY = useSharedValue(0);
-  /** Barre compacte au-dessus de la grille : activer les touches seulement quand le seuil est dépassé */
-  const slideshowStickyChromeRef = useRef(false);
-  const [slideshowStickyChrome, setSlideshowStickyChrome] = useState(false);
   const [bookModalVisible, setBookModalVisible] = useState(false);
   const [createBookFlowTitle, setCreateBookFlowTitle] = useState<string | null>(null);
 
@@ -1071,8 +910,6 @@ export default function FavorisScreen() {
       return () => {
         setPullOverscrollPx(0);
         galleryScrollY.value = 0;
-        slideshowStickyChromeRef.current = false;
-        setSlideshowStickyChrome(false);
         setSelectionMode(false);
         setSelectedIds(new Set());
       };
@@ -1118,13 +955,6 @@ export default function FavorisScreen() {
   }, [galleryItems, selectedIds]);
 
   const slideshowItems = useMemo(() => buildSlideshowItems(galleryItems), [galleryItems]);
-
-  useEffect(() => {
-    if (slideshowItems.length === 0) {
-      slideshowStickyChromeRef.current = false;
-      setSlideshowStickyChrome(false);
-    }
-  }, [slideshowItems.length]);
 
   /** Icônes claires sur le hero sombre : seulement quand cet onglet est au premier plan (pas sous memory-view / autre stack). */
   useEffect(() => {
@@ -1175,30 +1005,13 @@ export default function FavorisScreen() {
   const favoritesListHeader = useMemo(() => {
     if (slideshowItems.length === 0) return null;
     return (
-      <HeroListHeader
+      <HeroSlideshowListHeader
         scrollY={galleryScrollY}
         slideshowItems={slideshowItems}
         heroHeight={heroHeight}
-        heroBaseH={heroBaseH}
-        heroGradientHeight={heroGradientHeight}
-        insetTop={insets.top}
-        selectionMode={selectionMode}
-        selectionHeaderTitle={selectionHeaderTitle}
-        onExitSelection={exitSelection}
-        onEnterSelection={enterSelectionMode}
       />
     );
-  }, [
-    slideshowItems,
-    heroHeight,
-    heroBaseH,
-    heroGradientHeight,
-    insets.top,
-    selectionMode,
-    selectionHeaderTitle,
-    exitSelection,
-    enterSelectionMode,
-  ]);
+  }, [slideshowItems, heroHeight]);
 
   return (
     <View style={styles.container}>
@@ -1237,7 +1050,7 @@ export default function FavorisScreen() {
               </Text>
             </View>
           ) : (
-            <>
+            <View style={styles.galleryShell}>
               <FlatList
                 ref={galleryListRef}
                 data={galleryItems}
@@ -1260,93 +1073,21 @@ export default function FavorisScreen() {
                   setPullOverscrollPx(
                     y < 0 ? Math.min(-y, SLIDESHOW_PULL_MAX_PX) : 0
                   );
-                  if (slideshowItems.length > 0 && heroBaseH > 1e-6) {
-                    const past =
-                      y > heroBaseH * STICKY_CHROME_SCROLL_THRESHOLD_RATIO;
-                    if (past !== slideshowStickyChromeRef.current) {
-                      slideshowStickyChromeRef.current = past;
-                      setSlideshowStickyChrome(past);
-                    }
-                  }
                 }}
                 {...Platform.select({
                   android: { overScrollMode: 'always' as const },
                 })}
               />
-
-              {slideshowItems.length > 0 && galleryItems.length > 0 ? (
-                <FavorisStickyGalleryChrome
-                  scrollY={galleryScrollY}
-                  heroBaseH={heroBaseH}
-                  insetTop={insets.top}
-                  gradientHeight={heroGradientHeight}
-                  selectionMode={selectionMode}
-                  selectionHeaderTitle={selectionHeaderTitle}
-                  pointerEventsActive={slideshowStickyChrome}
-                  onExitSelection={exitSelection}
-                  onEnterSelection={enterSelectionMode}
-                />
-              ) : null}
-
-              {slideshowItems.length === 0 && galleryItems.length > 0 ? (
-                <View style={[styles.topChrome, styles.topChromeFloatingGradient]} pointerEvents="box-none">
-                  <View
-                    style={[styles.stickyChromeInner, { minHeight: heroGradientHeight }]}
-                    collapsable={false}
-                    pointerEvents="box-none"
-                  >
-                    <LinearGradient
-                      colors={FAVORIS_TOP_GRADIENT_COLORS}
-                      locations={FAVORIS_TOP_GRADIENT_LOCATIONS}
-                      pointerEvents="none"
-                      style={[styles.favorisFloatingChromeGradient, { height: heroGradientHeight }]}
-                    />
-                    <View
-                      style={[
-                        styles.topChromeRow,
-                        styles.topChromeRowOverGradient,
-                        { paddingTop: insets.top + verticalScale(10) },
-                      ]}
-                      pointerEvents="box-none"
-                    >
-                    {selectionMode ? (
-                      <>
-                        <Pressable
-                          onPress={exitSelection}
-                          style={styles.topChromeSideBtn}
-                          hitSlop={12}
-                          accessibilityRole="button"
-                          accessibilityLabel="Annuler la sélection"
-                        >
-                          <Text style={styles.topChromeBtnTextLight}>Annuler</Text>
-                        </Pressable>
-                        <Text style={styles.topChromeCenterTitleLight} numberOfLines={1}>
-                          {selectionHeaderTitle}
-                        </Text>
-                        <View style={styles.topChromeSideSpacer} />
-                      </>
-                    ) : (
-                      <>
-                        <View style={styles.topChromeFlex} />
-                        <Pressable
-                          onPress={enterSelectionMode}
-                          hitSlop={8}
-                          style={({ pressed }) => [styles.topChromeSelectCta, pressed && { opacity: 0.88 }]}
-                          accessibilityRole="button"
-                          accessibilityLabel="Mode sélection"
-                        >
-                          <View style={styles.topChromeSelectCtaContent}>
-                            <BookOpen size={scale(18)} color="#FFFFFF" strokeWidth={2.2} />
-                            <Text style={styles.topChromeBtnTextLight}>Sélectionner</Text>
-                          </View>
-                        </Pressable>
-                      </>
-                    )}
-                    </View>
-                  </View>
-                </View>
-              ) : null}
-            </>
+              {/** Titre + Sélectionner au-dessus du scroll : ne réserve plus de hauteur — la photo du header va jusqu’en haut. */}
+              <FavorisFixedTopChrome
+                insetTop={insets.top}
+                gradientHeight={heroGradientHeight}
+                selectionMode={selectionMode}
+                selectionHeaderTitle={selectionHeaderTitle}
+                onExitSelection={exitSelection}
+                onEnterSelection={enterSelectionMode}
+              />
+            </View>
           )}
 
           {selectionMode && selectedIds.size > 0 ? (
@@ -1466,6 +1207,20 @@ const styles = StyleSheet.create({
   mainColumnLight: {
     backgroundColor: '#FFFFFF',
   },
+  /** Colonne liste pleine hauteur ; chrome titre en absolu par-dessus (sans bandeau réservé). */
+  galleryShell: {
+    flex: 1,
+    minHeight: 0,
+    position: 'relative',
+  },
+  favorisFixedTopChrome: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+    paddingBottom: 0,
+  },
   heroHeaderStack: {
     width: '100%',
   },
@@ -1498,26 +1253,6 @@ const styles = StyleSheet.create({
     left: '-9%',
     width: '118%',
     height: '118%',
-  },
-  favorisTitleGradient: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 14,
-  },
-  favorisTitleWrap: {
-    position: 'absolute',
-    zIndex: 15,
-  },
-  favorisTitleIos: {
-    fontSize: scale(34),
-    fontWeight: '800',
-    color: '#FFFFFF',
-    letterSpacing: scale(-0.6),
-    textShadowColor: 'rgba(0,0,0,0.45)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 8,
   },
   centered: {
     flex: 1,
@@ -1601,24 +1336,6 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: '#FFFFFF',
   },
-  topChrome: {
-    paddingBottom: verticalScale(8),
-  },
-  topChromeOnHero: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 0,
-    zIndex: 20,
-  },
-  /** Bandeau flottant : même dégradé que le héros ; pas d’overflow hidden (évite de rogner le fondu → bande noire). */
-  topChromeFloatingGradient: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 0,
-    zIndex: 22,
-  },
   favorisFloatingChromeGradient: {
     position: 'absolute',
     top: 0,
@@ -1633,17 +1350,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: SPACING.md,
   },
-  topChromeRowOverGradient: {
-    zIndex: 1,
+  topChromeRowSelecting: {
+    justifyContent: 'space-between',
   },
   topChromeFlex: {
     flex: 1,
+  },
+  topChromeRowOverGradient: {
+    zIndex: 1,
   },
   topChromeSideBtn: {
     minWidth: scale(76),
     paddingVertical: verticalScale(6),
   },
-  /** CTA « Sélectionner » sur le héros : pilule grise translucide, alignée avec la ligne du titre Favoris */
+  /** CTA « Sélectionner » sur le héros : pilule grise translucide */
   topChromeSelectCta: {
     minWidth: scale(76),
     alignItems: 'center',
@@ -1673,14 +1393,14 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
-  /** Titre « Favoris » au-dessus de la grille (bandeau collant) */
+  /** Titre « Favoris » au-dessus de la grille (barre fixe) — gardé lisible à côté de Sélectionner */
   favorisStickyTitle: {
     flexShrink: 1,
     maxWidth: '52%',
     color: '#FFFFFF',
-    fontSize: scale(22),
+    fontSize: scale(28),
     fontWeight: '700',
-    letterSpacing: scale(-0.35),
+    letterSpacing: scale(-0.45),
     textShadowColor: 'rgba(0,0,0,0.45)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 6,

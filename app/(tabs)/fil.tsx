@@ -14,6 +14,7 @@ import { useFonts, Lora_400Regular_Italic } from '@expo-google-fonts/lora';
 import { verticalScale } from '@/utils/responsive';
 import EditTextModal from '@/components/EditTextModal';
 import { usePrefetchMemories } from '@/hooks/usePrefetchMemories';
+import { useFeedVideoAutoplay } from '@/hooks/useFeedVideoAutoplay';
 import { usePendingMediaUploads } from '@/contexts/PendingMediaUploadsContext';
 import { useFeedData } from '@/hooks/useFeedData';
 import { useToggleFavorite } from '@/hooks/useToggleFavorite';
@@ -65,7 +66,8 @@ export default function FilScreen() {
     closeEditLocationModal,
   } = useFilRowActions(setMemories);
 
-  const { onViewableItemsChanged } = usePrefetchMemories();
+  const { onViewableItemsChanged: onPrefetchViewable } = usePrefetchMemories();
+  const { feedAutoplayMemoryId, onViewableItemsChanged } = useFeedVideoAutoplay(onPrefetchViewable);
   const feedViewabilityConfig = useMemo(
     () => ({ itemVisiblePercentThreshold: 50, minimumViewTime: 300 }),
     []
@@ -98,7 +100,8 @@ export default function FilScreen() {
     handlePickVoiceCover,
     handleDeleteMemory,
     swipeRefs,
-    immersiveLaunchRef
+    immersiveLaunchRef,
+    feedAutoplayMemoryId
   );
 
   useFocusEffect(

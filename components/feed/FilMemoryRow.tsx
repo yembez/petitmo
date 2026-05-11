@@ -1,15 +1,21 @@
 import {
   View,
   Text,
+  StyleSheet,
   TouchableOpacity,
   Pressable,
   ActivityIndicator,
   Platform,
+  Animated,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { Pencil, Heart, Play, Trash2, ImagePlus } from 'lucide-react-native';
+import { Pencil, Heart, Play, Trash2, ImagePlus, Volume2, VolumeX } from 'lucide-react-native';
 import {
   memo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
   type Dispatch,
   type SetStateAction,
   type MutableRefObject,
@@ -28,14 +34,20 @@ import { clampAudioBookAnnotation } from '@/lib/audioBookAnnotation';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { Video, ResizeMode } from "expo-av";
 import { Swipeable, RectButton } from "react-native-gesture-handler";
-import { useDominantImageColors } from "@/hooks/useDominantImageColors";
+import {
+  CapturedAtOverlay,
+  FeedPhotoFavoriteOverlay,
+} from '@/components/feed/FeedMediaOverlays';
 import type { PendingUpload } from "@/contexts/PendingMediaUploadsContext";
 import {
   formatDuration,
   formatDateLong,
   formatAgeAtMemory,
-  formatCaptureStickerLabel,
 } from '@/utils/date';
+import {
+  capturedMediaDateLabel,
+  shouldShowCapturedMediaDateOverlay,
+} from '@/utils/feedCaptureOverlay';
 import AudioPlayer from "@/components/AudioPlayer";
 import {
   filChildLiteKey,
@@ -44,6 +56,7 @@ import {
   type Child,
 } from "@/utils/feedHelpers";
 import { styles, TEXT_POST_GUTTER } from "@/components/feed/feedStyles";
+import { ensurePlaybackAudioForListening } from '@/lib/playbackAudioMode';
 
 /** Icônes d’action (hors favori couleur charte) */
 const ACTION_ICON_INK = '#0A0A0A';
@@ -53,79 +66,11 @@ const FONT_MAMAN = 'Lora_400Regular_Italic';
 
 const EM_QUAD = '\u2003';
 
-/** Même logique que l’étiquette date (patch bas-droite) : blanc par défaut, noir si le serveur l’indique. */
-function feedPhotoOverlayInk(inkOverride?: string | null): '#FFFFFF' | '#0A0A0A' {
-  const inkRaw = (inkOverride ?? '').trim().toUpperCase();
-  if (inkRaw === '#0A0A0A' || inkRaw === '#FFFFFF') return inkRaw;
-  return '#FFFFFF';
-}
-
-function CapturedAtOverlay({ uriForAnalysis, label, inkOverride }: { uriForAnalysis: string; label: string; inkOverride?: string | null }) {
-  // IMPORTANT: le calcul fiable est fait côté serveur sur un patch bas-droite (captured_overlay_ink).
-  // Côté app, on évite toute heuristique "globale" (souvent fausse au premier render),
-  // et on force BLANC par défaut. Noir uniquement si le serveur l'a explicitement demandé.
-  useDominantImageColors(uriForAnalysis); // garde le hook (pré-chargement/caching), mais n'influence pas l'encre.
-  const ink = feedPhotoOverlayInk(inkOverride);
-
-  return (
-    <View style={[styles.capturedOverlay, { maxWidth: '78%', alignSelf: 'flex-end' }]} pointerEvents="none">
-      <View style={styles.overlayBadge}>
-        <Text
-          style={[
-            styles.capturedOverlayText,
-            { color: ink, textAlign: 'right' as const },
-          ]}
-          numberOfLines={2}
-        >
-          {label}
-        </Text>
-      </View>
-    </View>
-  );
-}
-
 /** Taille unique des icônes dans le fil (actions + overlays). */
 const FEED_ICON_PX = APP_ICON_PX;
 /** Cœur favori : même taille sur médias (photo/vidéo) et sur la ligne d’actions (texte/vocal). */
 const FEED_FAVORITE_HEART_PX = scale(20);
 
-/** Favori sur média : hors sélection = contour blanc sur fond sombre ; actif = cœur terracotta plein, fond disque blanc léger. */
-function FeedPhotoFavoriteOverlay({
-  isFavorite,
-  inkOverride,
-  onPress,
-}: {
-  isFavorite: boolean;
-  inkOverride?: string | null;
-  onPress: () => void;
-}) {
-  void inkOverride;
-  const outlineInk = '#FFFFFF' as const;
-  const terracotta = THEME.feedFavoriteTerracotta;
-
-  return (
-    <View style={styles.feedPhotoFavoriteOverlay} pointerEvents="box-none">
-      <TouchableOpacity
-        onPress={onPress}
-        activeOpacity={0.75}
-        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        accessibilityRole="button"
-        accessibilityLabel={isFavorite ? 'Retirer des favoris' : 'Mettre en favori'}
-        style={[
-          styles.feedFavoriteMediaCircle,
-          isFavorite && styles.feedFavoriteMediaCircleActive,
-        ]}
-      >
-        <Heart
-          size={FEED_FAVORITE_HEART_PX}
-          color={isFavorite ? terracotta : outlineInk}
-          strokeWidth={isFavorite ? 2.05 : 2.45}
-          fill={isFavorite ? terracotta : 'none'}
-        />
-      </TouchableOpacity>
-    </View>
-  );
-}
 /** Une ligne « envoi en cours » (même liste que les souvenirs → pas de saut de header FlatList). */
 export type FeedListItem =
   | { rowKind: 'pending'; row: PendingUpload }
@@ -152,6 +97,8 @@ type FilMemoryRowProps = {
   skipPostHeightMeasurement?: boolean;
   /** Import non finalisé : pas de favori / swipe / actions. */
   isOptimisticFeedPending?: boolean;
+  /** Vidéo sélectionnée pour lecture auto muette dans le fil (style Instagram). */
+  isFeedVideoAutoplay?: boolean;
 };
 function filMemoryRowDataPropsEqual(prev: FilMemoryRowProps, next: FilMemoryRowProps): boolean {
   if (prev.memoryIndex !== next.memoryIndex) return false;
@@ -159,6 +106,7 @@ function filMemoryRowDataPropsEqual(prev: FilMemoryRowProps, next: FilMemoryRowP
   if (prev.fontsLoaded !== next.fontsLoaded) return false;
   if (!!prev.skipPostHeightMeasurement !== !!next.skipPostHeightMeasurement) return false;
   if (!!prev.isOptimisticFeedPending !== !!next.isOptimisticFeedPending) return false;
+  if (!!prev.isFeedVideoAutoplay !== !!next.isFeedVideoAutoplay) return false;
   if (filChildLiteKey(prev.child) !== filChildLiteKey(next.child)) return false;
   if (filMemoryLiteKey(prev.memory) !== filMemoryLiteKey(next.memory)) return false;
   return true;
@@ -189,10 +137,11 @@ const PendingFeedUploadCard = memo(function PendingFeedUploadCard({ p }: { p: Pe
           <View style={{ position: 'relative' }}>
             {isVideo ? (
               preview0 ? (
-                <View style={[styles.mediaCard, styles.videoBody]}>
+                <View style={[styles.mediaCard, styles.videoBody, styles.videoMediaCard]}>
                   <Video
                     source={{ uri: preview0 }}
                     style={styles.photoImage}
+                    videoStyle={styles.feedInlineVideoNativeBg}
                     resizeMode={ResizeMode.COVER}
                     shouldPlay={false}
                     isLooping={false}
@@ -248,6 +197,7 @@ function FilMemoryRow({
   immersiveLaunchRef,
   skipPostHeightMeasurement = false,
   isOptimisticFeedPending = false,
+  isFeedVideoAutoplay = false,
 }: FilMemoryRowProps) {
   const photoUrls = useFeedPhotoDisplayUrls(memory);
   const contentTextRaw = memory.content?.trim() || '';
@@ -276,22 +226,56 @@ function FilMemoryRow({
   const locationLabelRaw = memory.location?.trim() || '';
   const locationCore = locationLabelRaw.replace(/\s*\([^)]*\)\s*$/, '').trim();
   const locationLabel = locationCore ? `à ${locationCore}` : '';
-  const capturedIso = memory.created_at;
-  /** `formatDateLong` ignore l’heure : même jour prise/import masquait l’overlay ; import optimiste avait created = inserted. */
-  const showCapturedOverlay = (() => {
-    if (!capturedIso?.trim()) return false;
-    const added = addedAtIso?.trim();
-    if (!added) return false;
-    const tA = new Date(added).getTime();
-    const tC = new Date(capturedIso).getTime();
-    if (Number.isNaN(tA) || Number.isNaN(tC)) return false;
-    if (Math.abs(tA - tC) < 90_000) return false;
-    return true;
-  })();
-  const capturedOverlayLabel = showCapturedOverlay
-    ? formatCaptureStickerLabel(capturedIso, memory.location)
-    : '';
+  const showCapturedOverlay = shouldShowCapturedMediaDateOverlay(memory);
+  const capturedOverlayLabel = showCapturedOverlay ? capturedMediaDateLabel(memory) : '';
   const videoUriForOverlay = (videoPosterUri || videoPlaybackUri || '').trim();
+  const canAutoplayVideoInline =
+    isFeedVideoAutoplay && memory.type === 'video' && !!videoPlaybackUri.trim();
+
+  const [feedInlineVideoSoundOn, setFeedInlineVideoSoundOn] = useState(false);
+  const [feedInlineVideoDisplayReady, setFeedInlineVideoDisplayReady] = useState(false);
+  /** Poster au-dessus de la vidéo : fondu 1→0 une fois la vidéo décodée (évite le « saut » thumbnail → frame). */
+  const feedInlinePosterFade = useRef(new Animated.Value(1)).current;
+  const feedInlineVideoReveal = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    setFeedInlineVideoSoundOn(false);
+    setFeedInlineVideoDisplayReady(false);
+    feedInlinePosterFade.setValue(1);
+    feedInlineVideoReveal.setValue(0);
+  }, [memory.id, canAutoplayVideoInline, videoPlaybackUri, feedInlinePosterFade, feedInlineVideoReveal]);
+
+  useEffect(() => {
+    if (!feedInlineVideoDisplayReady || !canAutoplayVideoInline) return;
+    const hasPoster = !!videoPosterUri.trim();
+    if (hasPoster) {
+      Animated.timing(feedInlinePosterFade, {
+        toValue: 0,
+        duration: 280,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      Animated.timing(feedInlineVideoReveal, {
+        toValue: 1,
+        duration: 280,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [
+    feedInlineVideoDisplayReady,
+    canAutoplayVideoInline,
+    videoPosterUri,
+    feedInlinePosterFade,
+    feedInlineVideoReveal,
+  ]);
+
+  const toggleFeedInlineVideoSound = useCallback(async () => {
+    const next = !feedInlineVideoSoundOn;
+    if (next) {
+      await ensurePlaybackAudioForListening();
+    }
+    setFeedInlineVideoSoundOn(next);
+  }, [feedInlineVideoSoundOn]);
 
   const skipImmersive =
     isOptimisticFeedPending ||
@@ -422,8 +406,70 @@ function FilMemoryRow({
                 accessibilityRole="button"
                 accessibilityLabel="Ouvrir en plein écran"
               >
-                <View style={[styles.mediaCard, styles.videoBody]}>
-                  {videoPosterUri ? (
+                <View style={[styles.mediaCard, styles.videoBody, styles.videoMediaCard]}>
+                  {canAutoplayVideoInline ? (
+                    <View style={[styles.photoImage, styles.feedInlineAutoplayStack]} pointerEvents="none">
+                      <View
+                        style={[
+                          StyleSheet.absoluteFillObject,
+                          { backgroundColor: '#000000', zIndex: 0 },
+                        ]}
+                        pointerEvents="none"
+                      />
+                      <Animated.View
+                        style={[
+                          StyleSheet.absoluteFillObject,
+                          {
+                            opacity: videoPosterUri.trim() ? 1 : feedInlineVideoReveal,
+                            zIndex: 1,
+                            backgroundColor: '#000000',
+                          },
+                        ]}
+                        pointerEvents="none"
+                      >
+                        <Video
+                          source={{ uri: videoPlaybackUri }}
+                          style={StyleSheet.absoluteFillObject}
+                          videoStyle={styles.feedInlineVideoNativeBg}
+                          resizeMode={ResizeMode.COVER}
+                          shouldPlay
+                          isLooping
+                          isMuted={!feedInlineVideoSoundOn}
+                          useNativeControls={false}
+                          onReadyForDisplay={() =>
+                            setFeedInlineVideoDisplayReady(prev => prev || true)
+                          }
+                          onPlaybackStatusUpdate={status => {
+                            if (!status.isLoaded) return;
+                            if (
+                              status.isPlaying ||
+                              (typeof status.positionMillis === 'number' &&
+                                status.positionMillis > 40)
+                            ) {
+                              setFeedInlineVideoDisplayReady(prev => prev || true);
+                            }
+                          }}
+                        />
+                      </Animated.View>
+                      {videoPosterUri.trim() ? (
+                        <Animated.View
+                          style={[
+                            StyleSheet.absoluteFillObject,
+                            { opacity: feedInlinePosterFade, zIndex: 2 },
+                          ]}
+                          pointerEvents="none"
+                        >
+                          <Image
+                            source={{ uri: videoPosterUri }}
+                            style={StyleSheet.absoluteFillObject}
+                            contentFit="cover"
+                            cachePolicy="disk"
+                            recyclingKey={memory.id}
+                          />
+                        </Animated.View>
+                      ) : null}
+                    </View>
+                  ) : videoPosterUri ? (
                     <Image
                       source={{ uri: videoPosterUri }}
                       style={styles.photoImage}
@@ -435,6 +481,7 @@ function FilMemoryRow({
                     <Video
                       source={{ uri: videoPlaybackUri }}
                       style={styles.photoImage}
+                      videoStyle={styles.feedInlineVideoNativeBg}
                       resizeMode={ResizeMode.COVER}
                       shouldPlay={false}
                       isLooping={false}
@@ -442,9 +489,9 @@ function FilMemoryRow({
                       useNativeControls={false}
                     />
                   ) : (
-                    <View style={[styles.photoImage, { backgroundColor: '#ECECEF' }]} />
+                    <View style={[styles.photoImage, { backgroundColor: '#000000' }]} />
                   )}
-                  {!skipImmersive ? (
+                  {!skipImmersive && !canAutoplayVideoInline ? (
                     <View style={[styles.playOverlay, styles.videoPlayIconAboveTap]} pointerEvents="none">
                       <View style={styles.playButton}>
                         <Play size={ICON_SIZES.sm} color="#FFFFFF" fill="#FFFFFF" strokeWidth={0} />
@@ -452,12 +499,30 @@ function FilMemoryRow({
                     </View>
                   ) : null}
                   {memory.duration ? (
-                    <View style={[styles.durationBadge, styles.videoDurationAboveTap]} pointerEvents="none">
+                    <View style={styles.videoDurationBadgeTopRight} pointerEvents="none">
                       <Text style={styles.durationText}>{formatDuration(memory.duration)}</Text>
                     </View>
                   ) : null}
                 </View>
               </Pressable>
+              {canAutoplayVideoInline ? (
+                <TouchableOpacity
+                  style={styles.videoSoundToggleTopLeft}
+                  onPress={() => void toggleFeedInlineVideoSound()}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    feedInlineVideoSoundOn ? 'Couper le son de la vidéo' : 'Activer le son de la vidéo'
+                  }
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  {feedInlineVideoSoundOn ? (
+                    <Volume2 size={scale(18)} color="#FFFFFF" strokeWidth={2} />
+                  ) : (
+                    <VolumeX size={scale(18)} color="#FFFFFF" strokeWidth={2} />
+                  )}
+                </TouchableOpacity>
+              ) : null}
               <FeedPhotoFavoriteOverlay
                 isFavorite={!!memory.is_favorite}
                 inkOverride={memory.captured_overlay_ink}

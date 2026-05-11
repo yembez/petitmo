@@ -261,6 +261,23 @@ const styles = StyleSheet.create({
   videoBody: {
     position: 'relative',
   },
+  /**
+   * Fond carte vidéo : noir (pas gris `#ECECEF`) pour éviter les éclairs blancs du lecteur
+   * natif au démarrage / arrêt et aux boucles.
+   */
+  videoMediaCard: {
+    backgroundColor: '#000000',
+  },
+  /** Style passé en `videoStyle` sur `expo-av` `Video` : colore la surface native (ex. Android). */
+  feedInlineVideoNativeBg: {
+    backgroundColor: '#000000',
+  },
+  /** Autoplay fil : poster / fond sous la `Video` jusqu’au 1er frame (évite flash blanc). */
+  feedInlineAutoplayStack: {
+    width: '100%',
+    height: '100%',
+    position: 'relative',
+  },
   /** Couvre la carte : tap pour lire / mettre en pause (au-dessus de la vue vidéo) */
   videoTapLayer: {
     ...StyleSheet.absoluteFillObject,
@@ -268,9 +285,6 @@ const styles = StyleSheet.create({
   },
   videoPlayIconAboveTap: {
     zIndex: 3,
-  },
-  videoDurationAboveTap: {
-    zIndex: 4,
   },
   playOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -298,6 +312,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: scale(7),
     paddingVertical: verticalScale(3),
     borderRadius: scale(6),
+  },
+  /** Vidéo fil : coin haut droit (évite le chevauchement avec le cœur favori en bas à droite). */
+  videoDurationBadgeTopRight: {
+    position: 'absolute',
+    right: scale(12),
+    top: verticalScale(12),
+    zIndex: 4,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    paddingHorizontal: scale(7),
+    paddingVertical: verticalScale(3),
+    borderRadius: scale(6),
+  },
+  /** Vidéo autoplay fil : activer / couper le son (sibling au-dessus du Pressable plein écran). */
+  videoSoundToggleTopLeft: {
+    position: 'absolute',
+    left: scale(12),
+    top: verticalScale(12),
+    zIndex: 8,
+    width: scale(36),
+    height: scale(36),
+    borderRadius: scale(18),
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.55)',
   },
   feedPhotoFavoriteOverlay: {
     position: 'absolute',

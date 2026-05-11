@@ -23,7 +23,7 @@ import { scale, verticalScale } from '@/utils/responsive';
 import { calculateAge } from '@/utils/date';
 import { getUserTier, setUserTier, type UserTier } from '@/lib/userTier';
 import { Image } from 'expo-image';
-import { resolveChildProfileImageUri } from '@/utils/childPhotoUri';
+import { resolveChildProfileImageDisplayUri } from '@/utils/childPhotoUri';
 import { supabase } from '@/lib/supabase';
 import { getLocalMemoriesPendingCloudSync } from '@/lib/localDb';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
@@ -381,7 +381,11 @@ function ChildRowAvatar({
   child: Child;
   letterFontFamily?: string;
 }) {
-  const uri = resolveChildProfileImageUri(child.local_photo_path, child.photo_url);
+  const uri = resolveChildProfileImageDisplayUri(
+    child.local_photo_path,
+    child.photo_url,
+    child.updated_at,
+  );
   if (!uri) {
     return (
       <AvatarFallback
@@ -396,7 +400,7 @@ function ChildRowAvatar({
       style={styles.childRowAvatarImg}
       contentFit="cover"
       cachePolicy="memory-disk"
-      recyclingKey={child.id}
+      recyclingKey={`${child.id}-${child.updated_at ?? ''}`}
     />
   );
 }

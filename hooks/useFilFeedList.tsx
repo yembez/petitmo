@@ -35,7 +35,8 @@ export function useFilFeedList(
   handlePickVoiceCover: (m: Memory) => void | Promise<void>,
   handleDeleteMemory: (m: Memory) => void,
   swipeRefs: MutableRefObject<Map<string, Swipeable | null>>,
-  immersiveLaunchRef: RefObject<(index: number) => void>
+  immersiveLaunchRef: RefObject<(index: number) => void>,
+  feedAutoplayMemoryId: string | null
 ): {
   feedData: FeedListItem[];
   renderItem: (info: { item: FeedListItem }) => ReactElement;
@@ -81,6 +82,7 @@ export function useFilFeedList(
         immersiveLaunchRef={immersiveLaunchRef}
         skipPostHeightMeasurement={opts?.skipPostHeight === true}
         isOptimisticFeedPending={opts?.isOptimisticFeedPending === true}
+        isFeedVideoAutoplay={feedAutoplayMemoryId === memory.id}
       />
     ),
     [
@@ -97,6 +99,7 @@ export function useFilFeedList(
       handleDeleteMemory,
       swipeRefs,
       immersiveLaunchRef,
+      feedAutoplayMemoryId,
     ]
   );
 

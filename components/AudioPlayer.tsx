@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Audio } from 'expo-av';
+import { ensurePlaybackAudioForListening } from '@/lib/playbackAudioMode';
 import { Play, Pause } from 'lucide-react-native';
 import Svg, { ClipPath, Defs, Path, Rect } from 'react-native-svg';
 import { scale } from '@/utils/responsive';
@@ -253,6 +254,8 @@ export default function AudioPlayer({
         await currentSound.pauseAsync();
         return;
       }
+
+      await ensurePlaybackAudioForListening();
 
       const st = await currentSound.getStatusAsync();
       if (!st.isLoaded) return;

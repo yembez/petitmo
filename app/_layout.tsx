@@ -14,6 +14,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { THEME } from '@/constants/theme';
+import { ensurePlaybackAudioForListening } from '@/lib/playbackAudioMode';
 import { supabase, supabaseAnonKey, supabaseUrl } from '@/lib/supabase';
 import { PendingMediaUploadsProvider } from '@/contexts/PendingMediaUploadsContext';
 import { initLocalDb } from '@/lib/localDb';
@@ -46,6 +47,7 @@ export default function RootLayout() {
   /** Portrait partout sauf prévisualisation livre (paysage au pivot). Évite la course avec `book-preview` : une seule source selon la route. */
   useEffect(() => {
     if (!isAuthReady) return;
+    void ensurePlaybackAudioForListening();
     void (async () => {
       try {
         const bookViewer = pathname.includes('book-preview');

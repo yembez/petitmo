@@ -30,7 +30,10 @@ import {
 } from '@/services/children';
 import { getCachedUserMode } from '@/lib/userMode';
 import type { Child } from '@/types/local';
-import { resolveChildProfileImageUri } from '@/utils/childPhotoUri';
+import {
+  resolveChildProfileImageUri,
+  resolveChildProfileImageDisplayUri,
+} from '@/utils/childPhotoUri';
 import DatePicker from '@/components/DatePicker';
 import { CropModal } from '@/components/CropModal';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
@@ -72,7 +75,13 @@ export default function EditChildScreen() {
         setName(cleaned.name);
         setBirthdate(cleaned.birthdate || '');
         const resolved =
-          resolveChildProfileImageUri(cleaned.local_photo_path, cleaned.photo_url) ?? '';
+          resolveChildProfileImageDisplayUri(
+            cleaned.local_photo_path,
+            cleaned.photo_url,
+            cleaned.updated_at,
+          ) ??
+          resolveChildProfileImageUri(cleaned.local_photo_path, cleaned.photo_url) ??
+          '';
         setPhotoUrl(resolved);
         // Récupère la source “originale” si dispo, sinon photo affichable (local ou URL).
         try {
@@ -143,20 +152,23 @@ export default function EditChildScreen() {
       setIsUploadingPhoto(true);
       const url = await uploadChildPhoto(child.id, uri);
       const cur = getLocalChild(child.id);
+      if (!cur) {
+        Alert.alert('Erreur', 'Profil introuvable');
+        return;
+      }
+      const cleaned = await sanitizeChildLocalAvatarIfMissing(cur);
+      setChild(cleaned);
       const display =
         Platform.OS !== 'web'
-          ? resolveChildProfileImageUri(cur?.local_photo_path ?? null, url) ?? url
-          : url;
+          ? resolveChildProfileImageDisplayUri(
+              cleaned.local_photo_path,
+              cleaned.photo_url,
+              cleaned.updated_at,
+            ) ??
+            resolveChildProfileImageUri(cleaned.local_photo_path, cleaned.photo_url) ??
+            url
+          : (resolveChildProfileImageUri(cleaned.local_photo_path, cleaned.photo_url) ?? url);
       setPhotoUrl(display);
-      setChild(prev =>
-        prev && prev.id === child.id
-          ? {
-              ...prev,
-              photo_url: url,
-              local_photo_path: cur?.local_photo_path ?? prev.local_photo_path ?? null,
-            }
-          : prev
-      );
     } catch (error) {
       console.error('Error uploading photo:', error);
       Alert.alert('Erreur', 'Impossible de télécharger la photo');

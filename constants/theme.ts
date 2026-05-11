@@ -15,6 +15,14 @@ export const THEME = {
   brandTerracottaTopOverlay: 'rgba(68, 28, 16, 0.55)',
   /** Cœur favori **plein** sous un post du fil (terracotta brique) */
   feedFavoriteTerracotta: '#D06235',
+  /**
+   * Fond du CTA pill « Écrire un souvenir » — écran Capturer uniquement.
+   */
+  captureWriteCtaBackground: '#FFFFFF',
+  /** Fond icône carte « Enregistrer » — écran Capturer (maquette v4). */
+  captureRecordIconBackground: '#7C4FD6',
+  /** Fond icône carte « Importer » — écran Capturer (maquette v4). */
+  captureImportIconBackground: '#2B7FFF',
   /** CTA primaires, liens, spinners (hors cœur du fil) — noir (remplace le bleu). */
   accent: '#1C1C1E',
   /** Fond type paywall — espace parent, création / édition profil enfant */

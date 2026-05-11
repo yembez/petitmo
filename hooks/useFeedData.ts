@@ -16,7 +16,13 @@ import {
   fetchMemoriesByIds,
   requestMissingMediaDerivatives,
 } from '@/services/media';
-import { getChildren, getOrSelectFirstChild, setSelectedChild } from '@/services/children';
+import {
+  getChildren,
+  getOrSelectFirstChild,
+  setSelectedChild,
+  sanitizeChildLocalAvatarIfMissing,
+  PETITMO_CHILD_PROFILE_UPDATED_EVENT,
+} from '@/services/children';
 import { listBooks, type Book } from '@/services/books';
 import type { PendingUpload } from '@/contexts/PendingMediaUploadsContext';
 import {
@@ -168,6 +174,24 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
     const subUpdated = DeviceEventEmitter.addListener('petitmo:memories-updated', () => {
       void loadData({ silent: true });
     });
+    const subChildProfile = DeviceEventEmitter.addListener(
+      PETITMO_CHILD_PROFILE_UPDATED_EVENT,
+      (payload: { childId: string }) => {
+        void (async () => {
+          const id = payload?.childId?.trim();
+          if (!id || childRef.current?.id !== id) return;
+          try {
+            const all = await getChildren();
+            const row = all.find(c => c.id === id);
+            if (!row) return;
+            const cleaned = await sanitizeChildLocalAvatarIfMissing(row);
+            setChild(cleaned);
+          } catch (e) {
+            console.error('Fil: refresh profil enfant', e);
+          }
+        })();
+      }
+    );
     const subInserted = DeviceEventEmitter.addListener(
       'petitmo:memories-inserted',
       (payload: unknown) => {
@@ -213,6 +237,7 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
     return () => {
       subInvalidate.remove();
       subUpdated.remove();
+      subChildProfile.remove();
       subInserted.remove();
     };
   }, [loadData]);

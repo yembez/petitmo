@@ -28,7 +28,7 @@ import PhotoMosaic from '@/components/PhotoMosaic';
 import AudioPlayer from '@/components/AudioPlayer';
 import EditTextModal from '@/components/EditTextModal';
 import { getMemoryById, updateMemoryContent } from '@/services/media';
-import { resolveChildProfileImageUri } from '@/utils/childPhotoUri';
+import { resolveChildProfileImageDisplayUri } from '@/utils/childPhotoUri';
 import { getChildren } from '@/services/children';
 import { getAllPhotoUrlsForDisplay, parseFavoritePhotoUrls } from '@/utils/memoryPhotos';
 import { getSignedMediaDisplayUrl, useSignedMediaUrl } from '@/lib/mediaSignedUrl';
@@ -271,7 +271,11 @@ export default function MemoryViewScreen() {
       const direct = typeof b.coverPhotoUrl === 'string' ? b.coverPhotoUrl.trim() : '';
       if (direct) return direct;
       if (!child) return null;
-      return resolveChildProfileImageUri(child.local_photo_path, signedChildRemote ?? child.photo_url);
+      return resolveChildProfileImageDisplayUri(
+        child.local_photo_path,
+        signedChildRemote ?? child.photo_url,
+        child.updated_at,
+      );
     },
     [child, signedChildRemote]
   );

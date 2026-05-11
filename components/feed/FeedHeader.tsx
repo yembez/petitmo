@@ -8,7 +8,7 @@ import { scale, verticalScale } from '@/utils/responsive';
 import type { Child } from '@/utils/feedHelpers';
 import { styles } from '@/components/feed/feedStyles';
 import { THEME } from '@/constants/theme';
-import { resolveChildProfileImageUri } from '@/utils/childPhotoUri';
+import { resolveChildProfileImageDisplayUri } from '@/utils/childPhotoUri';
 
 export type FeedHeaderProps = {
   child: Child | null;
@@ -35,7 +35,12 @@ export const FeedHeader = memo(function FeedHeader({ child, paddingTop, onMenuPr
     );
   }
 
-  const photoUri = resolveChildProfileImageUri(child.local_photo_path, child.photo_url) ?? '';
+  const photoUri =
+    resolveChildProfileImageDisplayUri(
+      child.local_photo_path,
+      child.photo_url,
+      child.updated_at,
+    ) ?? '';
   const firstName = child.name.trim().split(/\s+/)[0] || child.name;
   const agePresent = child.birthdate ? calculateAge(child.birthdate) : '';
 
@@ -49,7 +54,7 @@ export const FeedHeader = memo(function FeedHeader({ child, paddingTop, onMenuPr
               style={StyleSheet.absoluteFillObject}
               contentFit="cover"
               cachePolicy="memory-disk"
-              recyclingKey={child.id}
+              recyclingKey={`${child.id}-${child.updated_at ?? ''}`}
             />
           </View>
         ) : (

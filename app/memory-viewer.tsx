@@ -28,9 +28,19 @@ import { getPrimaryPhotoUriForBookPreview } from '@/utils/memoryPhotos';
 import { formatAgeAtMemory, formatDateLong } from '@/utils/date';
 import { useFeedVideoPlaybackUri } from '@/hooks/useFeedVideoPlaybackUri';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
+import { ensurePlaybackAudioForListening } from '@/lib/playbackAudioMode';
 import AudioPlayer from '@/components/AudioPlayer';
 import EditTextModal from '@/components/EditTextModal';
 import { updateMemoryContent } from '@/services/media';
+import { useToggleFavorite } from '@/hooks/useToggleFavorite';
+import {
+  CapturedAtOverlay,
+  FeedPhotoFavoriteOverlay,
+} from '@/components/feed/FeedMediaOverlays';
+import {
+  capturedMediaDateLabel,
+  shouldShowCapturedMediaDateOverlay,
+} from '@/utils/feedCaptureOverlay';
 
 const BG = '#000000';
 const CAPTION = 'rgba(255,255,255,0.92)';
@@ -52,6 +62,7 @@ export default function MemoryViewerScreen() {
   const [editingTextMemory, setEditingTextMemory] = useState<Memory | null>(null);
   const listRef = useRef<FlatList<Memory>>(null);
   const didHydrateRef = useRef(false);
+  const toggleFavorite = useToggleFavorite(setMemories);
 
   useEffect(() => {
     if (didHydrateRef.current) return;
@@ -76,6 +87,7 @@ export default function MemoryViewerScreen() {
   useFocusEffect(
     useCallback(() => {
       setStatusBarStyle('light');
+      void ensurePlaybackAudioForListening();
       return () => setStatusBarStyle('dark');
     }, [])
   );
@@ -106,9 +118,10 @@ export default function MemoryViewerScreen() {
         childFirstName={child?.name?.trim().split(/\s+/)[0] ?? ''}
         childBirthdate={child?.birthdate ?? null}
         onRequestEditText={m => setEditingTextMemory(m)}
+        toggleFavorite={toggleFavorite}
       />
     ),
-    [visibleId, itemHeight, windowW, child?.name, child?.birthdate]
+    [visibleId, itemHeight, windowW, child?.name, child?.birthdate, toggleFavorite]
   );
 
   const handleSaveTextEdit = useCallback(
@@ -202,6 +215,7 @@ function ImmersivePage({
   childFirstName,
   childBirthdate,
   onRequestEditText,
+  toggleFavorite,
 }: {
   memory: Memory;
   isActive: boolean;
@@ -210,6 +224,7 @@ function ImmersivePage({
   childFirstName: string;
   childBirthdate: string | null;
   onRequestEditText: (m: Memory) => void;
+  toggleFavorite: (id: string) => void | Promise<void>;
 }) {
   const addedLabel = formatDateLong(memory.inserted_at || memory.created_at);
   const ageAt = childBirthdate
@@ -218,6 +233,11 @@ function ImmersivePage({
   const loc = memory.location?.trim()
     ? memory.location.replace(/\s*\([^)]*\)\s*$/, '').trim()
     : '';
+
+  const showCapturedOnMedia =
+    (memory.type === 'photo' || memory.type === 'video') &&
+    shouldShowCapturedMediaDateOverlay(memory);
+  const capturedLabelOnMedia = showCapturedOnMedia ? capturedMediaDateLabel(memory) : '';
 
   return (
     <View style={{ height, width, backgroundColor: BG }}>
@@ -234,15 +254,32 @@ function ImmersivePage({
       </View>
 
       <View style={styles.mediaBlock}>
-        {memory.type === 'photo' && <ImmersivePhoto memory={memory} />}
+        {memory.type === 'photo' && (
+          <ImmersivePhoto
+            memory={memory}
+            showCapturedOverlay={showCapturedOnMedia}
+            capturedOverlayLabel={capturedLabelOnMedia}
+            onToggleFavorite={toggleFavorite}
+          />
+        )}
         {memory.type === 'video' && (
-          <ImmersiveVideo memory={memory} isActive={isActive} width={width} height={height * 0.62} />
+          <ImmersiveVideo
+            memory={memory}
+            isActive={isActive}
+            showCapturedOverlay={showCapturedOnMedia}
+            capturedOverlayLabel={capturedLabelOnMedia}
+            onToggleFavorite={toggleFavorite}
+          />
         )}
         {memory.type === 'voice' && (
-          <ImmersiveVoice memory={memory} width={width} />
+          <ImmersiveVoice memory={memory} width={width} onToggleFavorite={toggleFavorite} />
         )}
         {memory.type === 'text' && (
-          <ImmersiveText memory={memory} onTapEdit={() => onRequestEditText(memory)} />
+          <ImmersiveText
+            memory={memory}
+            onTapEdit={() => onRequestEditText(memory)}
+            onToggleFavorite={toggleFavorite}
+          />
         )}
       </View>
 
@@ -257,89 +294,227 @@ function ImmersivePage({
   );
 }
 
-function ImmersivePhoto({ memory }: { memory: Memory }) {
+function ImmersivePhoto({
+  memory,
+  showCapturedOverlay,
+  capturedOverlayLabel,
+  onToggleFavorite,
+}: {
+  memory: Memory;
+  showCapturedOverlay: boolean;
+  capturedOverlayLabel: string;
+  onToggleFavorite: (id: string) => void | Promise<void>;
+}) {
   const raw = getPrimaryPhotoUriForBookPreview(memory)?.trim() ?? '';
   const signed = useSignedMediaUrl(raw || null);
   const uri = (signed ?? raw).trim();
+
+  const overlays = (
+    <>
+      <FeedPhotoFavoriteOverlay
+        isFavorite={!!memory.is_favorite}
+        inkOverride={memory.captured_overlay_ink}
+        onPress={() => void onToggleFavorite(memory.id)}
+      />
+      {showCapturedOverlay && uri ? (
+        <CapturedAtOverlay
+          uriForAnalysis={uri}
+          label={capturedOverlayLabel}
+          inkOverride={memory.captured_overlay_ink}
+        />
+      ) : null}
+    </>
+  );
+
   if (!uri) {
-    return <View style={styles.mediaFallback} />;
+    return (
+      <View style={[styles.photoImmersiveWrap, styles.mediaFallback]}>
+        <FeedPhotoFavoriteOverlay
+          isFavorite={!!memory.is_favorite}
+          inkOverride={memory.captured_overlay_ink}
+          onPress={() => void onToggleFavorite(memory.id)}
+        />
+      </View>
+    );
   }
   return (
-    <Image
-      source={{ uri }}
-      style={styles.fullBleed}
-      contentFit="cover"
-      cachePolicy="disk"
-      recyclingKey={memory.id}
-    />
+    <View style={styles.photoImmersiveWrap}>
+      <Image
+        source={{ uri }}
+        style={styles.fullBleed}
+        contentFit="cover"
+        cachePolicy="disk"
+        recyclingKey={memory.id}
+      />
+      {overlays}
+    </View>
   );
 }
 
 function ImmersiveVideo({
   memory,
   isActive,
-  width,
-  height,
+  showCapturedOverlay,
+  capturedOverlayLabel,
+  onToggleFavorite,
 }: {
   memory: Memory;
   isActive: boolean;
-  width: number;
-  height: number;
+  showCapturedOverlay: boolean;
+  capturedOverlayLabel: string;
+  onToggleFavorite: (id: string) => void | Promise<void>;
 }) {
   const uri = useFeedVideoPlaybackUri(memory);
   const posterRaw =
     (memory.poster_url?.trim() || memory.thumbnail_url?.trim() || '') || '';
   const posterSigned = useSignedMediaUrl(posterRaw || null) ?? '';
 
-  if (!uri?.trim() && !posterSigned?.trim()) {
-    return <View style={[styles.mediaFallback, { width, height }]} />;
+  const seedNatural = useMemo(() => {
+    const w = memory.original_px_w ?? 0;
+    const h = memory.original_px_h ?? 0;
+    return w > 0 && h > 0 ? ({ w, h } as const) : null;
+  }, [memory.original_px_w, memory.original_px_h]);
+
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(seedNatural);
+
+  useEffect(() => {
+    const w = memory.original_px_w ?? 0;
+    const h = memory.original_px_h ?? 0;
+    setNatural(w > 0 && h > 0 ? { w, h } : null);
+  }, [memory.id, memory.original_px_w, memory.original_px_h]);
+
+  const onReadyForDisplay = useCallback(
+    (e: { naturalSize?: { width: number; height: number } }) => {
+      const nw = e.naturalSize?.width ?? 0;
+      const nh = e.naturalSize?.height ?? 0;
+      if (nw > 0 && nh > 0) setNatural({ w: nw, h: nh });
+    },
+    []
+  );
+
+  const onPosterLoad = useCallback((e: { source: { width?: number; height?: number } }) => {
+    const w = e.source.width ?? 0;
+    const h = e.source.height ?? 0;
+    if (w > 0 && h > 0) setNatural(prev => prev ?? { w, h });
+  }, []);
+
+  /** Paysage (et carré) : tout voir, jamais rogner. Portrait : remplir au max (cover). */
+  const resizeMode =
+    natural && natural.h > natural.w ? ResizeMode.COVER : ResizeMode.CONTAIN;
+  const posterFit = resizeMode === ResizeMode.CONTAIN ? ('contain' as const) : ('cover' as const);
+
+  const trimmedUri = uri?.trim() ?? '';
+  const videoUriForOverlay = (posterSigned.trim() || trimmedUri).trim();
+
+  const favoriteOverlay = (
+    <FeedPhotoFavoriteOverlay
+      isFavorite={!!memory.is_favorite}
+      inkOverride={memory.captured_overlay_ink}
+      onPress={() => void onToggleFavorite(memory.id)}
+    />
+  );
+
+  const captureOverlay =
+    showCapturedOverlay && videoUriForOverlay ? (
+      <CapturedAtOverlay
+        uriForAnalysis={videoUriForOverlay}
+        label={capturedOverlayLabel}
+        inkOverride={memory.captured_overlay_ink}
+      />
+    ) : null;
+
+  const mediaOverlays = (
+    <>
+      {favoriteOverlay}
+      {captureOverlay}
+    </>
+  );
+
+  if (!trimmedUri && !posterSigned.trim()) {
+    return (
+      <View style={[styles.videoImmersiveWrap, styles.mediaFallback]}>
+        {mediaOverlays}
+      </View>
+    );
   }
 
-  return (
-    <View style={{ width, height, backgroundColor: '#0A0A0A' }}>
-      {uri?.trim() && isActive ? (
+  if (trimmedUri && isActive) {
+    return (
+      <View style={styles.videoImmersiveWrap}>
         <Video
-          source={{ uri: uri.trim() }}
-          style={{ width, height }}
-          resizeMode={ResizeMode.COVER}
-          shouldPlay={isActive}
+          source={{ uri: trimmedUri }}
+          style={StyleSheet.absoluteFillObject}
+          resizeMode={resizeMode}
+          shouldPlay
           isLooping
           isMuted={false}
           useNativeControls={false}
+          onReadyForDisplay={onReadyForDisplay}
         />
-      ) : posterSigned ? (
+        {mediaOverlays}
+      </View>
+    );
+  }
+
+  if (posterSigned) {
+    return (
+      <View style={styles.videoImmersiveWrap}>
         <Image
           source={{ uri: posterSigned }}
-          style={{ width, height }}
-          contentFit="cover"
+          style={StyleSheet.absoluteFillObject}
+          contentFit={posterFit}
           cachePolicy="disk"
+          recyclingKey={memory.id}
+          onLoad={onPosterLoad}
         />
-      ) : uri?.trim() ? (
+        {mediaOverlays}
+      </View>
+    );
+  }
+
+  if (trimmedUri) {
+    return (
+      <View style={styles.videoImmersiveWrap}>
         <Video
-          source={{ uri: uri.trim() }}
-          style={{ width, height }}
-          resizeMode={ResizeMode.COVER}
+          source={{ uri: trimmedUri }}
+          style={StyleSheet.absoluteFillObject}
+          resizeMode={resizeMode}
           shouldPlay={false}
           isMuted
           useNativeControls={false}
+          onReadyForDisplay={onReadyForDisplay}
         />
-      ) : (
-        <View style={[styles.mediaFallback, { width, height }]} />
-      )}
+        {mediaOverlays}
+      </View>
+    );
+  }
+
+  return (
+    <View style={[styles.videoImmersiveWrap, styles.mediaFallback]}>
+      {mediaOverlays}
     </View>
   );
 }
 
-function ImmersiveVoice({ memory, width }: { memory: Memory; width: number }) {
+function ImmersiveVoice({
+  memory,
+  width,
+  onToggleFavorite,
+}: {
+  memory: Memory;
+  width: number;
+  onToggleFavorite: (id: string) => void | Promise<void>;
+}) {
   const signed =
     useSignedMediaUrl(memory.type === 'voice' ? (memory.media_url ?? null) : null) ?? '';
   const uri = signed.trim() || (memory.media_url ?? '').trim();
   const coverRaw = (memory.voice_cover_path ?? memory.voice_cover_url) ?? null;
   const coverUri = useSignedMediaUrl(coverRaw) ?? '';
+  const hasCover = !!coverUri.trim();
 
   return (
-    <View style={[styles.voiceWrap, { width }]}>
-      {coverUri.trim() ? (
+    <View style={[styles.voiceWrapImmersive, { width }, styles.immersiveMediaOverlaysHost]}>
+      {hasCover ? (
         <Image
           source={{ uri: coverUri.trim() }}
           style={StyleSheet.absoluteFillObject}
@@ -349,18 +524,23 @@ function ImmersiveVoice({ memory, width }: { memory: Memory; width: number }) {
       ) : (
         <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#1C1C1E' }]} />
       )}
-      <View style={styles.voicePlayer}>
+      <View style={[styles.voicePlayerImmersive, hasCover && styles.voicePlayerImmersiveCoverScrim]}>
         {uri ? (
           <AudioPlayer
             uri={uri}
             duration={memory.duration || 0}
             playbackStartSec={memory.voice_playback_start_sec ?? null}
-            variant={coverUri.trim() ? 'coverBottom' : 'default'}
-            controlIconColor="#FFFFFF"
-            coverFlushBottom={!!coverUri.trim()}
+            variant={hasCover ? 'coverBottom' : 'default'}
+            controlIconColor={hasCover ? '#1C1C1E' : '#FFFFFF'}
+            coverFlushBottom={hasCover}
           />
         ) : null}
       </View>
+      <FeedPhotoFavoriteOverlay
+        isFavorite={!!memory.is_favorite}
+        inkOverride={memory.captured_overlay_ink}
+        onPress={() => void onToggleFavorite(memory.id)}
+      />
     </View>
   );
 }
@@ -368,9 +548,11 @@ function ImmersiveVoice({ memory, width }: { memory: Memory; width: number }) {
 function ImmersiveText({
   memory,
   onTapEdit,
+  onToggleFavorite,
 }: {
   memory: Memory;
   onTapEdit: () => void;
+  onToggleFavorite: (id: string) => void | Promise<void>;
 }) {
   const raw = memory.content?.trim() || '';
   const fitLevel = useMemo<0 | 1 | 2 | 3>(() => {
@@ -419,23 +601,30 @@ function ImmersiveText({
           : styles.textParaGap;
 
   return (
-    <Pressable
-      onPress={onTapEdit}
-      style={[styles.textWrap, wrapStyle]}
-      accessibilityRole="button"
-      accessibilityLabel="Modifier le texte"
-    >
-      {paragraphs.map((para, idx) => (
-        <Text
-          key={idx}
-          style={[bodyStyle, idx > 0 && paraGapStyle]}
-          {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
-        >
-          {EM_QUAD}
-          {para.replace(/\n/g, `\n${EM_QUAD}`)}
-        </Text>
-      ))}
-    </Pressable>
+    <View style={styles.textImmersiveOuter}>
+      <Pressable
+        onPress={onTapEdit}
+        style={[styles.textWrap, wrapStyle]}
+        accessibilityRole="button"
+        accessibilityLabel="Modifier le texte"
+      >
+        {paragraphs.map((para, idx) => (
+          <Text
+            key={idx}
+            style={[bodyStyle, idx > 0 && paraGapStyle]}
+            {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
+          >
+            {EM_QUAD}
+            {para.replace(/\n/g, `\n${EM_QUAD}`)}
+          </Text>
+        ))}
+      </Pressable>
+      <FeedPhotoFavoriteOverlay
+        isFavorite={!!memory.is_favorite}
+        inkOverride={memory.captured_overlay_ink}
+        onPress={() => void onToggleFavorite(memory.id)}
+      />
+    </View>
   );
 }
 
@@ -471,6 +660,36 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     minHeight: verticalScale(200),
   },
+  /** Photo immersive : conteneur pour overlays (favori + date) comme dans le fil. */
+  photoImmersiveWrap: {
+    flex: 1,
+    width: '100%',
+    alignSelf: 'stretch',
+    minHeight: 0,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  /** Hôte positionné pour pastilles fil (cœur bas-droite). */
+  immersiveMediaOverlaysHost: {
+    position: 'relative',
+  },
+  /** Texte immersif : fond noir + cœur favori comme ligne d’actions fil. */
+  textImmersiveOuter: {
+    flex: 1,
+    width: '100%',
+    minHeight: 0,
+    position: 'relative',
+  },
+  /** Vidéo immersive : même extension que photo / vocal dans le bloc média. */
+  videoImmersiveWrap: {
+    flex: 1,
+    width: '100%',
+    alignSelf: 'stretch',
+    minHeight: 0,
+    position: 'relative',
+    backgroundColor: '#000000',
+    overflow: 'hidden',
+  },
   fullBleed: {
     width: '100%',
     minHeight: verticalScale(320),
@@ -491,16 +710,23 @@ const styles = StyleSheet.create({
     fontSize: scale(15),
     lineHeight: scale(22),
   },
-  voiceWrap: {
-    minHeight: verticalScale(280),
-    justifyContent: 'flex-end',
+  /** Vocal immersif : même zone que la photo (flex dans mediaBlock), cover en plein écran. */
+  voiceWrapImmersive: {
+    flex: 1,
+    width: '100%',
+    alignSelf: 'stretch',
+    minHeight: 0,
+    position: 'relative',
     overflow: 'hidden',
-    borderRadius: scale(12),
-    marginHorizontal: scale(16),
+    justifyContent: 'flex-end',
   },
-  voicePlayer: {
+  voicePlayerImmersive: {
+    width: '100%',
     paddingVertical: verticalScale(16),
     paddingHorizontal: scale(16),
+  },
+  voicePlayerImmersiveCoverScrim: {
+    backgroundColor: 'rgba(0,0,0,0.42)',
   },
   textWrap: {
     flex: 1,

@@ -24,3 +24,28 @@ export function resolveChildProfileImageUri(
   const remote = (remotePhotoUrl ?? '').trim()
   return remote || null
 }
+
+/**
+ * URI affichage profil : évite le cache natif quand un fichier local est écrasé au même chemin
+ * (ex. `petitmo_children/{id}.jpg`) en faisant varier l’URL quand `updated_at` change.
+ * Ne pas toucher aux URL http(s) (signatures, etc.).
+ */
+export function resolveChildProfileImageDisplayUri(
+  localPhotoPath: string | null | undefined,
+  remotePhotoUrl: string | null | undefined,
+  updatedAt: string | null | undefined,
+): string | null {
+  const base = resolveChildProfileImageUri(localPhotoPath, remotePhotoUrl)
+  if (!base) return null
+  const rev = (updatedAt ?? '').trim()
+  if (!rev) return base
+  if (
+    base.startsWith('file:') ||
+    base.startsWith('content:') ||
+    base.startsWith('ph://')
+  ) {
+    const sep = base.includes('?') ? '&' : '?'
+    return `${base}${sep}petitmo_v=${encodeURIComponent(rev)}`
+  }
+  return base
+}

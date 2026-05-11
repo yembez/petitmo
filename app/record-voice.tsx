@@ -201,6 +201,7 @@ export default function RecordVoiceScreen() {
       recordingFileUriRef.current = fileUri;
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
       });
 
       setHasRecording(true);

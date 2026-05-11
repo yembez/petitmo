@@ -1902,6 +1902,7 @@ export async function toggleFavorite(memoryId: string, isFavorite: boolean) {
   try {
     if ((await getCachedUserMode()) === 'local') {
       updateLocalMemoryFavorite(memoryId, isFavorite);
+      DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId });
       return true;
     }
 
@@ -1919,6 +1920,7 @@ export async function toggleFavorite(memoryId: string, isFavorite: boolean) {
     updateLocalMemoryUrls(memoryId, {
       upload_status: undefined,
     });
+    DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId });
     return true;
   } catch (error) {
     console.error('Toggle favorite error:', error);

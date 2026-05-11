@@ -2,7 +2,7 @@ import { supabase } from '@/lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
 import { copyAsync, documentDirectory, downloadAsync, getInfoAsync, makeDirectoryAsync } from 'expo-file-system/legacy';
-import { Platform } from 'react-native';
+import { DeviceEventEmitter, Platform } from 'react-native';
 import type { Database } from '@/types/database';
 import type { Child as LocalChild } from '@/types/local';
 import { getCachedUserMode } from '@/lib/userMode';
@@ -12,6 +12,15 @@ import { resolveChildProfileImageUri } from '@/utils/childPhotoUri';
 import { ensureLocalImageForPalette } from '@/hooks/ensureLocalImageForPalette';
 
 type ChildRow = Database['public']['Tables']['children']['Row'];
+
+/** Émis après mise à jour profil enfant (photo, nom…) — ex. rafraîchir l’onglet Capturer. */
+export const PETITMO_CHILD_PROFILE_UPDATED_EVENT = 'petitmo:child-profile-updated' as const;
+
+function notifyChildProfileUpdated(childId: string): void {
+  const id = childId.trim();
+  if (!id) return;
+  DeviceEventEmitter.emit(PETITMO_CHILD_PROFILE_UPDATED_EVENT, { childId: id });
+}
 
 function isChildDuplicateKeyError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
@@ -266,6 +275,7 @@ export async function uploadChildPhoto(childId: string, photoUri: string): Promi
         updated_at: now,
       };
       upsertLocalChild(next);
+      notifyChildProfileUpdated(childId);
       return dest;
     }
 
@@ -337,6 +347,7 @@ export async function uploadChildPhoto(childId: string, photoUri: string): Promi
       });
     }
 
+    notifyChildProfileUpdated(childId);
     return signedUrl;
   } catch (error) {
     console.error('Upload child photo error:', error);
@@ -585,6 +596,7 @@ export async function updateChild(
         updated_at: new Date().toISOString(),
       };
       upsertLocalChild(next);
+      notifyChildProfileUpdated(childId);
       return next;
     }
 
@@ -607,6 +619,7 @@ export async function updateChild(
       updated_at: data.updated_at ?? base.updated_at,
     };
     upsertLocalChild(next);
+    notifyChildProfileUpdated(childId);
     return next;
   } catch (error) {
     console.error('Update child error:', error);
