@@ -16,8 +16,8 @@ const FEED_GUTTER = scale(20);
 const TEXT_POST_GUTTER = scale(32);
 /** Contours des blocs — très discrets */
 const POST_BORDER_SUBTLE = 'rgba(0,0,0,0.08)';
-/** Pills d’action : trait léger type iOS */
-const ACTION_OUTLINE = 'rgba(0,0,0,0.14)';
+/** Liseré fin fil (avatar header, etc.) */
+const FEED_BLACK_HAIRLINE = '#000000';
 const GREY_ACTIVE_BG = '#E5E7EB';
 const GREY_ACTIVE_BORDER = '#D1D5DB';
 /** Hauteur du bloc « traits + date · âge » — alignée sur `styles.daySeparatorBlock` (chaque post) */
@@ -83,6 +83,8 @@ const styles = StyleSheet.create({
     borderRadius: HEADER_AVATAR_PX / 2,
     overflow: 'hidden',
     backgroundColor: 'rgba(208, 98, 53, 0.08)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: FEED_BLACK_HAIRLINE,
   },
   headerAvatarPlaceholder: {
     width: HEADER_AVATAR_PX,
@@ -91,6 +93,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(208, 98, 53, 0.14)',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: FEED_BLACK_HAIRLINE,
   },
   headerAvatarLetter: {
     fontSize: scale(26),
@@ -377,6 +381,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(0,0,0,0.05)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: FEED_BLACK_HAIRLINE,
   },
   feedFavoriteActionCircleActive: {
     backgroundColor: 'rgba(255,255,255,0.72)',
@@ -524,7 +530,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: scale(12),
     borderRadius: scale(100),
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: ACTION_OUTLINE,
+    borderColor: FEED_BLACK_HAIRLINE,
     backgroundColor: 'rgba(255,255,255,0.5)',
   },
   swipeDeleteContainer: {

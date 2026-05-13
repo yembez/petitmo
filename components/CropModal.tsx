@@ -18,8 +18,12 @@ import Animated, {
 import * as ImageManipulator from 'expo-image-manipulator';
 import { Image } from 'expo-image';
 import Svg, { Defs, Mask, Rect } from 'react-native-svg';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets, useSafeAreaFrame } from 'react-native-safe-area-context';
 import { scale as s, verticalScale } from '@/utils/responsive';
+import {
+  computeCaptureHeroPhotoViewport,
+  insetCropRectForCaptureHeroViewport,
+} from '@/utils/captureHeroMetrics';
 
 type CropModalProps = {
   visible: boolean;
@@ -41,6 +45,7 @@ function clamp(v: number, min: number, max: number): number {
 export function CropModal({ visible, imageUri, onCancel, onConfirm, onChangePhoto }: CropModalProps) {
   const { width: screenW, height: screenH } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const frame = useSafeAreaFrame();
   const headerH = 52;
   const footerH = 80;
   const bodyPadV = verticalScale(18);
@@ -50,15 +55,16 @@ export function CropModal({ visible, imageUri, onCancel, onConfirm, onChangePhot
   const stageW = screenW;
   const maxCropH = Math.max(180, Math.round(stageH - bodyPadV * 2));
 
-  // Zone de crop 4:5 centrée, largeur = screenW-40 (bornée par la hauteur dispo)
+  /** Même ratio que le hero photo de l’onglet Capturer (plein cadre, sans bandes après export). */
+  const captureHeroViewport = useMemo(
+    () => computeCaptureHeroPhotoViewport(frame.height, screenH, screenW, insets.top),
+    [frame.height, insets.top, screenH, screenW],
+  );
+
   const cropRect = useMemo(() => {
     const maxW = Math.max(180, Math.round(screenW - 40));
-    const naturalH = Math.round((maxW * 5) / 4);
-    if (naturalH <= maxCropH) return { width: maxW, height: naturalH };
-    const h = maxCropH;
-    const w = Math.round((h * 4) / 5);
-    return { width: w, height: h };
-  }, [maxCropH, screenW]);
+    return insetCropRectForCaptureHeroViewport(maxW, maxCropH, captureHeroViewport);
+  }, [captureHeroViewport, maxCropH, screenW]);
 
   const cropRectLeft = useMemo(() => (stageW - cropRect.width) / 2, [cropRect.width, stageW]);
   const cropRectTop = useMemo(() => (stageH - cropRect.height) / 2, [cropRect.height, stageH]);
@@ -203,7 +209,7 @@ export function CropModal({ visible, imageUri, onCancel, onConfirm, onChangePhot
               height: Math.round(safeH),
             },
           },
-          /** Largeur max seulement : conserve le ratio (évite d’écraser une photo entière non 4:5). */
+          /** Largeur max seulement : conserve le ratio du crop (celui du hero Capturer). */
           { resize: { width: 800 } },
         ],
         { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }

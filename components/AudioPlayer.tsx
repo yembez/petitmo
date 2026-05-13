@@ -55,6 +55,8 @@ interface AudioPlayerProps {
   controlIconColor?: string;
   /** Réduit les marges internes pour coller play + onde au bas du visuel (ex. fil avec photo). */
   coverFlushBottom?: boolean;
+  /** Fil : liseré noir fin autour du disque play / pause. */
+  feedPlayDiscOutline?: boolean;
 }
 
 export default function AudioPlayer({
@@ -64,6 +66,7 @@ export default function AudioPlayer({
   variant = 'default',
   controlIconColor = '#FFFFFF',
   coverFlushBottom = false,
+  feedPlayDiscOutline = false,
 }: AudioPlayerProps) {
   const [sound, setSound] = useState<Audio.Sound | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -295,6 +298,7 @@ export default function AudioPlayer({
     <TouchableOpacity
       style={[
         styles.playButtonCoverFlush,
+        feedPlayDiscOutline && styles.playButtonCoverFlushFeedOutline,
         {
           width: PLAY_FLUSH,
           height: PLAY_FLUSH,
@@ -334,6 +338,7 @@ export default function AudioPlayer({
       <TouchableOpacity
         style={[
           styles.playButton,
+          feedPlayDiscOutline && styles.playButtonFeedOutline,
           {
             top: (stack - PLAY) / 2,
             left: (stack - PLAY) / 2,
@@ -465,6 +470,10 @@ const styles = StyleSheet.create({
     shadowRadius: scale(8),
     elevation: 4,
   },
+  playButtonFeedOutline: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#000000',
+  },
   /** Fil vocal + photo : play bien visible, bas aligné avec l’onde */
   playButtonCoverFlush: {
     flexShrink: 0,
@@ -478,6 +487,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.38,
     shadowRadius: scale(10),
     elevation: 10,
+  },
+  playButtonCoverFlushFeedOutline: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#000000',
   },
   waveform: {
     flexDirection: 'row',

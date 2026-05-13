@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Platform } from 'react-native';
 import { Tabs } from 'expo-router';
 import type { LucideIcon } from 'lucide-react-native';
 import { BookOpenText, Heart, List, Plus } from 'lucide-react-native';
@@ -6,11 +6,52 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { THEME } from '@/constants/theme';
 import { scale, verticalScale } from '@/utils/responsive';
 import { APP_ICON_PX } from '@/constants/iconSizes';
+import {
+  TAB_BAR_BACKGROUND,
+  TAB_BAR_BORDER_COLOR,
+  TAB_BAR_BORDER_WIDTH,
+  TAB_BAR_CONTENT_HEIGHT,
+  TAB_BAR_CORNER_RADIUS,
+  TAB_BAR_FLOAT_SIDE_INSET,
+} from '@/constants/tabBarLayout';
 
 const TAB_ICON_SIZE = APP_ICON_PX;
 const TAB_ICON_SIZE_FOCUSED = scale(25);
 
 const INK = '#0A0A0A';
+
+/** Recouvrement léger de la pastille sur l’anneau noir : évite un frange clair (anti-alias) au joint haut. */
+const TAB_BAR_INNER_OVERLAP = StyleSheet.hairlineWidth;
+
+function TabBarBackgroundFill() {
+  const inset = TAB_BAR_BORDER_WIDTH;
+  const o = TAB_BAR_INNER_OVERLAP;
+  const innerRadius = Math.max(0, TAB_BAR_CORNER_RADIUS - inset + o);
+  return (
+    <View
+      pointerEvents="none"
+      style={[
+        StyleSheet.absoluteFillObject,
+        {
+          backgroundColor: TAB_BAR_BORDER_COLOR,
+          borderRadius: TAB_BAR_CORNER_RADIUS,
+        },
+      ]}
+    >
+      <View
+        style={{
+          position: 'absolute',
+          top: Math.max(0, inset - o),
+          left: Math.max(0, inset - o),
+          right: Math.max(0, inset - o),
+          bottom: Math.max(0, inset - o),
+          borderRadius: innerRadius,
+          backgroundColor: TAB_BAR_BACKGROUND,
+        }}
+      />
+    </View>
+  );
+}
 
 function TabBarGlyph({
   Icon,
@@ -36,9 +77,6 @@ function TabBarGlyph({
   );
 }
 
-/** Hauteur utile des icônes + labels (hors safe area / home indicator) */
-const TAB_BAR_CONTENT_HEIGHT = verticalScale(52);
-
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
   const bottomPad = verticalScale(6) + insets.bottom;
@@ -47,20 +85,44 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
+        /** Laisse voir la scène dans les marges latérales sous la tab bar flottante. */
+        sceneStyle: { backgroundColor: 'transparent' },
         tabBarActiveTintColor: INK,
         tabBarInactiveTintColor: INK,
+        /** Liseré : anneau noir + pastille (recouvrement hairline sur l’anneau pour éviter frange claire). */
+        tabBarBackground: () => <TabBarBackgroundFill />,
         tabBarStyle: {
-          backgroundColor: '#FFFFFF',
-          borderTopWidth: StyleSheet.hairlineWidth,
-          borderTopColor: 'rgba(0,0,0,0.28)',
-          elevation: 0,
-          shadowOpacity: 0,
-          shadowOffset: { width: 0, height: 0 },
-          shadowRadius: 0,
+          position: 'absolute',
+          left: TAB_BAR_FLOAT_SIDE_INSET,
+          right: TAB_BAR_FLOAT_SIDE_INSET,
+          bottom: 0,
+          backgroundColor: 'transparent',
+          borderTopWidth: 0,
+          borderRightWidth: 0,
+          borderBottomWidth: 0,
+          borderLeftWidth: 0,
+          borderColor: 'transparent',
+          borderTopLeftRadius: TAB_BAR_CORNER_RADIUS,
+          borderTopRightRadius: TAB_BAR_CORNER_RADIUS,
+          borderBottomLeftRadius: TAB_BAR_CORNER_RADIUS,
+          borderBottomRightRadius: TAB_BAR_CORNER_RADIUS,
+          overflow: 'hidden',
           height: TAB_BAR_CONTENT_HEIGHT + insets.bottom,
           paddingBottom: bottomPad,
           paddingTop: verticalScale(4),
           paddingHorizontal: scale(8),
+          ...Platform.select({
+            ios: {
+              shadowColor: '#000000',
+              shadowOffset: { width: 0, height: -2 },
+              shadowOpacity: 0.14,
+              shadowRadius: 12,
+            },
+            android: {
+              elevation: 12,
+            },
+            default: {},
+          }),
         },
         tabBarItemStyle: {
           flex: 1,
@@ -81,7 +143,6 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Capturer',
-          sceneStyle: { backgroundColor: '#FBFAF7' },
           tabBarIcon: ({ focused }) => <TabBarGlyph Icon={Plus} focused={focused} />,
         }}
       />

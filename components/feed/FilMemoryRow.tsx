@@ -582,6 +582,7 @@ function FilMemoryRow({
                     variant={(memory.voice_cover_path ?? memory.voice_cover_url) ? 'coverBottom' : 'default'}
                     controlIconColor={ACTION_ICON_INK}
                     coverFlushBottom={!!(memory.voice_cover_path ?? memory.voice_cover_url)}
+                    feedPlayDiscOutline
                   />
                 </View>
               </View>

@@ -30,8 +30,14 @@ export function useFeedVideoAutoplay(
 ): {
   feedAutoplayMemoryId: string | null;
   onViewableItemsChanged: (info: { viewableItems: ViewToken[]; changed: ViewToken[] }) => void;
+  /** Arrête la lecture inline (ex. avant `memory-viewer`) pour éviter deux pistes vidéo. */
+  suspendFeedInlineVideo: () => void;
 } {
   const [feedAutoplayMemoryId, setFeedAutoplayMemoryId] = useState<string | null>(null);
+
+  const suspendFeedInlineVideo = useCallback(() => {
+    setFeedAutoplayMemoryId(null);
+  }, []);
 
   const onViewableItemsChanged = useCallback(
     (info: { viewableItems: ViewToken[]; changed: ViewToken[] }) => {
@@ -55,5 +61,5 @@ export function useFeedVideoAutoplay(
     [onPrefetchViewable]
   );
 
-  return { feedAutoplayMemoryId, onViewableItemsChanged };
+  return { feedAutoplayMemoryId, onViewableItemsChanged, suspendFeedInlineVideo };
 }

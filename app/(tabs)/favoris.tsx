@@ -34,6 +34,7 @@ import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
 import { scale, verticalScale } from '@/utils/responsive';
 import { THEME } from '@/constants/theme';
+import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
 import { SPACING, FONT_SIZES } from '@/constants/sizes';
 import { useFonts, EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
 import { getMemories, requestMissingMediaDerivatives } from '@/services/media';
@@ -1061,6 +1062,11 @@ export default function FavorisScreen() {
                 contentContainerStyle={[
                   styles.galleryContent,
                   selectionMode && selectedIds.size > 0 ? styles.galleryContentWithSelectionCta : null,
+                  {
+                    paddingBottom:
+                      tabBarFloatingOverlapPad(insets.bottom) +
+                      (selectionMode && selectedIds.size > 0 ? verticalScale(52) : verticalScale(6)),
+                  },
                 ]}
                 style={styles.gallery}
                 showsVerticalScrollIndicator={false}

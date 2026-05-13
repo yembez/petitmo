@@ -23,6 +23,7 @@ import { useFilLayout } from '@/hooks/useFilLayout';
 import { useFilRowActions } from '@/hooks/useFilRowActions';
 import { styles } from '@/components/feed/feedStyles';
 import { THEME } from '@/constants/theme';
+import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
 import { FeedHeader } from '@/components/feed/FeedHeader';
 import type { FeedListItem } from '@/components/feed/FilMemoryRow';
 import { peekSilentInitialFilLoadArmed } from '@/services/feedAfterImportFlags';
@@ -67,7 +68,8 @@ export default function FilScreen() {
   } = useFilRowActions(setMemories);
 
   const { onViewableItemsChanged: onPrefetchViewable } = usePrefetchMemories();
-  const { feedAutoplayMemoryId, onViewableItemsChanged } = useFeedVideoAutoplay(onPrefetchViewable);
+  const { feedAutoplayMemoryId, onViewableItemsChanged, suspendFeedInlineVideo } =
+    useFeedVideoAutoplay(onPrefetchViewable);
   const feedViewabilityConfig = useMemo(
     () => ({ itemVisiblePercentThreshold: 50, minimumViewTime: 300 }),
     []
@@ -78,6 +80,7 @@ export default function FilScreen() {
   const listRef = useRef<FlatList<FeedListItem> | null>(null);
   const immersiveLaunchRef = useRef<(index: number) => void>(() => {});
   immersiveLaunchRef.current = (index: number) => {
+    suspendFeedInlineVideo();
     setMemoryViewerSession({ memories, initialIndex: index });
     router.push({
       pathname: '/memory-viewer',
@@ -166,7 +169,10 @@ export default function FilScreen() {
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={feedViewabilityConfig}
           style={styles.scrollView}
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingBottom: verticalScale(28) + tabBarFloatingOverlapPad(insets.bottom) },
+          ]}
           showsVerticalScrollIndicator={false}
           ItemSeparatorComponent={() => <View style={localStyles.postDivider} />}
           refreshControl={

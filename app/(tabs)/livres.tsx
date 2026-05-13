@@ -26,6 +26,7 @@ import type { Book } from '@/services/books';
 import { deleteBook, listBooks } from '@/services/books';
 import { feedBooksHydrationSnapshot } from '@/services/tabScreensCache';
 import { supabase } from '@/lib/supabase';
+import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
 
 export default function LivresScreen() {
   const router = useRouter();
@@ -149,7 +150,7 @@ export default function LivresScreen() {
         contentContainerStyle={[
           styles.listContent,
           books.length === 0 && styles.listContentEmpty,
-          { paddingBottom: insets.bottom + verticalScale(24) },
+          { paddingBottom: verticalScale(24) + tabBarFloatingOverlapPad(insets.bottom) },
         ]}
         ListEmptyComponent={
           <View style={styles.emptyWrap}>

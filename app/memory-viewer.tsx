@@ -16,7 +16,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
 import { Image } from 'expo-image';
 import { Video, ResizeMode } from 'expo-av';
-import { X } from 'lucide-react-native';
+import { Volume2, VolumeX, X } from 'lucide-react-native';
 import { scale, verticalScale } from '@/utils/responsive';
 import {
   clearMemoryViewerSession,
@@ -376,12 +376,17 @@ function ImmersiveVideo({
   }, [memory.original_px_w, memory.original_px_h]);
 
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(seedNatural);
+  const [immersiveVideoSoundOn, setImmersiveVideoSoundOn] = useState(true);
 
   useEffect(() => {
     const w = memory.original_px_w ?? 0;
     const h = memory.original_px_h ?? 0;
     setNatural(w > 0 && h > 0 ? { w, h } : null);
   }, [memory.id, memory.original_px_w, memory.original_px_h]);
+
+  useEffect(() => {
+    setImmersiveVideoSoundOn(true);
+  }, [memory.id]);
 
   const onReadyForDisplay = useCallback(
     (e: { naturalSize?: { width: number; height: number } }) => {
@@ -447,11 +452,26 @@ function ImmersiveVideo({
           resizeMode={resizeMode}
           shouldPlay
           isLooping
-          isMuted={false}
+          isMuted={!immersiveVideoSoundOn}
           useNativeControls={false}
           onReadyForDisplay={onReadyForDisplay}
         />
         {mediaOverlays}
+        <Pressable
+          style={styles.immersiveVideoSoundToggle}
+          onPress={() => setImmersiveVideoSoundOn(v => !v)}
+          accessibilityRole="button"
+          accessibilityLabel={
+            immersiveVideoSoundOn ? 'Couper le son de la vidéo' : 'Activer le son de la vidéo'
+          }
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          {immersiveVideoSoundOn ? (
+            <Volume2 color="#FFFFFF" size={scale(20)} strokeWidth={2} />
+          ) : (
+            <VolumeX color="#FFFFFF" size={scale(20)} strokeWidth={2} />
+          )}
+        </Pressable>
       </View>
     );
   }
@@ -689,6 +709,19 @@ const styles = StyleSheet.create({
     position: 'relative',
     backgroundColor: '#000000',
     overflow: 'hidden',
+  },
+  /** Même logique que le fil : au-dessus des overlays média (favori, date). */
+  immersiveVideoSoundToggle: {
+    position: 'absolute',
+    left: scale(12),
+    top: verticalScale(12),
+    zIndex: 8,
+    width: scale(40),
+    height: scale(40),
+    borderRadius: scale(20),
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.55)',
   },
   fullBleed: {
     width: '100%',
