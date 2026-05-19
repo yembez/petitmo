@@ -34,8 +34,8 @@ export const THEME = {
   accentDeep: '#0A0A0A',
   accentSoft: '#8E8E93',
 
-  /** Jaune accent — CTA écran Capturer (`#F3D25E`). */
-  captureAccentYellow: '#F3D25E',
+  /** Accent CTA écran Capturer — couleur charte (`#FFD34E`). */
+  captureAccentYellow: '#FFD34E',
   /** @deprecated violet maquette initiale — conservé si besoin legacy. */
   captureMaquetteViolet: '#5B47D6',
   /** Icône + libellé onglet actif tab bar. */

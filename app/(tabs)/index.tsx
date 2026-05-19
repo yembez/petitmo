@@ -59,22 +59,28 @@ const CAPTURE_HERO_BREATHE_MIN = 1;
 const CAPTURE_HERO_BREATHE_MAX = 1.03;
 const CAPTURE_HERO_BREATHE_HALF_MS = 8500;
 
-/**
- * Voile très léger sur la photo (neutre, sans teinte marron).
- */
-const HERO_OPTICAL_SOFTNESS = [
-  'rgba(0, 0, 0, 0.04)',
-  'rgba(255, 255, 255, 0.02)',
-  'rgba(0, 0, 0, 0.06)',
+/** Fondu noir léger en haut du hero (lisibilité logo / menu). */
+const HERO_TOP_BLACK_FADE = [
+  'rgba(0, 0, 0, 0.52)',
+  'rgba(0, 0, 0, 0.22)',
+  'rgba(0, 0, 0, 0)',
 ] as const;
+
+/** Hauteur du fondu haut ≈ 30 % du hero (px, pas de % pour fiabilité layout). */
+function captureHeroTopFadeHeight(heroHeight: number): number {
+  return Math.max(verticalScale(72), Math.round(heroHeight * 0.3));
+}
+
+/** Espace volontaire entre le bas du bloc titre et le haut du bloc CTA. */
+const CAPTURE_TITLE_CTA_GAP = verticalScale(18);
 
 /** Accent CTA écran Capturer — aligné sur `THEME.captureAccentYellow`. */
 const CAPTURE_ACCENT = THEME.captureAccentYellow;
 
 const CAPTURE_CTA_BORDER = '#000000';
 
-/** Forme pillule — identique sur Écrire et CTA secondaires (Importer / Enregistrer). */
-const CAPTURE_CTA_PILL_RADIUS = 9999;
+/** Rayon des coins — identique sur Écrire et CTA secondaires (Importer / Enregistrer). */
+const CAPTURE_CTA_BORDER_RADIUS = scale(20);
 
 /** Phosphor `fill` — CTA secondaires Enregistrer / Importer (noir). */
 const CAPTURE_PHOSPHOR_SECONDARY = {
@@ -284,6 +290,10 @@ export default function CapturerScreen() {
   const compact = layoutH < 600;
 
   const captureHeroHeight = useMemo(() => Math.round(layoutH * 0.5), [layoutH]);
+  const captureHeroTopFadeH = useMemo(
+    () => captureHeroTopFadeHeight(captureHeroHeight),
+    [captureHeroHeight],
+  );
 
   const [child, setChild] = useState<Child | null>(() => getCaptureTabChildSnapshot());
   const [isLoading, setIsLoading] = useState(() => getCaptureTabChildSnapshot() === null);
@@ -506,6 +516,12 @@ export default function CapturerScreen() {
                     <Text style={styles.heroPlaceholderText}>{child.name.charAt(0).toUpperCase()}</Text>
                   </View>
                 )}
+                <LinearGradient
+                  colors={[...HERO_TOP_BLACK_FADE]}
+                  locations={[0, 0.5, 1]}
+                  pointerEvents="none"
+                  style={[styles.captureHeroTopBlackFade, { height: captureHeroTopFadeH }]}
+                />
               </TouchableOpacity>
 
               <View
@@ -545,13 +561,12 @@ export default function CapturerScreen() {
                   paddingHorizontal: scale(20),
                   paddingBottom: captureTabBarReserve,
                 },
-                compact && styles.captureContentWhiteCompact,
               ]}
             >
               <View
                 style={[
-                  styles.captureMiddleStack,
-                  compact && styles.captureMiddleStackCompact,
+                  styles.captureTitleZone,
+                  compact && styles.captureTitleZoneCompact,
                 ]}
               >
                 <View style={styles.captureTitleBlock} pointerEvents="none">
@@ -585,7 +600,9 @@ export default function CapturerScreen() {
                     />
                   </View>
                 </View>
+              </View>
 
+              <View style={styles.captureCtaZone}>
                 <View style={styles.captureCtaBlock}>
                   <View style={styles.capturePrimaryWriteWrap}>
                     <CapturePrimaryWriteButton
@@ -694,32 +711,50 @@ const styles = StyleSheet.create({
     position: 'relative',
     backgroundColor: '#000',
   },
+  captureHeroTopBlackFade: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+    elevation: 10,
+  },
   captureContentWhite: {
     width: '100%',
     flex: 1,
     minHeight: 0,
     backgroundColor: THEME.bg,
     alignItems: 'stretch',
-    justifyContent: 'center',
-    paddingVertical: verticalScale(10),
   },
-  captureContentWhiteCompact: {
-    paddingVertical: verticalScale(6),
+  /**
+   * Zone titre : flex 1, contenu calé vers le bas (vers les CTA).
+   * Évite le « double vide » du centrage dans chaque moitié d’écran.
+   */
+  captureTitleZone: {
+    flex: 1,
+    minHeight: 0,
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    paddingBottom: CAPTURE_TITLE_CTA_GAP,
   },
-  /** Titre + CTA groupés — centré dans le bloc blanc, espacement serré. */
-  captureMiddleStack: {
-    alignItems: 'stretch',
-    gap: verticalScale(14),
-  },
-  captureMiddleStackCompact: {
-    gap: verticalScale(10),
+  captureTitleZoneCompact: {
+    paddingBottom: verticalScale(14),
   },
   captureTitleBlock: {
     alignItems: 'center',
+    maxWidth: '100%',
+  },
+  /** Zone CTA : flex 1, contenu calé vers le haut (vers le titre). */
+  captureCtaZone: {
+    flex: 1,
+    minHeight: 0,
+    justifyContent: 'flex-start',
+    alignItems: 'stretch',
   },
   captureCtaBlock: {
     alignItems: 'stretch',
-    flexShrink: 0,
+    alignSelf: 'center',
+    width: '100%',
   },
   captureTitleLine1: {
     textAlign: 'center',
@@ -763,7 +798,7 @@ const styles = StyleSheet.create({
     width: '88%',
     maxWidth: scale(340),
     backgroundColor: CAPTURE_ACCENT,
-    borderRadius: CAPTURE_CTA_PILL_RADIUS,
+    borderRadius: CAPTURE_CTA_BORDER_RADIUS,
     borderWidth: 1,
     borderColor: CAPTURE_CTA_BORDER,
     paddingVertical: verticalScale(16),
@@ -795,7 +830,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: verticalScale(10),
     paddingHorizontal: scale(12),
-    borderRadius: CAPTURE_CTA_PILL_RADIUS,
+    borderRadius: CAPTURE_CTA_BORDER_RADIUS,
     borderWidth: 1,
     borderColor: CAPTURE_CTA_BORDER,
     backgroundColor: THEME.bg,
@@ -860,7 +895,7 @@ type CaptureHeroImageStackProps = {
   reactKey: string;
 };
 
-/** Photo hero plein cadre + léger zoom + voile optique neutre. */
+/** Photo hero plein cadre + léger zoom « respiration ». */
 function CaptureHeroImageStack({ photoUri, reactKey }: CaptureHeroImageStackProps) {
   const breatheScale = useRef(new Animated.Value(CAPTURE_HERO_BREATHE_MIN)).current;
 
@@ -891,7 +926,7 @@ function CaptureHeroImageStack({ photoUri, reactKey }: CaptureHeroImageStackProp
   }, [photoUri, reactKey, breatheScale]);
 
   return (
-    <>
+    <View style={StyleSheet.absoluteFillObject} pointerEvents="box-none">
       <Animated.View
         key={reactKey}
         style={[StyleSheet.absoluteFillObject, { transform: [{ scale: breatheScale }] }]}
@@ -915,12 +950,6 @@ function CaptureHeroImageStack({ photoUri, reactKey }: CaptureHeroImageStackProp
           </ColorMatrix>
         )}
       </Animated.View>
-      <LinearGradient
-        colors={[...HERO_OPTICAL_SOFTNESS]}
-        locations={[0, 0.42, 1]}
-        pointerEvents="none"
-        style={StyleSheet.absoluteFillObject}
-      />
-    </>
+    </View>
   );
 }
