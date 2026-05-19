@@ -33,4 +33,19 @@ export const THEME = {
   accentMuted: '#3A3A3C',
   accentDeep: '#0A0A0A',
   accentSoft: '#8E8E93',
+
+  /** Jaune accent — CTA écran Capturer (`#F3D25E`). */
+  captureAccentYellow: '#F3D25E',
+  /** @deprecated violet maquette initiale — conservé si besoin legacy. */
+  captureMaquetteViolet: '#5B47D6',
+  /** Icône + libellé onglet actif tab bar. */
+  tabBarActiveTint: '#1C1C1E',
+  /** Icône + libellé onglets inactifs. */
+  tabBarInactiveTint: '#8E8E93',
+  /** Fond de la tab bar flottante (off-white). */
+  tabBarSurface: '#F2F0F6',
+  /** Pastille onglet actif tab bar — gris très léger. */
+  tabBarActivePill: '#F2F2F4',
+  /** @deprecated anneau lavande (tab bar violette) — non utilisé sur le bandeau blanc actuel. */
+  tabBarOuterRing: '#D5CEEB',
 } as const;

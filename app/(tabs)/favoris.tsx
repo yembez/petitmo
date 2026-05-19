@@ -34,7 +34,10 @@ import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
 import { scale, verticalScale } from '@/utils/responsive';
 import { THEME } from '@/constants/theme';
-import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
+import {
+  tabBarFloatingBottomInset,
+  tabBarFloatingOverlapPad,
+} from '@/constants/tabBarLayout';
 import { SPACING, FONT_SIZES } from '@/constants/sizes';
 import { useFonts, EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
 import { getMemories, requestMissingMediaDerivatives } from '@/services/media';
@@ -524,9 +527,18 @@ function FavorisFixedTopChrome({
             </>
           ) : (
             <>
-              <Text style={styles.favorisStickyTitle} numberOfLines={1}>
-                Favoris
-              </Text>
+              <View style={styles.favorisTitleRow}>
+                <Text style={styles.favorisStickyTitle} numberOfLines={1}>
+                  Favoris
+                </Text>
+                <Heart
+                  size={scale(22)}
+                  color="#FFFFFF"
+                  fill="#FFFFFF"
+                  strokeWidth={1.6}
+                  style={styles.favorisTitleHeart}
+                />
+              </View>
               <View style={styles.topChromeFlex} />
               <Pressable
                 onPress={onEnterSelection}
@@ -536,8 +548,8 @@ function FavorisFixedTopChrome({
                 accessibilityLabel="Mode sélection"
               >
                 <View style={styles.topChromeSelectCtaContent}>
-                  <BookOpen size={scale(18)} color="#FFFFFF" strokeWidth={2.2} />
-                  <Text style={styles.topChromeBtnTextLight}>Sélectionner</Text>
+                  <BookOpen size={scale(18)} color={THEME.textPrimary} strokeWidth={2.2} />
+                  <Text style={styles.topChromeSelectCtaText}>Sélectionner</Text>
                 </View>
               </Pressable>
             </>
@@ -565,6 +577,9 @@ const HERO_PULL_SCALE_PER_PX = 0.00135;
 const GALLERY_TILE_GAP = 1;
 
 const SELECTION_RING = 22;
+
+/** Hauteur du bandeau « Ajouter au livre » (au-dessus de la tab bar). */
+const FAVORIS_SELECTION_ACTION_BAR_HEIGHT = verticalScale(58);
 
 const AUDIO_WAVE_BARS = [6, 12, 8, 16, 10, 18, 13, 20, 12, 17, 9, 14] as const;
 
@@ -1065,7 +1080,9 @@ export default function FavorisScreen() {
                   {
                     paddingBottom:
                       tabBarFloatingOverlapPad(insets.bottom) +
-                      (selectionMode && selectedIds.size > 0 ? verticalScale(52) : verticalScale(6)),
+                      (selectionMode && selectedIds.size > 0
+                        ? FAVORIS_SELECTION_ACTION_BAR_HEIGHT + verticalScale(6)
+                        : verticalScale(6)),
                   },
                 ]}
                 style={styles.gallery}
@@ -1102,8 +1119,7 @@ export default function FavorisScreen() {
               exiting={SlideOutDown.duration(200)}
               style={[
                 styles.selectionActionBar,
-                /* Pas d’insets.bottom ici : la tab bar occupe déjà la zone home indicator ; sinon bandeau blanc trop haut. */
-                { paddingBottom: verticalScale(6) },
+                { bottom: tabBarFloatingBottomInset(insets.bottom) },
               ]}
             >
               <TouchableOpacity
@@ -1369,20 +1385,27 @@ const styles = StyleSheet.create({
     minWidth: scale(76),
     paddingVertical: verticalScale(6),
   },
-  /** CTA « Sélectionner » sur le héros : pilule grise translucide */
+  /** CTA « Sélectionner » sur le héros — aligné charte Capturer (jaune + contour noir). */
   topChromeSelectCta: {
     minWidth: scale(76),
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: verticalScale(8),
     paddingHorizontal: scale(15),
-    borderRadius: scale(999),
-    backgroundColor: 'rgba(120,120,128,0.42)',
+    borderRadius: scale(20),
+    backgroundColor: THEME.captureAccentYellow,
+    borderWidth: 1,
+    borderColor: '#000000',
   },
   topChromeSelectCtaContent: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: scale(7),
+  },
+  topChromeSelectCtaText: {
+    color: THEME.textPrimary,
+    fontSize: scale(16),
+    fontWeight: '600',
   },
   topChromeSideSpacer: {
     minWidth: scale(76),
@@ -1399,10 +1422,16 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
-  /** Titre « Favoris » au-dessus de la grille (barre fixe) — gardé lisible à côté de Sélectionner */
+  /** Titre « Favoris » + cœur terracotta — gardé lisible à côté de Sélectionner */
+  favorisTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 1,
+    maxWidth: '58%',
+    gap: scale(6),
+  },
   favorisStickyTitle: {
     flexShrink: 1,
-    maxWidth: '52%',
     color: '#FFFFFF',
     fontSize: scale(28),
     fontWeight: '700',
@@ -1411,12 +1440,14 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 6,
   },
+  favorisTitleHeart: {
+    flexShrink: 0,
+  },
   selectionActionBar: {
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 0,
-    zIndex: 40,
+    zIndex: 50,
     backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
     borderTopColor: 'rgba(0,0,0,0.32)',
@@ -1424,14 +1455,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: SPACING.md,
     paddingTop: verticalScale(10),
+    paddingBottom: verticalScale(10),
     ...Platform.select({
       ios: {
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: -1 },
-        shadowOpacity: 0.05,
-        shadowRadius: 4,
+        shadowOffset: { width: 0, height: -2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 8,
       },
-      android: { elevation: 6 },
+      android: { elevation: 12 },
     }),
   },
   selectionActionBtn: {
