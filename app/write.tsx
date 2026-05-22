@@ -16,6 +16,7 @@ import { ChevronLeft, Mic } from 'lucide-react-native';
 import { scale, verticalScale } from '@/utils/responsive';
 import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
+import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import { supabase } from '@/lib/supabase';
 import { getCachedUserMode } from '@/lib/userMode';
 import { checkMemoryLimit } from '@/lib/limits';
@@ -243,11 +244,15 @@ export default function WriteScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <ChevronLeft size={ICON_SIZES.lg} color="#3F4A5A" strokeWidth={2} />
         </TouchableOpacity>
-        <TouchableOpacity onPress={handleSave} style={styles.saveButton} disabled={isSaving}>
+        <TouchableOpacity
+          onPress={handleSave}
+          style={[petitmoCtaStyles.primary, styles.saveButton, isSaving && petitmoCtaStyles.primaryDisabled]}
+          disabled={isSaving}
+        >
           {isSaving ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
+            <ActivityIndicator size="small" color={PETITMO_CTA_SPINNER_COLOR} />
           ) : (
-            <Text style={styles.saveButtonText}>Enregistrer</Text>
+            <Text style={petitmoCtaStyles.primaryText}>Enregistrer</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -306,13 +311,6 @@ const styles = StyleSheet.create({
   saveButton: {
     paddingVertical: SPACING.sm,
     paddingHorizontal: SPACING.lg,
-    backgroundColor: THEME.accent,
-    borderRadius: scale(100),
-  },
-  saveButtonText: {
-    fontSize: FONT_SIZES.base,
-    color: '#FFFFFF',
-    fontWeight: '600',
   },
   inputContainer: {
     flex: 1,

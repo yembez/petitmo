@@ -212,7 +212,7 @@ export default function BookFinalizeMediaScreen() {
 
             {loading ? (
               <View style={styles.spinnerRow}>
-                <ActivityIndicator color={THEME.feedFavoriteTerracotta} />
+                <ActivityIndicator color={THEME.brandPrimary} />
               </View>
             ) : null}
           </>
@@ -249,7 +249,7 @@ const styles = StyleSheet.create({
   },
   progressFill: {
     height: '100%',
-    backgroundColor: THEME.feedFavoriteTerracotta,
+    backgroundColor: THEME.brandPrimary,
     borderRadius: scale(999),
   },
   progressLabel: { marginTop: scale(10), textAlign: 'center', color: THEME.textMuted, fontSize: scale(14) },
@@ -258,7 +258,7 @@ const styles = StyleSheet.create({
   spinnerRow: { marginTop: scale(14), alignItems: 'center' },
   cta: {
     marginTop: scale(18),
-    backgroundColor: THEME.feedFavoriteTerracotta,
+    backgroundColor: THEME.brandPrimary,
     paddingVertical: scale(14),
     borderRadius: scale(12),
     alignItems: 'center',

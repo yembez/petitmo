@@ -7,6 +7,11 @@ import {
   takeFeedBootstrapVideoUri,
 } from '@/services/feedLocalPhotoCache';
 import { getSignedMediaDisplayUrl } from '@/lib/mediaSignedUrl';
+import {
+  firstNonEmptyUri,
+  normalizeVideoPlaybackUri,
+  videoPlaybackCandidateFromMemory,
+} from '@/utils/videoMediaUri';
 
 function isHttpUrl(u: string): boolean {
   return /^https?:\/\//i.test(u.trim());
@@ -27,28 +32,29 @@ function isLikelyDeviceLocalAsset(u: string): boolean {
   return false;
 }
 
-function remotePlaybackUri(m: Memory): string {
-  return (m.edited_media_url?.trim() || m.media_url?.trim() || '').trim();
-}
-
 async function resolveRemoteVideoUri(raw: string): Promise<string> {
   const t = raw.trim();
-  if (!t || !isHttpUrl(t)) return t;
+  if (!t || !isHttpUrl(t)) return normalizeVideoPlaybackUri(t);
   return getSignedMediaDisplayUrl(t);
+}
+
+function initialPlaybackUri(memory: Memory): string {
+  if (memory.type !== 'video') return '';
+  if (Platform.OS === 'web') {
+    return normalizeVideoPlaybackUri(videoPlaybackCandidateFromMemory(memory));
+  }
+  const boot = peekFeedBootstrapVideoUri(memory.id);
+  return normalizeVideoPlaybackUri(
+    firstNonEmptyUri(boot, videoPlaybackCandidateFromMemory(memory))
+  );
 }
 
 /**
  * URI de lecture vidéo dans le fil : copie locale persistante si présente (pas d’egress),
- * sinon `edited_media_url` / `media_url`.
+ * sinon candidats distants / sandbox. Pas de sondage disque synchrone (autoplay fil).
  */
 export function useFeedVideoPlaybackUri(memory: Memory): string {
-  const [uri, setUri] = useState<string>(() => {
-    if (memory.type !== 'video') return '';
-    if (Platform.OS === 'web') return remotePlaybackUri(memory);
-    const boot = peekFeedBootstrapVideoUri(memory.id);
-    if (boot?.trim()) return boot.trim();
-    return remotePlaybackUri(memory);
-  });
+  const [uri, setUri] = useState<string>(() => initialPlaybackUri(memory));
 
   useEffect(() => {
     if (memory.type !== 'video') {
@@ -58,7 +64,7 @@ export function useFeedVideoPlaybackUri(memory: Memory): string {
 
     let alive = true;
     void (async () => {
-      const remoteRaw = remotePlaybackUri(memory);
+      const remoteRaw = videoPlaybackCandidateFromMemory(memory);
       const remote = await resolveRemoteVideoUri(remoteRaw);
       if (!alive) return;
       if (Platform.OS === 'web') {
@@ -66,29 +72,42 @@ export function useFeedVideoPlaybackUri(memory: Memory): string {
         return;
       }
 
-      const local = await getFeedLocalVideoPath(memory.id);
-      let chosen = (local?.trim() || remote || '').trim();
+      const feedCopy = (await getFeedLocalVideoPath(memory.id))?.trim() ?? '';
+      const boot = peekFeedBootstrapVideoUri(memory.id)?.trim() ?? '';
+      const remoteNorm = normalizeVideoPlaybackUri(remote);
+      const memoryNorm = normalizeVideoPlaybackUri(videoPlaybackCandidateFromMemory(memory));
+      const chosen = normalizeVideoPlaybackUri(
+        firstNonEmptyUri(feedCopy, memoryNorm, boot, remoteNorm)
+      );
       if (!alive) return;
       setUri(prev => {
         const prevU = (prev?.trim() || '');
+        const nextU = chosen.trim();
         if (
           prevU &&
           isLikelyDeviceLocalAsset(prevU) &&
-          chosen &&
-          isLikelyDeviceLocalAsset(chosen) &&
-          prevU !== chosen
+          nextU &&
+          isLikelyDeviceLocalAsset(nextU) &&
+          prevU !== nextU
         ) {
           return prev;
         }
-        return prev === chosen ? prev : chosen;
+        return prev === nextU ? prev : nextU;
       });
-      takeFeedBootstrapVideoUri(memory.id);
+      if (chosen) takeFeedBootstrapVideoUri(memory.id);
     })();
 
     return () => {
       alive = false;
     };
-  }, [memory.type, memory.id, memory.media_url, memory.edited_media_url]);
+  }, [
+    memory.type,
+    memory.id,
+    memory.media_url,
+    memory.edited_media_url,
+    memory.local_media_path,
+    memory.local_original_path,
+  ]);
 
   return uri;
 }

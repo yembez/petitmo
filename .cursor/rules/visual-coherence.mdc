@@ -12,7 +12,7 @@ Petitmo a un système visuel **centralisé**. Toute valeur visuelle nouvelle doi
 
 ## Couleurs
 
-- Source unique : `constants/theme.ts` → `THEME.bg`, `THEME.bgScreen`, `THEME.textPrimary`, `THEME.textMuted`, `THEME.textSecondary`, `THEME.accent`, `THEME.accentMuted`, `THEME.accentDeep`, `THEME.accentSoft`, `THEME.feedFavoriteTerracotta`.
+- Source unique : `constants/theme.ts` → `THEME.bg`, `THEME.bgScreen`, `THEME.textPrimary`, `THEME.textMuted`, `THEME.textSecondary`, `THEME.accent`, `THEME.accentMuted`, `THEME.accentDeep`, `THEME.accentSoft`, `THEME.brandPrimary` (CTA, cœurs favoris, paywall).
 - Si une nuance manque, **ajouter une clé dans `THEME`** plutôt qu'écrire un hex en local.
 
 ### Exceptions tolérées (pour l'instant)

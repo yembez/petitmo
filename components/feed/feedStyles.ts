@@ -1,6 +1,8 @@
 import { Platform, StyleSheet } from 'react-native';
 import { scale, verticalScale } from '@/utils/responsive';
 import { THEME } from '@/constants/theme';
+import { PETITMO_CTA_BORDER_WIDTH } from '@/constants/petitmoCtaStyles';
+import { MEMORY_TEXT_FONT } from '@/constants/memoryTextFont';
 import { FONT_SIZES } from '@/constants/sizes';
 import {
   MEDIA_CARD_INSET,
@@ -10,21 +12,20 @@ import {
 } from '@/constants/feedLayout';
 
 const HEADER_AVATAR_PX = scale(68);
+/** Liseré rosé autour de l’avatar header fil. */
+const HEADER_AVATAR_BORDER_WIDTH = 1;
 /** Marge horizontale (ex. audio sans visuel) — référencé par `styles` */
 const FEED_GUTTER = scale(20);
 /** Posts texte : colonne étroite façon livre */
 const TEXT_POST_GUTTER = scale(32);
 /** Contours des blocs — très discrets */
 const POST_BORDER_SUBTLE = 'rgba(0,0,0,0.08)';
-/** Liseré fin fil (avatar header, etc.) */
+/** Liseré fin fil (cartes média, etc.) */
 const FEED_BLACK_HAIRLINE = '#000000';
 const GREY_ACTIVE_BG = '#E5E7EB';
 const GREY_ACTIVE_BORDER = '#D1D5DB';
 /** Hauteur du bloc « traits + date · âge » — alignée sur `styles.daySeparatorBlock` (chaque post) */
 const DAY_SEPARATOR_BLOCK_H = verticalScale(46);
-
-/** Séparation entre blocs post — alignée charte (paywall / espace famille). */
-const FEED_POST_DIVIDER = THEME.familyFlowLine;
 
 const styles = StyleSheet.create({
   container: {
@@ -82,24 +83,24 @@ const styles = StyleSheet.create({
     height: HEADER_AVATAR_PX,
     borderRadius: HEADER_AVATAR_PX / 2,
     overflow: 'hidden',
-    backgroundColor: 'rgba(208, 98, 53, 0.08)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: FEED_BLACK_HAIRLINE,
+    backgroundColor: 'rgba(252, 87, 87, 0.08)',
+    borderWidth: HEADER_AVATAR_BORDER_WIDTH,
+    borderColor: THEME.brandPrimary,
   },
   headerAvatarPlaceholder: {
     width: HEADER_AVATAR_PX,
     height: HEADER_AVATAR_PX,
     borderRadius: HEADER_AVATAR_PX / 2,
-    backgroundColor: 'rgba(208, 98, 53, 0.14)',
+    backgroundColor: 'rgba(252, 87, 87, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: FEED_BLACK_HAIRLINE,
+    borderWidth: HEADER_AVATAR_BORDER_WIDTH,
+    borderColor: THEME.brandPrimary,
   },
   headerAvatarLetter: {
     fontSize: scale(26),
     fontWeight: '600',
-    color: THEME.brandTerracotta,
+    color: THEME.brandPrimary,
   },
   headerNameBlock: {
     flex: 1,
@@ -133,13 +134,16 @@ const styles = StyleSheet.create({
   },
   feedViewport: {
     flex: 1,
+    backgroundColor: THEME.bgScreen,
   },
   scrollView: {
     flex: 1,
+    backgroundColor: THEME.bgScreen,
   },
   scrollContent: {
     paddingBottom: verticalScale(28),
     paddingHorizontal: 0,
+    backgroundColor: THEME.bgScreen,
   },
   pillsScroll: {
     backgroundColor: THEME.familyFlowScreenBg,
@@ -178,14 +182,55 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: scale(6),
   },
-  post: {
-    width: '100%',
+  /**
+   * Enveloppe ombre (sans `overflow: hidden` — sinon iOS ne dessine pas l’ombre).
+   * Le contenu clipé vit dans `post`.
+   * Halo : offset nul + rayon large (relief tout autour, pas seulement en bas).
+   */
+  postShell: {
+    alignSelf: 'stretch',
+    marginHorizontal: scale(8),
+    borderRadius: scale(12),
     backgroundColor: '#FFFFFF',
-    overflow: 'visible',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: FEED_POST_DIVIDER,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000000',
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.11,
+        shadowRadius: scale(16),
+      },
+      android: {
+        /** Android reste surtout « bas » ; on atténue pour ne pas rivaliser avec le halo iOS. */
+        elevation: 5,
+      },
+      default: {
+        shadowColor: '#000000',
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.11,
+        shadowRadius: scale(16),
+      },
+    }),
   },
-  /** Ligne avec traits fins + date · âge (répétée à chaque post) */
+  post: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: scale(12),
+    overflow: 'hidden',
+  },
+  /**
+   * Racine d’une ligne du fil : espacement entre posts + pas de clip sur l’ombre.
+   * L’espace vertical remplace l’ancien `feedPostGap` (vue opaque qui masquait l’ombre).
+   */
+  feedRowRoot: {
+    overflow: 'visible',
+  },
+  feedRowSpacingTop: {
+    marginTop: verticalScale(24),
+  },
+  /** Cellule FlatList : ne pas clipper l’ombre portée des cartes. */
+  feedListCell: {
+    overflow: 'visible',
+  },
+  /** En-tête date · âge (répété à chaque post). */
   daySeparatorBlock: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -484,6 +529,7 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     fontSize: scale(17),
     fontWeight: '400',
+    fontFamily: MEMORY_TEXT_FONT,
     color: '#1C1C1E',
     lineHeight: scale(28),
     textAlign: 'justify',
@@ -505,10 +551,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: POST_BORDER_SUBTLE,
   },
-  /** Annotations sous photo / vidéo / vocal — Lora italic */
+  /** Annotations sous photo / vidéo / vocal */
   captionAnnotation: {
     fontSize: scale(15),
     fontWeight: '400',
+    fontFamily: MEMORY_TEXT_FONT,
     color: '#1C1C1E',
     lineHeight: scale(24),
   },
@@ -532,6 +579,12 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: FEED_BLACK_HAIRLINE,
     backgroundColor: 'rgba(255,255,255,0.5)',
+  },
+  /** CTA crayon fil — ardoise `#526779` (exception au rosé charte). */
+  actionButtonPencilAccent: {
+    backgroundColor: THEME.feedPencilCtaBackground,
+    borderWidth: PETITMO_CTA_BORDER_WIDTH,
+    borderColor: THEME.feedPencilCtaBorderColor,
   },
   swipeDeleteContainer: {
     justifyContent: 'center',
@@ -578,13 +631,9 @@ const styles = StyleSheet.create({
     marginTop: verticalScale(18),
     paddingHorizontal: scale(24),
     paddingVertical: verticalScale(12),
-    backgroundColor: THEME.brandTerracotta,
-    borderRadius: scale(100),
   },
   createButtonText: {
     fontSize: scale(16),
-    color: '#FFFFFF',
-    fontWeight: '600',
   },
 });
 

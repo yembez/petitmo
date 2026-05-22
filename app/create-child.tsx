@@ -20,6 +20,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { scale, verticalScale } from '@/utils/responsive';
 import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
+import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import { createChild, setSelectedChild } from '@/services/children';
 import DatePicker from '@/components/DatePicker';
 import PetitmoLogoManuscrit from '@/components/PetitmoLogoManuscrit';
@@ -79,7 +80,7 @@ export default function CreateChildScreen() {
   if (!fontsLoaded) {
     return (
       <View style={[styles.container, styles.fontsGate]}>
-        <ActivityIndicator color={THEME.brandTerracotta} size="large" />
+        <ActivityIndicator color={THEME.textPrimary} size="large" />
       </View>
     );
   }
@@ -150,7 +151,7 @@ export default function CreateChildScreen() {
               style={[styles.input, dm500 ? { fontFamily: dm500 } : null]}
               value={childName}
               onChangeText={setChildName}
-              placeholder="Prénom"
+              placeholder="Prénom ou prénoms composés"
               placeholderTextColor={THEME.textMuted}
               autoCapitalize="words"
               autoCorrect={false}
@@ -170,21 +171,19 @@ export default function CreateChildScreen() {
         </View>
 
         <TouchableOpacity
-          style={[styles.ctaButton, (!childName.trim() || isCreating) && styles.ctaButtonDisabled]}
+          style={[
+            petitmoCtaStyles.primary,
+            petitmoCtaStyles.primaryFullWidth,
+            (!childName.trim() || isCreating) && petitmoCtaStyles.primaryDisabled,
+          ]}
           onPress={handleContinue}
           disabled={!childName.trim() || isCreating}
           activeOpacity={0.9}
         >
           {isCreating ? (
-            <ActivityIndicator color="#FFFFFF" />
+            <ActivityIndicator color={PETITMO_CTA_SPINNER_COLOR} />
           ) : (
-            <Text
-              style={[
-                styles.ctaButtonText,
-                dm600 ? { fontFamily: dm600 } : null,
-                !childName.trim() && styles.ctaButtonTextDisabled,
-              ]}
-            >
+            <Text style={[petitmoCtaStyles.primaryText, dm600 ? { fontFamily: dm600 } : null]}>
               Continuer
             </Text>
           )}
@@ -197,7 +196,7 @@ export default function CreateChildScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: THEME.familyFlowScreenBg,
+    backgroundColor: THEME.bg,
   },
   fontsGate: {
     justifyContent: 'center',
@@ -252,7 +251,7 @@ const styles = StyleSheet.create({
   },
   addPhotoText: {
     fontSize: FONT_SIZES.sm,
-    color: THEME.brandTerracotta,
+    color: THEME.brandPrimary,
     fontWeight: '500',
     marginBottom: verticalScale(8),
   },
@@ -281,29 +280,5 @@ const styles = StyleSheet.create({
     paddingVertical: verticalScale(14),
     fontSize: FONT_SIZES.md,
     color: THEME.textPrimary,
-  },
-  ctaButton: {
-    width: '100%',
-    backgroundColor: THEME.brandTerracotta,
-    borderRadius: scale(100),
-    paddingVertical: verticalScale(16),
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  ctaButtonDisabled: {
-    backgroundColor: THEME.brandTerracotta,
-    opacity: 0.4,
-  },
-  ctaButtonText: {
-    fontSize: FONT_SIZES.md,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  ctaButtonTextDisabled: {
-    color: '#FFFFFF',
   },
 });

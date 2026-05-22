@@ -18,6 +18,7 @@ import { useFonts, DMSans_400Regular, DMSans_500Medium, DMSans_600SemiBold, DMSa
 import { Pencil, Trash2, X } from 'lucide-react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import * as ImageManipulator from 'expo-image-manipulator';
+import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { buildBookPages, type BookPage } from '@/src/book/BookEngine';
@@ -778,6 +779,37 @@ export default function BookPreviewScreen() {
     },
     [bookId]
   );
+
+  const pickCoverFromGallery = useCallback(async () => {
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert(
+          'Accès refusé',
+          'Autorisez l’accès à vos photos dans les réglages pour choisir une image de couverture.',
+        );
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: false,
+        quality: 1,
+      });
+      if (result.canceled || !result.assets[0]?.uri?.trim()) return;
+      const uri = result.assets[0].uri.trim();
+      pickCover(uri);
+      const coverImgH = availHPortrait * (142 / 216);
+      openBookCrop({
+        storageKey: 'cover',
+        uri,
+        frameW: screenWidth,
+        frameH: coverImgH,
+        pageType: 'cover',
+      });
+    } catch {
+      Alert.alert('Erreur', 'Impossible d’ouvrir la galerie photos.');
+    }
+  }, [availHPortrait, openBookCrop, pickCover, screenWidth]);
 
   const renderPageItem: ListRenderItem<PageRow> = useCallback(
     ({ item, index }) => (
@@ -1633,7 +1665,29 @@ export default function BookPreviewScreen() {
             keyExtractor={(it) => it.source}
             numColumns={3}
             columnWrapperStyle={{ gap: 2 }}
-            contentContainerStyle={{ paddingHorizontal: 2, gap: 2 }}
+            contentContainerStyle={{ paddingHorizontal: 2, gap: 2, paddingBottom: 8 }}
+            ListHeaderComponent={
+              <View style={styles.coverPickerListHeader}>
+                <Pressable
+                  onPress={() => void pickCoverFromGallery()}
+                  style={({ pressed }) => [
+                    styles.coverPickerGalleryBtn,
+                    pressed && { opacity: 0.9 },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Choisir une photo depuis la galerie"
+                >
+                  <Text style={styles.coverPickerGalleryBtnText}>Choisir depuis la galerie</Text>
+                </Pressable>
+                {favoriteCoverThumbs.length > 0 ? (
+                  <Text style={styles.coverPickerSectionLabel}>Photos des favoris du livre</Text>
+                ) : (
+                  <Text style={styles.coverPickerSectionHint}>
+                    Aucune photo favorite pour ce livre — utilise la galerie ou ajoute des favoris.
+                  </Text>
+                )}
+              </View>
+            }
             renderItem={({ item }) => (
               <Pressable
                 onPress={() => pickCover(item.source)}
@@ -1666,7 +1720,7 @@ export default function BookPreviewScreen() {
             bookCropSession.pageType === 'cover'
               ? () => {
                   setBookCropSession(null);
-                  setCoverPickerOpen(true);
+                  void pickCoverFromGallery();
                 }
               : undefined
           }
@@ -1900,5 +1954,35 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
+  },
+  coverPickerListHeader: {
+    marginBottom: 10,
+  },
+  coverPickerGalleryBtn: {
+    backgroundColor: '#C4784A',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  coverPickerGalleryBtnText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  coverPickerSectionLabel: {
+    color: 'rgba(255,255,255,0.55)',
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 8,
+    paddingHorizontal: 2,
+  },
+  coverPickerSectionHint: {
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 8,
+    paddingHorizontal: 2,
   },
 });

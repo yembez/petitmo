@@ -20,6 +20,7 @@ import { Image } from 'expo-image';
 import Svg, { Defs, Mask, Rect } from 'react-native-svg';
 import { useSafeAreaInsets, useSafeAreaFrame } from 'react-native-safe-area-context';
 import { scale as s, verticalScale } from '@/utils/responsive';
+import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import {
   computeCaptureHeroPhotoViewport,
   insetCropRectForCaptureHeroViewport,
@@ -338,14 +339,18 @@ export function CropModal({ visible, imageUri, onCancel, onConfirm, onChangePhot
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.validateBtn, (!imgSize || busy) && { opacity: 0.55 }]}
+              style={[
+                petitmoCtaStyles.primary,
+                styles.validateBtn,
+                (!imgSize || busy) && petitmoCtaStyles.primaryDisabled,
+              ]}
               activeOpacity={0.85}
               disabled={!imgSize || busy}
               onPress={() => void confirmCrop()}
               accessibilityRole="button"
               accessibilityLabel="Valider"
             >
-              <Text style={styles.validateBtnText}>Valider</Text>
+              <Text style={[petitmoCtaStyles.primaryText, styles.validateBtnText]}>Valider</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -420,11 +425,8 @@ const styles = StyleSheet.create({
   validateBtn: {
     paddingHorizontal: s(18),
     paddingVertical: verticalScale(12),
-    borderRadius: s(20),
-    backgroundColor: '#C4784A',
   },
   validateBtnText: {
-    color: '#FFFFFF',
     fontSize: s(14),
     fontWeight: '700',
   },

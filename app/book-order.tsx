@@ -14,6 +14,7 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { THEME } from '@/constants/theme';
+import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import { scale } from '@/utils/responsive';
 import { getUserTier } from '@/lib/userTier';
 import { getLastGuestExportEmail, setLastGuestExportEmail } from '@/lib/guestExportPrefs';
@@ -515,7 +516,7 @@ export default function BookOrderScreen() {
   if (loading) {
     return (
       <View style={[styles.center, { paddingTop: insets.top }]}>
-        <ActivityIndicator size="large" color={THEME.accent} />
+        <ActivityIndicator size="large" color={THEME.brandPrimary} />
       </View>
     );
   }
@@ -523,7 +524,7 @@ export default function BookOrderScreen() {
   if (blockedEmptyMemories) {
     return (
       <View style={[styles.center, { paddingTop: insets.top }]}>
-        <ActivityIndicator size="large" color={THEME.accent} />
+        <ActivityIndicator size="large" color={THEME.brandPrimary} />
       </View>
     );
   }
@@ -700,16 +701,18 @@ export default function BookOrderScreen() {
 
         <Pressable
           style={[
+            petitmoCtaStyles.primary,
+            petitmoCtaStyles.primaryFullWidth,
             styles.cta,
-            (submitting || !formIsComplete) && styles.ctaDisabled,
+            (submitting || !formIsComplete) && petitmoCtaStyles.primaryDisabled,
           ]}
           disabled={submitting || !formIsComplete}
           onPress={() => void submitOrder()}
         >
           {submitting ? (
-            <ActivityIndicator color="#fff" />
+            <ActivityIndicator color={PETITMO_CTA_SPINNER_COLOR} />
           ) : (
-            <Text style={styles.ctaText}>{ctaLabel}</Text>
+            <Text style={[petitmoCtaStyles.primaryText, styles.ctaText]}>{ctaLabel}</Text>
           )}
         </Pressable>
       </ScrollView>
@@ -781,7 +784,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: scale(10),
     paddingVertical: scale(6),
   },
-  chipOn: { borderColor: THEME.accent, backgroundColor: 'rgba(0,0,0,0.04)' },
+  chipOn: { borderColor: THEME.brandPrimary, backgroundColor: 'rgba(252, 87, 87, 0.08)' },
   chipText: { fontSize: scale(13), color: THEME.textPrimary },
   chipTextOn: { fontWeight: '600' },
   checkRow: { flexDirection: 'row', alignItems: 'center', gap: scale(10), marginTop: scale(8), marginBottom: scale(12) },
@@ -792,15 +795,12 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: THEME.textSecondary,
   },
-  checkboxOn: { backgroundColor: THEME.feedFavoriteTerracotta, borderColor: THEME.feedFavoriteTerracotta },
+  checkboxOn: { backgroundColor: THEME.brandPrimary, borderColor: THEME.brandPrimary },
   checkLabel: { flex: 1, fontSize: scale(14), color: THEME.textPrimary, lineHeight: scale(20) },
   cta: {
-    backgroundColor: THEME.accent,
-    paddingVertical: scale(14),
-    borderRadius: scale(12),
-    alignItems: 'center',
     marginTop: scale(8),
   },
-  ctaDisabled: { opacity: 0.5 },
-  ctaText: { color: '#fff', fontSize: scale(16), fontWeight: '600' },
+  ctaText: {
+    fontSize: scale(16),
+  },
 });

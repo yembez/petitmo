@@ -66,14 +66,14 @@ export default function OnboardingScreen() {
         imageStyle={styles.backgroundImageStyle}
       >
         <LinearGradient
-          colors={[THEME.brandTerracottaTopOverlay, 'transparent']}
+          colors={[THEME.brandPrimaryTopOverlay, 'transparent']}
           locations={[0, 1]}
           style={[styles.topOverlay, { height: insets.top + verticalScale(140) }]}
           pointerEvents="none"
         />
 
         <LinearGradient
-          colors={['transparent', THEME.brandTerracottaTopOverlay]}
+          colors={['transparent', THEME.brandPrimaryTopOverlay]}
           locations={[0, 1]}
           style={[styles.bottomOverlay, { height: insets.bottom + verticalScale(140) }]}
           pointerEvents="none"
@@ -231,7 +231,7 @@ const styles = StyleSheet.create({
   ctaButton: {
     width: '100%',
     maxWidth: scale(320),
-    backgroundColor: THEME.brandTerracotta,
+    backgroundColor: THEME.brandPrimary,
     borderRadius: scale(100),
     borderWidth: 0,
     borderColor: 'transparent',
@@ -264,7 +264,7 @@ const styles = StyleSheet.create({
   ctaButtonSecondaryText: {
     fontSize: FONT_SIZES.md,
     fontWeight: '600',
-    color: THEME.brandTerracotta,
+    color: THEME.brandPrimary,
     textAlign: 'center',
   },
   linkTertiaryWrap: {

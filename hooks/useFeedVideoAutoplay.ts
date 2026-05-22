@@ -4,6 +4,7 @@ import type { ViewToken } from 'react-native';
 import type { Memory } from '@/types/local';
 import type { FeedListItem } from '@/components/feed/FilMemoryRow';
 import { peekFeedBootstrapVideoUri } from '@/services/feedLocalPhotoCache';
+import { videoPlaybackCandidateFromMemory } from '@/utils/videoMediaUri';
 
 function memoryFromFeedListItem(item: ViewToken['item']): Memory | null {
   if (!item || typeof item !== 'object') return null;
@@ -16,8 +17,7 @@ function memoryFromFeedListItem(item: ViewToken['item']): Memory | null {
 /** Suffisant pour choisir une ligne « autoplay » sans attendre la résolution async des URLs signées. */
 function hasLikelyPlayableVideoUri(m: Memory): boolean {
   if (m.type !== 'video') return false;
-  const raw = (m.edited_media_url?.trim() || m.media_url?.trim() || '').trim();
-  if (raw) return true;
+  if (videoPlaybackCandidateFromMemory(m)) return true;
   if (Platform.OS === 'web') return false;
   return !!peekFeedBootstrapVideoUri(m.id)?.trim();
 }

@@ -1,6 +1,6 @@
 ---
 description: Local-first média — comment lire et écrire les souvenirs/photos sans casser les écrans.
-globs: services/memory*.ts,services/media.ts,services/localOnlyMemoryCapture.ts,services/memoriesLocalSync.ts,services/memoryRowMapping.ts,services/feedLocalPhotoCache.ts,services/tabScreens*.ts,services/pendingCloudFlush.ts,services/pendingRawGuestUploads.ts,utils/memoryPhotos.ts,utils/feedHelpers.ts,utils/localMediaReadable.ts,utils/childPhotoUri.ts,hooks/useFeed*.ts,hooks/useFil*.ts,hooks/useMigrationProgress.ts,lib/localDb.ts,app/(tabs)/fil.tsx,app/(tabs)/favoris.tsx,app/(tabs)/livres.tsx,app/(tabs)/index.tsx,app/memory-view*.tsx,app/book-*.tsx,app/import-media.tsx,components/feed/**
+globs: services/memory*.ts,services/media.ts,services/localOnlyMemoryCapture.ts,services/memoriesLocalSync.ts,services/memoryRowMapping.ts,services/feedLocalPhotoCache.ts,services/tabScreens*.ts,services/pendingCloudFlush.ts,services/pendingRawGuestUploads.ts,utils/memoryPhotos.ts,utils/mediaExif.ts,utils/feedHelpers.ts,utils/feedCaptureOverlay.ts,utils/localMediaReadable.ts,utils/childPhotoUri.ts,constants/importPicker.ts,hooks/useFeed*.ts,hooks/useFil*.ts,hooks/useMigrationProgress.ts,lib/localDb.ts,app/(tabs)/fil.tsx,app/(tabs)/favoris.tsx,app/(tabs)/livres.tsx,app/(tabs)/index.tsx,app/memory-view*.tsx,app/book-*.tsx,app/import-media.tsx,components/feed/**
 alwaysApply: false
 ---
 
@@ -66,6 +66,14 @@ Toujours vérifier `await getCachedUserMode()` avant un upload réseau. Voir aus
 ### 7. Écriture en SQLite local : objet complet
 
 Tout `upsertLocalMemories` (`lib/localDb.ts`) doit recevoir un `Memory` **complet** — passer par `withLocalFields` ou `mergeServerMemoryRowWithExistingLocal` (tous deux dans `services/memoryRowMapping.ts`). Un objet partiel met à `null` les colonnes manquantes.
+
+### 8. Import photothèque (`import-media`) — contrat stable
+
+- Options picker : **`constants/importPicker.ts`** (`IMPORT_PHOTO_PICKER_OPTS`) — `exif: true` par défaut.
+- Métadonnées : **`buildImportMetadataFromPickerAsset`** (`utils/mediaExif.ts`) pour chaque asset (simple, album, lot séparé). Pas de `buildImportMetadataFromExif` seul sur le premier asset d’un lot.
+- `expo-media-library` : **import dynamique** dans `mediaExif.ts` uniquement. Import statique = crash `ExpoMediaLibrary` + route `import-media` non enregistrée sur dev client non rebuild.
+- Passer `exif: false` (galerie plus rapide) **uniquement** après `npx expo run:ios` / rebuild Android et vérif que `isMediaLibraryNativeLinked()` retourne `true`.
+- Pastille date fil : `created_at` (prise) vs `inserted_at` (ajout) — voir `utils/feedCaptureOverlay.ts`. Gratuit et cloud : même chaîne via `capturedAtIso` → `captureMemoryLocalOnly` / `uploadMedia`.
 
 ## Avant de toucher à un écran qui affiche des médias
 

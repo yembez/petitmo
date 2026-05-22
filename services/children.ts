@@ -10,16 +10,27 @@ import { getLocalChild, listLocalChildren, upsertLocalChild } from '@/lib/localD
 import { getSignedMediaDisplayUrl } from '@/lib/mediaSignedUrl';
 import { resolveChildProfileImageUri } from '@/utils/childPhotoUri';
 import { ensureLocalImageForPalette } from '@/hooks/ensureLocalImageForPalette';
+import { normalizeChildGivenName } from '@/utils/childDisplayName';
 
 type ChildRow = Database['public']['Tables']['children']['Row'];
 
 /** Émis après mise à jour profil enfant (photo, nom…) — ex. rafraîchir l’onglet Capturer. */
 export const PETITMO_CHILD_PROFILE_UPDATED_EVENT = 'petitmo:child-profile-updated' as const;
 
-function notifyChildProfileUpdated(childId: string): void {
+export type ChildProfileUpdatedPayload = {
+  childId: string;
+  /** Profil déjà persisté (SQLite) — évite un `getChildren` potentiellement en retard. */
+  child?: LocalChild;
+};
+
+function notifyChildProfileUpdated(childId: string, child?: LocalChild): void {
   const id = childId.trim();
   if (!id) return;
-  DeviceEventEmitter.emit(PETITMO_CHILD_PROFILE_UPDATED_EVENT, { childId: id });
+  const payload: ChildProfileUpdatedPayload = { childId: id };
+  if (child && child.id === id) {
+    payload.child = child;
+  }
+  DeviceEventEmitter.emit(PETITMO_CHILD_PROFILE_UPDATED_EVENT, payload);
 }
 
 function isChildDuplicateKeyError(error: unknown): boolean {
@@ -71,11 +82,24 @@ export async function sanitizeChildLocalAvatarIfMissing(child: LocalChild): Prom
   const uri = resolveChildProfileImageUri(lp, null);
   if (!uri?.startsWith('file')) return child;
 
-  try {
-    const info = await getInfoAsync(uri);
-    if (info.exists && !info.isDirectory) return child;
-  } catch {
-    /* fichier inaccessible */
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const info = await getInfoAsync(uri);
+      if (info.exists && !info.isDirectory) return child;
+    } catch {
+      /* fichier inaccessible */
+    }
+    if (attempt === 0) {
+      await new Promise<void>(resolve => {
+        setTimeout(resolve, 180);
+      });
+    }
+  }
+
+  /** Gratuit local : pas de `photo_url` de repli — ne pas effacer le chemin (hero Capturer vide). */
+  if (!(child.photo_url ?? '').trim()) {
+    console.warn('[children] avatar local introuvable, chemin conservé', child.id);
+    return child;
   }
 
   const next: LocalChild = { ...child, local_photo_path: null };
@@ -275,7 +299,7 @@ export async function uploadChildPhoto(childId: string, photoUri: string): Promi
         updated_at: now,
       };
       upsertLocalChild(next);
-      notifyChildProfileUpdated(childId);
+      notifyChildProfileUpdated(childId, next);
       return dest;
     }
 
@@ -347,7 +371,8 @@ export async function uploadChildPhoto(childId: string, photoUri: string): Promi
       });
     }
 
-    notifyChildProfileUpdated(childId);
+    const refreshed = getLocalChild(childId);
+    notifyChildProfileUpdated(childId, refreshed ?? undefined);
     return signedUrl;
   } catch (error) {
     console.error('Upload child photo error:', error);
@@ -453,7 +478,8 @@ export async function ensureChildRowExistsOnSupabaseForExport(childId: string): 
   }
 }
 
-export async function createChild(name: string, birthdate?: string, photoUri?: string) {
+export async function createChild(rawName: string, birthdate?: string, photoUri?: string) {
+  const name = normalizeChildGivenName(rawName);
   try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('User not authenticated');
@@ -585,24 +611,28 @@ export async function updateChild(
   }
 ) {
   try {
+    const patch = {
+      ...updates,
+      ...(updates.name !== undefined ? { name: normalizeChildGivenName(updates.name) } : {}),
+    };
     if ((await getCachedUserMode()) === 'local') {
       const cur = getLocalChild(childId);
       if (!cur) throw new Error('Child not found locally');
       const next: LocalChild = {
         ...cur,
-        ...updates,
+        ...patch,
         birthdate:
           updates.birthdate !== undefined ? updates.birthdate ?? '' : cur.birthdate,
         updated_at: new Date().toISOString(),
       };
       upsertLocalChild(next);
-      notifyChildProfileUpdated(childId);
+      notifyChildProfileUpdated(childId, next);
       return next;
     }
 
     const { data, error } = await supabase
       .from('children')
-      .update(updates)
+      .update(patch)
       .eq('id', childId)
       .select()
       .single();
@@ -619,7 +649,7 @@ export async function updateChild(
       updated_at: data.updated_at ?? base.updated_at,
     };
     upsertLocalChild(next);
-    notifyChildProfileUpdated(childId);
+    notifyChildProfileUpdated(childId, next);
     return next;
   } catch (error) {
     console.error('Update child error:', error);

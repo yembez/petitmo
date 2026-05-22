@@ -144,7 +144,7 @@ export default function LivresScreen() {
         data={books}
         keyExtractor={item => item.id}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={THEME.accent} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={THEME.brandPrimary} />
         }
         ItemSeparatorComponent={() => <View style={styles.rowSep} />}
         contentContainerStyle={[
@@ -253,7 +253,7 @@ export default function LivresScreen() {
                 value={draftTitle}
                 onChangeText={setDraftTitle}
                 placeholder="Titre du livre (optionnel)"
-                placeholderTextColor="rgba(255,255,255,0.45)"
+                placeholderTextColor={THEME.textMuted}
                 style={styles.modalInput}
                 returnKeyType="done"
                 onSubmitEditing={startCreateFlowToFavoris}
@@ -266,7 +266,11 @@ export default function LivresScreen() {
                 >
                   <Text style={styles.modalBtnGhostText}>Annuler</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.modalBtnCta} onPress={startCreateFlowToFavoris} activeOpacity={0.9}>
+                <TouchableOpacity
+                  style={styles.modalBtnCta}
+                  onPress={startCreateFlowToFavoris}
+                  activeOpacity={0.9}
+                >
                   <Text style={styles.modalBtnCtaText}>Choisir des favoris →</Text>
                 </TouchableOpacity>
               </View>
@@ -290,20 +294,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   modalCard: {
-    backgroundColor: '#1C1C1E',
+    backgroundColor: THEME.bg,
     borderRadius: 16,
     padding: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: THEME.familyFlowLine,
   },
   modalTitle: {
-    color: '#FFFFFF',
+    color: THEME.textPrimary,
     fontSize: 18,
     fontWeight: '700',
     marginBottom: 6,
   },
   modalSub: {
-    color: 'rgba(255,255,255,0.75)',
+    color: THEME.textMuted,
     fontSize: 14,
     lineHeight: 20,
     marginBottom: 12,
@@ -312,10 +316,10 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 12,
     paddingHorizontal: 12,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: THEME.bg,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    color: '#FFFFFF',
+    borderColor: 'rgba(0,0,0,0.10)',
+    color: THEME.textPrimary,
     marginBottom: 12,
   },
   modalBtns: {
@@ -328,12 +332,12 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: THEME.bg,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: 'rgba(0,0,0,0.12)',
   },
   modalBtnGhostText: {
-    color: 'rgba(255,255,255,0.85)',
+    color: THEME.textPrimary,
     fontSize: 15,
     fontWeight: '600',
   },
@@ -341,14 +345,16 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 44,
     borderRadius: 12,
+    paddingHorizontal: scale(12),
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: THEME.brandArdoise,
   },
   modalBtnCtaText: {
-    color: '#1C1C1E',
+    color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '700',
+    textAlign: 'center',
   },
   centered: {
     justifyContent: 'center',
@@ -374,7 +380,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: scale(6),
-    backgroundColor: '#0A0A0A',
+    backgroundColor: THEME.brandArdoise,
     paddingVertical: verticalScale(10),
     paddingHorizontal: scale(16),
     borderRadius: scale(999),
@@ -476,7 +482,7 @@ const styles = StyleSheet.create({
   },
   emptyCta: {
     marginTop: verticalScale(24),
-    backgroundColor: '#0A0A0A',
+    backgroundColor: THEME.brandArdoise,
     paddingVertical: verticalScale(14),
     paddingHorizontal: scale(28),
     borderRadius: scale(999),

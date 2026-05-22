@@ -9,6 +9,7 @@ import type { Child } from '@/utils/feedHelpers';
 import { styles } from '@/components/feed/feedStyles';
 import { THEME } from '@/constants/theme';
 import { resolveChildProfileImageDisplayUri } from '@/utils/childPhotoUri';
+import { childDisplayGivenName, childDisplayInitial } from '@/utils/childDisplayName';
 
 export type FeedHeaderProps = {
   child: Child | null;
@@ -41,7 +42,7 @@ export const FeedHeader = memo(function FeedHeader({ child, paddingTop, onMenuPr
       child.photo_url,
       child.updated_at,
     ) ?? '';
-  const firstName = child.name.trim().split(/\s+/)[0] || child.name;
+  const givenName = childDisplayGivenName(child.name) || child.name.trim();
   const agePresent = child.birthdate ? calculateAge(child.birthdate) : '';
 
   const inner = (
@@ -59,12 +60,12 @@ export const FeedHeader = memo(function FeedHeader({ child, paddingTop, onMenuPr
           </View>
         ) : (
           <View style={styles.headerAvatarPlaceholder}>
-            <Text style={styles.headerAvatarLetter}>{firstName.charAt(0).toUpperCase()}</Text>
+            <Text style={styles.headerAvatarLetter}>{childDisplayInitial(child.name)}</Text>
           </View>
         )}
         <View style={styles.headerNameBlock}>
           <Text style={styles.headerTitleLine} numberOfLines={1}>
-            <Text style={styles.headerChildName}>{firstName}</Text>
+            <Text style={styles.headerChildName}>{givenName}</Text>
             {!!agePresent && (
               <>
                 <Text style={styles.headerDot}>{' · '}</Text>

@@ -29,10 +29,12 @@ import { APP_ICON_PX } from '@/constants/iconSizes';
 import PhotoMosaic from "@/components/PhotoMosaic";
 import { isFeedMultiPhotoAlbum, parseFavoritePhotoUrls } from '@/utils/memoryPhotos';
 import { useFeedPhotoDisplayUrls } from "@/hooks/useFeedPhotoDisplayUrls";
-import { useFeedVideoPlaybackUri } from "@/hooks/useFeedVideoPlaybackUri";
+import { useFeedVideoPlaybackUri } from '@/hooks/useFeedVideoPlaybackUri';
+import { useExpoAvShouldPlay } from '@/hooks/useExpoAvShouldPlay';
+import { normalizeVideoPlaybackUri } from '@/utils/videoMediaUri';
 import { clampAudioBookAnnotation } from '@/lib/audioBookAnnotation';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
-import { Video, ResizeMode } from "expo-av";
+import { Video, ResizeMode, type AVPlaybackStatus } from 'expo-av';
 import { Swipeable, RectButton } from "react-native-gesture-handler";
 import {
   CapturedAtOverlay,
@@ -61,9 +63,6 @@ import { ensurePlaybackAudioForListening } from '@/lib/playbackAudioMode';
 /** Icônes d’action (hors favori couleur charte) */
 const ACTION_ICON_INK = '#0A0A0A';
 
-/** Textes des souvenirs `type: 'text'` créés depuis « Écrire » (Lora Italic) */
-const FONT_MAMAN = 'Lora_400Regular_Italic';
-
 const EM_QUAD = '\u2003';
 
 /** Taille unique des icônes dans le fil (actions + overlays). */
@@ -83,7 +82,6 @@ type FilMemoryRowProps = {
   memories: Memory[];
   setPostHeights: Dispatch<SetStateAction<number[]>>;
   child: Child | null;
-  fontsLoaded: boolean;
   uploadingVoiceCoverId: string | null;
   setMemories: Dispatch<SetStateAction<Memory[]>>;
   toggleFavorite: (id: string) => void | Promise<void>;
@@ -103,7 +101,6 @@ type FilMemoryRowProps = {
 function filMemoryRowDataPropsEqual(prev: FilMemoryRowProps, next: FilMemoryRowProps): boolean {
   if (prev.memoryIndex !== next.memoryIndex) return false;
   if (prev.uploadingVoiceCoverId !== next.uploadingVoiceCoverId) return false;
-  if (prev.fontsLoaded !== next.fontsLoaded) return false;
   if (!!prev.skipPostHeightMeasurement !== !!next.skipPostHeightMeasurement) return false;
   if (!!prev.isOptimisticFeedPending !== !!next.isOptimisticFeedPending) return false;
   if (!!prev.isFeedVideoAutoplay !== !!next.isFeedVideoAutoplay) return false;
@@ -115,7 +112,8 @@ const PendingFeedUploadCard = memo(function PendingFeedUploadCard({ p }: { p: Pe
   const isVideo = p.kind === 'video';
   const preview0 = p.previewUris[0];
   return (
-    <View style={styles.post}>
+    <View style={styles.postShell}>
+      <View style={styles.post}>
       <View style={styles.daySeparatorBlock}>
         <View style={styles.dayHeaderRow}>
           <View style={styles.dayHeaderLeft}>
@@ -175,6 +173,7 @@ const PendingFeedUploadCard = memo(function PendingFeedUploadCard({ p }: { p: Pe
           </View>
         </View>
       </View>
+      </View>
     </View>
   );
 });
@@ -185,7 +184,6 @@ function FilMemoryRow({
   memories,
   setPostHeights,
   child,
-  fontsLoaded,
   uploadingVoiceCoverId,
   setMemories,
   toggleFavorite,
@@ -214,7 +212,8 @@ function FilMemoryRow({
   })();
   const videoPosterRaw =
     (memory.poster_url?.trim() || memory.thumbnail_url?.trim() || '') || '';
-  const videoPosterUri = useSignedMediaUrl(videoPosterRaw || null) ?? '';
+  const videoPosterSigned = useSignedMediaUrl(videoPosterRaw || null) ?? '';
+  const videoPosterUri = normalizeVideoPlaybackUri((videoPosterSigned || videoPosterRaw).trim());
   const voiceCoverDisplayUri =
     useSignedMediaUrl((memory.voice_cover_path ?? memory.voice_cover_url) ?? null) ?? '';
   const voicePlaybackSigned =
@@ -228,7 +227,7 @@ function FilMemoryRow({
   const locationLabel = locationCore ? `à ${locationCore}` : '';
   const showCapturedOverlay = shouldShowCapturedMediaDateOverlay(memory);
   const capturedOverlayLabel = showCapturedOverlay ? capturedMediaDateLabel(memory) : '';
-  const videoUriForOverlay = (videoPosterUri || videoPlaybackUri || '').trim();
+  const videoUriForOverlay = videoPosterUri.trim();
   const canAutoplayVideoInline =
     isFeedVideoAutoplay && memory.type === 'video' && !!videoPlaybackUri.trim();
 
@@ -237,6 +236,14 @@ function FilMemoryRow({
   /** Poster au-dessus de la vidéo : fondu 1→0 une fois la vidéo décodée (évite le « saut » thumbnail → frame). */
   const feedInlinePosterFade = useRef(new Animated.Value(1)).current;
   const feedInlineVideoReveal = useRef(new Animated.Value(0)).current;
+  const feedInlineVideoRef = useRef<Video | null>(null);
+  useExpoAvShouldPlay(feedInlineVideoRef, canAutoplayVideoInline, videoPlaybackUri);
+
+  useEffect(() => {
+    return () => {
+      void feedInlineVideoRef.current?.unloadAsync();
+    };
+  }, [memory.id]);
 
   useEffect(() => {
     setFeedInlineVideoSoundOn(false);
@@ -288,7 +295,7 @@ function FilMemoryRow({
 
   const postCard = (
     <View
-      style={styles.post}
+      style={styles.postShell}
       onLayout={(e) => {
         if (skipPostHeightMeasurement) return;
         const h = e.nativeEvent.layout.height;
@@ -301,6 +308,7 @@ function FilMemoryRow({
         });
       }}
     >
+      <View style={styles.post}>
       <View style={styles.daySeparatorBlock}>
         <View style={styles.dayHeaderRow}>
           <View style={styles.dayHeaderLeft}>
@@ -407,7 +415,7 @@ function FilMemoryRow({
                 accessibilityLabel="Ouvrir en plein écran"
               >
                 <View style={[styles.mediaCard, styles.videoBody, styles.videoMediaCard]}>
-                  {canAutoplayVideoInline ? (
+                  {videoPlaybackUri.trim() ? (
                     <View style={[styles.photoImage, styles.feedInlineAutoplayStack]} pointerEvents="none">
                       <View
                         style={[
@@ -420,7 +428,12 @@ function FilMemoryRow({
                         style={[
                           StyleSheet.absoluteFillObject,
                           {
-                            opacity: videoPosterUri.trim() ? 1 : feedInlineVideoReveal,
+                            opacity:
+                              canAutoplayVideoInline && videoPosterUri.trim()
+                                ? 1
+                                : canAutoplayVideoInline
+                                  ? feedInlineVideoReveal
+                                  : 1,
                             zIndex: 1,
                             backgroundColor: '#000000',
                           },
@@ -428,18 +441,22 @@ function FilMemoryRow({
                         pointerEvents="none"
                       >
                         <Video
+                          ref={feedInlineVideoRef}
                           source={{ uri: videoPlaybackUri }}
                           style={StyleSheet.absoluteFillObject}
                           videoStyle={styles.feedInlineVideoNativeBg}
                           resizeMode={ResizeMode.COVER}
-                          shouldPlay
-                          isLooping
-                          isMuted={!feedInlineVideoSoundOn}
+                          shouldPlay={canAutoplayVideoInline}
+                          isLooping={canAutoplayVideoInline}
+                          isMuted={!canAutoplayVideoInline || !feedInlineVideoSoundOn}
                           useNativeControls={false}
-                          onReadyForDisplay={() =>
-                            setFeedInlineVideoDisplayReady(prev => prev || true)
-                          }
-                          onPlaybackStatusUpdate={status => {
+                          onReadyForDisplay={() => {
+                            setFeedInlineVideoDisplayReady(prev => prev || true);
+                            if (canAutoplayVideoInline) {
+                              void feedInlineVideoRef.current?.playAsync();
+                            }
+                          }}
+                          onPlaybackStatusUpdate={(status: AVPlaybackStatus) => {
                             if (!status.isLoaded) return;
                             if (
                               status.isPlaying ||
@@ -452,21 +469,31 @@ function FilMemoryRow({
                         />
                       </Animated.View>
                       {videoPosterUri.trim() ? (
-                        <Animated.View
-                          style={[
-                            StyleSheet.absoluteFillObject,
-                            { opacity: feedInlinePosterFade, zIndex: 2 },
-                          ]}
-                          pointerEvents="none"
-                        >
+                        canAutoplayVideoInline ? (
+                          <Animated.View
+                            style={[
+                              StyleSheet.absoluteFillObject,
+                              { opacity: feedInlinePosterFade, zIndex: 2 },
+                            ]}
+                            pointerEvents="none"
+                          >
+                            <Image
+                              source={{ uri: videoPosterUri }}
+                              style={StyleSheet.absoluteFillObject}
+                              contentFit="cover"
+                              cachePolicy="disk"
+                              recyclingKey={memory.id}
+                            />
+                          </Animated.View>
+                        ) : (
                           <Image
                             source={{ uri: videoPosterUri }}
-                            style={StyleSheet.absoluteFillObject}
+                            style={[StyleSheet.absoluteFillObject, { zIndex: 2 }]}
                             contentFit="cover"
                             cachePolicy="disk"
                             recyclingKey={memory.id}
                           />
-                        </Animated.View>
+                        )
                       ) : null}
                     </View>
                   ) : videoPosterUri ? (
@@ -476,17 +503,6 @@ function FilMemoryRow({
                       contentFit="cover"
                       cachePolicy="disk"
                       recyclingKey={memory.id}
-                    />
-                  ) : videoPlaybackUri ? (
-                    <Video
-                      source={{ uri: videoPlaybackUri }}
-                      style={styles.photoImage}
-                      videoStyle={styles.feedInlineVideoNativeBg}
-                      resizeMode={ResizeMode.COVER}
-                      shouldPlay={false}
-                      isLooping={false}
-                      isMuted
-                      useNativeControls={false}
                     />
                   ) : (
                     <View style={[styles.photoImage, { backgroundColor: '#000000' }]} />
@@ -602,11 +618,7 @@ function FilMemoryRow({
                 {bookParagraphs.map((para, idx) => (
                   <Text
                     key={idx}
-                    style={[
-                      styles.textContent,
-                      idx > 0 && styles.textBookParagraphSpacing,
-                      fontsLoaded && { fontFamily: FONT_MAMAN },
-                    ]}
+                    style={[styles.textContent, idx > 0 && styles.textBookParagraphSpacing]}
                     {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
                   >
                     {EM_QUAD}
@@ -628,7 +640,7 @@ function FilMemoryRow({
               accessibilityLabel="Modifier l’annotation"
             >
               <Text
-                style={[styles.captionAnnotation, fontsLoaded && { fontFamily: FONT_MAMAN }]}
+                style={styles.captionAnnotation}
                 numberOfLines={memory.type === 'voice' ? 2 : 4}
               >
                 {contentText}
@@ -645,7 +657,7 @@ function FilMemoryRow({
         >
           {memory.type === 'text' || !contentText ? (
             <TouchableOpacity
-              style={styles.actionButton}
+              style={[styles.actionButton, styles.actionButtonPencilAccent]}
               onPress={() => handleEditMemory(memory)}
               activeOpacity={0.75}
               accessibilityRole="button"
@@ -657,7 +669,11 @@ function FilMemoryRow({
                     : 'Annoter'
               }
             >
-              <Pencil size={FEED_ICON_PX} color={ACTION_ICON_INK} strokeWidth={2.2} />
+              <Pencil
+                size={FEED_ICON_PX}
+                color={THEME.feedPencilCtaForeground}
+                strokeWidth={2.2}
+              />
             </TouchableOpacity>
           ) : null}
 
@@ -694,44 +710,49 @@ function FilMemoryRow({
             >
               <Heart
                 size={FEED_FAVORITE_HEART_PX}
-                color={memory.is_favorite ? THEME.feedFavoriteTerracotta : ACTION_ICON_INK}
+                color={memory.is_favorite ? THEME.brandPrimary : ACTION_ICON_INK}
                 strokeWidth={2.05}
-                fill={memory.is_favorite ? THEME.feedFavoriteTerracotta : 'none'}
+                fill={memory.is_favorite ? THEME.brandPrimary : 'none'}
               />
             </TouchableOpacity>
           ) : null}
         </View>
       </View>
+      </View>
     </View>
   );
 
   return (
-    <Swipeable
-      ref={(r) => {
-        if (r) swipeRefs.current.set(memory.id, r);
-        else swipeRefs.current.delete(memory.id);
-      }}
-      enabled={!isOptimisticFeedPending}
-      friction={2}
-      overshootRight={false}
-      renderRightActions={
-        isOptimisticFeedPending
-          ? undefined
-          : () => (
-              <View style={styles.swipeDeleteContainer}>
-                <RectButton
-                  style={styles.swipeDeleteBtn}
-                  onPress={() => handleDeleteMemory(memory)}
-                >
-                  <Trash2 size={scale(22)} color="#FFFFFF" strokeWidth={2.2} />
-                  <Text style={styles.swipeDeleteLabel}>Supprimer</Text>
-                </RectButton>
-              </View>
-            )
-      }
-    >
-      {postCard}
-    </Swipeable>
+    <View style={[styles.feedRowRoot, memoryIndex > 0 && styles.feedRowSpacingTop]}>
+      <Swipeable
+        ref={(r) => {
+          if (r) swipeRefs.current.set(memory.id, r);
+          else swipeRefs.current.delete(memory.id);
+        }}
+        enabled={!isOptimisticFeedPending}
+        friction={2}
+        overshootRight={false}
+        /** Par défaut RNGH met `overflow: 'hidden'` — coupe l’ombre du `postShell`. */
+        containerStyle={{ overflow: 'visible' }}
+        renderRightActions={
+          isOptimisticFeedPending
+            ? undefined
+            : () => (
+                <View style={styles.swipeDeleteContainer}>
+                  <RectButton
+                    style={styles.swipeDeleteBtn}
+                    onPress={() => handleDeleteMemory(memory)}
+                  >
+                    <Trash2 size={scale(22)} color="#FFFFFF" strokeWidth={2.2} />
+                    <Text style={styles.swipeDeleteLabel}>Supprimer</Text>
+                  </RectButton>
+                </View>
+              )
+        }
+      >
+        {postCard}
+      </Swipeable>
+    </View>
   );
 }
 

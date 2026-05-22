@@ -4,6 +4,7 @@ import { Camera, Mic, ImageIcon, Lock } from 'lucide-react-native';
 import { scale, verticalScale } from '@/utils/responsive';
 import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
+import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -77,11 +78,11 @@ export default function PermissionModal({ visible, type, onRequestPermission, on
 
             <View style={styles.buttons}>
               <TouchableOpacity
-                style={styles.authorizeButton}
+                style={[petitmoCtaStyles.primary, petitmoCtaStyles.primaryFullWidth, styles.authorizeButton]}
                 onPress={onRequestPermission}
                 activeOpacity={0.9}
               >
-                <Text style={styles.authorizeButtonText}>Autoriser</Text>
+                <Text style={[petitmoCtaStyles.primaryText, styles.authorizeButtonText]}>Autoriser</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -165,21 +166,10 @@ const styles = StyleSheet.create({
     gap: SPACING.sm,
   },
   authorizeButton: {
-    width: '100%',
-    backgroundColor: THEME.accent,
-    borderRadius: scale(100),
     paddingVertical: verticalScale(14),
-    alignItems: 'center',
-    shadowColor: THEME.accent,
-    shadowOffset: { width: 0, height: scale(4) },
-    shadowOpacity: 0.3,
-    shadowRadius: scale(8),
-    elevation: 4,
   },
   authorizeButtonText: {
     fontSize: FONT_SIZES.base,
-    fontWeight: '600',
-    color: '#FFFFFF',
   },
   cancelButton: {
     width: '100%',

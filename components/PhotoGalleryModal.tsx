@@ -22,8 +22,8 @@ import { scale, verticalScale } from '@/utils/responsive';
 import type { Memory } from '@/types/local';
 import { isPhotoUrlFavorited, isPhotoUrlFavoritedWithVariants } from '@/utils/memoryPhotos';
 
-/** Cœurs favoris : terracotta charte (pas l’accent bleu du reste de l’app). */
-const FAVORI_FILL = THEME.feedFavoriteTerracotta;
+/** Cœurs favoris : rosé charte (`THEME.brandPrimary`). */
+const FAVORI_FILL = THEME.brandPrimary;
 
 type Props = {
   visible: boolean;

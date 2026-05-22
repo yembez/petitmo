@@ -26,7 +26,6 @@ export function useFilFeedList(
   setMemories: Dispatch<SetStateAction<Memory[]>>,
   child: Child | null,
   pendingUploads: PendingUpload[],
-  fontsLoaded: boolean,
   uploadingVoiceCoverId: string | null,
   setPostHeights: Dispatch<SetStateAction<number[]>>,
   toggleFavorite: (id: string) => void | Promise<void>,
@@ -70,7 +69,6 @@ export function useFilFeedList(
         memories={memories}
         setPostHeights={setPostHeights}
         child={child}
-        fontsLoaded={fontsLoaded}
         uploadingVoiceCoverId={uploadingVoiceCoverId}
         setMemories={setMemories}
         toggleFavorite={toggleFavorite}
@@ -88,7 +86,6 @@ export function useFilFeedList(
     [
       memories,
       child,
-      fontsLoaded,
       uploadingVoiceCoverId,
       setMemories,
       setPostHeights,

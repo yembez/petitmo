@@ -15,12 +15,14 @@ import * as ImagePicker from 'expo-image-picker';
 import { scale, verticalScale } from '@/utils/responsive';
 import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
+import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import PermissionModal from '@/components/PermissionModal';
 import ImportBatchLayoutModal from '@/components/ImportBatchLayoutModal';
 import { uploadMedia, uploadPhotoAlbum } from '@/services/media';
 import { usePendingMediaUploads } from '@/contexts/PendingMediaUploadsContext';
 import { getOrSelectFirstChild } from '@/services/children';
-import { buildImportMetadataFromExif, buildImportMetadataFromPickerAsset } from '@/utils/mediaExif';
+import { IMPORT_PHOTO_PICKER_OPTS } from '@/constants/importPicker';
+import { buildImportMetadataFromPickerAsset } from '@/utils/mediaExif';
 import { getUserTier } from '@/lib/userTier';
 import { checkMemoryLimit, checkVideoLimit, FREE_TIER_VIDEO_MAX_DURATION } from '@/lib/limits';
 import { IMPORT_DUPLICATE_ASSET } from '@/lib/importDuplicate';
@@ -42,17 +44,20 @@ async function importSeparatePhotosWithConcurrency(
   memories: NonNullable<Awaited<ReturnType<typeof uploadMedia>>>[];
   duplicateSkipped: number;
   otherFailed: number;
+  limitReached: boolean;
 }> {
   type Row = NonNullable<Awaited<ReturnType<typeof uploadMedia>>>;
   const results: (Row | null)[] = new Array(assets.length).fill(null);
   let duplicateSkipped = 0;
   let otherFailed = 0;
+  let limitReached = false;
   let next = 0;
 
   const worker = async () => {
     while (true) {
+      if (limitReached) return;
       const idx = next++;
-      if (idx >= assets.length) break;
+      if (idx >= assets.length) return;
       const asset = assets[idx];
       try {
         const meta = await buildImportMetadataFromPickerAsset(asset, { isVideo: false });
@@ -77,7 +82,8 @@ async function importSeparatePhotosWithConcurrency(
           e instanceof Error &&
           (e.message === 'LIMIT_REACHED' || e.message === 'VIDEO_LIMIT_REACHED')
         ) {
-          throw e;
+          limitReached = true;
+          return;
         } else {
           otherFailed += 1;
           console.warn('[import-media] importSeparatePhotos', asset?.uri, e);
@@ -97,15 +103,8 @@ async function importSeparatePhotosWithConcurrency(
       otherFailed,
     });
   }
-  return { memories, duplicateSkipped, otherFailed };
+  return { memories, duplicateSkipped, otherFailed, limitReached };
 }
-
-const pickerOpts = {
-  /** Préserve au mieux EXIF (date, GPS) — pas de recadrage */
-  allowsEditing: false as const,
-  quality: 1 as const,
-  exif: true as const,
-};
 
 function assetIsVideo(asset: ImagePicker.ImagePickerAsset): boolean {
   if (asset.type === 'video' || asset.type === 'pairedVideo') return true;
@@ -131,15 +130,18 @@ export default function ImportMediaScreen() {
     preview: ImportStickerPreview;
   } | null>(null);
   const autoGalleryLaunchedRef = useRef(false);
+  /** Tier lu une fois au montage — évite `await getUserTier()` avant d’ouvrir la galerie. */
+  const videoMaxDurationRef = useRef(FREE_TIER_VIDEO_MAX_DURATION);
 
   useEffect(() => {
-    checkPermissions();
+    void getUserTier().then(tier => {
+      videoMaxDurationRef.current = tier === 'free' ? FREE_TIER_VIDEO_MAX_DURATION : 0;
+    });
+  }, []);
 
+  useEffect(() => {
     const subscription = AppState.addEventListener('change', handleAppStateChange);
-
-    return () => {
-      subscription.remove();
-    };
+    return () => subscription.remove();
   }, []);
 
   const handleAppStateChange = (nextAppState: AppStateStatus) => {
@@ -168,6 +170,12 @@ export default function ImportMediaScreen() {
     if (result.granted) {
       setHasPermission(true);
       setShowPermissionModal(false);
+      const res = await pickFromLibrary();
+      if (res === 'cancelled') {
+        router.back();
+        return;
+      }
+      if (res !== 'committed') setPickAttemptFinished(true);
     } else {
       setShowPermissionModal(false);
       router.back();
@@ -202,7 +210,7 @@ export default function ImportMediaScreen() {
           return;
         }
 
-        const limitCheck = await checkMemoryLimit(childId);
+        const limitCheck = await checkMemoryLimit(childId, { force: true });
         const tier = await getUserTier();
         const dedupedForSeparate =
           kind === 'photo' && photoBatchLayout === 'separate' && assets.length > 1
@@ -226,7 +234,7 @@ export default function ImportMediaScreen() {
               : `Il reste ${left} emplacement${left > 1 ? 's' : ''} pour ce profil. Réduis ta sélection, ou choisis « Un seul post » pour ne créer qu’un souvenir.`
           );
           if (left === 0) {
-            router.push({ pathname: '/paywall', params: { context: 'LIMIT_REACHED' } });
+            router.replace({ pathname: '/paywall', params: { context: 'LIMIT_REACHED', returnTo: 'fil' } });
           }
           return;
         }
@@ -234,7 +242,7 @@ export default function ImportMediaScreen() {
         if (!limitCheck.canCreate) {
           setNavigatingToFeed(false);
           setPickAttemptFinished(true);
-          router.push({ pathname: '/paywall', params: { context: 'LIMIT_REACHED' } });
+          router.replace({ pathname: '/paywall', params: { context: 'LIMIT_REACHED', returnTo: 'fil' } });
           return;
         }
 
@@ -255,8 +263,20 @@ export default function ImportMediaScreen() {
             capturedAtPreviewIso: cap,
             locationPreview: loc,
             upload: async () => {
-              const { memories: inserted, duplicateSkipped, otherFailed } =
+              const { memories: inserted, duplicateSkipped, otherFailed, limitReached } =
                 await importSeparatePhotosWithConcurrency(dedupedForSeparate, childId);
+              if (limitReached && inserted.length === 0) {
+                throw new Error('LIMIT_REACHED');
+              }
+              if (limitReached && inserted.length > 0) {
+                requestAnimationFrame(() => {
+                  Alert.alert(
+                    'Limite gratuite',
+                    `Tu as atteint le nombre max de souvenirs (${limitCheck.limit}). Les photos déjà importées restent dans le fil.`
+                  );
+                  router.replace({ pathname: '/paywall', params: { context: 'LIMIT_REACHED', returnTo: 'fil' } });
+                });
+              }
               if (duplicateSkipped > 0 || otherFailed > 0) {
                 requestAnimationFrame(() => {
                   if (duplicateSkipped > 0 && otherFailed === 0) {
@@ -288,14 +308,13 @@ export default function ImportMediaScreen() {
 
         if (kind === 'photo' && assets.length > 1 && photoBatchLayout === 'album') {
           const first = assets[0];
-          const exif = first.exif as Record<string, unknown> | null | undefined;
           const uris = assets.map(a => a.uri);
           startBackgroundUploadNavigateToFeed({
             previewUris: uris,
             capturedAtPreviewIso: cap,
             locationPreview: loc,
             upload: async () => {
-              const meta = buildImportMetadataFromExif(exif ?? undefined);
+              const meta = await buildImportMetadataFromPickerAsset(first, { isVideo: false });
               const locationOverride =
                 meta.locationLabel && meta.locationLabel.trim() ? meta.locationLabel.trim() : undefined;
               const albumFp = buildAlbumImportFingerprint(assets.map(a => a.assetId));
@@ -345,7 +364,7 @@ export default function ImportMediaScreen() {
           if (!videoLimitCheck.canCreate) {
             setNavigatingToFeed(false);
             setPickAttemptFinished(true);
-            router.push({ pathname: '/paywall', params: { context: 'VIDEO_LIMIT_REACHED' } });
+            router.replace({ pathname: '/paywall', params: { context: 'VIDEO_LIMIT_REACHED', returnTo: 'fil' } });
             return;
           }
           startBackgroundUploadNavigateToFeed({
@@ -385,15 +404,10 @@ export default function ImportMediaScreen() {
 
   const pickFromLibrary = useCallback(async (): Promise<PickResult> => {
     try {
-      const tier = await getUserTier();
-      const isFree = tier === 'free';
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images', 'videos'],
-        ...pickerOpts,
-        // Pas de recadrage pour les photos : `allowsEditing` ouvre une modale de crop native.
-        // La limite vidéo (30s) est appliquée via `videoMaxDuration`.
-        allowsEditing: false,
-        videoMaxDuration: isFree ? FREE_TIER_VIDEO_MAX_DURATION : 0,
+        ...IMPORT_PHOTO_PICKER_OPTS,
+        videoMaxDuration: videoMaxDurationRef.current,
         allowsMultipleSelection: true,
         selectionLimit: MAX_PHOTOS_AT_ONCE,
       });
@@ -436,8 +450,7 @@ export default function ImportMediaScreen() {
 
       if (assets.length > 1) {
         const first = assets[0];
-        const exif = first.exif as Record<string, unknown> | null | undefined;
-        const meta = buildImportMetadataFromExif(exif ?? undefined);
+        const meta = await buildImportMetadataFromPickerAsset(first, { isVideo: false });
         setBatchChoice({
           assets,
           preview: {
@@ -461,18 +474,42 @@ export default function ImportMediaScreen() {
     }
   }, [commitSelection, setBatchChoice]);
 
+  /** Ouvre la galerie dès le montage (permission + picker enchaînés, sans attendre un 2e rendu). */
   useEffect(() => {
-    if (hasPermission !== true || autoGalleryLaunchedRef.current) return;
+    if (autoGalleryLaunchedRef.current) return;
     autoGalleryLaunchedRef.current = true;
+
     void (async () => {
-      const res = await pickFromLibrary();
-      if (res === 'cancelled') {
-        router.back();
-        return;
+      try {
+        let perm = await ImagePicker.getMediaLibraryPermissionsAsync();
+        if (!perm.granted) {
+          perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        }
+        if (!perm.granted) {
+          if (!perm.canAskAgain) {
+            router.back();
+            return;
+          }
+          setShowPermissionModal(true);
+          setPickAttemptFinished(true);
+          setHasPermission(false);
+          return;
+        }
+        setHasPermission(true);
+
+        const res = await pickFromLibrary();
+        if (res === 'cancelled') {
+          router.back();
+          return;
+        }
+        if (res !== 'committed') setPickAttemptFinished(true);
+      } catch (e) {
+        console.error('[import-media] ouverture galerie', e);
+        setPickAttemptFinished(true);
+        Alert.alert('Erreur', 'Impossible d’ouvrir la bibliothèque média.');
       }
-      if (res !== 'committed') setPickAttemptFinished(true);
     })();
-  }, [hasPermission, pickFromLibrary]);
+  }, [pickFromLibrary, router]);
 
   const batchLayoutModalEl = (
     <ImportBatchLayoutModal
@@ -547,8 +584,13 @@ export default function ImportMediaScreen() {
             <Text style={styles.subtitle}>
               Aucun média sélectionné. Rouvre la bibliothèque pour choisir des photos ou une vidéo.
             </Text>
-            <TouchableOpacity style={styles.fallbackPrimaryBtn} onPress={() => void pickFromLibrary()}>
-              <Text style={styles.fallbackPrimaryText}>Ouvrir photos et vidéos</Text>
+            <TouchableOpacity
+              style={[petitmoCtaStyles.primary, styles.fallbackPrimaryBtn]}
+              onPress={() => void pickFromLibrary()}
+            >
+              <Text style={[petitmoCtaStyles.primaryText, styles.fallbackPrimaryText]}>
+                Ouvrir photos et vidéos
+              </Text>
             </TouchableOpacity>
           </View>
         )}
@@ -591,16 +633,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   fallbackPrimaryBtn: {
-    backgroundColor: THEME.accent,
-    borderRadius: scale(16),
     paddingVertical: SPACING.lg,
     paddingHorizontal: SPACING.xl,
-    alignItems: 'center',
     minWidth: scale(260),
   },
   fallbackPrimaryText: {
     fontSize: FONT_SIZES.lg,
-    color: '#FFFFFF',
-    fontWeight: '600',
   },
 });

@@ -79,8 +79,8 @@ export function BookPdfGeneratingOverlay({ visible }: Props) {
           <Animated.View style={[styles.iconRing, iconStyle]}>
             <Heart
               size={scale(46)}
-              color={THEME.brandTerracotta}
-              fill={THEME.brandTerracotta}
+              color={THEME.brandPrimary}
+              fill={THEME.brandPrimary}
               strokeWidth={1.8}
             />
           </Animated.View>
@@ -112,7 +112,7 @@ const styles = StyleSheet.create({
     width: scale(96),
     height: scale(96),
     borderRadius: scale(48),
-    backgroundColor: THEME.brandTerracotta,
+    backgroundColor: THEME.brandPrimary,
   },
   iconRing: {
     alignItems: 'center',

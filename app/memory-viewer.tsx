@@ -14,6 +14,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Image } from 'expo-image';
 import { Video, ResizeMode } from 'expo-av';
 import { Volume2, VolumeX, X } from 'lucide-react-native';
@@ -24,9 +25,16 @@ import {
 } from '@/services/memoryViewerSession';
 import type { Memory, Child } from '@/types/local';
 import { getChildren } from '@/services/children';
-import { getPrimaryPhotoUriForBookPreview } from '@/utils/memoryPhotos';
+import {
+  getPrimaryPhotoUriForImmersiveViewer,
+  pickPhotoUriForOverlayPalette,
+} from '@/utils/memoryPhotos';
+import { extractMediaBucketPath } from '@/lib/mediaSignedUrl';
 import { formatAgeAtMemory, formatDateLong } from '@/utils/date';
+import { childDisplayGivenName } from '@/utils/childDisplayName';
 import { useFeedVideoPlaybackUri } from '@/hooks/useFeedVideoPlaybackUri';
+import { useExpoAvShouldPlay } from '@/hooks/useExpoAvShouldPlay';
+import { normalizeVideoPlaybackUri } from '@/utils/videoMediaUri';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { ensurePlaybackAudioForListening } from '@/lib/playbackAudioMode';
 import AudioPlayer from '@/components/AudioPlayer';
@@ -41,11 +49,28 @@ import {
   capturedMediaDateLabel,
   shouldShowCapturedMediaDateOverlay,
 } from '@/utils/feedCaptureOverlay';
+import { THEME } from '@/constants/theme';
+import { MEMORY_TEXT_FONT } from '@/constants/memoryTextFont';
 
-const BG = '#000000';
-const CAPTION = 'rgba(255,255,255,0.92)';
-const FONT_MAMAN = 'Lora_400Regular_Italic';
+const BG = THEME.bg;
+/** Même pastille que `overlayBadge` du fil (date de prise bas-gauche). */
+const CHROME_PILL_BG = 'rgba(0, 0, 0, 0.38)';
+const TOP_CHROME_TEXT = '#FFFFFF';
+/** Dégradé haut du viewer sur photo / vidéo / vocal (cover). */
+const IMMERSIVE_TOP_BLACK_FADE = [
+  'rgba(0, 0, 0, 0.55)',
+  'rgba(0, 0, 0, 0.22)',
+  'rgba(0, 0, 0, 0)',
+] as const;
 const EM_QUAD = '\u2003';
+
+function immersiveTopFadeHeight(pageHeight: number): number {
+  return Math.max(verticalScale(96), Math.round(pageHeight * 0.24));
+}
+
+function isImmersiveMediaType(type: Memory['type']): boolean {
+  return type === 'photo' || type === 'video' || type === 'voice';
+}
 
 export default function MemoryViewerScreen() {
   const router = useRouter();
@@ -84,13 +109,23 @@ export default function MemoryViewerScreen() {
     });
   }, [parsedInitial, router]);
 
+  const visibleMemory = useMemo(
+    () => memories.find(m => m.id === visibleId) ?? memories[0] ?? null,
+    [memories, visibleId],
+  );
+  const closeOnMediaChrome = visibleMemory ? isImmersiveMediaType(visibleMemory.type) : true;
+
   useFocusEffect(
     useCallback(() => {
-      setStatusBarStyle('light');
+      setStatusBarStyle(closeOnMediaChrome ? 'light' : 'dark');
       void ensurePlaybackAudioForListening();
       return () => setStatusBarStyle('dark');
-    }, [])
+    }, [closeOnMediaChrome]),
   );
+
+  useEffect(() => {
+    setStatusBarStyle(closeOnMediaChrome ? 'light' : 'dark');
+  }, [closeOnMediaChrome]);
 
   const itemHeight = windowH;
 
@@ -115,7 +150,7 @@ export default function MemoryViewerScreen() {
         isActive={visibleId === item.id}
         height={itemHeight}
         width={windowW}
-        childFirstName={child?.name?.trim().split(/\s+/)[0] ?? ''}
+        childFirstName={childDisplayGivenName(child?.name)}
         childBirthdate={child?.birthdate ?? null}
         onRequestEditText={m => setEditingTextMemory(m)}
         toggleFavorite={toggleFavorite}
@@ -158,7 +193,7 @@ export default function MemoryViewerScreen() {
 
   return (
     <View style={[styles.root, { height: windowH, backgroundColor: BG }]}>
-      <StatusBar style="light" />
+      <StatusBar style={closeOnMediaChrome ? 'light' : 'dark'} />
       <EditTextModal
         key={editingTextMemory?.id ?? 'closed'}
         visible={editingTextMemory !== null}
@@ -172,12 +207,20 @@ export default function MemoryViewerScreen() {
           clearMemoryViewerSession();
           router.back();
         }}
-        style={[styles.closeBtn, { top: insets.top + verticalScale(8), right: scale(12) }]}
+        style={[
+          styles.closeBtn,
+          closeOnMediaChrome ? styles.closeBtnOnMedia : styles.closeBtnOnText,
+          { top: insets.top + verticalScale(8), right: scale(12) },
+        ]}
         hitSlop={14}
         accessibilityRole="button"
         accessibilityLabel="Fermer"
       >
-        <X color="#FFFFFF" size={scale(28)} strokeWidth={2.2} />
+        <X
+          color={closeOnMediaChrome ? TOP_CHROME_TEXT : THEME.textPrimary}
+          size={scale(28)}
+          strokeWidth={2.2}
+        />
       </Pressable>
 
       <FlatList
@@ -226,6 +269,7 @@ function ImmersivePage({
   onRequestEditText: (m: Memory) => void;
   toggleFavorite: (id: string) => void | Promise<void>;
 }) {
+  const insets = useSafeAreaInsets();
   const addedLabel = formatDateLong(memory.inserted_at || memory.created_at);
   const ageAt = childBirthdate
     ? formatAgeAtMemory(childBirthdate, memory.created_at)
@@ -238,48 +282,104 @@ function ImmersivePage({
     (memory.type === 'photo' || memory.type === 'video') &&
     shouldShowCapturedMediaDateOverlay(memory);
   const capturedLabelOnMedia = showCapturedOnMedia ? capturedMediaDateLabel(memory) : '';
+  const mediaChrome = isImmersiveMediaType(memory.type);
+  const topChromePadTop = insets.top + verticalScale(8);
+  const topFadeHeight = useMemo(() => immersiveTopFadeHeight(height), [height]);
+  const [videoSoundOn, setVideoSoundOn] = useState(true);
+
+  useEffect(() => {
+    setVideoSoundOn(true);
+  }, [memory.id]);
+
+  const immersiveMetaLine = useMemo(() => {
+    const parts: string[] = [];
+    if (childFirstName) {
+      parts.push(ageAt ? `${childFirstName} · ${ageAt}` : childFirstName);
+    }
+    parts.push(addedLabel);
+    if (loc) parts.push(loc);
+    return parts.join(' · ');
+  }, [childFirstName, ageAt, addedLabel, loc]);
+
+  const metaBlock = (
+    <Text
+      style={mediaChrome ? styles.metaLineOnMedia : styles.metaLineOnText}
+      numberOfLines={1}
+    >
+      {immersiveMetaLine}
+    </Text>
+  );
 
   return (
     <View style={{ height, width, backgroundColor: BG }}>
-      <View style={[styles.metaTop, { paddingTop: verticalScale(52) }]}>
-        {childFirstName ? (
-          <Text style={styles.metaTitle} numberOfLines={1}>
-            {ageAt ? `${childFirstName} · ${ageAt}` : childFirstName}
-          </Text>
-        ) : null}
-        <Text style={styles.metaSub} numberOfLines={1}>
-          {addedLabel}
-          {loc ? ` · ${loc}` : ''}
-        </Text>
-      </View>
+      <View style={styles.pageBody}>
+        <View style={styles.mediaFill}>
+          {memory.type === 'photo' && (
+            <ImmersivePhoto
+              memory={memory}
+              showCapturedOverlay={showCapturedOnMedia}
+              capturedOverlayLabel={capturedLabelOnMedia}
+              onToggleFavorite={toggleFavorite}
+            />
+          )}
+          {memory.type === 'video' && (
+            <ImmersiveVideo
+              memory={memory}
+              isActive={isActive}
+              soundOn={videoSoundOn}
+              showCapturedOverlay={showCapturedOnMedia}
+              capturedOverlayLabel={capturedLabelOnMedia}
+              onToggleFavorite={toggleFavorite}
+            />
+          )}
+          {memory.type === 'voice' && (
+            <ImmersiveVoice memory={memory} width={width} onToggleFavorite={toggleFavorite} />
+          )}
+          {memory.type === 'text' && (
+            <ImmersiveText
+              memory={memory}
+              onTapEdit={() => onRequestEditText(memory)}
+              onToggleFavorite={toggleFavorite}
+            />
+          )}
+        </View>
 
-      <View style={styles.mediaBlock}>
-        {memory.type === 'photo' && (
-          <ImmersivePhoto
-            memory={memory}
-            showCapturedOverlay={showCapturedOnMedia}
-            capturedOverlayLabel={capturedLabelOnMedia}
-            onToggleFavorite={toggleFavorite}
-          />
-        )}
-        {memory.type === 'video' && (
-          <ImmersiveVideo
-            memory={memory}
-            isActive={isActive}
-            showCapturedOverlay={showCapturedOnMedia}
-            capturedOverlayLabel={capturedLabelOnMedia}
-            onToggleFavorite={toggleFavorite}
-          />
-        )}
-        {memory.type === 'voice' && (
-          <ImmersiveVoice memory={memory} width={width} onToggleFavorite={toggleFavorite} />
-        )}
-        {memory.type === 'text' && (
-          <ImmersiveText
-            memory={memory}
-            onTapEdit={() => onRequestEditText(memory)}
-            onToggleFavorite={toggleFavorite}
-          />
+        {mediaChrome ? (
+          <>
+            <LinearGradient
+              colors={[...IMMERSIVE_TOP_BLACK_FADE]}
+              locations={[0, 0.5, 1]}
+              pointerEvents="none"
+              style={[styles.topMediaGradient, { height: topFadeHeight }]}
+            />
+            <View
+              style={[styles.topChromeFloat, { paddingTop: topChromePadTop }]}
+              pointerEvents="box-none"
+            >
+              {metaBlock}
+              {memory.type === 'video' && isActive ? (
+                <Pressable
+                  style={[styles.chromePill, styles.chromeIconPill]}
+                  onPress={() => setVideoSoundOn(v => !v)}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    videoSoundOn ? 'Couper le son de la vidéo' : 'Activer le son de la vidéo'
+                  }
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  {videoSoundOn ? (
+                    <Volume2 color={TOP_CHROME_TEXT} size={scale(20)} strokeWidth={2} />
+                  ) : (
+                    <VolumeX color={TOP_CHROME_TEXT} size={scale(20)} strokeWidth={2} />
+                  )}
+                </Pressable>
+              ) : null}
+            </View>
+          </>
+        ) : (
+          <View style={[styles.topTextMeta, { paddingTop: topChromePadTop }]} pointerEvents="none">
+            {metaBlock}
+          </View>
         )}
       </View>
 
@@ -305,9 +405,18 @@ function ImmersivePhoto({
   capturedOverlayLabel: string;
   onToggleFavorite: (id: string) => void | Promise<void>;
 }) {
-  const raw = getPrimaryPhotoUriForBookPreview(memory)?.trim() ?? '';
-  const signed = useSignedMediaUrl(raw || null);
-  const uri = (signed ?? raw).trim();
+  const raw = getPrimaryPhotoUriForImmersiveViewer(memory)?.trim() ?? '';
+  const isDeviceLocal =
+    !!raw &&
+    (raw.startsWith('file:') ||
+      raw.startsWith('content:') ||
+      raw.startsWith('ph://') ||
+      raw.startsWith('assets-library://') ||
+      (raw.startsWith('/') && !extractMediaBucketPath(raw)));
+  const needsRemoteSign = !!raw && !isDeviceLocal;
+  const signed = useSignedMediaUrl(needsRemoteSign ? raw : null);
+  const uri = (needsRemoteSign ? signed ?? raw : raw).trim();
+  const paletteUri = pickPhotoUriForOverlayPalette(memory) || uri;
 
   const overlays = (
     <>
@@ -318,7 +427,7 @@ function ImmersivePhoto({
       />
       {showCapturedOverlay && uri ? (
         <CapturedAtOverlay
-          uriForAnalysis={uri}
+          uriForAnalysis={paletteUri}
           label={capturedOverlayLabel}
           inkOverride={memory.captured_overlay_ink}
         />
@@ -343,7 +452,8 @@ function ImmersivePhoto({
         source={{ uri }}
         style={styles.fullBleed}
         contentFit="cover"
-        cachePolicy="disk"
+        cachePolicy="memory-disk"
+        priority="high"
         recyclingKey={memory.id}
       />
       {overlays}
@@ -354,12 +464,14 @@ function ImmersivePhoto({
 function ImmersiveVideo({
   memory,
   isActive,
+  soundOn,
   showCapturedOverlay,
   capturedOverlayLabel,
   onToggleFavorite,
 }: {
   memory: Memory;
   isActive: boolean;
+  soundOn: boolean;
   showCapturedOverlay: boolean;
   capturedOverlayLabel: string;
   onToggleFavorite: (id: string) => void | Promise<void>;
@@ -368,6 +480,7 @@ function ImmersiveVideo({
   const posterRaw =
     (memory.poster_url?.trim() || memory.thumbnail_url?.trim() || '') || '';
   const posterSigned = useSignedMediaUrl(posterRaw || null) ?? '';
+  const posterUri = normalizeVideoPlaybackUri((posterSigned || posterRaw).trim());
 
   const seedNatural = useMemo(() => {
     const w = memory.original_px_w ?? 0;
@@ -376,25 +489,43 @@ function ImmersiveVideo({
   }, [memory.original_px_w, memory.original_px_h]);
 
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(seedNatural);
-  const [immersiveVideoSoundOn, setImmersiveVideoSoundOn] = useState(true);
+  const [videoReady, setVideoReady] = useState(false);
+  const immersiveVideoRef = useRef<Video | null>(null);
+
+  const trimmedUri = uri?.trim() ?? '';
+  useExpoAvShouldPlay(immersiveVideoRef, isActive, trimmedUri);
 
   useEffect(() => {
     const w = memory.original_px_w ?? 0;
     const h = memory.original_px_h ?? 0;
     setNatural(w > 0 && h > 0 ? { w, h } : null);
-  }, [memory.id, memory.original_px_w, memory.original_px_h]);
+    setVideoReady(false);
+  }, [memory.id, memory.original_px_w, memory.original_px_h, trimmedUri]);
 
-  useEffect(() => {
-    setImmersiveVideoSoundOn(true);
-  }, [memory.id]);
+  const markVideoReady = useCallback(() => {
+    setVideoReady(prev => (prev ? prev : true));
+  }, []);
 
   const onReadyForDisplay = useCallback(
     (e: { naturalSize?: { width: number; height: number } }) => {
       const nw = e.naturalSize?.width ?? 0;
       const nh = e.naturalSize?.height ?? 0;
-      if (nw > 0 && nh > 0) setNatural({ w: nw, h: nh });
+      if (nw > 0 && nh > 0) {
+        setNatural(prev => {
+          if (prev?.w === nw && prev?.h === nh) return prev;
+          return { w: nw, h: nh };
+        });
+      }
+      markVideoReady();
     },
-    []
+    [markVideoReady],
+  );
+
+  const onPlaybackStatusUpdate = useCallback(
+    (status: { isLoaded?: boolean }) => {
+      if (status.isLoaded) markVideoReady();
+    },
+    [markVideoReady],
   );
 
   const onPosterLoad = useCallback((e: { source: { width?: number; height?: number } }) => {
@@ -403,13 +534,13 @@ function ImmersiveVideo({
     if (w > 0 && h > 0) setNatural(prev => prev ?? { w, h });
   }, []);
 
-  /** Paysage (et carré) : tout voir, jamais rogner. Portrait : remplir au max (cover). */
+  const dimensions = natural ?? seedNatural;
+  /** Paysage (et carré) : tout voir. Portrait : cover — dimensions figées dès l’EXIF pour éviter le saut. */
   const resizeMode =
-    natural && natural.h > natural.w ? ResizeMode.COVER : ResizeMode.CONTAIN;
+    dimensions && dimensions.h > dimensions.w ? ResizeMode.COVER : ResizeMode.CONTAIN;
   const posterFit = resizeMode === ResizeMode.CONTAIN ? ('contain' as const) : ('cover' as const);
 
-  const trimmedUri = uri?.trim() ?? '';
-  const videoUriForOverlay = (posterSigned.trim() || trimmedUri).trim();
+  const videoUriForOverlay = posterUri.trim();
 
   const favoriteOverlay = (
     <FeedPhotoFavoriteOverlay
@@ -435,7 +566,7 @@ function ImmersiveVideo({
     </>
   );
 
-  if (!trimmedUri && !posterSigned.trim()) {
+  if (!trimmedUri && !posterUri) {
     return (
       <View style={[styles.videoImmersiveWrap, styles.mediaFallback]}>
         {mediaOverlays}
@@ -443,74 +574,40 @@ function ImmersiveVideo({
     );
   }
 
-  if (trimmedUri && isActive) {
-    return (
-      <View style={styles.videoImmersiveWrap}>
-        <Video
-          source={{ uri: trimmedUri }}
-          style={StyleSheet.absoluteFillObject}
-          resizeMode={resizeMode}
-          shouldPlay
-          isLooping
-          isMuted={!immersiveVideoSoundOn}
-          useNativeControls={false}
-          onReadyForDisplay={onReadyForDisplay}
-        />
-        {mediaOverlays}
-        <Pressable
-          style={styles.immersiveVideoSoundToggle}
-          onPress={() => setImmersiveVideoSoundOn(v => !v)}
-          accessibilityRole="button"
-          accessibilityLabel={
-            immersiveVideoSoundOn ? 'Couper le son de la vidéo' : 'Activer le son de la vidéo'
-          }
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          {immersiveVideoSoundOn ? (
-            <Volume2 color="#FFFFFF" size={scale(20)} strokeWidth={2} />
-          ) : (
-            <VolumeX color="#FFFFFF" size={scale(20)} strokeWidth={2} />
-          )}
-        </Pressable>
-      </View>
-    );
-  }
-
-  if (posterSigned) {
-    return (
-      <View style={styles.videoImmersiveWrap}>
-        <Image
-          source={{ uri: posterSigned }}
-          style={StyleSheet.absoluteFillObject}
-          contentFit={posterFit}
-          cachePolicy="disk"
-          recyclingKey={memory.id}
-          onLoad={onPosterLoad}
-        />
-        {mediaOverlays}
-      </View>
-    );
-  }
-
-  if (trimmedUri) {
-    return (
-      <View style={styles.videoImmersiveWrap}>
-        <Video
-          source={{ uri: trimmedUri }}
-          style={StyleSheet.absoluteFillObject}
-          resizeMode={resizeMode}
-          shouldPlay={false}
-          isMuted
-          useNativeControls={false}
-          onReadyForDisplay={onReadyForDisplay}
-        />
-        {mediaOverlays}
-      </View>
-    );
-  }
+  const showPosterPlaceholder = !!posterUri && !videoReady;
 
   return (
-    <View style={[styles.videoImmersiveWrap, styles.mediaFallback]}>
+    <View style={styles.videoImmersiveWrap}>
+      {trimmedUri ? (
+        <View style={[StyleSheet.absoluteFillObject, styles.immersiveVideoLayer]} pointerEvents="none">
+          <Video
+            ref={immersiveVideoRef}
+            source={{ uri: trimmedUri }}
+            style={StyleSheet.absoluteFillObject}
+            resizeMode={resizeMode}
+            shouldPlay={isActive}
+            isLooping
+            isMuted={!isActive || !soundOn}
+            useNativeControls={false}
+            onReadyForDisplay={onReadyForDisplay}
+            onPlaybackStatusUpdate={onPlaybackStatusUpdate}
+          />
+        </View>
+      ) : (
+        <View style={[StyleSheet.absoluteFillObject, styles.immersiveVideoBackdrop]} />
+      )}
+
+      {showPosterPlaceholder ? (
+        <Image
+          source={{ uri: posterUri }}
+          style={[StyleSheet.absoluteFillObject, styles.immersiveVideoPosterOverlay]}
+          contentFit={posterFit}
+          cachePolicy="disk"
+          recyclingKey={`${memory.id}-poster`}
+          onLoad={onPosterLoad}
+        />
+      ) : null}
+
       {mediaOverlays}
     </View>
   );
@@ -542,7 +639,7 @@ function ImmersiveVoice({
           cachePolicy="disk"
         />
       ) : (
-        <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#1C1C1E' }]} />
+        <View style={[StyleSheet.absoluteFillObject, { backgroundColor: THEME.bgScreen }]} />
       )}
       <View style={[styles.voicePlayerImmersive, hasCover && styles.voicePlayerImmersiveCoverScrim]}>
         {uri ? (
@@ -656,29 +753,84 @@ const styles = StyleSheet.create({
   closeBtn: {
     position: 'absolute',
     zIndex: 20,
-    padding: scale(8),
-    borderRadius: scale(22),
-    backgroundColor: 'rgba(0,0,0,0.35)',
+    width: scale(44),
+    height: scale(44),
+    borderRadius: scale(999),
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  metaTop: {
-    paddingHorizontal: scale(20),
-    paddingBottom: verticalScale(8),
+  closeBtnOnMedia: {
+    backgroundColor: CHROME_PILL_BG,
   },
-  metaTitle: {
-    color: CAPTION,
-    fontSize: scale(17),
+  closeBtnOnText: {
+    backgroundColor: 'rgba(0, 0, 0, 0.06)',
+  },
+  pageBody: {
+    flex: 1,
+    position: 'relative',
+    minHeight: 0,
+  },
+  mediaFill: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+  },
+  topMediaGradient: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 5,
+  },
+  topChromeFloat: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 6,
+    paddingHorizontal: scale(12),
+    paddingRight: scale(56),
+    gap: verticalScale(8),
+  },
+  metaLineOnMedia: {
+    color: TOP_CHROME_TEXT,
+    fontSize: scale(14),
     fontWeight: '600',
     letterSpacing: -0.2,
+    maxWidth: '100%',
   },
-  metaSub: {
-    marginTop: verticalScale(4),
-    color: 'rgba(255,255,255,0.72)',
-    fontSize: scale(14),
+  chromePill: {
+    backgroundColor: CHROME_PILL_BG,
+    borderRadius: scale(999),
+    paddingHorizontal: scale(12),
+    paddingVertical: verticalScale(8),
+    alignSelf: 'flex-start',
+    maxWidth: '78%',
   },
-  mediaBlock: {
-    flex: 1,
+  chromeIconPill: {
+    width: scale(40),
+    height: scale(40),
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    alignItems: 'center',
     justifyContent: 'center',
-    minHeight: verticalScale(200),
+  },
+  topTextMeta: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 6,
+    paddingHorizontal: scale(20),
+    paddingRight: scale(56),
+    paddingBottom: verticalScale(10),
+    backgroundColor: BG,
+  },
+  metaLineOnText: {
+    color: THEME.textPrimary,
+    fontSize: scale(14),
+    fontWeight: '600',
+    letterSpacing: -0.2,
+    maxWidth: '100%',
   },
   /** Photo immersive : conteneur pour overlays (favori + date) comme dans le fil. */
   photoImmersiveWrap: {
@@ -693,12 +845,13 @@ const styles = StyleSheet.create({
   immersiveMediaOverlaysHost: {
     position: 'relative',
   },
-  /** Texte immersif : fond noir + cœur favori comme ligne d’actions fil. */
+  /** Texte immersif : fond blanc + cœur favori comme ligne d’actions fil. */
   textImmersiveOuter: {
     flex: 1,
     width: '100%',
     minHeight: 0,
     position: 'relative',
+    backgroundColor: BG,
   },
   /** Vidéo immersive : même extension que photo / vocal dans le bloc média. */
   videoImmersiveWrap: {
@@ -707,21 +860,17 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     minHeight: 0,
     position: 'relative',
-    backgroundColor: '#000000',
+    backgroundColor: BG,
     overflow: 'hidden',
   },
-  /** Même logique que le fil : au-dessus des overlays média (favori, date). */
-  immersiveVideoSoundToggle: {
-    position: 'absolute',
-    left: scale(12),
-    top: verticalScale(12),
-    zIndex: 8,
-    width: scale(40),
-    height: scale(40),
-    borderRadius: scale(20),
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.55)',
+  immersiveVideoBackdrop: {
+    backgroundColor: BG,
+  },
+  immersiveVideoPosterOverlay: {
+    zIndex: 2,
+  },
+  immersiveVideoLayer: {
+    zIndex: 1,
   },
   fullBleed: {
     width: '100%',
@@ -731,16 +880,19 @@ const styles = StyleSheet.create({
   mediaFallback: {
     flex: 1,
     minHeight: verticalScale(200),
-    backgroundColor: '#1C1C1E',
+    backgroundColor: THEME.bgScreen,
   },
   footer: {
     paddingHorizontal: scale(20),
     paddingBottom: verticalScale(28),
     paddingTop: verticalScale(12),
+    backgroundColor: BG,
   },
   caption: {
-    color: 'rgba(255,255,255,0.88)',
+    color: THEME.textPrimary,
     fontSize: scale(15),
+    fontWeight: '400',
+    fontFamily: MEMORY_TEXT_FONT,
     lineHeight: scale(22),
   },
   /** Vocal immersif : même zone que la photo (flex dans mediaBlock), cover en plein écran. */
@@ -761,51 +913,54 @@ const styles = StyleSheet.create({
   voicePlayerImmersiveCoverScrim: {
     backgroundColor: 'rgba(0,0,0,0.42)',
   },
+  /** Marges latérales type page de livre (texte immersif). */
   textWrap: {
     flex: 1,
-    paddingHorizontal: scale(28),
+    paddingHorizontal: scale(48),
     justifyContent: 'center',
     minHeight: verticalScale(280),
   },
   textWrapFit1: {
-    paddingHorizontal: scale(26),
+    paddingHorizontal: scale(44),
   },
   textWrapFit2: {
-    paddingHorizontal: scale(25),
+    paddingHorizontal: scale(42),
   },
   textWrapFit3: {
-    paddingHorizontal: scale(24),
+    paddingHorizontal: scale(40),
   },
   textBody: {
-    color: '#FFFFFF',
+    color: THEME.textPrimary,
     fontSize: scale(26),
     lineHeight: scale(34),
-    textAlign: 'left',
-    // Style “roman” : aligné gauche, justification douce.
+    width: '100%',
+    textAlign: 'justify',
     textAlignVertical: 'top',
-    ...(Platform.OS === 'ios' || Platform.OS === 'android' ? { textAlign: 'left' as const } : {}),
-    fontFamily: FONT_MAMAN,
+    fontFamily: MEMORY_TEXT_FONT,
   },
   textBodyFit1: {
-    color: '#FFFFFF',
+    color: THEME.textPrimary,
     fontSize: scale(24),
     lineHeight: scale(32),
-    textAlign: 'left',
-    fontFamily: FONT_MAMAN,
+    width: '100%',
+    textAlign: 'justify',
+    fontFamily: MEMORY_TEXT_FONT,
   },
   textBodyFit2: {
-    color: '#FFFFFF',
+    color: THEME.textPrimary,
     fontSize: scale(21),
     lineHeight: scale(28),
-    textAlign: 'left',
-    fontFamily: FONT_MAMAN,
+    width: '100%',
+    textAlign: 'justify',
+    fontFamily: MEMORY_TEXT_FONT,
   },
   textBodyFit3: {
-    color: '#FFFFFF',
+    color: THEME.textPrimary,
     fontSize: scale(18),
     lineHeight: scale(25),
-    textAlign: 'left',
-    fontFamily: FONT_MAMAN,
+    width: '100%',
+    textAlign: 'justify',
+    fontFamily: MEMORY_TEXT_FONT,
   },
   textParaGap: {
     marginTop: verticalScale(18),

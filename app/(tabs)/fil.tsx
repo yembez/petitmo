@@ -5,12 +5,15 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
+  StyleSheet,
+  type StyleProp,
+  type ViewStyle,
+  type ViewProps,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useState, useCallback, useMemo, useRef } from 'react';
-import { useFonts, Lora_400Regular_Italic } from '@expo-google-fonts/lora';
+import { useState, useCallback, useMemo, useRef, type ReactNode } from 'react';
 import { verticalScale } from '@/utils/responsive';
 import EditTextModal from '@/components/EditTextModal';
 import { usePrefetchMemories } from '@/hooks/usePrefetchMemories';
@@ -23,12 +26,12 @@ import { useFilLayout } from '@/hooks/useFilLayout';
 import { useFilRowActions } from '@/hooks/useFilRowActions';
 import { styles } from '@/components/feed/feedStyles';
 import { THEME } from '@/constants/theme';
+import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
 import { FeedHeader } from '@/components/feed/FeedHeader';
 import type { FeedListItem } from '@/components/feed/FilMemoryRow';
 import { peekSilentInitialFilLoadArmed } from '@/services/feedAfterImportFlags';
 import { setMemoryViewerSession } from '@/services/memoryViewerSession';
-import { StyleSheet } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { getTimingNudge, markNudgeSeen, recordInstallDate } from '@/lib/paywallTiming';
 
@@ -36,7 +39,6 @@ export default function FilScreen() {
   const router = useRouter();
   const { pending: pendingUploads } = usePendingMediaUploads();
   const insets = useSafeAreaInsets();
-  const [fontsLoaded] = useFonts({ Lora_400Regular_Italic });
   const [timingNudge, setTimingNudge] = useState<'DAY_30' | 'DAY_60' | null>(null);
   const {
     memories,
@@ -71,7 +73,7 @@ export default function FilScreen() {
   const { feedAutoplayMemoryId, onViewableItemsChanged, suspendFeedInlineVideo } =
     useFeedVideoAutoplay(onPrefetchViewable);
   const feedViewabilityConfig = useMemo(
-    () => ({ itemVisiblePercentThreshold: 50, minimumViewTime: 300 }),
+    () => ({ itemVisiblePercentThreshold: 50, minimumViewTime: 80 }),
     []
   );
   const onFeedHeaderMenuPress = useCallback(() => {
@@ -89,12 +91,20 @@ export default function FilScreen() {
   };
   const toggleFavorite = useToggleFavorite(setMemories);
 
+  const renderFilListCell = useCallback(
+    (props: { style?: StyleProp<ViewStyle>; children: ReactNode; onLayout?: ViewProps['onLayout'] }) => (
+      <View style={[props.style, styles.feedListCell]} onLayout={props.onLayout}>
+        {props.children}
+      </View>
+    ),
+    []
+  );
+
   const { feedData, renderItem } = useFilFeedList(
     memories,
     setMemories,
     child,
     pendingUploads,
-    fontsLoaded,
     uploadingVoiceCoverId,
     setPostHeights,
     toggleFavorite,
@@ -129,7 +139,7 @@ export default function FilScreen() {
     return (
       <View style={[styles.container, styles.centered]}>
         <StatusBar style="dark" />
-        <ActivityIndicator size="large" color={THEME.brandTerracotta} />
+        <ActivityIndicator size="large" color={THEME.brandPrimary} />
       </View>
     );
   }
@@ -139,8 +149,11 @@ export default function FilScreen() {
       <View style={[styles.container, styles.centered]}>
         <StatusBar style="dark" />
         <Text style={styles.emptyText}>Aucun enfant trouvé</Text>
-        <TouchableOpacity style={styles.createButton} onPress={() => router.push('/create-child')}>
-          <Text style={styles.createButtonText}>Créer un profil</Text>
+        <TouchableOpacity
+          style={[petitmoCtaStyles.primary, styles.createButton]}
+          onPress={() => router.push('/create-child')}
+        >
+          <Text style={[petitmoCtaStyles.primaryText, styles.createButtonText]}>Créer un profil</Text>
         </TouchableOpacity>
       </View>
     );
@@ -166,6 +179,7 @@ export default function FilScreen() {
               : memoryFlatListKeyByIdRef.current.get(item.memory.id) ?? item.memory.id
           }
           renderItem={renderItem}
+          CellRendererComponent={renderFilListCell}
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={feedViewabilityConfig}
           style={styles.scrollView}
@@ -174,9 +188,8 @@ export default function FilScreen() {
             { paddingBottom: verticalScale(28) + tabBarFloatingOverlapPad(insets.bottom) },
           ]}
           showsVerticalScrollIndicator={false}
-          ItemSeparatorComponent={() => <View style={localStyles.postDivider} />}
           refreshControl={
-            <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor={THEME.brandTerracotta} />
+            <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor={THEME.brandPrimary} />
           }
           ListEmptyComponent={
             feedData.length === 0 ? (
@@ -242,10 +255,6 @@ export default function FilScreen() {
 }
 
 const localStyles = StyleSheet.create({
-  postDivider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: THEME.familyFlowLine,
-  },
   nudgeBanner: {
     position: 'absolute',
     left: 20,
@@ -264,7 +273,7 @@ const localStyles = StyleSheet.create({
     flex: 1,
   },
   nudgeCta: {
-    color: THEME.brandTerracotta,
+    color: THEME.brandPrimary,
     fontSize: 13,
     fontWeight: '600',
     marginLeft: 8,

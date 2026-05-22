@@ -103,7 +103,7 @@ export default function ParentSpaceScreen() {
   if (!fontsLoaded) {
     return (
       <View style={[styles.container, styles.fontsGate, { paddingTop: insets.top }]}>
-        <ActivityIndicator color={THEME.brandTerracotta} size="large" />
+        <ActivityIndicator color={THEME.brandPrimary} size="large" />
       </View>
     );
   }
@@ -408,7 +408,7 @@ function ChildRowAvatar({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: THEME.familyFlowScreenBg,
+    backgroundColor: THEME.bg,
   },
   fontsGate: {
     justifyContent: 'center',
@@ -420,7 +420,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
-    backgroundColor: THEME.familyFlowScreenBg,
+    backgroundColor: THEME.bg,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: THEME.familyFlowLine,
   },
@@ -497,7 +497,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   rowLabelAccent: {
-    color: THEME.brandTerracotta,
+    color: THEME.brandPrimary,
     fontWeight: '600',
   },
   rowLabelDestructive: {
@@ -533,7 +533,7 @@ const styles = StyleSheet.create({
     width: scale(34),
     height: scale(34),
     borderRadius: scale(17),
-    backgroundColor: THEME.brandTerracotta,
+    backgroundColor: THEME.brandPrimary,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: SPACING.sm,

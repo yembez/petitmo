@@ -29,6 +29,7 @@ import {
   upsertBook,
 } from '@/services/books';
 import { getLocalMemoryById } from '@/lib/localDb';
+import { THEME } from '@/constants/theme';
 
 const INK = '#1C1C1E';
 
@@ -452,7 +453,7 @@ const styles = StyleSheet.create({
     borderTopColor: 'rgba(0,0,0,0.10)',
   },
   modalOkBtn: {
-    backgroundColor: '#0A0A0A',
+    backgroundColor: THEME.brandArdoise,
     borderRadius: scale(999),
     paddingVertical: verticalScale(14),
     alignItems: 'center',
@@ -562,7 +563,7 @@ const styles = StyleSheet.create({
   modalBookMeta: { marginLeft: scale(12), fontSize: scale(13), fontWeight: '700', color: '#6B7280' },
   modalBookAddBtn: {
     marginLeft: scale(12),
-    backgroundColor: '#0A0A0A',
+    backgroundColor: THEME.brandArdoise,
     borderRadius: scale(999),
     paddingVertical: verticalScale(8),
     paddingHorizontal: scale(16),
@@ -622,7 +623,7 @@ const styles = StyleSheet.create({
   },
   modalCreateCta: {
     flex: 1,
-    backgroundColor: '#0A0A0A',
+    backgroundColor: THEME.brandArdoise,
     borderRadius: scale(999),
     paddingVertical: verticalScale(12),
     alignItems: 'center',

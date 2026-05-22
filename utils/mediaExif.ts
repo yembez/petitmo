@@ -3,6 +3,16 @@ import * as FileSystem from 'expo-file-system';
 import { Platform } from 'react-native';
 
 /**
+ * Métadonnées à l’import photothèque.
+ *
+ * Garde-fous (ne pas régresser) :
+ * 1. Picker : `IMPORT_PHOTO_PICKER_OPTS.exif` doit rester `true` tant que le binaire n’embarque pas
+ *    `expo-media-library` (rebuild `npx expo run:ios` après ajout du plugin dans `app.json`).
+ * 2. Module natif : import **dynamique** uniquement (`getMediaLibraryModule`) — jamais `import … from 'expo-media-library'` en tête de fichier.
+ * 3. Fil : `created_at` ≠ `inserted_at` (≥ 90 s) pour afficher la pastille (`utils/feedCaptureOverlay.ts`).
+ */
+
+/**
  * Date/heure de prise depuis EXIF (souvent `DateTimeOriginal` format `YYYY:MM:DD HH:mm:ss`).
  */
 export function parseExifCaptureDateIso(
@@ -47,35 +57,95 @@ export function buildImportMetadataFromExif(
   return { capturedAtIso, locationLabel: null };
 }
 
+/** Timestamp photothèque / fichier → ISO (secondes ou millisecondes depuis epoch). */
+function captureTimestampToIso(raw: number): string | undefined {
+  if (!Number.isFinite(raw) || raw <= 0) return undefined;
+  const ms = raw < 1e12 ? raw * 1000 : raw;
+  const d = new Date(ms);
+  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+}
+
+type MediaLibraryModule = typeof import('expo-media-library');
+
+let mediaLibraryLoadAttempted = false;
+let mediaLibraryModule: MediaLibraryModule | null = null;
+
+/**
+ * Chargement paresseux : évite le crash si le binaire n’a pas été rebuild après `expo-media-library`.
+ * (import statique → `Cannot find native module 'ExpoMediaLibrary'` et route `import-media` absente.)
+ */
+async function getMediaLibraryModule(): Promise<MediaLibraryModule | null> {
+  if (mediaLibraryLoadAttempted) return mediaLibraryModule;
+  mediaLibraryLoadAttempted = true;
+  if (Platform.OS === 'web') return null;
+  try {
+    mediaLibraryModule = await import('expo-media-library');
+    return mediaLibraryModule;
+  } catch {
+    mediaLibraryModule = null;
+    return null;
+  }
+}
+
+/**
+ * Date de prise via `assetId` + MediaLibrary — utile quand `exif: false` sur le picker (après rebuild natif).
+ */
+async function resolveCapturedAtFromLibraryAssetId(
+  assetId: string | null | undefined
+): Promise<string | undefined> {
+  const id = assetId?.trim();
+  if (!id || Platform.OS === 'web') return undefined;
+  const MediaLibrary = await getMediaLibraryModule();
+  if (!MediaLibrary) return undefined;
+  try {
+    const info = await MediaLibrary.getAssetInfoAsync(id);
+    return captureTimestampToIso(info.creationTime);
+  } catch {
+    return undefined;
+  }
+}
+
+async function resolveCapturedAtFromLocalFileUri(uri: string): Promise<string | undefined> {
+  try {
+    const file = new FileSystem.File(uri);
+    if (file.exists) {
+      const ms = file.creationTime ?? file.modificationTime;
+      if (ms != null) return captureTimestampToIso(ms);
+    }
+  } catch {
+    // URI photothèque (ph://) ou copie temporaire sans métadonnées
+  }
+  return undefined;
+}
+
 /**
  * Métadonnées à l’import depuis un asset picker (photo ou vidéo).
- * Les vidéos ont souvent peu ou pas d’EXIF : on retombe sur la date de création / modification du fichier local.
+ * Ordre : EXIF picker → photothèque (`assetId`, si module natif dispo) → dates fichier local.
  */
 export async function buildImportMetadataFromPickerAsset(
   asset: ImagePicker.ImagePickerAsset,
   options?: { isVideo?: boolean }
 ): Promise<ImportMetadata> {
+  void options;
   const meta = buildImportMetadataFromExif(asset.exif ?? undefined);
   if (meta.capturedAtIso) {
     return meta;
   }
+  const fromLibrary = await resolveCapturedAtFromLibraryAssetId(asset.assetId ?? null);
+  if (fromLibrary) {
+    return { ...meta, capturedAtIso: fromLibrary };
+  }
   if (Platform.OS === 'web') {
     return meta;
   }
-  const asVideo = options?.isVideo ?? asset.type === 'video';
-  if (!asVideo) {
-    return meta;
-  }
-  try {
-    const file = new FileSystem.File(asset.uri);
-    if (file.exists) {
-      const ms = file.creationTime ?? file.modificationTime;
-      if (ms != null && Number.isFinite(ms)) {
-        return { ...meta, capturedAtIso: new Date(ms).toISOString() };
-      }
-    }
-  } catch {
-    // URI type photothèque ou fichier inaccessible
+  const fromFile = await resolveCapturedAtFromLocalFileUri(asset.uri);
+  if (fromFile) {
+    return { ...meta, capturedAtIso: fromFile };
   }
   return meta;
+}
+
+/** `true` après rebuild natif si `getAssetInfoAsync` est utilisable (tests / futur `exif: false`). */
+export async function isMediaLibraryNativeLinked(): Promise<boolean> {
+  return (await getMediaLibraryModule()) != null;
 }

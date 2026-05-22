@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import {
   View,
   Text,
@@ -13,6 +13,8 @@ import {
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useLocalSearchParams, useRouter } from 'expo-router'
+import { useFocusEffect } from '@react-navigation/native'
+import { StatusBar, setStatusBarStyle } from 'expo-status-bar'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import {
@@ -47,10 +49,18 @@ export type PaywallContext =
 type PaywallParams = {
   context?: PaywallContext
   childName?: string
+  /** Où renvoyer l’utilisatrice à la fermeture (ex. quota atteint pendant import → fil). */
+  returnTo?: string
+}
+
+function normalizePaywallReturnTo(raw: unknown): 'fil' | null {
+  if (typeof raw !== 'string') return null
+  const key = raw.trim()
+  return key === 'fil' ? 'fil' : null
 }
 
 /** Hero souscription hors quota souvenirs : pas de « X premiers souvenirs » (cf. AGENTS.md). */
-/** Saut de ligne après « moment », puis ligne suivante + cœur Lucide terracotta. */
+/** Saut de ligne après « moment », puis ligne suivante + cœur Lucide rosé (`PAYWALL_HEART`). */
 const PAYWALL_NEUTRAL_HEAD_LINE1 = 'Préservez chaque moment'
 const PAYWALL_NEUTRAL_HEAD_LINE2_TEXT = 'avec votre enfant, sans limite'
 
@@ -144,9 +154,11 @@ const PAYWALL_MESSAGES: Record<
 type Plan = 'yearly' | 'monthly'
 
 const PAYWALL_BG = '#F6F4F1'
-/** Terracotta charte (`THEME.brandTerracotta`). */
-const ACCENT = THEME.brandTerracotta
-const ACCENT_SOFT = 'rgba(208, 98, 53, 0.14)'
+/** Gris CTA charte — paywall (`THEME.brandArdoise`). */
+const ACCENT = THEME.brandArdoise
+const ACCENT_SOFT = THEME.paywallAccentSoft
+/** Cœur hero paywall uniquement — rosé charte. */
+const PAYWALL_HEART = THEME.brandPrimary
 const CARD = '#FFFFFF'
 const MUTED = '#6B7280'
 const LINE = 'rgba(0,0,0,0.08)'
@@ -166,6 +178,15 @@ export default function PaywallScreen() {
   const insets = useSafeAreaInsets()
   const params = useLocalSearchParams<PaywallParams>()
   const context: PaywallContext = normalizePaywallContext(params.context)
+  const returnTo = normalizePaywallReturnTo(params.returnTo)
+
+  const dismissPaywall = () => {
+    if (returnTo === 'fil') {
+      router.replace('/(tabs)/fil')
+      return
+    }
+    router.back()
+  }
 
   const [selectedPlan, setSelectedPlan] = useState<Plan>('yearly')
   const [isLoading, setIsLoading] = useState(false)
@@ -229,8 +250,18 @@ export default function PaywallScreen() {
     lineHeight: scale(26),
   }
 
+  /** Heure, batterie, signal… en blanc sur le hero sombre (comme Capturer / Favoris). */
+  useFocusEffect(
+    useCallback(() => {
+      setStatusBarStyle('light')
+      return () => setStatusBarStyle('dark')
+    }, [])
+  )
+
   return (
-    <ScrollView
+    <>
+      <StatusBar style="light" />
+      <ScrollView
       style={styles.root}
       contentContainerStyle={[styles.rootContent, { paddingBottom: contentBottomPad }]}
       showsVerticalScrollIndicator={false}
@@ -241,6 +272,12 @@ export default function PaywallScreen() {
           source={require('@/assets/images/maman_enfant_paywall.png')}
           style={StyleSheet.absoluteFillObject}
           contentFit="cover"
+        />
+        <LinearGradient
+          colors={['rgba(0,0,0,0.62)', 'rgba(0,0,0,0.28)', 'transparent']}
+          locations={[0, 0.55, 1]}
+          style={styles.heroTopFade}
+          pointerEvents="none"
         />
         <LinearGradient
           colors={['rgba(246,244,241,0)', 'rgba(246,244,241,0.5)', PAYWALL_BG]}
@@ -270,7 +307,7 @@ export default function PaywallScreen() {
           </View>
         </View>
         <Pressable
-          onPress={() => router.back()}
+          onPress={dismissPaywall}
           style={({ pressed }) => [
             styles.closeFab,
             { top: insets.top + 10, right: 16 + insets.right },
@@ -280,7 +317,7 @@ export default function PaywallScreen() {
           accessibilityRole="button"
           accessibilityLabel="Fermer"
         >
-          <X size={18} color="#1C1C1E" strokeWidth={2.4} />
+          <X size={18} color="#FFFFFF" strokeWidth={2.4} />
         </Pressable>
       </View>
 
@@ -312,7 +349,7 @@ export default function PaywallScreen() {
               )}
             </TouchableOpacity>
             <Pressable
-              onPress={() => router.back()}
+              onPress={dismissPaywall}
               style={({ pressed }) => [styles.dismissCta, { marginTop: 16 }, pressed && { opacity: 0.78 }]}
               accessibilityRole="button"
             >
@@ -364,8 +401,8 @@ export default function PaywallScreen() {
                 </Text>
                 <Heart
                   size={scale(20)}
-                  color={THEME.brandTerracotta}
-                  fill={THEME.brandTerracotta}
+                  color={PAYWALL_HEART}
+                  fill={PAYWALL_HEART}
                   strokeWidth={2}
                   accessibilityElementsHidden
                   importantForAccessibility="no"
@@ -491,7 +528,7 @@ export default function PaywallScreen() {
         </TouchableOpacity>
 
         <Pressable
-          onPress={() => router.back()}
+          onPress={dismissPaywall}
           style={({ pressed }) => [styles.dismissCta, pressed && { opacity: 0.78 }]}
           accessibilityRole="button"
           accessibilityLabel="Pas maintenant"
@@ -506,6 +543,7 @@ export default function PaywallScreen() {
         )}
       </View>
     </ScrollView>
+    </>
   )
 }
 
@@ -553,13 +591,21 @@ const styles = StyleSheet.create({
     position: 'relative',
     overflow: 'visible',
   },
+  heroTopFade: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: '48%',
+    zIndex: 1,
+  },
   logoPlus: {
-    color: ACCENT,
+    color: '#FFFFFF',
     fontWeight: '800',
     letterSpacing: -1,
-    textShadowColor: 'rgba(0,0,0,0.35)',
+    textShadowColor: 'rgba(0,0,0,0.45)',
     textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
+    textShadowRadius: 4,
   },
   closeFab: {
     position: 'absolute',
@@ -567,57 +613,11 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.95)',
+    backgroundColor: 'rgba(0,0,0,0.32)',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.06)',
-  },
-  statusCard: {
-    position: 'absolute',
-    zIndex: 3,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: CARD,
-    borderRadius: 12,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderWidth: 1,
-    borderColor: LINE,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.08,
-        shadowRadius: 12,
-      },
-      android: { elevation: 4 },
-      default: {},
-    }),
-  },
-  statusIconWrap: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: ACCENT_SOFT,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  statusTextCol: {
-    flex: 1,
-    minWidth: 0,
-  },
-  statusTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#1C1C1E',
-  },
-  statusBody: {
-    marginTop: 2,
-    fontSize: 11,
-    color: MUTED,
-    lineHeight: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.22)',
   },
   body: {
     marginTop: -verticalScale(42),
@@ -677,7 +677,7 @@ const styles = StyleSheet.create({
     color: ACCENT,
   },
   headlineHeart: {
-    color: THEME.brandTerracotta,
+    color: PAYWALL_HEART,
     textShadowColor: 'transparent',
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 0,
@@ -866,7 +866,7 @@ const styles = StyleSheet.create({
     marginTop: verticalScale(22),
     height: 54,
     borderRadius: 14,
-    backgroundColor: THEME.brandTerracotta,
+    backgroundColor: ACCENT,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 20,

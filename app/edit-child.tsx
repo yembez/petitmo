@@ -6,19 +6,21 @@ import {
   Image,
   TextInput,
   ScrollView,
+  Keyboard,
   ActivityIndicator,
   Alert,
   Platform,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Camera, Menu } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { scale, verticalScale } from '@/utils/responsive';
 import { SPACING, FONT_SIZES, PROFILE_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
+import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import { getLocalChild } from '@/lib/localDb';
 import {
   getChildren,
@@ -37,10 +39,13 @@ import {
 import DatePicker from '@/components/DatePicker';
 import { CropModal } from '@/components/CropModal';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
+import { normalizeChildGivenName } from '@/utils/childDisplayName';
 
 export default function EditChildScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const scrollRef = useRef<ScrollView>(null);
+  const [keyboardInset, setKeyboardInset] = useState(0);
   const { loaded: fontsLoaded, dm500, dm600, dm700 } = useDmSansFamilyFlowFonts();
   const params = useLocalSearchParams();
   const [child, setChild] = useState<Child | null>(null);
@@ -60,6 +65,21 @@ export default function EditChildScreen() {
 
   useEffect(() => {
     loadChild();
+  }, []);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardInset(e.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      setKeyboardInset(0);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
   }, []);
 
   const loadChild = async () => {
@@ -185,20 +205,19 @@ export default function EditChildScreen() {
 
     try {
       setIsSaving(true);
-      if ((await getCachedUserMode()) === 'local') {
-        // Photo déjà persistée (sandbox + SQLite) par `uploadChildPhoto` en mode local
-        await updateChild(child.id, {
-          name: name.trim(),
-          birthdate: birthdate || null,
-        });
-      } else {
-        await updateChild(child.id, {
-          name: name.trim(),
-          birthdate: birthdate || null,
-          /** Toujours l’URL Supabase / signée — `photoUrl` peut être un `file://` après persistance sandbox. */
-          photo_url: (child.photo_url ?? '').trim() || null,
-        });
-      }
+      const updates = {
+        name: normalizeChildGivenName(name),
+        birthdate: birthdate || null,
+      };
+      const updated =
+        (await getCachedUserMode()) === 'local'
+          ? await updateChild(child.id, updates)
+          : await updateChild(child.id, {
+              ...updates,
+              /** Toujours l’URL Supabase / signée — `photoUrl` peut être un `file://` après persistance sandbox. */
+              photo_url: (child.photo_url ?? '').trim() || null,
+            });
+      setChild(updated);
       router.back();
     } catch (error) {
       console.error('Error updating child:', error);
@@ -211,7 +230,7 @@ export default function EditChildScreen() {
   if (!fontsLoaded) {
     return (
       <View style={[styles.container, styles.loadingContainer]}>
-        <ActivityIndicator size="large" color={THEME.brandTerracotta} />
+        <ActivityIndicator size="large" color={THEME.textPrimary} />
       </View>
     );
   }
@@ -219,7 +238,7 @@ export default function EditChildScreen() {
   if (isLoading) {
     return (
       <View style={[styles.container, styles.loadingContainer]}>
-        <ActivityIndicator size="large" color={THEME.brandTerracotta} />
+        <ActivityIndicator size="large" color={THEME.textPrimary} />
       </View>
     );
   }
@@ -247,7 +266,17 @@ export default function EditChildScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        ref={scrollRef}
+        style={styles.content}
+        contentContainerStyle={{
+          paddingBottom:
+            Math.max(insets.bottom, verticalScale(16)) + keyboardInset + verticalScale(24),
+        }}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.photoSection}>
           <TouchableOpacity
             onPress={() => void openCropOnCurrentPhoto()}
@@ -290,8 +319,15 @@ export default function EditChildScreen() {
               style={[styles.input, dm500 ? { fontFamily: dm500 } : null]}
               value={name}
               onChangeText={setName}
-              placeholder="Prénom de l'enfant"
+              placeholder="Prénom ou prénoms composés"
               placeholderTextColor={THEME.textMuted}
+              autoCapitalize="words"
+              autoCorrect={false}
+              onFocus={() => {
+                requestAnimationFrame(() => {
+                  scrollRef.current?.scrollTo({ y: 0, animated: true });
+                });
+              }}
             />
           </View>
 
@@ -306,14 +342,21 @@ export default function EditChildScreen() {
         </View>
 
         <TouchableOpacity
-          style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
+          style={[
+            petitmoCtaStyles.primary,
+            petitmoCtaStyles.primaryFullWidth,
+            styles.saveButton,
+            isSaving && petitmoCtaStyles.primaryDisabled,
+          ]}
           onPress={handleSave}
           disabled={isSaving}
         >
           {isSaving ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
+            <ActivityIndicator size="small" color={PETITMO_CTA_SPINNER_COLOR} />
           ) : (
-            <Text style={[styles.saveButtonText, dm600 ? { fontFamily: dm600 } : null]}>Enregistrer</Text>
+            <Text style={[petitmoCtaStyles.primaryText, dm600 ? { fontFamily: dm600 } : null]}>
+              Enregistrer
+            </Text>
           )}
         </TouchableOpacity>
       </ScrollView>
@@ -342,7 +385,7 @@ export default function EditChildScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: THEME.familyFlowScreenBg,
+    backgroundColor: THEME.bg,
   },
   loadingContainer: {
     justifyContent: 'center',
@@ -385,7 +428,7 @@ const styles = StyleSheet.create({
     borderRadius: PROFILE_SIZES.large / 2,
   },
   photoPlaceholder: {
-    backgroundColor: THEME.brandTerracotta,
+    backgroundColor: THEME.brandPrimary,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -405,7 +448,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 3,
-    borderColor: THEME.familyFlowScreenBg,
+    borderColor: THEME.bg,
   },
   photoIconContainer: {
     position: 'absolute',
@@ -414,11 +457,11 @@ const styles = StyleSheet.create({
     width: scale(40),
     height: scale(40),
     borderRadius: scale(20),
-    backgroundColor: THEME.brandTerracotta,
+    backgroundColor: THEME.brandPrimary,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 3,
-    borderColor: THEME.familyFlowScreenBg,
+    borderColor: THEME.bg,
   },
   photoHint: {
     fontSize: FONT_SIZES.sm,
@@ -453,23 +496,6 @@ const styles = StyleSheet.create({
     marginTop: SPACING.xs,
   },
   saveButton: {
-    backgroundColor: THEME.brandTerracotta,
-    borderRadius: scale(100),
-    paddingVertical: SPACING.md,
-    alignItems: 'center',
     marginBottom: SPACING.xl,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  saveButtonDisabled: {
-    opacity: 0.6,
-  },
-  saveButtonText: {
-    fontSize: FONT_SIZES.base,
-    fontWeight: '600',
-    color: '#FFFFFF',
   },
 });

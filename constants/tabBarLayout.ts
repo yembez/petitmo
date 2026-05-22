@@ -3,15 +3,14 @@ import { scale, verticalScale } from '@/utils/responsive';
 import { THEME } from '@/constants/theme';
 
 /**
- * Hauteur de la zone **icône + libellé** (entre le padding haut et le padding bas + safe area).
- * Ne pas confondre avec la hauteur totale du bandeau : voir `getTabBarOuterHeight`.
+ * Hauteur utile **icône + libellé** (zone onglets au-dessus du remplissage safe area).
  */
-export const TAB_BAR_CONTENT_HEIGHT = verticalScale(56);
+export const TAB_BAR_CONTENT_HEIGHT = verticalScale(50);
 
 /** Padding au-dessus des onglets (dans le bandeau). */
-export const TAB_BAR_PADDING_TOP = verticalScale(6);
+export const TAB_BAR_PADDING_TOP = verticalScale(4);
 
-/** Espace sous les libellés, au-dessus de la zone home indicator (hors `insets.bottom`). */
+/** Espace sous les libellés dans la zone onglets (au-dessus du bandeau safe). */
 export const TAB_BAR_PADDING_BOTTOM_GAP = verticalScale(6);
 
 /** Fond du bandeau tab bar (maquette : blanc pur, pas off-white). */
@@ -33,33 +32,42 @@ export const TAB_BAR_TOP_CORNER_RADIUS = TAB_BAR_CORNER_RADIUS;
  */
 export const TAB_BAR_FLOAT_SIDE_INSET = scale(12);
 
-/** Décalage du bandeau par rapport au bas de l’écran (flottement type maquette). */
+/** Décalage du bandeau par rapport au bas de l’écran quand pas de safe area. */
 export const TAB_BAR_FLOAT_BOTTOM_OFFSET = verticalScale(4);
 
-/** Rayon du carré lavande (onglet actif). */
-export const TAB_ACTIVE_INNER_RADIUS = scale(12);
-
-/**
- * Largeur fixe du carré jaune (onglet actif) — identique pour tous les onglets, indépendante du libellé.
- */
-export const TAB_ACTIVE_PILL_WIDTH = scale(84);
-
-/**
- * Hauteur totale du bandeau tab bar (padding compris + safe area basse).
- * À utiliser pour `tabBarStyle.height` afin d’éviter le rognage des libellés sous `overflow: 'hidden'`.
- */
-export function getTabBarOuterHeight(insetsBottom: number): number {
-  return (
-    TAB_BAR_PADDING_TOP +
-    TAB_BAR_CONTENT_HEIGHT +
-    TAB_BAR_PADDING_BOTTOM_GAP +
-    insetsBottom
-  );
+/** Hauteur de la zone onglets (icônes + libellés). */
+export function getTabBarChromeHeight(): number {
+  return TAB_BAR_PADDING_TOP + TAB_BAR_CONTENT_HEIGHT + TAB_BAR_PADDING_BOTTOM_GAP;
 }
 
-/** Distance du bas de l’écran pour caler un overlay au-dessus de la tab bar flottante. */
+/** Bande blanche sous les onglets = safe area (plus de trou transparent). */
+export function tabBarSafeFillHeight(insetsBottom: number): number {
+  return Math.max(0, insetsBottom);
+}
+
+/** Hauteur totale du bandeau (chrome + remplissage safe). */
+export function getTabBarTotalHeight(insetsBottom: number): number {
+  return getTabBarChromeHeight() + tabBarSafeFillHeight(insetsBottom);
+}
+
+/** `paddingBottom` du conteneur : réserve la safe area sous les onglets. */
+export function tabBarContentPaddingBottom(insetsBottom: number): number {
+  return tabBarSafeFillHeight(insetsBottom);
+}
+
+/** Ancre du bandeau : collé au bas si safe area, sinon léger flottement. */
+export function tabBarFloatBottomPosition(insetsBottom: number): number {
+  return tabBarSafeFillHeight(insetsBottom) > 0 ? 0 : TAB_BAR_FLOAT_BOTTOM_OFFSET;
+}
+
+/** @deprecated alias — hauteur totale (réserves listes). */
+export function getTabBarOuterHeight(insetsBottom: number): number {
+  return getTabBarTotalHeight(insetsBottom);
+}
+
+/** Distance du bas de l’écran pour caler un overlay au-dessus de la tab bar. */
 export function tabBarFloatingBottomInset(insetsBottom: number): number {
-  return getTabBarOuterHeight(insetsBottom) + TAB_BAR_FLOAT_BOTTOM_OFFSET;
+  return tabBarFloatBottomPosition(insetsBottom) + getTabBarTotalHeight(insetsBottom);
 }
 
 /**

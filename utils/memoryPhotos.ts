@@ -42,6 +42,7 @@ function normalizeMemoryMediaUriForDisplay(u: string): string {
  * Même arbitrage que le viewer immersif : local d’abord, sauf chemins sandbox Petitmo encore en base
  * alors que les fichiers ont disparu (réinstall) → on prend tout de suite la chaîne distante.
  */
+/** Affichage fil + viewer immersif : dérivé léger (`display` / `thumb`), pas le print livre. */
 export function pickPrimaryPhotoNormalizedForFeedAndViewer(memory: Memory): string {
   const localPick = firstNonEmpty(
     memory.local_display_path,
@@ -63,6 +64,21 @@ export function pickPrimaryPhotoNormalizedForFeedAndViewer(memory: Memory): stri
     ghostLocal && remotePick.trim()
       ? remotePick.trim()
       : localPick.trim() || remotePick.trim();
+  return raw ? normalizeMemoryMediaUriForDisplay(raw) : '';
+}
+
+/** Viewer immersif / fil : même dérivé que `pickPrimaryPhotoNormalizedForFeedAndViewer`. */
+export function getPrimaryPhotoUriForImmersiveViewer(memory: Memory): string {
+  const boot = peekFeedBootstrapDisplayUrls(memory.id)?.[0]?.trim();
+  if (boot) return boot;
+  return pickPrimaryPhotoNormalizedForFeedAndViewer(memory);
+}
+
+/** Pastille date + analyse palette : vignette légère (évite `print.jpg` / original). */
+export function pickPhotoUriForOverlayPalette(memory: Memory): string {
+  const localPick = firstNonEmpty(memory.local_thumb_path, memory.local_display_path);
+  const remotePick = firstNonEmpty(memory.thumb_url, memory.display_url);
+  const raw = localPick.trim() || remotePick.trim();
   return raw ? normalizeMemoryMediaUriForDisplay(raw) : '';
 }
 

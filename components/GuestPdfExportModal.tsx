@@ -16,6 +16,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getLastGuestExportEmail } from '@/lib/guestExportPrefs';
 import { getPrivacyPolicyUrl } from '@/lib/privacyPolicyUrl';
+import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 
 export type GuestPdfExportSubmit = {
   email: string;
@@ -126,16 +127,17 @@ export function GuestPdfExportModal({ visible, onClose, onSubmit, loading }: Pro
             </Pressable>
             <Pressable
               style={[
+                petitmoCtaStyles.primary,
                 styles.btnPrimary,
-                (!gdprChecked || loading || !email.trim()) && styles.btnPrimaryDisabled,
+                (!gdprChecked || loading || !email.trim()) && petitmoCtaStyles.primaryDisabled,
               ]}
               onPress={() => void handleConfirm()}
               disabled={!gdprChecked || loading || !email.trim()}
             >
               {loading ? (
-                <ActivityIndicator color="#fff" />
+                <ActivityIndicator color={PETITMO_CTA_SPINNER_COLOR} />
               ) : (
-                <Text style={styles.btnPrimaryText}>Continuer</Text>
+                <Text style={[petitmoCtaStyles.primaryText, styles.btnPrimaryText]}>Continuer</Text>
               )}
             </Pressable>
           </View>
@@ -241,19 +243,12 @@ const styles = StyleSheet.create({
     color: '#636366',
   },
   btnPrimary: {
-    backgroundColor: '#2D6A4F',
     paddingVertical: 12,
     paddingHorizontal: 20,
-    borderRadius: 10,
     minWidth: 120,
     alignItems: 'center',
   },
-  btnPrimaryDisabled: {
-    opacity: 0.45,
-  },
   btnPrimaryText: {
-    color: '#fff',
     fontSize: 16,
-    fontWeight: '600',
   },
 });

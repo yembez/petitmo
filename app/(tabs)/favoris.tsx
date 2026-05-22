@@ -34,12 +34,13 @@ import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
 import { scale, verticalScale } from '@/utils/responsive';
 import { THEME } from '@/constants/theme';
+import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import {
   tabBarFloatingBottomInset,
   tabBarFloatingOverlapPad,
 } from '@/constants/tabBarLayout';
 import { SPACING, FONT_SIZES } from '@/constants/sizes';
-import { useFonts, EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
+import { MEMORY_TEXT_FONT } from '@/constants/memoryTextFont';
 import { getMemories, requestMissingMediaDerivatives } from '@/services/media';
 import { getOrSelectFirstChild } from '@/services/children';
 import {
@@ -61,6 +62,7 @@ import {
   getVideoPosterUriForBookPreview,
 } from '@/utils/memoryPhotos';
 import { useFeedPhotoDisplayUrls } from '@/hooks/useFeedPhotoDisplayUrls';
+import { clampAudioBookAnnotation } from '@/lib/audioBookAnnotation';
 import { AddToBookModal } from '@/components/AddToBookModal';
 
 type FavListItem = {
@@ -191,7 +193,7 @@ function slideshowSlideRawUri(item: FavListItem, feedUrls: string[]): string {
   return item.thumbUrl.trim();
 }
 
-/** Extrait sous les vignettes photo / vidéo (premiers mots, même annotation que le souvenir). */
+/** Extrait sous les vignettes photo / vidéo / audio annoté (premiers mots, comme le fil). */
 const PHOTO_CAPTION_MAX_WORDS = 14;
 
 function photoCaptionOverlayText(content: string | null | undefined): string | null {
@@ -200,6 +202,18 @@ function photoCaptionOverlayText(content: string | null | undefined): string | n
   const words = raw.split(/\s+/u).filter(Boolean);
   if (words.length <= PHOTO_CAPTION_MAX_WORDS) return raw;
   return `${words.slice(0, PHOTO_CAPTION_MAX_WORDS).join(' ')}…`;
+}
+
+function galleryTileCaptionSnippet(memory: Memory): string | null {
+  const raw = (memory.content ?? '').trim();
+  if (!raw) return null;
+  if (memory.type === 'photo' || memory.type === 'video') {
+    return photoCaptionOverlayText(raw);
+  }
+  if (memory.type === 'voice') {
+    return photoCaptionOverlayText(clampAudioBookAnnotation(raw));
+  }
+  return null;
 }
 
 /** Zoom de départ → 1 : uniquement zoom arrière (aucun zoom avant visible). */
@@ -548,7 +562,7 @@ function FavorisFixedTopChrome({
                 accessibilityLabel="Mode sélection"
               >
                 <View style={styles.topChromeSelectCtaContent}>
-                  <BookOpen size={scale(18)} color={THEME.textPrimary} strokeWidth={2.2} />
+                  <BookOpen size={scale(18)} color={THEME.captureScreenCtaForeground} strokeWidth={2.2} />
                   <Text style={styles.topChromeSelectCtaText}>Sélectionner</Text>
                 </View>
               </Pressable>
@@ -578,8 +592,13 @@ const GALLERY_TILE_GAP = 1;
 
 const SELECTION_RING = 22;
 
-/** Hauteur du bandeau « Ajouter au livre » (au-dessus de la tab bar). */
-const FAVORIS_SELECTION_ACTION_BAR_HEIGHT = verticalScale(58);
+/** Zone CTA + padding haut du bandeau « Ajouter au livre » (hors tab bar). */
+const FAVORIS_SELECTION_CTA_BLOCK_HEIGHT = verticalScale(52);
+
+/** Hauteur totale du bandeau blanc : CTA + remplissage sous la tab bar flottante. */
+function favorisSelectionBarHeight(insetsBottom: number): number {
+  return FAVORIS_SELECTION_CTA_BLOCK_HEIGHT + tabBarFloatingBottomInset(insetsBottom);
+}
 
 const AUDIO_WAVE_BARS = [6, 12, 8, 16, 10, 18, 13, 20, 12, 17, 9, 14] as const;
 
@@ -626,7 +645,6 @@ function TypeGlyph({ type }: { type: Memory['type'] }) {
 type GalleryTileProps = {
   item: FavListItem;
   tileSize: number;
-  fontsLoaded: boolean;
   selectionMode: boolean;
   isSelected: boolean;
   onOpen: (memoryId: string) => void;
@@ -649,7 +667,6 @@ function galleryTilePropsEqual(a: GalleryTileProps, b: GalleryTileProps): boolea
     a.item.memory.voice_cover_url === b.item.memory.voice_cover_url &&
     (a.item.memory.voice_cover_path ?? '') === (b.item.memory.voice_cover_path ?? '') &&
     a.tileSize === b.tileSize &&
-    a.fontsLoaded === b.fontsLoaded &&
     a.selectionMode === b.selectionMode &&
     a.isSelected === b.isSelected &&
     a.onOpen === b.onOpen &&
@@ -660,7 +677,6 @@ function galleryTilePropsEqual(a: GalleryTileProps, b: GalleryTileProps): boolea
 const GalleryTile = memo(function GalleryTile({
   item,
   tileSize,
-  fontsLoaded,
   selectionMode,
   isSelected,
   onOpen,
@@ -713,10 +729,7 @@ const GalleryTile = memo(function GalleryTile({
   const isMedia = memory.type === 'photo' || memory.type === 'video';
   const isText = memory.type === 'text';
   const isAudio = memory.type === 'voice';
-  const tileCaptionSnippet =
-    memory.type === 'photo' || memory.type === 'video'
-      ? photoCaptionOverlayText(memory.content)
-      : null;
+  const tileCaptionSnippet = galleryTileCaptionSnippet(memory);
 
   const scaleSv = useSharedValue(1);
   const animStyle = useAnimatedStyle(() => ({
@@ -778,13 +791,7 @@ const GalleryTile = memo(function GalleryTile({
                   end={{ x: 0.5, y: 1 }}
                   style={StyleSheet.absoluteFillObject}
                 />
-                <Text
-                  style={[
-                    styles.galleryPhotoCaptionText,
-                    fontsLoaded
-                      ? { fontFamily: 'EBGaramond_400Regular_Italic', fontWeight: '400' }
-                      : { fontWeight: '600' },
-                  ]}
+                <Text style={styles.galleryPhotoCaptionText}
                   numberOfLines={2}
                   ellipsizeMode="tail"
                 >
@@ -807,7 +814,13 @@ const GalleryTile = memo(function GalleryTile({
                 <View style={styles.audioThumbScrim} pointerEvents="none" />
               </>
             ) : null}
-            <View style={styles.audioThumbContent} pointerEvents="none">
+            <View
+              style={[
+                styles.audioThumbContent,
+                tileCaptionSnippet ? styles.audioThumbContentWithCaption : null,
+              ]}
+              pointerEvents="none"
+            >
               <View style={styles.audioThumbPlay} pointerEvents="none">
                 <Play size={scale(18)} color="#FFFFFF" fill="#FFFFFF" strokeWidth={0} />
               </View>
@@ -817,16 +830,31 @@ const GalleryTile = memo(function GalleryTile({
                 ))}
               </View>
             </View>
+            {tileCaptionSnippet ? (
+              <View
+                style={[
+                  styles.galleryPhotoCaptionBand,
+                  selectionMode ? styles.galleryPhotoCaptionBandSelection : null,
+                ]}
+                pointerEvents="none"
+              >
+                <LinearGradient
+                  pointerEvents="none"
+                  colors={['rgba(55,55,55,0)', 'rgba(28,28,28,0.78)']}
+                  locations={[0, 1]}
+                  start={{ x: 0.5, y: 0 }}
+                  end={{ x: 0.5, y: 1 }}
+                  style={StyleSheet.absoluteFillObject}
+                />
+                <Text style={styles.galleryPhotoCaptionText} numberOfLines={2} ellipsizeMode="tail">
+                  {tileCaptionSnippet}
+                </Text>
+              </View>
+            ) : null}
           </View>
         ) : isText ? (
           <View style={styles.galleryPh}>
-            <Text
-              style={[
-                styles.galleryTextSnippet,
-                fontsLoaded ? { fontFamily: 'EBGaramond_400Regular_Italic' } : null,
-              ]}
-              numberOfLines={6}
-            >
+            <Text style={styles.galleryTextSnippet} numberOfLines={6}>
               {(memory.content ?? '').trim() || 'Petits mots'}
             </Text>
           </View>
@@ -863,7 +891,6 @@ export default function FavorisScreen() {
   const isTabFocused = useIsFocused();
   const params = useLocalSearchParams<{ bookId?: string; createBookTitle?: string }>();
   const insets = useSafeAreaInsets();
-  const [fontsLoaded] = useFonts({ EBGaramond_400Regular_Italic });
   /** Prérempli après `hydrateTabScreensFromLocal` : pas de roue si les données locales sont déjà connues. */
   const [loading, setLoading] = useState(() => feedChildHydrationSnapshot === null);
   const [memories, setMemories] = useState<Memory[]>(() => [...feedMemoriesHydrationSnapshot]);
@@ -1008,14 +1035,13 @@ export default function FavorisScreen() {
       <GalleryTile
         item={item}
         tileSize={tileSize}
-        fontsLoaded={fontsLoaded}
         selectionMode={selectionMode}
         isSelected={selectedIds.has(item.key)}
         onOpen={openMemory}
         onToggleSelect={toggleSelection}
       />
     ),
-    [fontsLoaded, tileSize, selectionMode, selectedIds, openMemory, toggleSelection]
+    [tileSize, selectionMode, selectedIds, openMemory, toggleSelection]
   );
 
   const favoritesListHeader = useMemo(() => {
@@ -1034,7 +1060,7 @@ export default function FavorisScreen() {
       {isTabFocused ? <StatusBar style="light" /> : null}
       {loading ? (
         <View style={styles.centered}>
-          <ActivityIndicator size="large" color={THEME.accent} />
+          <ActivityIndicator size="large" color={THEME.brandPrimary} />
         </View>
       ) : !hasChild ? (
         <View style={[styles.centered, styles.noChildPad]}>
@@ -1043,11 +1069,11 @@ export default function FavorisScreen() {
             Crée un profil pour enregistrer des souvenirs et des favoris.
           </Text>
           <TouchableOpacity
-            style={styles.noChildCta}
+            style={[petitmoCtaStyles.primary, styles.noChildCta]}
             onPress={() => router.push('/create-child')}
             activeOpacity={0.85}
           >
-            <Text style={styles.noChildCtaText}>Créer un profil</Text>
+            <Text style={[petitmoCtaStyles.primaryText, styles.noChildCtaText]}>Créer un profil</Text>
           </TouchableOpacity>
         </View>
       ) : (
@@ -1076,13 +1102,11 @@ export default function FavorisScreen() {
                 columnWrapperStyle={styles.galleryRow}
                 contentContainerStyle={[
                   styles.galleryContent,
-                  selectionMode && selectedIds.size > 0 ? styles.galleryContentWithSelectionCta : null,
                   {
                     paddingBottom:
-                      tabBarFloatingOverlapPad(insets.bottom) +
-                      (selectionMode && selectedIds.size > 0
-                        ? FAVORIS_SELECTION_ACTION_BAR_HEIGHT + verticalScale(6)
-                        : verticalScale(6)),
+                      selectionMode && selectedIds.size > 0
+                        ? favorisSelectionBarHeight(insets.bottom) + verticalScale(6)
+                        : tabBarFloatingOverlapPad(insets.bottom) + verticalScale(6),
                   },
                 ]}
                 style={styles.gallery}
@@ -1119,7 +1143,7 @@ export default function FavorisScreen() {
               exiting={SlideOutDown.duration(200)}
               style={[
                 styles.selectionActionBar,
-                { bottom: tabBarFloatingBottomInset(insets.bottom) },
+                { paddingBottom: tabBarFloatingBottomInset(insets.bottom) },
               ]}
             >
               <TouchableOpacity
@@ -1319,10 +1343,6 @@ const styles = StyleSheet.create({
     paddingTop: 0,
     paddingBottom: verticalScale(6),
   },
-  /** Espace pour le CTA « Ajouter au livre » en overlay bas (évite les tuiles cachées). */
-  galleryContentWithSelectionCta: {
-    paddingBottom: verticalScale(52),
-  },
   galleryRow: {
     gap: GALLERY_TILE_GAP,
     paddingHorizontal: 0,
@@ -1354,7 +1374,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.2)',
   },
   selectionRingSelected: {
-    backgroundColor: '#0A0A0A',
+    backgroundColor: '#5799FC',
     borderWidth: 1.5,
     borderColor: '#FFFFFF',
   },
@@ -1385,7 +1405,7 @@ const styles = StyleSheet.create({
     minWidth: scale(76),
     paddingVertical: verticalScale(6),
   },
-  /** CTA « Sélectionner » sur le héros — aligné charte Capturer (jaune + contour noir). */
+  /** CTA « Sélectionner » sur le héros — fond gris translucide sur la photo. */
   topChromeSelectCta: {
     minWidth: scale(76),
     alignItems: 'center',
@@ -1393,9 +1413,9 @@ const styles = StyleSheet.create({
     paddingVertical: verticalScale(8),
     paddingHorizontal: scale(15),
     borderRadius: scale(20),
-    backgroundColor: THEME.captureAccentYellow,
-    borderWidth: 1,
-    borderColor: '#000000',
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.38)',
   },
   topChromeSelectCtaContent: {
     flexDirection: 'row',
@@ -1403,7 +1423,7 @@ const styles = StyleSheet.create({
     gap: scale(7),
   },
   topChromeSelectCtaText: {
-    color: THEME.textPrimary,
+    color: THEME.captureScreenCtaForeground,
     fontSize: scale(16),
     fontWeight: '600',
   },
@@ -1422,7 +1442,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
-  /** Titre « Favoris » + cœur terracotta — gardé lisible à côté de Sélectionner */
+  /** Titre « Favoris » + cœur rosé — gardé lisible à côté de Sélectionner */
   favorisTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1447,30 +1467,30 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
+    bottom: 0,
     zIndex: 50,
-    backgroundColor: '#FFFFFF',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(0,0,0,0.32)',
+    backgroundColor: THEME.bg,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: THEME.familyFlowLine,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: SPACING.md,
     paddingTop: verticalScale(10),
-    paddingBottom: verticalScale(10),
     ...Platform.select({
       ios: {
         shadowColor: '#000',
         shadowOffset: { width: 0, height: -2 },
-        shadowOpacity: 0.08,
-        shadowRadius: 8,
+        shadowOpacity: 0.06,
+        shadowRadius: 6,
       },
-      android: { elevation: 12 },
+      android: { elevation: 8 },
     }),
   },
   selectionActionBtn: {
     alignSelf: 'center',
     width: '100%',
     maxWidth: scale(320),
-    backgroundColor: '#0A0A0A',
+    backgroundColor: THEME.brandArdoise,
     borderRadius: scale(999),
     paddingVertical: verticalScale(12),
     paddingHorizontal: scale(22),
@@ -1503,6 +1523,9 @@ const styles = StyleSheet.create({
     padding: SPACING.sm,
     paddingBottom: verticalScale(10),
     gap: verticalScale(10),
+  },
+  audioThumbContentWithCaption: {
+    paddingBottom: verticalScale(38),
   },
   audioThumbPlay: {
     position: 'absolute',
@@ -1541,9 +1564,20 @@ const styles = StyleSheet.create({
   galleryTextSnippet: {
     fontSize: 12,
     lineHeight: 16,
+    fontFamily: MEMORY_TEXT_FONT,
     color: INK,
     textAlign: 'center',
-    fontStyle: 'italic',
+  },
+  galleryPhotoCaptionText: {
+    fontSize: scale(11),
+    lineHeight: scale(14),
+    fontFamily: MEMORY_TEXT_FONT,
+    fontWeight: '400',
+    color: '#FFFFFF',
+    textAlign: 'left',
+    textShadowColor: 'rgba(0,0,0,0.35)',
+    textShadowOffset: { width: 0, height: 0.5 },
+    textShadowRadius: 3,
   },
   /** Même centrage et taille de pastille que `audioThumbPlay` (icône play audio). */
   galleryVideoBadge: {
@@ -1573,15 +1607,6 @@ const styles = StyleSheet.create({
   },
   galleryPhotoCaptionBandSelection: {
     paddingRight: scale(34),
-  },
-  galleryPhotoCaptionText: {
-    fontSize: scale(11),
-    lineHeight: scale(14),
-    color: '#FFFFFF',
-    textAlign: 'left',
-    textShadowColor: 'rgba(0,0,0,0.35)',
-    textShadowOffset: { width: 0, height: 0.5 },
-    textShadowRadius: 3,
   },
 
   textThumbGlyph: {
@@ -1613,15 +1638,11 @@ const styles = StyleSheet.create({
     marginBottom: verticalScale(20),
   },
   noChildCta: {
-    backgroundColor: THEME.accent,
     paddingHorizontal: SPACING.xl,
     paddingVertical: verticalScale(12),
-    borderRadius: scale(12),
   },
   noChildCtaText: {
-    color: '#FFFFFF',
     fontSize: FONT_SIZES.md,
-    fontWeight: '600',
   },
 
   // (Menu horizontal supprimé)

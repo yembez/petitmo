@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { ImageSourcePropType } from 'react-native';
+import { InteractionManager, type ImageSourcePropType } from 'react-native';
 import type { ImageColorsResult } from 'react-native-image-colors/build/types';
 import type { DominantColors } from './dominantImagePalette';
 import {
@@ -85,9 +85,12 @@ export function useDominantImageColors(
       }
     };
 
-    extract();
+    const task = InteractionManager.runAfterInteractions(() => {
+      void extract();
+    });
     return () => {
       cancelled = true;
+      task.cancel();
     };
   }, [imageSource]);
 

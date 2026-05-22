@@ -6,6 +6,7 @@ import { readAsStringAsync, EncodingType } from 'expo-file-system/legacy';
 import { resolveUriForPalette } from './dominantImagePalette';
 import { ensureLocalImageForPalette } from './ensureLocalImageForPalette';
 import { supabase } from '@/lib/supabase';
+import { isLikelyVideoFileUri } from '@/utils/videoMediaUri';
 
 function guessMimeFromUrl(url: string): 'image/jpeg' | 'image/png' | 'image/webp' {
   const u = url.split('?')[0].toLowerCase();
@@ -50,6 +51,7 @@ export async function fetchImageColorsResult(
 ): Promise<ImageColorsResult | null> {
   const originalUri = resolveUriForPalette(imageSource);
   if (!originalUri) return null;
+  if (isLikelyVideoFileUri(originalUri)) return null;
   if (!isImageColorsRuntimeAvailable()) return null;
 
   const cacheKey = originalUri.slice(0, 400);

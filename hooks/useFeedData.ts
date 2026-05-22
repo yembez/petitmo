@@ -22,6 +22,7 @@ import {
   setSelectedChild,
   sanitizeChildLocalAvatarIfMissing,
   PETITMO_CHILD_PROFILE_UPDATED_EVENT,
+  type ChildProfileUpdatedPayload,
 } from '@/services/children';
 import { listBooks, type Book } from '@/services/books';
 import type { PendingUpload } from '@/contexts/PendingMediaUploadsContext';
@@ -176,13 +177,16 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
     });
     const subChildProfile = DeviceEventEmitter.addListener(
       PETITMO_CHILD_PROFILE_UPDATED_EVENT,
-      (payload: { childId: string }) => {
+      (payload: ChildProfileUpdatedPayload) => {
         void (async () => {
           const id = payload?.childId?.trim();
           if (!id || childRef.current?.id !== id) return;
           try {
-            const all = await getChildren();
-            const row = all.find(c => c.id === id);
+            let row = payload.child?.id === id ? payload.child : null;
+            if (!row) {
+              const all = await getChildren();
+              row = all.find(c => c.id === id) ?? null;
+            }
             if (!row) return;
             const cleaned = await sanitizeChildLocalAvatarIfMissing(row);
             setChild(cleaned);

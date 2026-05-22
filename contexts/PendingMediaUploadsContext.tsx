@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
-import { Alert, DeviceEventEmitter } from 'react-native';
+import { Alert, DeviceEventEmitter, InteractionManager } from 'react-native';
 import { useRouter } from 'expo-router';
 import type { MemoryRow } from '@/services/media';
 import { setFeedBootstrapDisplayUrls, setFeedBootstrapVideoUri } from '@/services/feedLocalPhotoCache';
@@ -149,20 +149,23 @@ export function PendingMediaUploadsProvider({ children }: { children: React.Reac
               return;
             }
             if (err.message === 'LIMIT_REACHED') {
-              router.push({
-                pathname: '/paywall',
-                params: { context: 'LIMIT_REACHED' },
-              });
-              // Nettoyer l'upload en cours : retirer la carte « envoi » du pending
               setPending(p => p.filter(x => x.tempId !== tempId));
+              InteractionManager.runAfterInteractions(() => {
+                router.replace({
+                  pathname: '/paywall',
+                  params: { context: 'LIMIT_REACHED', returnTo: 'fil' },
+                });
+              });
               return;
             }
             if (err.message === 'VIDEO_LIMIT_REACHED') {
-              router.push({
-                pathname: '/paywall',
-                params: { context: 'VIDEO_LIMIT_REACHED' },
-              });
               setPending(p => p.filter(x => x.tempId !== tempId));
+              InteractionManager.runAfterInteractions(() => {
+                router.replace({
+                  pathname: '/paywall',
+                  params: { context: 'VIDEO_LIMIT_REACHED', returnTo: 'fil' },
+                });
+              });
               return;
             }
           }

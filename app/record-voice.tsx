@@ -31,6 +31,7 @@ import { Audio } from 'expo-av';
 import { scale, verticalScale } from '@/utils/responsive';
 import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
+import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import PermissionModal from '@/components/PermissionModal';
 import { uploadMedia } from '@/services/media';
 import { getOrSelectFirstChild } from '@/services/children';
@@ -647,17 +648,24 @@ export default function RecordVoiceScreen() {
           </View>
 
           <TouchableOpacity
-            style={styles.saveButtonMaquette}
+            style={[
+              petitmoCtaStyles.primary,
+              petitmoCtaStyles.primaryFullWidth,
+              styles.saveButtonMaquette,
+              isSaving && petitmoCtaStyles.primaryDisabled,
+            ]}
             onPress={() => void saveRecording()}
             disabled={isSaving}
             activeOpacity={0.88}
           >
             {isSaving ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
+              <ActivityIndicator size="small" color={PETITMO_CTA_SPINNER_COLOR} />
             ) : (
               <>
-                <Save size={scale(22)} color="#FFFFFF" strokeWidth={2} />
-                <Text style={styles.saveButtonMaquetteText}>Sauvegarder</Text>
+                <Save size={scale(22)} color={THEME.captureScreenCtaForeground} strokeWidth={2} />
+                <Text style={[petitmoCtaStyles.primaryText, styles.saveButtonMaquetteText]}>
+                  Sauvegarder
+                </Text>
               </>
             )}
           </TouchableOpacity>
@@ -900,14 +908,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: scale(10),
     marginTop: verticalScale(28),
-    paddingVertical: verticalScale(16),
-    borderRadius: scale(14),
-    backgroundColor: '#1C1C1E',
     minHeight: scale(54),
   },
   saveButtonMaquetteText: {
     fontSize: FONT_SIZES.base,
-    color: '#FFFFFF',
     fontWeight: '600',
   },
   privacyRow: {

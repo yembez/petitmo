@@ -125,7 +125,7 @@ Aucune autre écriture cloud n'est permise en gratuit. Pas de "petite sync genti
 ### Paywall — hero selon le contexte (`app/paywall.tsx`)
 
 - **Quota souvenirs gratuit atteint** (`context=LIMIT_REACHED` uniquement) : hero chiffré du type « Vous avez capturé vos N premiers souvenirs » + sous-texte du type « Continuez à préserver… » — pour que le message soit **factuel** et lié au plafond gratuit.
-- **Toute autre entrée** (onboarding « S’abonner », vidéo dans un livre, export, audio/vidéo hors quota souvenirs, nudges J+30…, ou absence de `context`) : hero **neutre**, sans évoquer un nombre de souvenirs capturés : ligne 1 **« Préservez chaque moment »** (saut après *moment*), ligne 2 **« avec votre enfant, sans limite »** + pictogramme **cœur Lucide** plein **terracotta charte** (`THEME.brandTerracotta`). CTA principal paywall en **terracotta charte**.
+- **Toute autre entrée** (onboarding « S’abonner », vidéo dans un livre, export, audio/vidéo hors quota souvenirs, nudges J+30…, ou absence de `context`) : hero **neutre**, sans évoquer un nombre de souvenirs capturés : ligne 1 **« Préservez chaque moment »** (saut après *moment*), ligne 2 **« avec votre enfant, sans limite »** + pictogramme **cœur Lucide** plein **rosé charte** (`THEME.brandPrimary`). CTA principal paywall en **rosé charte**.
 - Exception UI : flux **export PDF numérique à l’acte** (`EXPORT_DIGITAL_PDF`) conserve son propre titre / sous-titre (achat hors abonnement).
 - Passer explicitement `params.context` depuis chaque écran ; défaut = **`GENERAL`** (plus **`LIMIT_REACHED`** si param absent).
 

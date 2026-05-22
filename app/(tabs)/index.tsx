@@ -26,6 +26,11 @@ import * as Haptics from 'expo-haptics';
 import { useFonts, DMSans_400Regular, DMSans_700Bold } from '@expo-google-fonts/dm-sans';
 import { scale, verticalScale } from '@/utils/responsive';
 import { THEME } from '@/constants/theme';
+import {
+  PETITMO_CTA_BORDER_RADIUS,
+  PETITMO_CTA_BORDER_WIDTH,
+  PETITMO_CTA_SOFT_ELEVATION,
+} from '@/constants/petitmoCtaStyles';
 import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
 import {
   cacheRemoteChildProfilePhotoLocally,
@@ -35,13 +40,21 @@ import {
   PETITMO_CHILD_PROFILE_UPDATED_EVENT,
   sanitizeChildLocalAvatarIfMissing,
   setCaptureTabChildSnapshot,
+  type ChildProfileUpdatedPayload,
 } from '@/services/children';
 import type { Child } from '@/types/local';
 import PetitmoLogoManuscrit, { PETITMO_LOGO_VIEWBOX } from '@/components/PetitmoLogoManuscrit';
 import { checkMemoryLimit } from '@/lib/limits';
+import { getLocalChild } from '@/lib/localDb';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { resolveChildProfileImageDisplayUri } from '@/utils/childPhotoUri';
+import { childDisplayGivenName, childDisplayInitial } from '@/utils/childDisplayName';
 import { CAPTURE_HERO_COLOR_MATRIX } from '@/utils/captureHeroColorMatrix';
+import {
+  CAPTURE_HERO_IMAGE_CONTENT_POSITION,
+  CAPTURE_HERO_IMAGE_OBJECT_POSITION,
+  computeCaptureHeroPhotoViewport,
+} from '@/utils/captureHeroMetrics';
 import { ColorMatrix } from 'react-native-color-matrix-image-filters';
 
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -66,21 +79,44 @@ const HERO_TOP_BLACK_FADE = [
   'rgba(0, 0, 0, 0)',
 ] as const;
 
+/** Fondu noir en bas du hero (titre blanc sur la photo). */
+const HERO_BOTTOM_BLACK_FADE = [
+  'rgba(0, 0, 0, 0)',
+  'rgba(0, 0, 0, 0.38)',
+  'rgba(0, 0, 0, 0.78)',
+] as const;
+
 /** Hauteur du fondu haut ≈ 30 % du hero (px, pas de % pour fiabilité layout). */
 function captureHeroTopFadeHeight(heroHeight: number): number {
   return Math.max(verticalScale(72), Math.round(heroHeight * 0.3));
 }
 
-/** Espace volontaire entre le bas du bloc titre et le haut du bloc CTA. */
-const CAPTURE_TITLE_CTA_GAP = verticalScale(18);
+/** Hauteur du fondu bas ≈ 42 % du hero (bande titre). */
+function captureHeroBottomFadeHeight(heroHeight: number): number {
+  return Math.max(verticalScale(108), Math.round(heroHeight * 0.42));
+}
 
-/** Accent CTA écran Capturer — aligné sur `THEME.captureAccentYellow`. */
-const CAPTURE_ACCENT = THEME.captureAccentYellow;
+/** Écart vertical uniforme entre les CTA (Écrire, Importer, Enregistrer). */
+const CAPTURE_CTA_GAP = verticalScale(16);
 
-const CAPTURE_CTA_BORDER = '#000000';
+/** Fond du CTA principal « Écrire » — écran Capturer. */
+const CAPTURE_WRITE_CTA_BACKGROUND = THEME.captureScreenCtaBackground;
+/** Liseré CTA Importer / Enregistrer — même rosé, plus clair que le fond « Écrire ». */
+const CAPTURE_WRITE_CTA_BORDER = THEME.captureCtaBorderColor;
+/** Libellé + crayon sur fond `CAPTURE_WRITE_CTA_BACKGROUND`. */
+const CAPTURE_WRITE_CTA_FOREGROUND = THEME.captureScreenCtaForeground;
 
-/** Rayon des coins — identique sur Écrire et CTA secondaires (Importer / Enregistrer). */
-const CAPTURE_CTA_BORDER_RADIUS = scale(20);
+/** Titre Capturer — essai San Francisco sur iOS (`System`), graisses via `fontWeight`. */
+const CAPTURE_TITLE_FONT_FAMILY = Platform.select({
+  ios: 'System',
+  default: undefined,
+});
+
+function captureTitleFont(weight: '400' | '700') {
+  return CAPTURE_TITLE_FONT_FAMILY
+    ? { fontFamily: CAPTURE_TITLE_FONT_FAMILY, fontWeight: weight }
+    : { fontWeight: weight };
+}
 
 /** Phosphor `fill` — CTA secondaires Enregistrer / Importer (noir). */
 const CAPTURE_PHOSPHOR_SECONDARY = {
@@ -255,7 +291,7 @@ function CapturePrimaryWriteButton({
       >
         <Pencil
           size={scale(20)}
-          color={THEME.textPrimary}
+          color={CAPTURE_WRITE_CTA_FOREGROUND}
           strokeWidth={2.4}
           style={styles.capturePrimaryWritePencil}
         />
@@ -289,9 +325,16 @@ export default function CapturerScreen() {
   const layoutH = Math.min(frame.height > 1 ? frame.height : usableH, usableH);
   const compact = layoutH < 600;
 
-  const captureHeroHeight = useMemo(() => Math.round(layoutH * 0.5), [layoutH]);
+  const captureHeroHeight = useMemo(
+    () => Math.round(computeCaptureHeroPhotoViewport(frame.height, windowH, frame.width, insets.top).heroH),
+    [frame.height, frame.width, windowH, insets.top],
+  );
   const captureHeroTopFadeH = useMemo(
     () => captureHeroTopFadeHeight(captureHeroHeight),
+    [captureHeroHeight],
+  );
+  const captureHeroBottomFadeH = useMemo(
+    () => captureHeroBottomFadeHeight(captureHeroHeight),
     [captureHeroHeight],
   );
 
@@ -307,13 +350,16 @@ export default function CapturerScreen() {
   useEffect(() => {
     const sub = DeviceEventEmitter.addListener(
       PETITMO_CHILD_PROFILE_UPDATED_EVENT,
-      (payload: { childId: string }) => {
+      (payload: ChildProfileUpdatedPayload) => {
         void (async () => {
           const id = payload?.childId?.trim();
           if (!id || childRef.current?.id !== id) return;
           try {
-            const all = await getChildren();
-            const row = all.find(c => c.id === id);
+            let row: Child | null = payload.child?.id === id ? payload.child : null;
+            if (!row) {
+              const all = await getChildren();
+              row = all.find(c => c.id === id) ?? null;
+            }
             if (!row) return;
             const cleaned = await sanitizeChildLocalAvatarIfMissing(row);
             setChild(cleaned);
@@ -338,6 +384,11 @@ export default function CapturerScreen() {
 
   const handleCaptureCtaPress = useCallback(
     (route: CaptureRoute) => {
+      /** Importer : ouvrir la galerie tout de suite ; la limite est vérifiée après la sélection. */
+      if (route === '/import-media') {
+        router.push(route);
+        return;
+      }
       void (async () => {
         const childId = childRef.current?.id;
         if (!childId) {
@@ -381,6 +432,24 @@ export default function CapturerScreen() {
         try {
           if (!silent) setIsLoading(true);
           const storedSelectedId = await getOrSelectFirstChild();
+          if (cancelled) return;
+
+          /** Retour onglet (ex. après import fil) : SQLite direct, sans sanitize destructif. */
+          if (silent && storedSelectedId) {
+            const row = getLocalChild(storedSelectedId);
+            if (row) {
+              setChild(prev => {
+                const lp =
+                  (row.local_photo_path ?? '').trim() ||
+                  (prev?.local_photo_path ?? '').trim() ||
+                  null;
+                const pu = (row.photo_url ?? '').trim() || (prev?.photo_url ?? '').trim() || null;
+                return { ...row, local_photo_path: lp, photo_url: pu };
+              });
+            }
+            return;
+          }
+
           const allChildren = await getChildren();
           if (cancelled) return;
 
@@ -430,7 +499,7 @@ export default function CapturerScreen() {
     return (
       <View style={[styles.root, styles.loadingContainer]}>
         <StatusBar style="dark" />
-        <ActivityIndicator size="large" color={CAPTURE_ACCENT} />
+        <ActivityIndicator size="large" color={THEME.textPrimary} />
       </View>
     );
   }
@@ -467,8 +536,7 @@ export default function CapturerScreen() {
   const captureWhiteMinHeight = Math.max(0, layoutH - captureHeroHeight);
   /** Réserve sous les CTA pour la tab bar flottante (zone de centrage vertical). */
   const captureTabBarReserve = tabBarFloatingOverlapPad(insets.bottom);
-  const childFirstName =
-    child.name.trim().split(/\s+/).filter(Boolean)[0] ?? child.name.trim();
+  const childGivenName = childDisplayGivenName(child.name);
 
   return (
     <View style={styles.root}>
@@ -513,7 +581,7 @@ export default function CapturerScreen() {
                   />
                 ) : (
                   <View style={[StyleSheet.absoluteFillObject, styles.heroPlaceholder]}>
-                    <Text style={styles.heroPlaceholderText}>{child.name.charAt(0).toUpperCase()}</Text>
+                    <Text style={styles.heroPlaceholderText}>{childDisplayInitial(child.name)}</Text>
                   </View>
                 )}
                 <LinearGradient
@@ -551,6 +619,67 @@ export default function CapturerScreen() {
                   <Menu size={headerMenuIconSize} color={THEME.textPrimary} strokeWidth={2} />
                 </TouchableOpacity>
               </View>
+
+              <LinearGradient
+                colors={[...HERO_BOTTOM_BLACK_FADE]}
+                locations={[0, 0.45, 1]}
+                pointerEvents="none"
+                style={[styles.captureHeroBottomBlackFade, { height: captureHeroBottomFadeH }]}
+              />
+
+              <View style={styles.captureHeroTitleOverlay} pointerEvents="none">
+                <View style={styles.captureTitleBlock} accessibilityRole="header">
+                  <View
+                    style={[
+                      styles.captureTitleLine1Row,
+                      compact && styles.captureTitleLine1RowCompact,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.captureTitleLine1,
+                        compact && styles.captureTitleLine1Compact,
+                        captureTitleFont('400'),
+                      ]}
+                    >
+                      Quel souvenir pour{' '}
+                    </Text>
+                    <View style={styles.captureTitleNameHeartRow}>
+                      <Text
+                        style={[
+                          styles.captureTitleLine1,
+                          compact && styles.captureTitleLine1Compact,
+                          captureTitleFont('400'),
+                        ]}
+                      >
+                        {childGivenName || 'l’enfant'}
+                      </Text>
+                      <Heart
+                        size={scale(compact ? 13 : 16)}
+                        color={THEME.brandPrimary}
+                        fill={THEME.brandPrimary}
+                        strokeWidth={1.6}
+                        style={styles.captureTitleHeart}
+                      />
+                    </View>
+                  </View>
+
+                  <View style={styles.captureTitleLine2Row}>
+                    <Text
+                      style={[
+                        styles.captureTitleLine2Bold,
+                        compact && styles.captureTitleLine2BoldCompact,
+                        captureTitleFont('400'),
+                      ]}
+                    >
+                      <Text style={[styles.captureTitleTodayEmphasis, captureTitleFont('700')]}>
+                        aujourd&apos;hui
+                      </Text>
+                      <Text> ?</Text>
+                    </Text>
+                  </View>
+                </View>
+              </View>
             </View>
 
             <View
@@ -563,45 +692,6 @@ export default function CapturerScreen() {
                 },
               ]}
             >
-              <View
-                style={[
-                  styles.captureTitleZone,
-                  compact && styles.captureTitleZoneCompact,
-                ]}
-              >
-                <View style={styles.captureTitleBlock} pointerEvents="none">
-                  <Text
-                    style={[
-                      styles.captureTitleLine1,
-                      compact && styles.captureTitleLine1Compact,
-                      dmSans ? { fontFamily: dmSans } : { fontWeight: '400' },
-                    ]}
-                    accessibilityRole="header"
-                  >
-                    {`Quel souvenir pour ${childFirstName || 'l’enfant'}`}
-                  </Text>
-
-                  <View style={styles.captureTitleLine2Row}>
-                    <Text
-                      style={[
-                        styles.captureTitleLine2Bold,
-                        compact && styles.captureTitleLine2BoldCompact,
-                        dmSans700 ? { fontFamily: dmSans700 } : { fontWeight: '700' },
-                      ]}
-                    >
-                      aujourd&apos;hui ?
-                    </Text>
-                    <Heart
-                      size={scale(compact ? 10 : 12)}
-                      color={THEME.brandTerracotta}
-                      fill={THEME.brandTerracotta}
-                      strokeWidth={1.6}
-                      style={styles.captureTitleHeart}
-                    />
-                  </View>
-                </View>
-              </View>
-
               <View style={styles.captureCtaZone}>
                 <View style={styles.captureCtaBlock}>
                   <View style={styles.capturePrimaryWriteWrap}>
@@ -719,6 +809,26 @@ const styles = StyleSheet.create({
     zIndex: 10,
     elevation: 10,
   },
+  captureHeroBottomBlackFade: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 11,
+    elevation: 11,
+  },
+  captureHeroTitleOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 12,
+    elevation: 12,
+    paddingHorizontal: scale(20),
+    paddingBottom: verticalScale(14),
+    paddingTop: verticalScale(8),
+    alignItems: 'center',
+  },
   captureContentWhite: {
     width: '100%',
     flex: 1,
@@ -726,48 +836,51 @@ const styles = StyleSheet.create({
     backgroundColor: THEME.bg,
     alignItems: 'stretch',
   },
-  /**
-   * Zone titre : flex 1, contenu calé vers le bas (vers les CTA).
-   * Évite le « double vide » du centrage dans chaque moitié d’écran.
-   */
-  captureTitleZone: {
-    flex: 1,
-    minHeight: 0,
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    paddingBottom: CAPTURE_TITLE_CTA_GAP,
-  },
-  captureTitleZoneCompact: {
-    paddingBottom: verticalScale(14),
-  },
   captureTitleBlock: {
     alignItems: 'center',
     maxWidth: '100%',
   },
-  /** Zone CTA : flex 1, contenu calé vers le haut (vers le titre). */
+  /** Zone CTA sous le hero — centrée verticalement dans le bandeau blanc. */
   captureCtaZone: {
     flex: 1,
     minHeight: 0,
-    justifyContent: 'flex-start',
+    justifyContent: 'center',
     alignItems: 'stretch',
+    paddingTop: verticalScale(8),
   },
   captureCtaBlock: {
     alignItems: 'stretch',
     alignSelf: 'center',
     width: '100%',
   },
-  captureTitleLine1: {
-    textAlign: 'center',
-    fontSize: scale(21),
-    lineHeight: scale(27),
-    color: THEME.textPrimary,
-    letterSpacing: -0.35,
+  captureTitleLine1Row: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: verticalScale(3),
   },
-  captureTitleLine1Compact: {
-    fontSize: scale(18),
-    lineHeight: scale(23),
+  captureTitleLine1RowCompact: {
     marginBottom: verticalScale(2),
+  },
+  captureTitleNameHeartRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: scale(5),
+  },
+  captureTitleLine1: {
+    textAlign: 'center',
+    fontSize: scale(23),
+    lineHeight: scale(29),
+    color: '#FFFFFF',
+    letterSpacing: -0.35,
+    textShadowColor: 'rgba(0,0,0,0.35)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
+  captureTitleLine1Compact: {
+    fontSize: scale(20),
+    lineHeight: scale(26),
   },
   captureTitleLine2Row: {
     flexDirection: 'row',
@@ -777,35 +890,40 @@ const styles = StyleSheet.create({
     marginBottom: 0,
   },
   captureTitleLine2Bold: {
-    fontSize: scale(21),
-    lineHeight: scale(27),
-    color: THEME.textPrimary,
+    fontSize: scale(23),
+    lineHeight: scale(29),
+    color: '#FFFFFF',
     letterSpacing: -0.35,
+    textShadowColor: 'rgba(0,0,0,0.35)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
   },
   captureTitleLine2BoldCompact: {
-    fontSize: scale(18),
-    lineHeight: scale(23),
+    fontSize: scale(20),
+    lineHeight: scale(26),
+  },
+  /** « aujourd'hui » en bold sur le hero. */
+  captureTitleTodayEmphasis: {
+    letterSpacing: -0.35,
   },
   captureTitleHeart: {
-    marginLeft: scale(4),
+    marginTop: verticalScale(1),
   },
   capturePrimaryWriteWrap: {
     alignItems: 'center',
-    marginBottom: verticalScale(10),
+    marginBottom: CAPTURE_CTA_GAP,
   },
   capturePrimaryWriteBtn: {
     minWidth: Math.min(scale(300), SCREEN_W - scale(40)),
     width: '88%',
     maxWidth: scale(340),
-    backgroundColor: CAPTURE_ACCENT,
-    borderRadius: CAPTURE_CTA_BORDER_RADIUS,
-    borderWidth: 1,
-    borderColor: CAPTURE_CTA_BORDER,
-    paddingVertical: verticalScale(16),
+    backgroundColor: CAPTURE_WRITE_CTA_BACKGROUND,
+    borderRadius: PETITMO_CTA_BORDER_RADIUS,
+    paddingVertical: verticalScale(14),
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
+    ...PETITMO_CTA_SOFT_ELEVATION,
   },
   capturePrimaryWritePencil: {
     marginRight: scale(8),
@@ -813,7 +931,7 @@ const styles = StyleSheet.create({
   /** Compense le crayon à gauche pour centrer visuellement « Écrire » dans le bouton. */
   capturePrimaryWriteBtnText: {
     fontSize: scale(17),
-    color: THEME.textPrimary,
+    color: CAPTURE_WRITE_CTA_FOREGROUND,
     letterSpacing: -0.2,
     paddingRight: scale(30),
   },
@@ -822,7 +940,7 @@ const styles = StyleSheet.create({
     width: '88%',
     maxWidth: scale(340),
     minWidth: Math.min(scale(300), SCREEN_W - scale(40)),
-    gap: verticalScale(8),
+    gap: CAPTURE_CTA_GAP,
   },
   captureSecondaryRow: {
     width: '100%',
@@ -830,11 +948,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: verticalScale(10),
     paddingHorizontal: scale(12),
-    borderRadius: CAPTURE_CTA_BORDER_RADIUS,
-    borderWidth: 1,
-    borderColor: CAPTURE_CTA_BORDER,
+    borderRadius: PETITMO_CTA_BORDER_RADIUS,
+    borderWidth: PETITMO_CTA_BORDER_WIDTH,
+    borderColor: CAPTURE_WRITE_CTA_BORDER,
     backgroundColor: THEME.bg,
-    overflow: 'hidden',
+    ...PETITMO_CTA_SOFT_ELEVATION,
   },
   captureSecondaryIconWrap: {
     width: scale(48),
@@ -868,7 +986,7 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     ...(Platform.OS === 'web'
-      ? ({ objectFit: 'cover', objectPosition: 'center top' } as const)
+      ? ({ objectFit: 'cover', objectPosition: CAPTURE_HERO_IMAGE_OBJECT_POSITION } as const)
       : null),
   },
   heroPlaceholder: {
@@ -879,12 +997,12 @@ const styles = StyleSheet.create({
   heroPlaceholderText: {
     fontSize: scale(72),
     fontWeight: '600',
-    color: CAPTURE_ACCENT,
+    color: THEME.brandPrimarySoft,
   },
   ctaGhostText: {
     fontSize: scale(16),
     fontWeight: '600',
-    color: CAPTURE_ACCENT,
+    color: THEME.brandPrimarySoft,
   },
 });
 
@@ -944,7 +1062,7 @@ function CaptureHeroImageStack({ photoUri, reactKey }: CaptureHeroImageStackProp
               source={{ uri: photoUri }}
               style={[StyleSheet.absoluteFillObject, styles.heroImageCover]}
               contentFit="cover"
-              contentPosition="top"
+              contentPosition={CAPTURE_HERO_IMAGE_CONTENT_POSITION}
               accessibilityIgnoresInvertColors
             />
           </ColorMatrix>

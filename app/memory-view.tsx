@@ -17,12 +17,12 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BookOpen, Check, ChevronLeft, Pencil, Plus, X } from 'lucide-react-native';
-import { useFonts, Lora_400Regular_Italic } from '@expo-google-fonts/lora';
 import { Video, ResizeMode } from 'expo-av';
 import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
 import { useFocusEffect } from '@react-navigation/native';
 import { scale, verticalScale } from '@/utils/responsive';
 import { THEME } from '@/constants/theme';
+import { MEMORY_TEXT_FONT } from '@/constants/memoryTextFont';
 import { MEDIA_CARD_INSET, MEDIA_CARD_RADIUS } from '@/constants/feedLayout';
 import PhotoMosaic from '@/components/PhotoMosaic';
 import AudioPlayer from '@/components/AudioPlayer';
@@ -45,7 +45,6 @@ const INK = THEME.textPrimary;
 const FEED_GUTTER = scale(20);
 const TEXT_POST_GUTTER = scale(32);
 const POST_BORDER_SUBTLE = 'rgba(0,0,0,0.08)';
-const FONT_MAMAN = 'Lora_400Regular_Italic';
 const EM_QUAD = '\u2003';
 const DOCK_BG = '#FFFFFF';
 
@@ -57,7 +56,6 @@ export default function MemoryViewScreen() {
 
   const newBookInputRef = useRef<TextInput | null>(null);
 
-  const [fontsLoaded] = useFonts({ Lora_400Regular_Italic });
   const [memory, setMemory] = useState<Memory | null>(null);
   const [child, setChild] = useState<Child | null>(null);
   const [loading, setLoading] = useState(true);
@@ -471,11 +469,7 @@ export default function MemoryViewScreen() {
                   {bookParagraphs.map((para, idx) => (
                     <Text
                       key={idx}
-                      style={[
-                        styles.textContent,
-                        idx > 0 && styles.textBookParagraphSpacing,
-                        fontsLoaded && { fontFamily: FONT_MAMAN },
-                      ]}
+                      style={[styles.textContent, idx > 0 && styles.textBookParagraphSpacing]}
                       {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
                     >
                       {EM_QUAD}
@@ -501,7 +495,6 @@ export default function MemoryViewScreen() {
                 style={[
                   styles.captionAnnotation,
                   !contentText && styles.captionPlaceholder,
-                  fontsLoaded && { fontFamily: FONT_MAMAN },
                 ]}
               >
                 {contentText || 'Ajouter une annotation…'}
@@ -941,6 +934,7 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     fontSize: scale(17),
     fontWeight: '400',
+    fontFamily: MEMORY_TEXT_FONT,
     color: THEME.textPrimary,
     lineHeight: scale(28),
     textAlign: 'justify',
@@ -970,12 +964,12 @@ const styles = StyleSheet.create({
   captionAnnotation: {
     fontSize: scale(15),
     fontWeight: '400',
+    fontFamily: MEMORY_TEXT_FONT,
     color: 'rgba(28, 28, 30, 0.82)',
     lineHeight: scale(24),
   },
   captionPlaceholder: {
     color: '#AEAEB2',
-    fontStyle: 'italic',
   },
   bottomDock: {
     position: 'absolute',
@@ -998,7 +992,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: scale(8),
-    backgroundColor: '#0A0A0A',
+    backgroundColor: THEME.brandArdoise,
     borderRadius: scale(999),
     paddingVertical: verticalScale(14),
     paddingHorizontal: scale(18),
@@ -1124,7 +1118,7 @@ const styles = StyleSheet.create({
   modalBookMeta: { marginLeft: scale(12), fontSize: scale(13), fontWeight: '700', color: '#6B7280' },
   modalBookAddBtn: {
     marginLeft: scale(12),
-    backgroundColor: '#0A0A0A',
+    backgroundColor: THEME.brandArdoise,
     borderRadius: scale(999),
     paddingVertical: verticalScale(8),
     paddingHorizontal: scale(16),
@@ -1172,7 +1166,7 @@ const styles = StyleSheet.create({
   },
   modalCreateCta: {
     flex: 1,
-    backgroundColor: '#0A0A0A',
+    backgroundColor: THEME.brandArdoise,
     borderRadius: scale(999),
     paddingVertical: verticalScale(12),
     alignItems: 'center',

@@ -20,7 +20,12 @@ import {
   type MemoryRowDb,
 } from '@/services/memoryRowMapping';
 import { pullMemoriesFromRemoteToLocal } from '@/services/memoriesLocalSync';
-import { checkMemoryLimit, checkVideoLimit, MEDIA_BOOK_PRINT_MAX_WIDTH } from '@/lib/limits';
+import {
+  checkMemoryLimit,
+  checkVideoLimit,
+  invalidateMemoryLimitCache,
+  MEDIA_BOOK_PRINT_MAX_WIDTH,
+} from '@/lib/limits';
 import { getUserTier } from '@/lib/userTier';
 import { deleteLocalMediaFiles } from '@/lib/localCleanup';
 import {
@@ -35,6 +40,7 @@ import {
   deleteLocalMemory,
   findMemoryIdByImportAssetId,
   findMemoryIdByImportFingerprint,
+  getLocalChild,
   getLocalMemories,
   getLocalMemoryById,
   updateLocalMemoryContent,
@@ -1083,6 +1089,15 @@ export async function resumePetitmoPlusCloudCaptureOrMerge(
   return false;
 }
 
+/** user_id pour capture locale (SQLite) ; repli device-user Supabase si besoin. */
+async function resolveCaptureUserId(childId: string): Promise<string> {
+  const fromChild = getLocalChild(childId)?.user_id?.trim();
+  if (fromChild) return fromChild;
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user?.id) throw new Error('User not authenticated');
+  return user.id;
+}
+
 export async function uploadMedia({
   uri,
   type,
@@ -1100,7 +1115,7 @@ export async function uploadMedia({
 }: UploadMediaParams): Promise<MemoryRow | null> {
   console.log('[uploadMedia] called', { type, childId });
   try {
-    const limitCheck = await checkMemoryLimit(childId);
+    const limitCheck = await checkMemoryLimit(childId, { force: true });
     if (!limitCheck.canCreate) {
       throw new Error('LIMIT_REACHED');
     }
@@ -1112,17 +1127,15 @@ export async function uploadMedia({
       }
     }
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error('User not authenticated');
-
     throwIfImportDuplicate(childId, { importAssetId });
 
     if ((await getCachedUserMode()) === 'local') {
+      const userId = await resolveCaptureUserId(childId);
       const localMem = await captureMemoryLocalOnly({
         uri,
         type,
         childId,
-        userId: user.id,
+        userId,
         duration,
         voiceCoverUri,
         voicePlaybackStartSec,
@@ -1132,6 +1145,7 @@ export async function uploadMedia({
       });
       if (localMem) {
         upsertLocalMemory(localMem);
+        invalidateMemoryLimitCache(childId);
         if (!suppressFeedEmit) {
           DeviceEventEmitter.emit('petitmo:memories-inserted', { memories: [localMem] });
         }
@@ -1139,6 +1153,9 @@ export async function uploadMedia({
       }
       return null;
     }
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('User not authenticated');
 
     const paid = isPaid ?? (await getUserTier()) === 'paid';
 
@@ -1656,27 +1673,29 @@ export async function uploadPhotoAlbum({
       throw new Error('LIMIT_REACHED');
     }
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error('User not authenticated');
-
     throwIfImportDuplicate(childId, { importSourceFingerprint });
 
     if ((await getCachedUserMode()) === 'local') {
+      const userId = await resolveCaptureUserId(childId);
       const localMem = await capturePhotoAlbumLocalOnly({
         uris,
         childId,
-        userId: user.id,
+        userId,
         capturedAtIso,
         locationOverride,
         importSourceFingerprint,
       });
       if (localMem) {
         upsertLocalMemory(localMem);
+        invalidateMemoryLimitCache(childId);
         DeviceEventEmitter.emit('petitmo:memories-inserted', { memories: [localMem] });
         return localMem;
       }
       return null;
     }
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('User not authenticated');
 
     const results = await Promise.all(
       uris.map(uri => readAndUploadPhotoFile(uri, user.id, childId))

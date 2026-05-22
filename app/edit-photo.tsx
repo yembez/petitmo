@@ -18,6 +18,7 @@ import { ChevronLeft, Check, RotateCw, Crop, Undo, X } from 'lucide-react-native
 import { scale as scaleUtil, verticalScale } from '@/utils/responsive';
 import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
+import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system';
 import { supabase } from '@/lib/supabase';
@@ -563,9 +564,9 @@ export default function EditPhotoScreen() {
         <Text style={styles.errorText}>Aucune image à éditer</Text>
         <TouchableOpacity
           onPress={() => router.back()}
-          style={styles.errorButton}
+          style={[petitmoCtaStyles.primary, styles.errorButton]}
         >
-          <Text style={styles.errorButtonText}>Retour</Text>
+          <Text style={[petitmoCtaStyles.primaryText, styles.errorButtonText]}>Retour</Text>
         </TouchableOpacity>
       </View>
     );
@@ -749,15 +750,11 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.lg,
   },
   errorButton: {
-    backgroundColor: THEME.accent,
     paddingHorizontal: SPACING.xl,
     paddingVertical: SPACING.md,
-    borderRadius: scaleUtil(12),
   },
   errorButtonText: {
-    color: '#FFFFFF',
     fontSize: FONT_SIZES.md,
-    fontWeight: '600',
   },
   header: {
     flexDirection: 'row',

@@ -2,7 +2,6 @@ import { View, Text, TouchableOpacity } from 'react-native';
 import { Heart } from 'lucide-react-native';
 import { THEME } from '@/constants/theme';
 import { scale } from '@/utils/responsive';
-import { useDominantImageColors } from '@/hooks/useDominantImageColors';
 import { styles } from '@/components/feed/feedStyles';
 
 /** Même logique que l’étiquette date (patch bas-droite) : blanc par défaut, noir si le serveur l’indique. */
@@ -16,15 +15,16 @@ const FEED_FAVORITE_HEART_PX = scale(20);
 
 /** Pastille bas-gauche : date de prise (ou import vs prise selon règle fil). */
 export function CapturedAtOverlay({
-  uriForAnalysis,
+  uriForAnalysis: _uriForAnalysis,
   label,
   inkOverride,
 }: {
-  uriForAnalysis: string;
+  /** Conservé pour compatibilité appelants ; l’encre vient de `inkOverride` ou du blanc par défaut. */
+  uriForAnalysis?: string;
   label: string;
   inkOverride?: string | null;
 }) {
-  useDominantImageColors(uriForAnalysis);
+  void _uriForAnalysis;
   const ink = feedPhotoOverlayInk(inkOverride);
 
   return (
@@ -53,7 +53,7 @@ export function FeedPhotoFavoriteOverlay({
 }) {
   void inkOverride;
   const outlineInk = '#FFFFFF' as const;
-  const terracotta = THEME.feedFavoriteTerracotta;
+  const favoriteFill = THEME.brandPrimary;
 
   return (
     <View style={styles.feedPhotoFavoriteOverlay} pointerEvents="box-none">
@@ -67,9 +67,9 @@ export function FeedPhotoFavoriteOverlay({
       >
         <Heart
           size={FEED_FAVORITE_HEART_PX}
-          color={isFavorite ? terracotta : outlineInk}
+          color={isFavorite ? favoriteFill : outlineInk}
           strokeWidth={isFavorite ? 2.05 : 2.45}
-          fill={isFavorite ? terracotta : 'none'}
+          fill={isFavorite ? favoriteFill : 'none'}
         />
       </TouchableOpacity>
     </View>

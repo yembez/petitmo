@@ -255,9 +255,11 @@ export async function captureMemoryLocalOnly(params: {
       insertedAt,
       location: locationLabel,
     });
-    mem.local_media_path = feedPath ?? src;
+    const mediaPathLocal = feedPath ?? src;
+    setFeedBootstrapVideoUri(id, mediaPathLocal);
+    mem.local_media_path = mediaPathLocal;
     mem.local_original_path = localOriginalUri;
-    mem.media_url = mem.local_media_path;
+    mem.media_url = mediaPathLocal;
     mem.duration = typeof duration === 'number' && Number.isFinite(duration) ? duration : null;
     mem.file_size = size;
     mem.thumbnail_url = thumbDest;

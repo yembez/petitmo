@@ -33,7 +33,7 @@ L'abonnement (`lib/userTier.ts`) déverrouille : sync cloud, restauration, multi
   afficher : **"Cette adresse e-mail n'a pas de compte cloud payant associé"** + CTA **"Créer un compte"**.
 - Aucun parcours gratuit ne déclenche de création de compte email/mot de passe.
 - Aucun texte type "tes souvenirs sont sauvegardés" en gratuit.
-- Paywall abonnement : hero « X premiers souvenirs » **uniquement** si `LIMIT_REACHED` ; sinon hero neutre : ligne 1 jusqu’à « moment », ligne 2 « avec votre enfant, sans limite » + cœur Lucide terracotta ; CTA **terracotta charte**. Voir `AGENTS.md` et `app/paywall.tsx`.
+- Paywall abonnement : hero « X premiers souvenirs » **uniquement** si `LIMIT_REACHED` ; sinon hero neutre : ligne 1 jusqu’à « moment », ligne 2 « avec votre enfant, sans limite » + cœur Lucide rosé ; CTA **rosé charte** (`THEME.brandPrimary`). Voir `AGENTS.md` et `app/paywall.tsx`.
 
 ## Sources de vérité
 

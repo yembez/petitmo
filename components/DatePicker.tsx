@@ -4,6 +4,7 @@ import { X, Calendar } from 'lucide-react-native';
 import { scale, verticalScale } from '@/utils/responsive';
 import { SPACING, FONT_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
+import { PETITMO_CTA_BORDER_RADIUS, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 
 interface DatePickerProps {
   value: string;
@@ -159,10 +160,10 @@ export default function DatePicker({ value, onChange, placeholder = 'JJ/MM/AAAA'
                 <Text style={styles.cancelButtonText}>Annuler</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.modalButton, styles.confirmButton]}
+                style={[styles.modalButton, petitmoCtaStyles.primary, styles.confirmButton]}
                 onPress={handleConfirm}
               >
-                <Text style={styles.confirmButtonText}>Confirmer</Text>
+                <Text style={[petitmoCtaStyles.primaryText, styles.confirmButtonText]}>Confirmer</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -248,7 +249,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   pickerItemSelected: {
-    backgroundColor: THEME.brandTerracotta,
+    backgroundColor: THEME.brandPrimary,
     marginHorizontal: SPACING.xs,
     borderRadius: scale(6),
   },
@@ -277,16 +278,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#F3F4F6',
   },
   confirmButton: {
-    backgroundColor: THEME.brandTerracotta,
+    borderRadius: PETITMO_CTA_BORDER_RADIUS,
   },
   cancelButtonText: {
     fontSize: FONT_SIZES.base,
     fontWeight: '600',
     color: THEME.textPrimary,
-  },
-  confirmButtonText: {
-    fontSize: FONT_SIZES.base,
-    fontWeight: '600',
-    color: '#FFFFFF',
   },
 });
