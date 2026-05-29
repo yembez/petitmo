@@ -62,6 +62,7 @@ import {
   resolveImmersiveViewerInitialIndex,
   type ImmersiveViewerItem,
 } from '@/utils/immersiveViewerItems';
+import { useStableViewabilityPairs } from '@/hooks/useStableViewabilityPairs';
 
 const BG = THEME.bg;
 /** Même pastille que `overlayBadge` du fil (date de prise bas-gauche). */
@@ -142,7 +143,13 @@ export default function MemoryViewerScreen() {
     useCallback(() => {
       setStatusBarStyle(closeOnMediaChrome ? 'light' : 'dark');
       void ensurePlaybackAudioForListening();
-      return () => setStatusBarStyle('dark');
+      const frame = requestAnimationFrame(() => {
+        listRef.current?.recordInteraction?.();
+      });
+      return () => {
+        cancelAnimationFrame(frame);
+        setStatusBarStyle('dark');
+      };
     }, [closeOnMediaChrome]),
   );
 
@@ -152,16 +159,19 @@ export default function MemoryViewerScreen() {
 
   const itemHeight = windowH;
 
-  const onViewableItemsChanged = useRef(
-    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
-      const item = viewableItems[0]?.item as ImmersiveViewerItem | undefined;
-      setVisibleItemKey(item ? immersiveViewerItemKey(item) : null);
-    }
-  ).current;
+  const onViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken[] }) => {
+    const item = viewableItems[0]?.item as ImmersiveViewerItem | undefined;
+    setVisibleItemKey(item ? immersiveViewerItemKey(item) : null);
+  }, []);
 
-  const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 85,
-  }).current;
+  const immersiveViewabilityConfig = useMemo(
+    () => ({ itemVisiblePercentThreshold: 85 }),
+    [],
+  );
+  const immersiveViewabilityPairs = useStableViewabilityPairs(
+    immersiveViewabilityConfig,
+    onViewableItemsChanged,
+  );
 
   const handleFavoritePhotoUrlsUpdated = useCallback(
     (memoryId: string, urls: string[]) => {
@@ -296,8 +306,7 @@ export default function MemoryViewerScreen() {
         decelerationRate="fast"
         initialScrollIndex={initialIndex}
         getItemLayout={getItemLayout}
-        onViewableItemsChanged={onViewableItemsChanged}
-        viewabilityConfig={viewabilityConfig}
+        viewabilityConfigCallbackPairs={immersiveViewabilityPairs}
         removeClippedSubviews={Platform.OS === 'android'}
         windowSize={5}
         maxToRenderPerBatch={3}
@@ -725,7 +734,12 @@ function ImmersiveVideo({
             isLooping
             isMuted={!isActive || !soundOn}
             useNativeControls={false}
-            onReadyForDisplay={onReadyForDisplay}
+            onReadyForDisplay={e => {
+              onReadyForDisplay(e);
+              if (isActive) {
+                void immersiveVideoRef.current?.playAsync();
+              }
+            }}
             onPlaybackStatusUpdate={onPlaybackStatusUpdate}
           />
         </View>

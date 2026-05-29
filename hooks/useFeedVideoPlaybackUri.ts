@@ -4,54 +4,30 @@ import type { Memory } from '@/types/local';
 import {
   getFeedLocalVideoPath,
   peekFeedBootstrapVideoUri,
+  persistFeedLocalVideo,
   takeFeedBootstrapVideoUri,
 } from '@/services/feedLocalPhotoCache';
 import { getSignedMediaDisplayUrl } from '@/lib/mediaSignedUrl';
 import {
-  firstNonEmptyUri,
   normalizeVideoPlaybackUri,
-  videoPlaybackCandidateFromMemory,
+  resolveReadableVideoPlaybackUri,
 } from '@/utils/videoMediaUri';
-
-function isHttpUrl(u: string): boolean {
-  return /^https?:\/\//i.test(u.trim());
-}
-
-function isLikelyDeviceLocalAsset(u: string): boolean {
-  const t = u.trim();
-  if (!t || isHttpUrl(t) || t.startsWith('data:')) return false;
-  if (
-    t.startsWith('file:') ||
-    t.startsWith('content:') ||
-    t.startsWith('ph://') ||
-    t.startsWith('assets-library://')
-  ) {
-    return true;
-  }
-  if (t.startsWith('/')) return true;
-  return false;
-}
 
 async function resolveRemoteVideoUri(raw: string): Promise<string> {
   const t = raw.trim();
-  if (!t || !isHttpUrl(t)) return normalizeVideoPlaybackUri(t);
+  if (!t || !/^https?:\/\//i.test(t)) return normalizeVideoPlaybackUri(t);
   return getSignedMediaDisplayUrl(t);
 }
 
 function initialPlaybackUri(memory: Memory): string {
   if (memory.type !== 'video') return '';
-  if (Platform.OS === 'web') {
-    return normalizeVideoPlaybackUri(videoPlaybackCandidateFromMemory(memory));
-  }
   const boot = peekFeedBootstrapVideoUri(memory.id);
-  return normalizeVideoPlaybackUri(
-    firstNonEmptyUri(boot, videoPlaybackCandidateFromMemory(memory))
-  );
+  return boot ? normalizeVideoPlaybackUri(boot) : '';
 }
 
 /**
- * URI de lecture vidéo dans le fil : copie locale persistante si présente (pas d’egress),
- * sinon candidats distants / sandbox. Pas de sondage disque synchrone (autoplay fil).
+ * URI de lecture vidéo dans le fil : copie fil si présente, sinon sandbox `original.*`,
+ * sinon distant signé. Vérifie l’existence disque (chemins SQLite périmés ignorés).
  */
 export function useFeedVideoPlaybackUri(memory: Memory): string {
   const [uri, setUri] = useState<string>(() => initialPlaybackUri(memory));
@@ -64,37 +40,32 @@ export function useFeedVideoPlaybackUri(memory: Memory): string {
 
     let alive = true;
     void (async () => {
-      const remoteRaw = videoPlaybackCandidateFromMemory(memory);
-      const remote = await resolveRemoteVideoUri(remoteRaw);
-      if (!alive) return;
-      if (Platform.OS === 'web') {
-        setUri(remote);
-        return;
-      }
-
-      const feedCopy = (await getFeedLocalVideoPath(memory.id))?.trim() ?? '';
+      const feedCopy =
+        Platform.OS === 'web' ? null : ((await getFeedLocalVideoPath(memory.id))?.trim() ?? '');
       const boot = peekFeedBootstrapVideoUri(memory.id)?.trim() ?? '';
-      const remoteNorm = normalizeVideoPlaybackUri(remote);
-      const memoryNorm = normalizeVideoPlaybackUri(videoPlaybackCandidateFromMemory(memory));
-      const chosen = normalizeVideoPlaybackUri(
-        firstNonEmptyUri(feedCopy, memoryNorm, boot, remoteNorm)
-      );
-      if (!alive) return;
-      setUri(prev => {
-        const prevU = (prev?.trim() || '');
-        const nextU = chosen.trim();
-        if (
-          prevU &&
-          isLikelyDeviceLocalAsset(prevU) &&
-          nextU &&
-          isLikelyDeviceLocalAsset(nextU) &&
-          prevU !== nextU
-        ) {
-          return prev;
-        }
-        return prev === nextU ? prev : nextU;
+
+      const chosen = await resolveReadableVideoPlaybackUri(memory, {
+        feedCopy,
+        bootstrap: boot,
+        resolveRemote: resolveRemoteVideoUri,
       });
-      if (chosen) takeFeedBootstrapVideoUri(memory.id);
+
+      if (!alive) return;
+
+      setUri(chosen);
+
+      if (chosen && boot) takeFeedBootstrapVideoUri(memory.id);
+
+      if (
+        Platform.OS !== 'web' &&
+        !feedCopy &&
+        chosen &&
+        memory.id &&
+        chosen.includes('petitmo_memories/')
+      ) {
+        const sourcePath = chosen.replace(/^file:\/\//, '');
+        void persistFeedLocalVideo(memory.id, sourcePath);
+      }
     })();
 
     return () => {

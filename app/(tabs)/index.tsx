@@ -16,11 +16,11 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets, useSafeAreaFrame } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
-import { Menu } from 'lucide-react-native';
+import { Heart, Menu } from 'lucide-react-native';
 import ImageImportIcon from '@/components/ImageImportIcon';
 import MicIcon from '@/components/MicIcon';
 import PenIcon from '@/components/PenIcon';
@@ -29,7 +29,7 @@ import * as Haptics from 'expo-haptics';
 import { useFonts, Sora_600SemiBold } from '@expo-google-fonts/sora';
 
 const CAPTURE_PHOTO_TAGLINE_FONT = 'Sora-LightItalic';
-import { Manrope_400Regular } from '@expo-google-fonts/manrope';
+import { Manrope_400Regular, Manrope_700Bold } from '@expo-google-fonts/manrope';
 import { DMSans_500Medium } from '@expo-google-fonts/dm-sans';
 
 /** Tailles maquette capture (px logiques). */
@@ -37,11 +37,11 @@ const CAPTURE_TITLE_FONT_SIZE = 15;
 const CAPTURE_TITLE_LINE_HEIGHT = 20;
 const CAPTURE_SUBTITLE_FONT_SIZE = 11;
 const CAPTURE_SUBTITLE_LINE_HEIGHT = 15;
-const CAPTURE_HEADER_DATE_FONT_SIZE = 24;
-const CAPTURE_HEADER_DATE_LINE_HEIGHT = 28;
+const CAPTURE_HEADER_DATE_FONT_SIZE = 20;
+const CAPTURE_HEADER_DATE_LINE_HEIGHT = 24;
 
 const CAPTURE_PHOTO_TAGLINE =
-  '« Chaque moment ordinaire devient extraordinaire avec toi. »';
+  '\u201CAvec toi, l\'ordinaire devient extraordinaire.\u201D';
 const CAPTURE_PHOTO_TAGLINE_FONT_SIZE = 13;
 const CAPTURE_PHOTO_TAGLINE_LINE_HEIGHT = 18;
 
@@ -54,12 +54,10 @@ import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
 import { scale, verticalScale } from '@/utils/responsive';
 import { THEME } from '@/constants/theme';
 import {
-  cacheRemoteChildProfilePhotoLocally,
   getChildren,
   getOrSelectFirstChild,
   getCaptureTabChildSnapshot,
   PETITMO_CHILD_PROFILE_UPDATED_EVENT,
-  ensureChildFaceBounds,
   setCaptureTabChildSnapshot,
   type ChildProfileUpdatedPayload,
 } from '@/services/children';
@@ -71,7 +69,6 @@ import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { resolveChildProfileImageDisplayUri } from '@/utils/childPhotoUri';
 import { childDisplayGivenName, childDisplayInitial } from '@/utils/childDisplayName';
 import { formatCaptureChildAge, formatCaptureHeaderDate } from '@/utils/date';
-import { CaptureHeroSkiaPhoto } from '@/components/CaptureHeroSkiaPhoto';
 import { CAPTURE_HERO_COLOR_MATRIX } from '@/utils/captureHeroColorMatrix';
 import {
   CAPTURE_HERO_IMAGE_CONTENT_POSITION,
@@ -87,8 +84,8 @@ const CAPTURE_HERO_BREATHE_MAX = 1.03;
 const CAPTURE_HERO_BREATHE_HALF_MS = 8500;
 
 const CAPTURE_PHOTO_CARD_RADIUS = scale(32);
-const CAPTURE_PHOTO_CARD_ASPECT = 0.86;
-const CAPTURE_PHOTO_CARD_ASPECT_COMPACT = 0.78;
+const CAPTURE_PHOTO_CARD_ASPECT = 0.93;
+const CAPTURE_PHOTO_CARD_ASPECT_COMPACT = 0.85;
 /** Padding horizontal du scroll ; la photo utilise `capturePhotoBleed` pour des bords symétriques. */
 const CAPTURE_CONTENT_PADDING_H = scale(20);
 const CAPTURE_PHOTO_EDGE_PADDING_H = scale(14);
@@ -105,34 +102,42 @@ type CaptureRoute = '/write' | '/record-voice' | '/import-media';
 function CapturePhotoGlassPill({
   label,
   labelFontFamily,
+  emphasized = false,
   align = 'left',
+  accentDot = false,
 }: {
   label: string;
   labelFontFamily?: string;
+  emphasized?: boolean;
   align?: 'left' | 'right';
+  accentDot?: boolean;
 }) {
-  const text = (
-    <Text
-      style={[
-        styles.capturePhotoPillText,
-        align === 'right' && styles.capturePhotoPillTextRight,
-        labelFontFamily ? { fontFamily: labelFontFamily } : null,
-      ]}
-      numberOfLines={1}
-    >
-      {label}
-    </Text>
+  const content = (
+    <View style={styles.capturePhotoPillInner}>
+      {accentDot ? <View style={styles.capturePhotoPillAccentDot} /> : null}
+      <Text
+        style={[
+          styles.capturePhotoPillText,
+          emphasized && styles.capturePhotoPillTextEmphasized,
+          align === 'right' && styles.capturePhotoPillTextRight,
+          labelFontFamily ? { fontFamily: labelFontFamily } : emphasized ? { fontWeight: '700' } : null,
+        ]}
+        numberOfLines={1}
+      >
+        {label}
+      </Text>
+    </View>
   );
 
   if (Platform.OS === 'ios') {
     return (
       <BlurView intensity={48} tint="light" style={styles.capturePhotoPill}>
-        {text}
+        {content}
       </BlurView>
     );
   }
 
-  return <View style={[styles.capturePhotoPill, styles.capturePhotoPillFallback]}>{text}</View>;
+  return <View style={[styles.capturePhotoPill, styles.capturePhotoPillFallback]}>{content}</View>;
 }
 
 function CaptureDiscCta({
@@ -222,6 +227,7 @@ function CaptureDiscCta({
 
 export default function CapturerScreen() {
   const router = useRouter();
+  const isTabFocused = useIsFocused();
   const insets = useSafeAreaInsets();
   const frame = useSafeAreaFrame();
   const { height: windowH } = useWindowDimensions();
@@ -230,11 +236,13 @@ export default function CapturerScreen() {
     Sora_600SemiBold,
     [CAPTURE_PHOTO_TAGLINE_FONT]: require('@/assets/fonts/Sora-LightItalic.ttf'),
     Manrope_400Regular,
+    Manrope_700Bold,
     DMSans_500Medium,
   });
   const captureTitleFont = captureFontsLoaded ? 'Sora_600SemiBold' : undefined;
   const capturePhotoTaglineFont = captureFontsLoaded ? CAPTURE_PHOTO_TAGLINE_FONT : undefined;
   const captureSubtitleFont = captureFontsLoaded ? 'Manrope_400Regular' : undefined;
+  const capturePhotoPillNameFont = captureFontsLoaded ? 'Manrope_700Bold' : undefined;
   const captureCtaLabelFont = captureFontsLoaded ? 'DMSans_500Medium' : undefined;
   const usableH = Math.max(280, windowH);
   const layoutH = Math.min(frame.height > 1 ? frame.height : usableH, usableH);
@@ -245,6 +253,31 @@ export default function CapturerScreen() {
   const childRef = useRef<Child | null>(null);
   childRef.current = child;
 
+  const heroDisplayUri = child
+    ? resolveChildProfileImageDisplayUri(
+        child.local_photo_path,
+        child.photo_url,
+        child.updated_at,
+      )
+    : null;
+  const heroIsLocalAsset =
+    !!heroDisplayUri &&
+    (heroDisplayUri.startsWith('file:') ||
+      heroDisplayUri.startsWith('content:') ||
+      heroDisplayUri.startsWith('ph://') ||
+      (!heroDisplayUri.startsWith('http://') && !heroDisplayUri.startsWith('https://')));
+  const heroRemoteBase =
+    child && !heroIsLocalAsset
+      ? resolveChildProfileImageDisplayUri(null, child.photo_url, child.updated_at)
+      : null;
+  const heroSignedRemote = useSignedMediaUrl(heroRemoteBase);
+  /** Comme le fil : `petitmo_v` sur fichier local quand la photo est remplacée au même chemin. */
+  const photoUri = heroDisplayUri
+    ? heroIsLocalAsset
+      ? heroDisplayUri
+      : heroSignedRemote ?? heroDisplayUri
+    : '';
+
   useEffect(() => {
     setCaptureTabChildSnapshot(child);
   }, [child]);
@@ -253,29 +286,14 @@ export default function CapturerScreen() {
     const sub = DeviceEventEmitter.addListener(
       PETITMO_CHILD_PROFILE_UPDATED_EVENT,
       (payload: ChildProfileUpdatedPayload) => {
-        void (async () => {
-          const id = payload?.childId?.trim();
-          if (!id || childRef.current?.id !== id) return;
-          try {
-            let row: Child | null = payload.child?.id === id ? payload.child : null;
-            if (!row) {
-              const all = await getChildren();
-              row = all.find(c => c.id === id) ?? null;
-            }
-            if (!row) return;
-            const cleaned = await ensureChildFaceBounds(row);
-            setChild(cleaned);
-            if (cleaned.photo_url?.trim() && !cleaned.local_photo_path?.trim()) {
-              void cacheRemoteChildProfilePhotoLocally(cleaned).then(refreshed => {
-                if (refreshed.local_photo_path?.trim()) {
-                  setChild(refreshed);
-                }
-              });
-            }
-          } catch (e) {
-            console.error('Capture: refresh profil enfant', e);
-          }
-        })();
+        const id = payload?.childId?.trim();
+        if (!id || childRef.current?.id !== id) return;
+        if (payload.child?.id === id) {
+          setChild(payload.child);
+          return;
+        }
+        const row = getLocalChild(id);
+        if (row) setChild(row);
       }
     );
     return () => sub.remove();
@@ -336,17 +354,22 @@ export default function CapturerScreen() {
           const storedSelectedId = await getOrSelectFirstChild();
           if (cancelled) return;
 
-          /** Retour onglet (ex. après import fil) : SQLite direct, sans sanitize destructif. */
+          /** Retour onglet : lecture SQLite légère (pas de ML / sanitize en boucle). */
           if (silent && storedSelectedId) {
             const row = getLocalChild(storedSelectedId);
-            if (row) {
+            if (row && !cancelled) {
               setChild(prev => {
-                const lp =
-                  (row.local_photo_path ?? '').trim() ||
-                  (prev?.local_photo_path ?? '').trim() ||
-                  null;
-                const pu = (row.photo_url ?? '').trim() || (prev?.photo_url ?? '').trim() || null;
-                return { ...row, local_photo_path: lp, photo_url: pu };
+                if (
+                  prev?.id === row.id &&
+                  prev.local_photo_path === row.local_photo_path &&
+                  prev.photo_url === row.photo_url &&
+                  prev.name === row.name &&
+                  prev.birthdate === row.birthdate &&
+                  prev.updated_at === row.updated_at
+                ) {
+                  return prev;
+                }
+                return row;
               });
             }
             return;
@@ -357,29 +380,12 @@ export default function CapturerScreen() {
 
           if (storedSelectedId && allChildren.length > 0) {
             const selected = allChildren.find(c => c.id === storedSelectedId) ?? allChildren[0];
-            const cleaned = await ensureChildFaceBounds(selected);
-            setChild(cleaned);
-            if (cleaned.photo_url?.trim() && !cleaned.local_photo_path?.trim()) {
-              void cacheRemoteChildProfilePhotoLocally(cleaned).then(refreshed => {
-                if (!cancelled && refreshed.local_photo_path?.trim()) {
-                  setChild(refreshed);
-                }
-              });
-            }
+            if (!cancelled) setChild(selected);
           } else if (allChildren.length === 0) {
             setChild(null);
             router.push('/create-child');
           } else {
-            const first = allChildren[0];
-            const cleaned = await ensureChildFaceBounds(first);
-            setChild(cleaned);
-            if (cleaned.photo_url?.trim() && !cleaned.local_photo_path?.trim()) {
-              void cacheRemoteChildProfilePhotoLocally(cleaned).then(refreshed => {
-                if (!cancelled && refreshed.local_photo_path?.trim()) {
-                  setChild(refreshed);
-                }
-              });
-            }
+            if (!cancelled) setChild(allChildren[0]);
           }
         } catch (error) {
           console.error('Error loading child:', error);
@@ -416,21 +422,6 @@ export default function CapturerScreen() {
       </View>
     );
   }
-
-  const heroRawUri =
-    resolveChildProfileImageDisplayUri(
-      child.local_photo_path,
-      child.photo_url,
-      child.updated_at,
-    ) ?? null;
-  const heroIsLocalAsset =
-    !!heroRawUri &&
-    (heroRawUri.startsWith('file:') ||
-      heroRawUri.startsWith('content:') ||
-      heroRawUri.startsWith('ph://') ||
-      (!heroRawUri.startsWith('http://') && !heroRawUri.startsWith('https://')));
-  const heroSignedRemote = useSignedMediaUrl(heroRawUri && !heroIsLocalAsset ? heroRawUri : null);
-  const photoUri = heroRawUri ? (heroIsLocalAsset ? heroRawUri : heroSignedRemote ?? heroRawUri) : '';
 
   const headerMenuIconSize = scale(22);
   const captureLogoH = scale(28);
@@ -515,7 +506,9 @@ export default function CapturerScreen() {
             {photoUri ? (
               <CaptureHeroImageStack
                 photoUri={photoUri}
-                reactKey={`capture-hero-${child.id}-${child.updated_at}`}
+                reactKey={`capture-hero-${child.id}`}
+                imageRevision={child.updated_at ?? child.id}
+                isTabFocused={isTabFocused}
               />
             ) : (
               <View style={[StyleSheet.absoluteFillObject, styles.heroPlaceholder]}>
@@ -525,7 +518,8 @@ export default function CapturerScreen() {
             <View style={styles.capturePhotoPillsBar} pointerEvents="none">
               <CapturePhotoGlassPill
                 label={childGivenName || 'Enfant'}
-                labelFontFamily={captureSubtitleFont}
+                labelFontFamily={capturePhotoPillNameFont ?? captureSubtitleFont}
+                emphasized
                 align="left"
               />
               {childAgeLabel ? (
@@ -533,6 +527,7 @@ export default function CapturerScreen() {
                   label={childAgeLabel}
                   labelFontFamily={captureSubtitleFont}
                   align="right"
+                  accentDot
                 />
               ) : null}
             </View>
@@ -557,14 +552,30 @@ export default function CapturerScreen() {
           </View>
 
           <View style={styles.captureContentSection} accessibilityRole="header">
-            <Text
-              style={[
-                styles.captureTitle,
-                captureTitleFont ? { fontFamily: captureTitleFont } : { fontWeight: '600' },
-              ]}
-            >
-              Quel souvenir pour {childGivenName || "l'enfant"} aujourd&apos;hui ?
-            </Text>
+            <View style={styles.captureTitleRow}>
+              <Text
+                style={[
+                  styles.captureTitle,
+                  captureTitleFont ? { fontFamily: captureTitleFont } : { fontWeight: '600' },
+                ]}
+              >
+                Quel souvenir pour {childGivenName || "l'enfant"}{' '}
+              </Text>
+              <Heart
+                size={scale(14)}
+                color={THEME.captureDiscCtaBackground}
+                fill={THEME.captureDiscCtaBackground}
+                style={styles.captureTitleHeart}
+              />
+              <Text
+                style={[
+                  styles.captureTitle,
+                  captureTitleFont ? { fontFamily: captureTitleFont } : { fontWeight: '600' },
+                ]}
+              >
+                aujourd&apos;hui ?
+              </Text>
+            </View>
             <Text
               style={[
                 styles.captureSubtitle,
@@ -572,7 +583,7 @@ export default function CapturerScreen() {
                 captureSubtitleFont ? { fontFamily: captureSubtitleFont } : null,
               ]}
             >
-              Écris, importe photos ou vidéos ou enregistre
+              Écris, enregistre ou importe photos et vidéos
             </Text>
           </View>
 
@@ -735,13 +746,27 @@ const styles = StyleSheet.create({
   capturePhotoPillFallback: {
     backgroundColor: 'rgba(255, 255, 255, 0.28)',
   },
+  capturePhotoPillInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: scale(6),
+  },
+  capturePhotoPillAccentDot: {
+    width: scale(6),
+    height: scale(6),
+    borderRadius: scale(3),
+    backgroundColor: THEME.captureDiscCtaBackground,
+  },
   capturePhotoPillText: {
     fontSize: scale(12),
     lineHeight: scale(16),
-    fontWeight: '600',
+    fontWeight: '500',
     color: '#FFFFFF',
     textAlign: 'left',
     ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
+  },
+  capturePhotoPillTextEmphasized: {
+    fontWeight: '700',
   },
   capturePhotoPillTextRight: {
     textAlign: 'right',
@@ -783,9 +808,19 @@ const styles = StyleSheet.create({
     lineHeight: CAPTURE_TITLE_LINE_HEIGHT,
     color: THEME.textPrimary,
     textAlign: 'left',
-    alignSelf: 'stretch',
     letterSpacing: -0.2,
     ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
+  },
+  captureTitleRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    alignSelf: 'stretch',
+    marginBottom: verticalScale(6),
+  },
+  captureTitleHeart: {
+    marginHorizontal: scale(4),
+    marginBottom: scale(1),
   },
   captureSubtitle: {
     marginTop: verticalScale(6),
@@ -866,15 +901,22 @@ const captureHeroBreatheNativeDriver = Platform.OS !== 'web';
 type CaptureHeroImageStackProps = {
   photoUri: string;
   reactKey: string;
+  /** Change quand la photo est remplacée → invalide le cache expo-image sans remonter toute la carte. */
+  imageRevision: string;
 };
 
 /** Photo hero plein cadre + léger zoom « respiration ». */
-function CaptureHeroImageStack({ photoUri, reactKey }: CaptureHeroImageStackProps) {
+function CaptureHeroImageStack({
+  photoUri,
+  reactKey,
+  imageRevision,
+  isTabFocused,
+}: CaptureHeroImageStackProps & { isTabFocused: boolean }) {
   const breatheScale = useRef(new Animated.Value(CAPTURE_HERO_BREATHE_MIN)).current;
 
   useEffect(() => {
     breatheScale.setValue(CAPTURE_HERO_BREATHE_MIN);
-    if (CAPTURE_HERO_BREATHE_MAX <= CAPTURE_HERO_BREATHE_MIN) {
+    if (!isTabFocused || CAPTURE_HERO_BREATHE_MAX <= CAPTURE_HERO_BREATHE_MIN) {
       return undefined;
     }
     const ease = Easing.inOut(Easing.ease);
@@ -896,7 +938,7 @@ function CaptureHeroImageStack({ photoUri, reactKey }: CaptureHeroImageStackProp
       loop.stop();
       breatheScale.setValue(CAPTURE_HERO_BREATHE_MIN);
     };
-  }, [photoUri, reactKey, breatheScale]);
+  }, [reactKey, breatheScale, isTabFocused]);
 
   return (
     <View style={StyleSheet.absoluteFillObject} pointerEvents="box-none">
@@ -912,18 +954,17 @@ function CaptureHeroImageStack({ photoUri, reactKey }: CaptureHeroImageStackProp
             resizeMode="cover"
           />
         ) : (
-          <>
-            <ColorMatrix matrix={CAPTURE_HERO_COLOR_MATRIX} style={StyleSheet.absoluteFillObject}>
-              <ExpoImage
-                source={{ uri: photoUri }}
-                style={[StyleSheet.absoluteFillObject, styles.heroImageCover]}
-                contentFit="cover"
-                contentPosition={CAPTURE_HERO_IMAGE_CONTENT_POSITION}
-                accessibilityIgnoresInvertColors
-              />
-            </ColorMatrix>
-            <CaptureHeroSkiaPhoto photoUri={photoUri} />
-          </>
+          <ColorMatrix matrix={CAPTURE_HERO_COLOR_MATRIX} style={StyleSheet.absoluteFillObject}>
+            <ExpoImage
+              source={{ uri: photoUri }}
+              style={[StyleSheet.absoluteFillObject, styles.heroImageCover]}
+              contentFit="cover"
+              contentPosition={CAPTURE_HERO_IMAGE_CONTENT_POSITION}
+              cachePolicy="memory-disk"
+              recyclingKey={`${reactKey}-${imageRevision}`}
+              accessibilityIgnoresInvertColors
+            />
+          </ColorMatrix>
         )}
       </Animated.View>
     </View>

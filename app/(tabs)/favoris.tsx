@@ -453,10 +453,16 @@ type HeroSlideshowListHeaderProps = {
   scrollY: SharedValue<number>;
   slideshowItems: FavListItem[];
   heroHeight: number;
+  isTabFocused: boolean;
 };
 
 /** Diaporama seul dans l’en-tête de liste (titre + CTAs : barre fixe au-dessus de la FlatList). */
-function HeroSlideshowListHeader({ scrollY, slideshowItems, heroHeight }: HeroSlideshowListHeaderProps) {
+function HeroSlideshowListHeader({
+  scrollY,
+  slideshowItems,
+  heroHeight,
+  isTabFocused,
+}: HeroSlideshowListHeaderProps) {
   const imageMotionStyle = useAnimatedStyle(() => {
     const y = scrollY.value;
     const pulled = y < 0 ? y : 0;
@@ -472,7 +478,11 @@ function HeroSlideshowListHeader({ scrollY, slideshowItems, heroHeight }: HeroSl
     <View style={styles.heroHeaderStack}>
       <View style={[styles.heroColumn, { height: heroHeight }]}>
         <Reanimated.View style={[styles.heroSlideshowLayer, imageMotionStyle]}>
-          <FavorisSlideshow items={slideshowItems} height={heroHeight} isActive={heroHeight > 8} />
+          <FavorisSlideshow
+            items={slideshowItems}
+            height={heroHeight}
+            isActive={isTabFocused && heroHeight > 8}
+          />
         </Reanimated.View>
       </View>
       <View style={styles.heroGridWhiteGap} pointerEvents="none" />
@@ -1078,9 +1088,10 @@ export default function FavorisScreen() {
         scrollY={galleryScrollY}
         slideshowItems={slideshowItems}
         heroHeight={heroHeight}
+        isTabFocused={isTabFocused}
       />
     );
-  }, [slideshowItems, heroHeight]);
+  }, [slideshowItems, heroHeight, isTabFocused]);
 
   return (
     <View style={styles.container}>

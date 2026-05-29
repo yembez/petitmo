@@ -41,11 +41,13 @@ export const FeedHeader = memo(function FeedHeader({ child, paddingTop, onMenuPr
   const inner = (
     <View style={styles.headerRow}>
       <View style={styles.headerLeft}>
-        <ChildAvatar
-          key={`${child.id}-${child.updated_at ?? ''}-${child.local_photo_path ?? ''}`}
-          child={child}
-          size={scale(68)}
-        />
+        <View style={styles.headerAvatarRing}>
+          <ChildAvatar
+            key={`${child.id}-${child.updated_at ?? ''}-${child.local_photo_path ?? ''}`}
+            child={child}
+            size={scale(68)}
+          />
+        </View>
         <View style={styles.headerNameBlock}>
           <Text style={styles.headerTitleLine} numberOfLines={1}>
             <Text style={styles.headerChildName}>{givenName}</Text>

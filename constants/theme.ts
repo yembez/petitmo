@@ -3,8 +3,9 @@ const BRAND_PRIMARY = '#FC5757';
 const BRAND_PRIMARY_RGB = '252, 87, 87';
 /** Corail brique — fond splash natif (`app.json` `splash.backgroundColor`), adaptive icon. */
 const BRAND_SPLASH_BRICK = '#D9683A';
-/** Disques CTA écran Capturer. */
-const CAPTURE_DISC_CTA = '#FF7F4F';
+/** Orange CTA — disques Capturer, onglet actif tab bar, accents chaleureux. */
+const BRAND_CTA_ORANGE = '#FF7F4F';
+const BRAND_CTA_ORANGE_RGB = '255, 127, 79';
 /** Gris — CTA secondaires (paywall, livres, modales, favoris, memory-view…). */
 const BRAND_CTA_GRAY = '#51545E';
 const BRAND_CTA_GRAY_RGB = '81, 84, 94';
@@ -27,8 +28,10 @@ export const THEME = {
   brandPrimary: BRAND_PRIMARY,
   /** Fond splash (Expo / Android / iOS) — corail brique, distinct du rosé `brandPrimary`. */
   splashScreenBackground: BRAND_SPLASH_BRICK,
-  /** Disques CTA écran Capturer. */
-  captureDiscCtaBackground: CAPTURE_DISC_CTA,
+  /** Orange CTA charte — disques Capturer, tab bar active, point âge / cœur titre… */
+  brandCtaOrange: BRAND_CTA_ORANGE,
+  /** @deprecated — `brandCtaOrange` */
+  captureDiscCtaBackground: BRAND_CTA_ORANGE,
   /** @deprecated — `brandPrimary` */
   brandTerracotta: BRAND_PRIMARY,
   /** Vignette onboarding / hero photo (dérivé du rosé). */
@@ -79,7 +82,10 @@ export const THEME = {
   brandArdoise: BRAND_CTA_GRAY,
   /** Fond doux badges / sélection plan paywall. */
   paywallAccentSoft: `rgba(${BRAND_CTA_GRAY_RGB}, 0.14)`,
-  /** CTA crayon fil — ardoise (exception au rosé charte). */
+  /** Disque crayon fil — fond blanc + liseré noir fin (comme CTA cœur fil). */
+  feedPencilDiscCtaBackground: '#FFFFFF',
+  feedPencilDiscCtaForeground: '#1C1C1E',
+  /** @deprecated ardoise — ancien crayon fil */
   feedPencilCtaBackground: `rgba(${FEED_PENCIL_SLATE_RGB}, 0.20)`,
   feedPencilCtaBorderColor: `rgba(${FEED_PENCIL_SLATE_RGB}, 0.36)`,
   feedPencilCtaForeground: FEED_PENCIL_SLATE,
@@ -93,7 +99,7 @@ export const THEME = {
   /** @deprecated violet maquette initiale — conservé si besoin legacy. */
   captureMaquetteViolet: '#5B47D6',
   /** Icône + libellé onglet actif tab bar. */
-  tabBarActiveTint: BRAND_PRIMARY,
+  tabBarActiveTint: BRAND_CTA_ORANGE,
   /** Icône + libellé onglets inactifs. */
   tabBarInactiveTint: '#8E8E93',
   /** Fond tab bar — blanc cassé beige chaleureux. */
@@ -101,7 +107,7 @@ export const THEME = {
   /** @deprecated — `tabBarBackground` */
   tabBarSurface: '#F6F4F1',
   /** @deprecated pastille onglet actif supprimée — teinte via `tabBarActiveTint` uniquement. */
-  tabBarActivePill: `rgba(${BRAND_PRIMARY_RGB}, 0.14)`,
+  tabBarActivePill: `rgba(${BRAND_CTA_ORANGE_RGB}, 0.14)`,
   /** @deprecated anneau lavande (tab bar violette) — non utilisé sur le bandeau blanc actuel. */
   tabBarOuterRing: '#D5CEEB',
 } as const;

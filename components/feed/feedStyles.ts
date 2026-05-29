@@ -12,8 +12,9 @@ import {
 } from '@/constants/feedLayout';
 
 const HEADER_AVATAR_PX = scale(68);
-/** Liseré rosé autour de l’avatar header fil. */
-const HEADER_AVATAR_BORDER_WIDTH = 1;
+/** Liseré orange CTA autour de l’avatar header fil. */
+const HEADER_AVATAR_RING_WIDTH = scale(2);
+const HEADER_AVATAR_RING_PADDING = scale(2);
 /** Marge horizontale (ex. audio sans visuel) — référencé par `styles` */
 const FEED_GUTTER = scale(20);
 /** Posts texte : colonne étroite façon livre */
@@ -78,29 +79,33 @@ const styles = StyleSheet.create({
     minWidth: 0,
     gap: scale(12),
   },
+  headerAvatarRing: {
+    padding: HEADER_AVATAR_RING_PADDING,
+    borderRadius:
+      HEADER_AVATAR_PX / 2 + HEADER_AVATAR_RING_PADDING + HEADER_AVATAR_RING_WIDTH,
+    borderWidth: HEADER_AVATAR_RING_WIDTH,
+    borderColor: THEME.brandCtaOrange,
+    overflow: 'hidden',
+  },
   headerAvatarImg: {
     width: HEADER_AVATAR_PX,
     height: HEADER_AVATAR_PX,
     borderRadius: HEADER_AVATAR_PX / 2,
     overflow: 'hidden',
-    backgroundColor: 'rgba(252, 87, 87, 0.08)',
-    borderWidth: HEADER_AVATAR_BORDER_WIDTH,
-    borderColor: THEME.brandPrimary,
+    backgroundColor: 'rgba(255, 127, 79, 0.08)',
   },
   headerAvatarPlaceholder: {
     width: HEADER_AVATAR_PX,
     height: HEADER_AVATAR_PX,
     borderRadius: HEADER_AVATAR_PX / 2,
-    backgroundColor: 'rgba(252, 87, 87, 0.12)',
+    backgroundColor: 'rgba(255, 127, 79, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: HEADER_AVATAR_BORDER_WIDTH,
-    borderColor: THEME.brandPrimary,
   },
   headerAvatarLetter: {
     fontSize: scale(26),
     fontWeight: '600',
-    color: THEME.brandPrimary,
+    color: THEME.brandCtaOrange,
   },
   headerNameBlock: {
     flex: 1,
@@ -576,14 +581,14 @@ const styles = StyleSheet.create({
     gap: scale(8),
     flexShrink: 1,
   },
-  /** Disque crayon fil — parité CTA « Importer » (Capturer, `#FBD1C1`). */
+  /** Disque crayon fil — fond blanc + liseré noir (parité CTA cœur). */
   feedPencilDiscCta: {
     width: scale(40),
     height: scale(40),
     borderRadius: scale(20),
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: THEME.captureImportCtaBackground,
+    backgroundColor: THEME.feedPencilDiscCtaBackground,
     borderWidth: scale(1),
     borderColor: 'rgba(0, 0, 0, 0.28)',
   },

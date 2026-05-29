@@ -243,12 +243,6 @@ function FilMemoryRow({
   useExpoAvShouldPlay(feedInlineVideoRef, canAutoplayVideoInline, videoPlaybackUri);
 
   useEffect(() => {
-    return () => {
-      void feedInlineVideoRef.current?.unloadAsync();
-    };
-  }, [memory.id]);
-
-  useEffect(() => {
     setFeedInlineVideoSoundOn(false);
     setFeedInlineVideoDisplayReady(false);
     feedInlinePosterFade.setValue(1);
@@ -429,12 +423,7 @@ function FilMemoryRow({
                         style={[
                           StyleSheet.absoluteFillObject,
                           {
-                            opacity:
-                              canAutoplayVideoInline && videoPosterUri.trim()
-                                ? 1
-                                : canAutoplayVideoInline
-                                  ? feedInlineVideoReveal
-                                  : 1,
+                            opacity: 1,
                             zIndex: 1,
                             backgroundColor: '#000000',
                           },
@@ -667,7 +656,7 @@ function FilMemoryRow({
                       : 'Annoter'
                 }
               >
-                <PenIcon size={FEED_PEN_ICON_PX} color={THEME.captureCtaIconColor} />
+                <PenIcon size={FEED_PEN_ICON_PX} color={THEME.feedPencilDiscCtaForeground} />
               </TouchableOpacity>
             ) : null}
 

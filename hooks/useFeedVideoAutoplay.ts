@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import type { ViewToken } from 'react-native';
 import type { Memory } from '@/types/local';
@@ -30,22 +30,23 @@ export function useFeedVideoAutoplay(
 ): {
   feedAutoplayMemoryId: string | null;
   onViewableItemsChanged: (info: { viewableItems: ViewToken[]; changed: ViewToken[] }) => void;
+  /** Réapplique la dernière visibilité (ex. retour sur l’onglet Fil après un autre onglet). */
+  refreshFeedVideoAutoplay: () => void;
   /** Arrête la lecture inline (ex. avant `memory-viewer`) pour éviter deux pistes vidéo. */
   suspendFeedInlineVideo: () => void;
 } {
   const [feedAutoplayMemoryId, setFeedAutoplayMemoryId] = useState<string | null>(null);
+  const lastViewableRef = useRef<ViewToken[]>([]);
 
   const suspendFeedInlineVideo = useCallback(() => {
     setFeedAutoplayMemoryId(null);
   }, []);
 
-  const onViewableItemsChanged = useCallback(
-    (info: { viewableItems: ViewToken[]; changed: ViewToken[] }) => {
-      onPrefetchViewable(info);
-
+  const applyViewableItems = useCallback(
+    (viewableItems: ViewToken[]) => {
       let bestId: string | null = null;
       let bestIdx = Number.POSITIVE_INFINITY;
-      for (const t of info.viewableItems) {
+      for (const t of viewableItems) {
         if (!t.isViewable) continue;
         const m = memoryFromFeedListItem(t.item);
         if (!m || !hasLikelyPlayableVideoUri(m)) continue;
@@ -55,11 +56,32 @@ export function useFeedVideoAutoplay(
           bestId = m.id;
         }
       }
-
       setFeedAutoplayMemoryId(prev => (prev === bestId ? prev : bestId));
     },
-    [onPrefetchViewable]
+    [],
   );
 
-  return { feedAutoplayMemoryId, onViewableItemsChanged, suspendFeedInlineVideo };
+  const onViewableItemsChanged = useCallback(
+    (info: { viewableItems: ViewToken[]; changed: ViewToken[] }) => {
+      onPrefetchViewable(info);
+      lastViewableRef.current = info.viewableItems;
+      applyViewableItems(info.viewableItems);
+    },
+    [onPrefetchViewable, applyViewableItems],
+  );
+
+  const refreshFeedVideoAutoplay = useCallback(() => {
+    if (lastViewableRef.current.length > 0) {
+      applyViewableItems(lastViewableRef.current);
+      return;
+    }
+    setFeedAutoplayMemoryId(null);
+  }, [applyViewableItems]);
+
+  return {
+    feedAutoplayMemoryId,
+    onViewableItemsChanged,
+    refreshFeedVideoAutoplay,
+    suspendFeedInlineVideo,
+  };
 }

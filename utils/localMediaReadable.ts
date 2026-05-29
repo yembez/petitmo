@@ -8,7 +8,11 @@ export function isProbablyStalePetitmoSandboxPath(uriOrPath: string): boolean {
   if (!s || s.startsWith('content:') || s.startsWith('ph://') || s.startsWith('assets-library://')) {
     return false;
   }
-  return s.includes('petitmo_memories') || s.includes('petitmo_feed_local_thumbs');
+  return (
+    s.includes('petitmo_memories') ||
+    s.includes('petitmo_feed_local_thumbs') ||
+    s.includes('petitmo_feed_local_videos')
+  );
 }
 
 /**

@@ -44,7 +44,7 @@ function TabBarBackgroundFill() {
   );
 }
 
-/** Bouton onglet : pas de pastille — actif = teinte rosée via `tabBarActiveTintColor`. */
+/** Bouton onglet : pas de pastille — actif = orange CTA via `tabBarActiveTintColor`. */
 function PetitmoTabBarButton(props: ComponentProps<typeof PlatformPressable>) {
   const { style, 'aria-selected': isActive, ...rest } = props;
   const flatStyle = StyleSheet.flatten(style) ?? {};
@@ -105,7 +105,11 @@ export default function TabLayout() {
         /** Garder Fil / Favoris montés : évite remontage + rechargement images après long séjour sur Capturer. */
         lazy: false,
         detachInactiveScreens: false,
-        freezeOnBlur: true,
+        /**
+         * `freezeOnBlur` gèle Reanimated + expo-av sur les onglets inactifs au 1er montage ;
+         * au retour sur Fil / Favoris, zoom diaporama et autoplay vidéo ne repartaient plus.
+         */
+        freezeOnBlur: false,
         sceneStyle: { backgroundColor: 'transparent' },
         tabBarActiveTintColor: THEME.tabBarActiveTint,
         tabBarInactiveTintColor: THEME.tabBarInactiveTint,

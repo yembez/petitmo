@@ -19,6 +19,7 @@ import { verticalScale } from '@/utils/responsive';
 import EditTextModal from '@/components/EditTextModal';
 import { usePrefetchMemories } from '@/hooks/usePrefetchMemories';
 import { useFeedVideoAutoplay } from '@/hooks/useFeedVideoAutoplay';
+import { useStableViewabilityPairs } from '@/hooks/useStableViewabilityPairs';
 import { usePendingMediaUploads } from '@/contexts/PendingMediaUploadsContext';
 import { useFeedData } from '@/hooks/useFeedData';
 import { useToggleFavorite } from '@/hooks/useToggleFavorite';
@@ -76,11 +77,19 @@ export default function FilScreen() {
   } = useFilRowActions(setMemories);
 
   const { onViewableItemsChanged: onPrefetchViewable } = usePrefetchMemories();
-  const { feedAutoplayMemoryId, onViewableItemsChanged, suspendFeedInlineVideo } =
-    useFeedVideoAutoplay(onPrefetchViewable);
+  const {
+    feedAutoplayMemoryId,
+    onViewableItemsChanged,
+    refreshFeedVideoAutoplay,
+    suspendFeedInlineVideo,
+  } = useFeedVideoAutoplay(onPrefetchViewable);
   const feedViewabilityConfig = useMemo(
     () => ({ itemVisiblePercentThreshold: 50, minimumViewTime: 80 }),
-    []
+    [],
+  );
+  const feedViewabilityPairs = useStableViewabilityPairs(
+    feedViewabilityConfig,
+    onViewableItemsChanged,
   );
   const onFeedHeaderMenuPress = useCallback(() => {
     router.push('/parent-space');
@@ -157,6 +166,11 @@ export default function FilScreen() {
         });
       }
 
+      const viewabilityFrame = requestAnimationFrame(() => {
+        listRef.current?.recordInteraction?.();
+        refreshFeedVideoAutoplay();
+      });
+
       void recordInstallDate();
       void getTimingNudge().then(nudge => {
         if (!nudge) return;
@@ -170,8 +184,11 @@ export default function FilScreen() {
         }
       });
 
-      return () => scrollTask?.cancel();
-    }, [router, applyPendingFeedScrollIntent])
+      return () => {
+        cancelAnimationFrame(viewabilityFrame);
+        scrollTask?.cancel();
+      };
+    }, [router, applyPendingFeedScrollIntent, refreshFeedVideoAutoplay]),
   );
 
   useEffect(() => {
@@ -242,8 +259,7 @@ export default function FilScreen() {
           }
           renderItem={renderItem}
           CellRendererComponent={renderFilListCell}
-          onViewableItemsChanged={onViewableItemsChanged}
-          viewabilityConfig={feedViewabilityConfig}
+          viewabilityConfigCallbackPairs={feedViewabilityPairs}
           onScroll={e => {
             feedScrollOffsetRef.current = e.nativeEvent.contentOffset.y;
           }}

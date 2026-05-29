@@ -90,7 +90,7 @@ export async function refreshChildProfileFromLocal(childId: string): Promise<Loc
   if (!id) return null;
   const row = getLocalChild(id);
   if (!row) return null;
-  return ensureChildFaceBounds(row);
+  return sanitizeChildLocalAvatarIfMissing(row);
 }
 
 export async function ensureChildFaceBounds(child: LocalChild): Promise<LocalChild> {
@@ -213,10 +213,12 @@ export async function sanitizeChildLocalAvatarIfMissing(child: LocalChild): Prom
     }
   }
 
-  /** Gratuit local : pas de `photo_url` de repli — ne pas effacer le chemin (hero Capturer vide). */
+  /** Pas de `photo_url` : chemin local mort (réinstall) → placeholder plutôt qu’URI illisible. */
   if (!(child.photo_url ?? '').trim()) {
-    console.warn('[children] avatar local introuvable, chemin conservé', child.id);
-    return child;
+    console.warn('[children] avatar local introuvable, nettoyage local_photo_path', child.id);
+    const next: LocalChild = { ...child, local_photo_path: null };
+    upsertLocalChild(next);
+    return next;
   }
 
   const next: LocalChild = { ...child, local_photo_path: null };

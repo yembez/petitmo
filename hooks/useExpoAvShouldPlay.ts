@@ -31,13 +31,16 @@ export function useExpoAvShouldPlay(
     };
 
     void apply();
-    const retryId = setTimeout(() => {
-      void apply();
-    }, 48);
+    const retryMs = [48, 200, 500];
+    const retryIds = retryMs.map(ms =>
+      setTimeout(() => {
+        void apply();
+      }, ms),
+    );
 
     return () => {
       cancelled = true;
-      clearTimeout(retryId);
+      retryIds.forEach(id => clearTimeout(id));
     };
   }, [ref, shouldPlay, playbackUri]);
 }

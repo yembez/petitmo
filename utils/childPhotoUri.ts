@@ -6,7 +6,7 @@ export function resolveChildProfileImageUri(
   localPhotoPath: string | null | undefined,
   remotePhotoUrl: string | null | undefined,
 ): string | null {
-  const local = (localPhotoPath ?? '').trim()
+  const local = (localPhotoPath ?? '').trim();
   if (local) {
     if (
       local.startsWith('file:') ||
@@ -16,13 +16,13 @@ export function resolveChildProfileImageUri(
       local.startsWith('ph://') ||
       local.startsWith('asset:')
     ) {
-      return local
+      return local;
     }
-    const path = local.startsWith('/') ? local : `/${local}`
-    return `file://${path}`
+    const path = local.startsWith('/') ? local : `/${local}`;
+    return `file://${path}`;
   }
-  const remote = (remotePhotoUrl ?? '').trim()
-  return remote || null
+  const remote = (remotePhotoUrl ?? '').trim();
+  return remote || null;
 }
 
 /**
@@ -35,17 +35,17 @@ export function resolveChildProfileImageDisplayUri(
   remotePhotoUrl: string | null | undefined,
   updatedAt: string | null | undefined,
 ): string | null {
-  const base = resolveChildProfileImageUri(localPhotoPath, remotePhotoUrl)
-  if (!base) return null
-  const rev = (updatedAt ?? '').trim()
-  if (!rev) return base
+  const base = resolveChildProfileImageUri(localPhotoPath, remotePhotoUrl);
+  if (!base) return null;
+  const rev = (updatedAt ?? '').trim();
+  if (!rev) return base;
   if (
     base.startsWith('file:') ||
     base.startsWith('content:') ||
     base.startsWith('ph://')
   ) {
-    const sep = base.includes('?') ? '&' : '?'
-    return `${base}${sep}petitmo_v=${encodeURIComponent(rev)}`
+    const sep = base.includes('?') ? '&' : '?';
+    return `${base}${sep}petitmo_v=${encodeURIComponent(rev)}`;
   }
-  return base
+  return base;
 }

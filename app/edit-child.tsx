@@ -27,9 +27,9 @@ import {
   setSelectedChild,
   updateChild,
   uploadChildPhoto,
-  ensureChildFaceBounds,
-  notifyChildProfileUpdated,
+  sanitizeChildLocalAvatarIfMissing,
   refreshChildProfileFromLocal,
+  notifyChildProfileUpdated,
   resolveChildAvatarCropSourceUri,
 } from '@/services/children';
 import { getCachedUserMode } from '@/lib/userMode';
@@ -103,7 +103,10 @@ export default function EditChildScreen() {
 
       if (currentChild) {
         await setSelectedChild(currentChild.id);
-        const cleaned = await ensureChildFaceBounds(currentChild);
+        const cleaned =
+          Platform.OS === 'web'
+            ? currentChild
+            : await sanitizeChildLocalAvatarIfMissing(currentChild);
         setChild(cleaned);
         setName(cleaned.name);
         setBirthdate(cleaned.birthdate || '');
@@ -183,25 +186,14 @@ export default function EditChildScreen() {
 
     try {
       setIsUploadingPhoto(true);
-      const url = await uploadChildPhoto(child.id, uri);
+      await uploadChildPhoto(child.id, uri);
       const cur = getLocalChild(child.id);
       if (!cur) {
         Alert.alert('Erreur', 'Profil introuvable');
         return;
       }
-      const cleaned = await ensureChildFaceBounds(cur);
-      setChild(cleaned);
-      notifyChildProfileUpdated(child.id, cleaned);
-      const display =
-        Platform.OS !== 'web'
-          ? resolveChildProfileImageDisplayUri(
-              cleaned.local_photo_path,
-              cleaned.photo_url,
-              cleaned.updated_at,
-            ) ??
-            resolveChildProfileImageUri(cleaned.local_photo_path, cleaned.photo_url) ??
-            url
-          : (resolveChildProfileImageUri(cleaned.local_photo_path, cleaned.photo_url) ?? url);
+      setChild(cur);
+      const display = resolveChildProfileImageUri(cur.local_photo_path, cur.photo_url) ?? '';
       setPhotoUrl(display);
     } catch (error) {
       console.error('Error uploading photo:', error);
@@ -232,6 +224,7 @@ export default function EditChildScreen() {
               photo_url: (child.photo_url ?? '').trim() || null,
             });
       setChild(updated);
+      notifyChildProfileUpdated(updated.id, updated);
       router.back();
     } catch (error) {
       console.error('Error updating child:', error);

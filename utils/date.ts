@@ -169,13 +169,30 @@ export function calculateAge(birthdate: string): string {
   return parts.join(' ') || 'nouveau-né';
 }
 
-/** Pilule âge Capturer — « mois » → « m », « semaine(s) » → « s » (ex. « 3 m et 2 s »). */
+/**
+ * Pilule âge Capturer :
+ * - &lt; 1 an : « X mois » (mot « mois » en entier)
+ * - ≥ 1 an : « 1 an et 3m », « 2 ans et 5m », etc.
+ */
 export function formatCaptureChildAge(birthdate: string | null | undefined): string {
   if (!birthdate?.trim()) return '';
-  return calculateAge(birthdate)
-    .replace(/\bmois\b/g, 'm')
-    .replace(/\bsemaines\b/g, 's')
-    .replace(/\bsemaine\b/g, 's');
+  const birth = new Date(birthdate);
+  const now = new Date();
+  if (Number.isNaN(birth.getTime()) || Number.isNaN(now.getTime()) || now < birth) {
+    return '';
+  }
+
+  const totalMonths = monthsBetweenBirthAndEvent(birth, now);
+
+  if (totalMonths < 12) {
+    return `${totalMonths} mois`;
+  }
+
+  const years = Math.floor(totalMonths / 12);
+  const remMonths = totalMonths % 12;
+  const yearLabel = years === 1 ? '1 an' : `${years} ans`;
+  if (remMonths === 0) return yearLabel;
+  return `${yearLabel} et ${remMonths}m`;
 }
 
 export function formatDuration(seconds: number): string {
