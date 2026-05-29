@@ -27,7 +27,11 @@ import { ICON_SIZES } from "@/constants/sizes";
 import { TEXT_POST_CARD_INSET } from '@/constants/feedLayout';
 import { APP_ICON_PX } from '@/constants/iconSizes';
 import PhotoMosaic from "@/components/PhotoMosaic";
-import { isFeedMultiPhotoAlbum, parseFavoritePhotoUrls } from '@/utils/memoryPhotos';
+import {
+  isAlbumFullyFavorited,
+  isFeedMultiPhotoAlbum,
+  parseFavoritePhotoUrls,
+} from '@/utils/memoryPhotos';
 import { useFeedPhotoDisplayUrls } from "@/hooks/useFeedPhotoDisplayUrls";
 import { useFeedVideoPlaybackUri } from '@/hooks/useFeedVideoPlaybackUri';
 import { useExpoAvShouldPlay } from '@/hooks/useExpoAvShouldPlay';
@@ -36,10 +40,8 @@ import { clampAudioBookAnnotation } from '@/lib/audioBookAnnotation';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { Video, ResizeMode, type AVPlaybackStatus } from 'expo-av';
 import { Swipeable, RectButton } from "react-native-gesture-handler";
-import {
-  CapturedAtOverlay,
-  FeedPhotoFavoriteOverlay,
-} from '@/components/feed/FeedMediaOverlays';
+import { CapturedAtOverlay } from '@/components/feed/FeedMediaOverlays';
+import PenIcon from '@/components/PenIcon';
 import type { PendingUpload } from "@/contexts/PendingMediaUploadsContext";
 import {
   formatDuration,
@@ -67,7 +69,8 @@ const EM_QUAD = '\u2003';
 
 /** Taille unique des icônes dans le fil (actions + overlays). */
 const FEED_ICON_PX = APP_ICON_PX;
-/** Cœur favori : même taille sur médias (photo/vidéo) et sur la ligne d’actions (texte/vocal). */
+const FEED_PEN_ICON_PX = scale(20);
+/** Cœur favori sous le post (à côté du crayon). */
 const FEED_FAVORITE_HEART_PX = scale(20);
 
 /** Une ligne « envoi en cours » (même liste que les souvenirs → pas de saut de header FlatList). */
@@ -90,7 +93,7 @@ type FilMemoryRowProps = {
   handlePickVoiceCover: (m: Memory) => void | Promise<void>;
   handleDeleteMemory: (m: Memory) => void;
   swipeRefs: MutableRefObject<Map<string, Swipeable | null>>;
-  immersiveLaunchRef: RefObject<(index: number) => void>;
+  immersiveLaunchRef: RefObject<(memoryId: string, albumPhotoIndex?: number) => void>;
   /** Ligne « import en cours » : ne pas écrire dans `postHeights` (index hors `memories`). */
   skipPostHeightMeasurement?: boolean;
   /** Import non finalisé : pas de favori / swipe / actions. */
@@ -284,14 +287,17 @@ function FilMemoryRow({
     setFeedInlineVideoSoundOn(next);
   }, [feedInlineVideoSoundOn]);
 
-  const skipImmersive =
-    isOptimisticFeedPending ||
-    (memory.type === 'photo' && isFeedMultiPhotoAlbum(memory));
-
-  const launchImmersive = () => {
-    if (skipImmersive) return;
-    immersiveLaunchRef.current(memoryIndex);
+  const launchImmersive = (albumPhotoIndex = 0) => {
+    if (isOptimisticFeedPending) return;
+    immersiveLaunchRef.current(memory.id, albumPhotoIndex);
   };
+
+  const skipImmersive = isOptimisticFeedPending;
+
+  const feedPhotoFavorited =
+    memory.type === 'photo' && isFeedMultiPhotoAlbum(memory)
+      ? !!memory.is_favorite || isAlbumFullyFavorited(memory)
+      : !!memory.is_favorite;
 
   const postCard = (
     <View
@@ -383,15 +389,10 @@ function FilMemoryRow({
                     )
                   )
                 }
-                onSinglePhotoImmersive={
-                  !skipImmersive && photoUrls.length > 0 ? launchImmersive : undefined
+                onPhotoImmersive={
+                  !isOptimisticFeedPending && photoUrls.length > 0 ? launchImmersive : undefined
                 }
                 memoryForFavoriteVariants={memory}
-              />
-              <FeedPhotoFavoriteOverlay
-                isFavorite={!!memory.is_favorite}
-                inkOverride={memory.captured_overlay_ink}
-                onPress={() => void toggleFavorite(memory.id)}
               />
               {showCapturedOverlay ? (
                 <CapturedAtOverlay
@@ -539,11 +540,6 @@ function FilMemoryRow({
                   )}
                 </TouchableOpacity>
               ) : null}
-              <FeedPhotoFavoriteOverlay
-                isFavorite={!!memory.is_favorite}
-                inkOverride={memory.captured_overlay_ink}
-                onPress={() => void toggleFavorite(memory.id)}
-              />
               {showCapturedOverlay && videoUriForOverlay ? (
                 <CapturedAtOverlay
                   uriForAnalysis={videoUriForOverlay}
@@ -652,70 +648,75 @@ function FilMemoryRow({
         <View
           style={[
             styles.postActions,
+            styles.postActionsSpread,
             memory.type === 'text' && { paddingHorizontal: TEXT_POST_GUTTER },
           ]}
         >
-          {memory.type === 'text' || !contentText ? (
-            <TouchableOpacity
-              style={[styles.actionButton, styles.actionButtonPencilAccent]}
-              onPress={() => handleEditMemory(memory)}
-              activeOpacity={0.75}
-              accessibilityRole="button"
-              accessibilityLabel={
-                memory.type === 'text'
-                  ? 'Modifier le texte'
-                  : memory.content?.trim()
-                    ? 'Modifier'
-                    : 'Annoter'
-              }
-            >
-              <Pencil
-                size={FEED_ICON_PX}
-                color={THEME.feedPencilCtaForeground}
-                strokeWidth={2.2}
-              />
-            </TouchableOpacity>
-          ) : null}
+          <View style={styles.postActionsLeft}>
+            {memory.type === 'text' || !contentText ? (
+              <TouchableOpacity
+                style={styles.feedPencilDiscCta}
+                onPress={() => handleEditMemory(memory)}
+                activeOpacity={0.75}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  memory.type === 'text'
+                    ? 'Modifier le texte'
+                    : memory.content?.trim()
+                      ? 'Modifier'
+                      : 'Annoter'
+                }
+              >
+                <PenIcon size={FEED_PEN_ICON_PX} color={THEME.captureCtaIconColor} />
+              </TouchableOpacity>
+            ) : null}
 
-          {memory.type === 'voice' && (!!memory.media_url || !!voicePlaybackSigned) && (
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => void handlePickVoiceCover(memory)}
-              activeOpacity={0.75}
-              disabled={uploadingVoiceCoverId === memory.id}
-              accessibilityRole="button"
-              accessibilityLabel={
-                memory.voice_cover_url ? 'Changer la photo de fond' : 'Ajouter une photo de fond'
-              }
-            >
-              {uploadingVoiceCoverId === memory.id ? (
-                <ActivityIndicator size="small" color={ACTION_ICON_INK} />
-              ) : (
-                <ImagePlus size={FEED_ICON_PX} color={ACTION_ICON_INK} strokeWidth={2.2} />
-              )}
-            </TouchableOpacity>
-          )}
+            {memory.type === 'voice' && (!!memory.media_url || !!voicePlaybackSigned) && (
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={() => void handlePickVoiceCover(memory)}
+                activeOpacity={0.75}
+                disabled={uploadingVoiceCoverId === memory.id}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  memory.voice_cover_url ? 'Changer la photo de fond' : 'Ajouter une photo de fond'
+                }
+              >
+                {uploadingVoiceCoverId === memory.id ? (
+                  <ActivityIndicator size="small" color={ACTION_ICON_INK} />
+                ) : (
+                  <ImagePlus size={FEED_ICON_PX} color={ACTION_ICON_INK} strokeWidth={2.2} />
+                )}
+              </TouchableOpacity>
+            )}
+          </View>
 
-          {memory.type !== 'photo' && memory.type !== 'video' ? (
-            <TouchableOpacity
-              style={[
-                styles.feedFavoriteActionCircle,
-                { marginLeft: 'auto' },
-                memory.is_favorite && styles.feedFavoriteActionCircleActive,
-              ]}
-              onPress={() => void toggleFavorite(memory.id)}
-              activeOpacity={0.75}
-              accessibilityRole="button"
-              accessibilityLabel="Favori"
-            >
-              <Heart
-                size={FEED_FAVORITE_HEART_PX}
-                color={memory.is_favorite ? THEME.brandPrimary : ACTION_ICON_INK}
-                strokeWidth={2.05}
-                fill={memory.is_favorite ? THEME.brandPrimary : 'none'}
-              />
-            </TouchableOpacity>
-          ) : null}
+          <TouchableOpacity
+            style={[
+              styles.feedFavoriteDiscCta,
+              (memory.type === 'photo' ? feedPhotoFavorited : !!memory.is_favorite) &&
+                styles.feedFavoriteDiscCtaActive,
+            ]}
+            onPress={() => void toggleFavorite(memory.id)}
+            activeOpacity={0.75}
+            accessibilityRole="button"
+            accessibilityLabel="Favori"
+          >
+            <Heart
+              size={FEED_FAVORITE_HEART_PX}
+              color={
+                (memory.type === 'photo' ? feedPhotoFavorited : !!memory.is_favorite)
+                  ? THEME.brandPrimary
+                  : ACTION_ICON_INK
+              }
+              strokeWidth={2.05}
+              fill={
+                (memory.type === 'photo' ? feedPhotoFavorited : !!memory.is_favorite)
+                  ? THEME.brandPrimary
+                  : 'none'
+              }
+            />
+          </TouchableOpacity>
         </View>
       </View>
       </View>

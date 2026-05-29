@@ -19,8 +19,9 @@ import { THEME } from '@/constants/theme';
 import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import { supabase } from '@/lib/supabase';
 import { getCachedUserMode } from '@/lib/userMode';
-import { checkMemoryLimit } from '@/lib/limits';
+import { checkMemoryLimit, invalidateMemoryLimitCache } from '@/lib/limits';
 import { getOrSelectFirstChild } from '@/services/children';
+import { armFeedSnapToLatestOnFocus } from '@/services/feedScrollRestore';
 import {
   MAX_TEXT_CHARS,
   MAX_VISUAL_LINES,
@@ -36,7 +37,7 @@ import {
 } from '@/utils/textLimits';
 import { upsertLocalMemory } from '@/lib/localDb';
 import { buildLocalTextMemory } from '@/services/localOnlyMemoryCapture';
-import { withLocalFields } from '@/services/memoryRowMapping';
+import { ensureMemoryUploadedForCloud } from '@/services/migration';
 
 type SpeechRecognitionResultLike = {
   isFinal: boolean
@@ -176,38 +177,24 @@ export default function WriteScreen() {
         return;
       }
 
-      if ((await getCachedUserMode()) === 'local') {
-        const mem = buildLocalTextMemory({
-          childId,
-          userId: user.id,
-          content: textToSave,
-          location: null,
-        });
-        upsertLocalMemory(mem);
-        DeviceEventEmitter.emit('petitmo:memories-inserted', { memories: [mem] });
-      } else {
-        const { data: insertedRow, error } = await supabase
-          .from('memories')
-          .insert({
-            child_id: childId,
-            user_id: user.id,
-            type: 'text',
-            content: textToSave,
-            location: null,
-            inserted_at: new Date().toISOString(),
-          })
-          .select('*')
-          .single();
+      const mode = await getCachedUserMode();
+      const mem = buildLocalTextMemory({
+        childId,
+        userId: user.id,
+        content: textToSave,
+        location: null,
+        syncStatus: mode === 'local' ? 'local' : 'pending',
+      });
+      upsertLocalMemory(mem);
+      invalidateMemoryLimitCache(childId);
+      DeviceEventEmitter.emit('petitmo:memories-inserted', { memories: [mem] });
 
-        if (error) throw error;
-        if (insertedRow?.id) {
-          const mem = { ...withLocalFields(insertedRow), sync_status: 'synced' as const };
-          upsertLocalMemory(mem);
-          DeviceEventEmitter.emit('petitmo:memories-inserted', { memories: [mem] });
-        }
+      if (mode === 'cloud') {
+        void ensureMemoryUploadedForCloud(mem);
       }
 
       Alert.alert('Succès', 'Moment sauvegardé avec succès');
+      armFeedSnapToLatestOnFocus();
       router.push('/(tabs)/fil');
     } catch (error) {
       console.error('Error saving text:', error);

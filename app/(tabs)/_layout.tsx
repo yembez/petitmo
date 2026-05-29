@@ -102,12 +102,16 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
+        /** Garder Fil / Favoris montés : évite remontage + rechargement images après long séjour sur Capturer. */
+        lazy: false,
+        detachInactiveScreens: false,
+        freezeOnBlur: true,
         sceneStyle: { backgroundColor: 'transparent' },
         tabBarActiveTintColor: THEME.tabBarActiveTint,
         tabBarInactiveTintColor: THEME.tabBarInactiveTint,
         tabBarActiveBackgroundColor: 'transparent',
         tabBarInactiveBackgroundColor: 'transparent',
-        tabBarBackground: () => <TabBarBackgroundFill safeFillHeight={safeFillHeight} />,
+        tabBarBackground: () => <TabBarBackgroundFill />,
         tabBarButton: props => <PetitmoTabBarButton {...props} />,
         tabBarStyle: {
           position: 'absolute',
@@ -130,13 +134,13 @@ export default function TabLayout() {
           paddingHorizontal: scale(4),
           ...Platform.select({
             ios: {
-              shadowColor: '#000000',
+              shadowColor: '#3C3126',
               shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.1,
+              shadowOpacity: 0.08,
               shadowRadius: 8,
             },
             android: {
-              elevation: 8,
+              elevation: 6,
             },
             default: {},
           }),
@@ -166,7 +170,11 @@ export default function TabLayout() {
         options={{
           title: 'Capturer',
           tabBarIcon: ({ focused, color }) => (
-            <TabBarGlyph Icon={Plus} focused={focused} color={color ?? THEME.tabBarInactiveTint} />
+            <TabBarGlyph
+              Icon={Plus}
+              focused={focused}
+              color={color ?? THEME.tabBarInactiveTint}
+            />
           ),
         }}
       />
@@ -227,20 +235,20 @@ const styles = StyleSheet.create({
   tabBarPressableBase: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingTop: verticalScale(3),
-    paddingBottom: verticalScale(4),
+    paddingTop: verticalScale(2),
+    paddingBottom: verticalScale(2),
     backgroundColor: 'transparent',
   },
   iconWrap: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: verticalScale(1),
+    marginBottom: verticalScale(0.5),
   },
   tabLabel: {
     marginTop: 0,
-    marginBottom: verticalScale(2),
-    fontSize: scale(10.5),
-    lineHeight: scale(12),
+    marginBottom: verticalScale(1),
+    fontSize: scale(10),
+    lineHeight: scale(11),
     letterSpacing: 0.15,
     textAlign: 'center',
     ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),

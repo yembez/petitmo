@@ -22,11 +22,10 @@ import type { Child } from '@/types/local';
 import { scale, verticalScale } from '@/utils/responsive';
 import { calculateAge } from '@/utils/date';
 import { getUserTier, setUserTier, type UserTier } from '@/lib/userTier';
-import { Image } from 'expo-image';
-import { resolveChildProfileImageDisplayUri } from '@/utils/childPhotoUri';
 import { supabase } from '@/lib/supabase';
 import { getLocalMemoriesPendingCloudSync } from '@/lib/localDb';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
+import { ChildAvatar } from '@/components/ChildAvatar';
 
 const CONTACT_EMAIL = 'contact@petitmo.app';
 const URL_PRIVACY = 'https://petitmo.app/privacy';
@@ -196,7 +195,7 @@ export default function ParentSpaceScreen() {
             children.map((c) => (
               <Row
                 key={c.id}
-                icon={<ChildRowAvatar child={c} letterFontFamily={dm700} />}
+                icon={<ChildAvatar child={c} size={scale(34)} />}
                 label={c.name ?? 'Sans nom'}
                 labelFontFamily={dm500}
                 value={c.birthdate ? calculateAge(c.birthdate) : ''}
@@ -374,36 +373,6 @@ function AvatarFallback({ letter, letterFontFamily }: { letter: string; letterFo
   );
 }
 
-function ChildRowAvatar({
-  child,
-  letterFontFamily,
-}: {
-  child: Child;
-  letterFontFamily?: string;
-}) {
-  const uri = resolveChildProfileImageDisplayUri(
-    child.local_photo_path,
-    child.photo_url,
-    child.updated_at,
-  );
-  if (!uri) {
-    return (
-      <AvatarFallback
-        letter={(child.name ?? '?').charAt(0).toUpperCase()}
-        letterFontFamily={letterFontFamily}
-      />
-    );
-  }
-  return (
-    <Image
-      source={{ uri }}
-      style={styles.childRowAvatarImg}
-      contentFit="cover"
-      cachePolicy="memory-disk"
-      recyclingKey={`${child.id}-${child.updated_at ?? ''}`}
-    />
-  );
-}
 
 const styles = StyleSheet.create({
   container: {

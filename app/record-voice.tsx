@@ -35,6 +35,7 @@ import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmo
 import PermissionModal from '@/components/PermissionModal';
 import { uploadMedia } from '@/services/media';
 import { getOrSelectFirstChild } from '@/services/children';
+import { armFeedSnapToLatestOnFocus } from '@/services/feedScrollRestore';
 import { getUserTier } from '@/lib/userTier';
 import { FREE_TIER_VOICE_MAX_DURATION } from '@/lib/limits';
 import { isAudioTrimAvailable, trimAudioToLocalFile } from '@/services/audioTrim';
@@ -480,6 +481,7 @@ export default function RecordVoiceScreen() {
 
       if (result) {
         Alert.alert('Succès', 'Souvenir sonore sauvegardé avec succès');
+        armFeedSnapToLatestOnFocus();
         router.push('/(tabs)/fil');
       } else {
         Alert.alert('Erreur', 'Impossible de sauvegarder le souvenir');

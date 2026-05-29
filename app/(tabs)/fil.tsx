@@ -6,6 +6,7 @@ import {
   ActivityIndicator,
   RefreshControl,
   StyleSheet,
+  InteractionManager,
   type StyleProp,
   type ViewStyle,
   type ViewProps,
@@ -13,7 +14,7 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useState, useCallback, useMemo, useRef, type ReactNode } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect, type ReactNode } from 'react';
 import { verticalScale } from '@/utils/responsive';
 import EditTextModal from '@/components/EditTextModal';
 import { usePrefetchMemories } from '@/hooks/usePrefetchMemories';
@@ -32,6 +33,11 @@ import { FeedHeader } from '@/components/feed/FeedHeader';
 import type { FeedListItem } from '@/components/feed/FilMemoryRow';
 import { peekSilentInitialFilLoadArmed } from '@/services/feedAfterImportFlags';
 import { setMemoryViewerSession } from '@/services/memoryViewerSession';
+import {
+  consumeFeedScrollIntent,
+  setFeedScrollRestoreOffset,
+  type FeedScrollIntent,
+} from '@/services/feedScrollRestore';
 import { useFocusEffect } from '@react-navigation/native';
 import { getTimingNudge, markNudgeSeen, recordInstallDate } from '@/lib/paywallTiming';
 
@@ -80,13 +86,23 @@ export default function FilScreen() {
     router.push('/parent-space');
   }, [router]);
   const listRef = useRef<FlatList<FeedListItem> | null>(null);
-  const immersiveLaunchRef = useRef<(index: number) => void>(() => {});
-  immersiveLaunchRef.current = (index: number) => {
+  const feedScrollOffsetRef = useRef(0);
+  const pendingScrollIntentRef = useRef<FeedScrollIntent | null>(null);
+  const [feedListOpacity, setFeedListOpacity] = useState(1);
+  const immersiveLaunchRef = useRef<(memoryId: string, albumPhotoIndex?: number) => void>(() => {});
+  immersiveLaunchRef.current = (memoryId: string, albumPhotoIndex = 0) => {
+    const memoryIndex = memories.findIndex(m => m.id === memoryId);
+    if (memoryIndex < 0) return;
+    setFeedScrollRestoreOffset(feedScrollOffsetRef.current);
     suspendFeedInlineVideo();
-    setMemoryViewerSession({ memories, initialIndex: index });
+    setMemoryViewerSession({
+      memories,
+      initialIndex: memoryIndex,
+      initialAlbumPhotoIndex: albumPhotoIndex,
+    });
     router.push({
       pathname: '/memory-viewer',
-      params: { initialIndex: String(index) },
+      params: { initialIndex: String(memoryIndex) },
     });
   };
   const toggleFavorite = useToggleFavorite(setMemories);
@@ -117,8 +133,30 @@ export default function FilScreen() {
     feedAutoplayMemoryId
   );
 
+  const applyPendingFeedScrollIntent = useCallback(() => {
+    const intent = pendingScrollIntentRef.current;
+    if (!intent || !listRef.current || feedData.length === 0) return false;
+
+    const offsetY = intent.type === 'restore' ? intent.offsetY : 0;
+    listRef.current.scrollToOffset({ offset: offsetY, animated: false });
+    feedScrollOffsetRef.current = offsetY;
+    pendingScrollIntentRef.current = null;
+    setFeedListOpacity(1);
+    return true;
+  }, [feedData.length]);
+
   useFocusEffect(
     useCallback(() => {
+      const intent = consumeFeedScrollIntent();
+      let scrollTask: { cancel: () => void } | undefined;
+      if (intent) {
+        pendingScrollIntentRef.current = intent;
+        setFeedListOpacity(0);
+        scrollTask = InteractionManager.runAfterInteractions(() => {
+          applyPendingFeedScrollIntent();
+        });
+      }
+
       void recordInstallDate();
       void getTimingNudge().then(nudge => {
         if (!nudge) return;
@@ -131,8 +169,32 @@ export default function FilScreen() {
           setTimingNudge(nudge);
         }
       });
-    }, [router])
+
+      return () => scrollTask?.cancel();
+    }, [router, applyPendingFeedScrollIntent])
   );
+
+  useEffect(() => {
+    if (feedListOpacity !== 0) return;
+    const fallback = setTimeout(() => {
+      pendingScrollIntentRef.current = null;
+      setFeedListOpacity(1);
+    }, 500);
+    return () => clearTimeout(fallback);
+  }, [feedListOpacity]);
+
+  /** Import / replace vers le fil déjà actif : le focus ne repasse pas, on consomme l’intent au changement de données. */
+  useEffect(() => {
+    if (pendingScrollIntentRef.current) {
+      applyPendingFeedScrollIntent();
+      return;
+    }
+    const intent = consumeFeedScrollIntent();
+    if (!intent) return;
+    pendingScrollIntentRef.current = intent;
+    setFeedListOpacity(0);
+    applyPendingFeedScrollIntent();
+  }, [feedData.length, pendingUploads.length, applyPendingFeedScrollIntent]);
 
   /** Pas d’écran plein pendant l’import : pending, flag « retour import », ou 1er rendu avant consume. */
   if (isLoading && pendingUploads.length === 0 && !peekSilentInitialFilLoadArmed()) {
@@ -169,7 +231,7 @@ export default function FilScreen() {
           onMenuPress={onFeedHeaderMenuPress}
         />
       </View>
-      <View style={styles.feedViewport}>
+      <View style={[styles.feedViewport, { opacity: feedListOpacity }]}>
         <FlatList<FeedListItem>
           ref={listRef}
           data={feedData}
@@ -182,6 +244,13 @@ export default function FilScreen() {
           CellRendererComponent={renderFilListCell}
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={feedViewabilityConfig}
+          onScroll={e => {
+            feedScrollOffsetRef.current = e.nativeEvent.contentOffset.y;
+          }}
+          scrollEventThrottle={16}
+          onContentSizeChange={() => {
+            applyPendingFeedScrollIntent();
+          }}
           style={styles.scrollView}
           contentContainerStyle={[
             styles.scrollContent,
@@ -200,10 +269,14 @@ export default function FilScreen() {
             ) : null
           }
           removeClippedSubviews={false}
-          maintainVisibleContentPosition={{
-            minIndexForVisible: 0,
-            autoscrollToTopThreshold: Math.round(verticalScale(80)),
-          }}
+          {...(pendingUploads.length > 0
+            ? {
+                maintainVisibleContentPosition: {
+                  minIndexForVisible: 0,
+                  autoscrollToTopThreshold: Math.round(verticalScale(80)),
+                },
+              }
+            : {})}
           initialNumToRender={4}
           maxToRenderPerBatch={6}
           windowSize={9}

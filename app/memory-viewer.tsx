@@ -27,8 +27,12 @@ import type { Memory, Child } from '@/types/local';
 import { getChildren } from '@/services/children';
 import {
   getPrimaryPhotoUriForImmersiveViewer,
+  getAlbumCanonicalFavoriteUrls,
+  isPhotoUrlFavoritedWithVariants,
+  parseFavoritePhotoUrls,
   pickPhotoUriForOverlayPalette,
 } from '@/utils/memoryPhotos';
+import { toggleFavoritePhotoUrl } from '@/services/media';
 import { extractMediaBucketPath } from '@/lib/mediaSignedUrl';
 import { formatAgeAtMemory, formatDateLong } from '@/utils/date';
 import { childDisplayGivenName } from '@/utils/childDisplayName';
@@ -51,6 +55,13 @@ import {
 } from '@/utils/feedCaptureOverlay';
 import { THEME } from '@/constants/theme';
 import { MEMORY_TEXT_FONT } from '@/constants/memoryTextFont';
+import {
+  buildImmersiveViewerItems,
+  immersiveViewerItemKey,
+  memoryFromImmersiveViewerItem,
+  resolveImmersiveViewerInitialIndex,
+  type ImmersiveViewerItem,
+} from '@/utils/immersiveViewerItems';
 
 const BG = THEME.bg;
 /** Même pastille que `overlayBadge` du fil (date de prise bas-gauche). */
@@ -83,11 +94,13 @@ export default function MemoryViewerScreen() {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [initialIndex, setInitialIndex] = useState(0);
   const [child, setChild] = useState<Child | null>(null);
-  const [visibleId, setVisibleId] = useState<string | null>(null);
+  const [visibleItemKey, setVisibleItemKey] = useState<string | null>(null);
   const [editingTextMemory, setEditingTextMemory] = useState<Memory | null>(null);
-  const listRef = useRef<FlatList<Memory>>(null);
+  const listRef = useRef<FlatList<ImmersiveViewerItem>>(null);
   const didHydrateRef = useRef(false);
   const toggleFavorite = useToggleFavorite(setMemories);
+
+  const viewerItems = useMemo(() => buildImmersiveViewerItems(memories), [memories]);
 
   useEffect(() => {
     if (didHydrateRef.current) return;
@@ -97,22 +110,32 @@ export default function MemoryViewerScreen() {
       return;
     }
     didHydrateRef.current = true;
-    const idx = Number.isFinite(parsedInitial)
+    const memoryIdx = Number.isFinite(parsedInitial)
       ? Math.min(Math.max(0, parsedInitial), payload.memories.length - 1)
       : Math.min(Math.max(0, payload.initialIndex), payload.memories.length - 1);
     setMemories(payload.memories);
-    setInitialIndex(idx);
-    setVisibleId(payload.memories[idx]?.id ?? null);
+    const flatIdx = resolveImmersiveViewerInitialIndex(
+      payload.memories,
+      memoryIdx,
+      payload.initialAlbumPhotoIndex,
+    );
+    setInitialIndex(flatIdx);
+    const items = buildImmersiveViewerItems(payload.memories);
+    const opened = items[flatIdx];
+    setVisibleItemKey(opened ? immersiveViewerItemKey(opened) : null);
     void getChildren().then(list => {
       const cid = payload.memories[0]?.child_id;
       setChild(list.find(c => c.id === cid) ?? null);
     });
   }, [parsedInitial, router]);
 
-  const visibleMemory = useMemo(
-    () => memories.find(m => m.id === visibleId) ?? memories[0] ?? null,
-    [memories, visibleId],
-  );
+  const visibleMemory = useMemo(() => {
+    if (!visibleItemKey || viewerItems.length === 0) {
+      return memories[0] ?? null;
+    }
+    const item = viewerItems.find(it => immersiveViewerItemKey(it) === visibleItemKey);
+    return item ? memoryFromImmersiveViewerItem(item) : memories[0] ?? null;
+  }, [visibleItemKey, viewerItems, memories]);
   const closeOnMediaChrome = visibleMemory ? isImmersiveMediaType(visibleMemory.type) : true;
 
   useFocusEffect(
@@ -131,11 +154,8 @@ export default function MemoryViewerScreen() {
 
   const onViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
-      const id =
-        viewableItems.length > 0 && viewableItems[0].item?.id
-          ? (viewableItems[0].item as Memory).id
-          : null;
-      setVisibleId(id);
+      const item = viewableItems[0]?.item as ImmersiveViewerItem | undefined;
+      setVisibleItemKey(item ? immersiveViewerItemKey(item) : null);
     }
   ).current;
 
@@ -143,20 +163,63 @@ export default function MemoryViewerScreen() {
     itemVisiblePercentThreshold: 85,
   }).current;
 
+  const handleFavoritePhotoUrlsUpdated = useCallback(
+    (memoryId: string, urls: string[]) => {
+      setMemories(prev =>
+        prev.map(m => {
+          if (m.id !== memoryId) return m;
+          const withUrls = { ...m, favorite_photo_urls: urls };
+          const allUrls = getAlbumCanonicalFavoriteUrls(withUrls);
+          const allFav =
+            allUrls.length > 0 &&
+            allUrls.every(u =>
+              isPhotoUrlFavoritedWithVariants(withUrls, urls, u)
+            );
+          return {
+            ...withUrls,
+            is_favorite: allFav,
+          };
+        })
+      );
+    },
+    []
+  );
+
   const renderItem = useCallback(
-    ({ item }: { item: Memory }) => (
-      <ImmersivePage
-        memory={item}
-        isActive={visibleId === item.id}
-        height={itemHeight}
-        width={windowW}
-        childFirstName={childDisplayGivenName(child?.name)}
-        childBirthdate={child?.birthdate ?? null}
-        onRequestEditText={m => setEditingTextMemory(m)}
-        toggleFavorite={toggleFavorite}
-      />
-    ),
-    [visibleId, itemHeight, windowW, child?.name, child?.birthdate, toggleFavorite]
+    ({ item }: { item: ImmersiveViewerItem }) => {
+      const memory = memoryFromImmersiveViewerItem(item);
+      const albumSlot =
+        item.kind === 'albumPhoto'
+          ? {
+              uri: item.photoUri,
+              index: item.albumPhotoIndex,
+              total: item.albumPhotoCount,
+            }
+          : undefined;
+      return (
+        <ImmersivePage
+          memory={memory}
+          isActive={visibleItemKey === immersiveViewerItemKey(item)}
+          height={itemHeight}
+          width={windowW}
+          albumPhotoSlot={albumSlot}
+          childFirstName={childDisplayGivenName(child?.name)}
+          childBirthdate={child?.birthdate ?? null}
+          onRequestEditText={m => setEditingTextMemory(m)}
+          toggleFavorite={toggleFavorite}
+          onFavoritePhotoUrlsUpdated={urls => handleFavoritePhotoUrlsUpdated(memory.id, urls)}
+        />
+      );
+    },
+    [
+      visibleItemKey,
+      itemHeight,
+      windowW,
+      child?.name,
+      child?.birthdate,
+      toggleFavorite,
+      handleFavoritePhotoUrlsUpdated,
+    ]
   );
 
   const handleSaveTextEdit = useCallback(
@@ -185,9 +248,9 @@ export default function MemoryViewerScreen() {
     [itemHeight]
   );
 
-  const keyExtractor = useCallback((m: Memory) => m.id, []);
+  const keyExtractor = useCallback((item: ImmersiveViewerItem) => immersiveViewerItemKey(item), []);
 
-  if (memories.length === 0) {
+  if (viewerItems.length === 0) {
     return <View style={[styles.root, { height: windowH, backgroundColor: BG }]} />;
   }
 
@@ -225,7 +288,7 @@ export default function MemoryViewerScreen() {
 
       <FlatList
         ref={listRef}
-        data={memories}
+        data={viewerItems}
         keyExtractor={keyExtractor}
         renderItem={renderItem}
         pagingEnabled
@@ -250,24 +313,34 @@ export default function MemoryViewerScreen() {
   );
 }
 
+type AlbumPhotoSlot = {
+  uri: string;
+  index: number;
+  total: number;
+};
+
 function ImmersivePage({
   memory,
   isActive,
   height,
   width,
+  albumPhotoSlot,
   childFirstName,
   childBirthdate,
   onRequestEditText,
   toggleFavorite,
+  onFavoritePhotoUrlsUpdated,
 }: {
   memory: Memory;
   isActive: boolean;
   height: number;
   width: number;
+  albumPhotoSlot?: AlbumPhotoSlot;
   childFirstName: string;
   childBirthdate: string | null;
   onRequestEditText: (m: Memory) => void;
   toggleFavorite: (id: string) => void | Promise<void>;
+  onFavoritePhotoUrlsUpdated: (urls: string[]) => void;
 }) {
   const insets = useSafeAreaInsets();
   const addedLabel = formatDateLong(memory.inserted_at || memory.created_at);
@@ -317,9 +390,11 @@ function ImmersivePage({
           {memory.type === 'photo' && (
             <ImmersivePhoto
               memory={memory}
+              albumPhotoSlot={albumPhotoSlot}
               showCapturedOverlay={showCapturedOnMedia}
               capturedOverlayLabel={capturedLabelOnMedia}
-              onToggleFavorite={toggleFavorite}
+              onToggleMemoryFavorite={toggleFavorite}
+              onFavoritePhotoUrlsUpdated={onFavoritePhotoUrlsUpdated}
             />
           )}
           {memory.type === 'video' && (
@@ -375,6 +450,13 @@ function ImmersivePage({
                 </Pressable>
               ) : null}
             </View>
+            {albumPhotoSlot && albumPhotoSlot.total > 1 ? (
+              <View style={styles.albumPageBadge} pointerEvents="none">
+                <Text style={styles.albumPageBadgeText}>
+                  {albumPhotoSlot.index + 1} / {albumPhotoSlot.total}
+                </Text>
+              </View>
+            ) : null}
           </>
         ) : (
           <View style={[styles.topTextMeta, { paddingTop: topChromePadTop }]} pointerEvents="none">
@@ -394,18 +476,22 @@ function ImmersivePage({
   );
 }
 
-function ImmersivePhoto({
-  memory,
+function ImmersivePhotoSlide({
+  uri,
+  memoryId,
+  paletteUri,
   showCapturedOverlay,
   capturedOverlayLabel,
-  onToggleFavorite,
+  inkOverride,
 }: {
-  memory: Memory;
+  uri: string;
+  memoryId: string;
+  paletteUri: string;
   showCapturedOverlay: boolean;
   capturedOverlayLabel: string;
-  onToggleFavorite: (id: string) => void | Promise<void>;
+  inkOverride: Memory['captured_overlay_ink'];
 }) {
-  const raw = getPrimaryPhotoUriForImmersiveViewer(memory)?.trim() ?? '';
+  const raw = uri.trim();
   const isDeviceLocal =
     !!raw &&
     (raw.startsWith('file:') ||
@@ -415,48 +501,98 @@ function ImmersivePhoto({
       (raw.startsWith('/') && !extractMediaBucketPath(raw)));
   const needsRemoteSign = !!raw && !isDeviceLocal;
   const signed = useSignedMediaUrl(needsRemoteSign ? raw : null);
-  const uri = (needsRemoteSign ? signed ?? raw : raw).trim();
-  const paletteUri = pickPhotoUriForOverlayPalette(memory) || uri;
+  const displayUri = (needsRemoteSign ? signed ?? raw : raw).trim();
 
-  const overlays = (
+  if (!displayUri) {
+    return <View style={[styles.fullBleed, styles.mediaFallback]} />;
+  }
+
+  return (
     <>
-      <FeedPhotoFavoriteOverlay
-        isFavorite={!!memory.is_favorite}
-        inkOverride={memory.captured_overlay_ink}
-        onPress={() => void onToggleFavorite(memory.id)}
+      <Image
+        source={{ uri: displayUri }}
+        style={styles.fullBleed}
+        contentFit="cover"
+        cachePolicy="memory-disk"
+        priority="high"
+        recyclingKey={`${memoryId}-${raw}`}
       />
-      {showCapturedOverlay && uri ? (
+      {showCapturedOverlay ? (
         <CapturedAtOverlay
-          uriForAnalysis={paletteUri}
+          uriForAnalysis={paletteUri || displayUri}
           label={capturedOverlayLabel}
-          inkOverride={memory.captured_overlay_ink}
+          inkOverride={inkOverride}
         />
       ) : null}
     </>
   );
+}
 
-  if (!uri) {
+function ImmersivePhoto({
+  memory,
+  albumPhotoSlot,
+  showCapturedOverlay,
+  capturedOverlayLabel,
+  onToggleMemoryFavorite,
+  onFavoritePhotoUrlsUpdated,
+}: {
+  memory: Memory;
+  albumPhotoSlot?: AlbumPhotoSlot;
+  showCapturedOverlay: boolean;
+  capturedOverlayLabel: string;
+  onToggleMemoryFavorite: (id: string) => void | Promise<void>;
+  onFavoritePhotoUrlsUpdated: (urls: string[]) => void;
+}) {
+  const favoritePhotoUrls = useMemo(() => parseFavoritePhotoUrls(memory), [memory]);
+
+  const raw = albumPhotoSlot
+    ? albumPhotoSlot.uri.trim()
+    : (getPrimaryPhotoUriForImmersiveViewer(memory)?.trim() ?? '');
+  const paletteUri = pickPhotoUriForOverlayPalette(memory) || raw;
+
+  const handleTogglePhotoFavorite = useCallback(
+    async (url: string) => {
+      const next = await toggleFavoritePhotoUrl(memory.id, url);
+      if (next) onFavoritePhotoUrlsUpdated(next);
+    },
+    [memory.id, onFavoritePhotoUrlsUpdated]
+  );
+
+  if (!raw) {
     return (
       <View style={[styles.photoImmersiveWrap, styles.mediaFallback]}>
         <FeedPhotoFavoriteOverlay
           isFavorite={!!memory.is_favorite}
           inkOverride={memory.captured_overlay_ink}
-          onPress={() => void onToggleFavorite(memory.id)}
+          onPress={() => void onToggleMemoryFavorite(memory.id)}
         />
       </View>
     );
   }
+
+  const photoFavorited = albumPhotoSlot
+    ? isPhotoUrlFavoritedWithVariants(memory, favoritePhotoUrls, raw)
+    : !!memory.is_favorite;
+
   return (
     <View style={styles.photoImmersiveWrap}>
-      <Image
-        source={{ uri }}
-        style={styles.fullBleed}
-        contentFit="cover"
-        cachePolicy="memory-disk"
-        priority="high"
-        recyclingKey={memory.id}
+      <ImmersivePhotoSlide
+        uri={raw}
+        memoryId={memory.id}
+        paletteUri={paletteUri}
+        showCapturedOverlay={showCapturedOverlay && (!albumPhotoSlot || albumPhotoSlot.index === 0)}
+        capturedOverlayLabel={capturedOverlayLabel}
+        inkOverride={memory.captured_overlay_ink}
       />
-      {overlays}
+      <FeedPhotoFavoriteOverlay
+        isFavorite={photoFavorited}
+        inkOverride={memory.captured_overlay_ink}
+        onPress={() =>
+          void (albumPhotoSlot
+            ? handleTogglePhotoFavorite(raw)
+            : onToggleMemoryFavorite(memory.id))
+        }
+      />
     </View>
   );
 }
@@ -839,6 +975,24 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     minHeight: 0,
     position: 'relative',
+    overflow: 'hidden',
+  },
+  albumPageBadge: {
+    position: 'absolute',
+    bottom: verticalScale(20),
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 8,
+  },
+  albumPageBadgeText: {
+    color: TOP_CHROME_TEXT,
+    fontSize: scale(13),
+    fontWeight: '600',
+    backgroundColor: CHROME_PILL_BG,
+    paddingHorizontal: scale(12),
+    paddingVertical: verticalScale(5),
+    borderRadius: scale(14),
     overflow: 'hidden',
   },
   /** Hôte positionné pour pastilles fil (cœur bas-droite). */

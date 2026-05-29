@@ -1,57 +1,52 @@
-import { useState, useCallback, type ReactNode } from 'react';
+import { useCallback, type ReactNode } from 'react';
 import { View, Text, StyleSheet, useWindowDimensions, Pressable } from 'react-native';
 import { Image } from 'expo-image';
 import { MEDIA_CARD_INSET, MEDIA_CARD_RADIUS } from '@/constants/feedLayout';
 import { scale } from '@/utils/responsive';
-import PhotoGalleryModal from '@/components/PhotoGalleryModal';
-import { toggleFavoritePhotoUrl } from '@/services/media';
 import type { Memory } from '@/types/local';
 
 const GAP = scale(3);
 
 type Props = {
   urls: string[];
-  /** Album : favoris par photo dans la visionneuse (optionnel). */
+  /** Album : favoris par photo (visionneuse / fil). */
   memoryId?: string;
   favoritePhotoUrls?: string[];
   onFavoritePhotoUrlsUpdated?: (urls: string[]) => void;
-  /** Une seule photo : ouvre le viewer immersif au lieu de la galerie modale. */
+  /** Au tap : ouvre le viewer immersif à l’index donné (1 ou N photos). */
+  onPhotoImmersive?: (index: number) => void;
+  /** @deprecated Utiliser `onPhotoImmersive`. */
   onSinglePhotoImmersive?: () => void;
-  /** Aligner l’état « favori » sur la galerie quand l’URL affichée est un dérivé. */
   memoryForFavoriteVariants?: Memory | null;
 };
 
 /**
- * Grille type WhatsApp + visionneuse plein écran au tap (swipe entre toutes les photos).
+ * Grille type WhatsApp ; au tap → viewer immersif si `onPhotoImmersive` est fourni.
  */
 export default function PhotoMosaic({
   urls,
-  memoryId,
-  favoritePhotoUrls,
-  onFavoritePhotoUrlsUpdated,
+  memoryId: _memoryId,
+  favoritePhotoUrls: _favoritePhotoUrls,
+  onFavoritePhotoUrlsUpdated: _onFavoritePhotoUrlsUpdated,
+  onPhotoImmersive,
   onSinglePhotoImmersive,
-  memoryForFavoriteVariants = null,
+  memoryForFavoriteVariants: _memoryForFavoriteVariants = null,
 }: Props) {
   const { width: screenW } = useWindowDimensions();
   const W = Math.max(0, screenW - 2 * MEDIA_CARD_INSET);
   const n = urls.length;
-  const [galleryOpen, setGalleryOpen] = useState(false);
-  const [galleryIndex, setGalleryIndex] = useState(0);
 
-  const openGallery = useCallback((index: number) => {
-    setGalleryIndex(index);
-    setGalleryOpen(true);
-  }, []);
-
-  const closeGallery = useCallback(() => setGalleryOpen(false), []);
-
-  const handleToggleFavoritePhoto = useCallback(
-    async (url: string) => {
-      if (!memoryId || !onFavoritePhotoUrlsUpdated) return;
-      const next = await toggleFavoritePhotoUrl(memoryId, url);
-      if (next) onFavoritePhotoUrlsUpdated(next);
+  const openImmersive = useCallback(
+    (index: number) => {
+      if (onPhotoImmersive) {
+        onPhotoImmersive(index);
+        return;
+      }
+      if (n === 1 && onSinglePhotoImmersive) {
+        onSinglePhotoImmersive();
+      }
     },
-    [memoryId, onFavoritePhotoUrlsUpdated]
+    [onPhotoImmersive, onSinglePhotoImmersive, n],
   );
 
   if (n === 0) return null;
@@ -61,8 +56,8 @@ export default function PhotoMosaic({
   const fourthOverlay = n > 4 ? n - 4 : 0;
 
   const onPressFourthCell = () => {
-    if (n > 4) openGallery(4);
-    else openGallery(3);
+    if (n > 4) openImmersive(4);
+    else openImmersive(3);
   };
 
   let grid: ReactNode;
@@ -70,9 +65,7 @@ export default function PhotoMosaic({
   if (n === 1) {
     grid = (
       <Pressable
-        onPress={() =>
-          onSinglePhotoImmersive ? onSinglePhotoImmersive() : openGallery(0)
-        }
+        onPress={() => openImmersive(0)}
         style={[styles.wrap, { borderRadius: MEDIA_CARD_RADIUS }]}
         accessibilityRole="image"
         accessibilityLabel="Ouvrir la photo en grand"
@@ -88,11 +81,11 @@ export default function PhotoMosaic({
   } else if (n === 2) {
     grid = (
       <View style={[styles.wrap, styles.row, { width: W, borderRadius: MEDIA_CARD_RADIUS }]}>
-        <Pressable onPress={() => openGallery(0)} style={[styles.fill, { width: cell, height: rowH }]}>
+        <Pressable onPress={() => openImmersive(0)} style={[styles.fill, { width: cell, height: rowH }]}>
           <Image source={{ uri: urls[0] }} style={StyleSheet.absoluteFillObject} contentFit="cover" cachePolicy="disk" />
         </Pressable>
         <View style={{ width: GAP }} />
-        <Pressable onPress={() => openGallery(1)} style={[styles.fill, { width: cell, height: rowH }]}>
+        <Pressable onPress={() => openImmersive(1)} style={[styles.fill, { width: cell, height: rowH }]}>
           <Image source={{ uri: urls[1] }} style={StyleSheet.absoluteFillObject} contentFit="cover" cachePolicy="disk" />
         </Pressable>
       </View>
@@ -102,15 +95,15 @@ export default function PhotoMosaic({
     const halfH = (H - GAP) / 2;
     grid = (
       <View style={[styles.wrap, styles.row, { width: W, height: H, borderRadius: MEDIA_CARD_RADIUS }]}>
-        <Pressable onPress={() => openGallery(0)} style={[styles.fill, { width: cell, height: H }]}>
+        <Pressable onPress={() => openImmersive(0)} style={[styles.fill, { width: cell, height: H }]}>
           <Image source={{ uri: urls[0] }} style={StyleSheet.absoluteFillObject} contentFit="cover" cachePolicy="disk" />
         </Pressable>
         <View style={{ width: GAP }} />
         <View style={{ width: cell, height: H }}>
-          <Pressable onPress={() => openGallery(1)} style={[styles.fill, { width: cell, height: halfH, marginBottom: GAP }]}>
+          <Pressable onPress={() => openImmersive(1)} style={[styles.fill, { width: cell, height: halfH, marginBottom: GAP }]}>
             <Image source={{ uri: urls[1] }} style={StyleSheet.absoluteFillObject} contentFit="cover" cachePolicy="disk" />
           </Pressable>
-          <Pressable onPress={() => openGallery(2)} style={[styles.fill, { width: cell, height: halfH }]}>
+          <Pressable onPress={() => openImmersive(2)} style={[styles.fill, { width: cell, height: halfH }]}>
             <Image source={{ uri: urls[2] }} style={StyleSheet.absoluteFillObject} contentFit="cover" cachePolicy="disk" />
           </Pressable>
         </View>
@@ -120,16 +113,16 @@ export default function PhotoMosaic({
     grid = (
       <View style={[styles.wrap, { width: W, borderRadius: MEDIA_CARD_RADIUS }]}>
         <View style={[styles.row, { marginBottom: GAP }]}>
-          <Pressable onPress={() => openGallery(0)} style={[styles.fill, { width: cell, height: rowH }]}>
+          <Pressable onPress={() => openImmersive(0)} style={[styles.fill, { width: cell, height: rowH }]}>
             <Image source={{ uri: urls[0] }} style={StyleSheet.absoluteFillObject} contentFit="cover" cachePolicy="disk" />
           </Pressable>
           <View style={{ width: GAP }} />
-          <Pressable onPress={() => openGallery(1)} style={[styles.fill, { width: cell, height: rowH }]}>
+          <Pressable onPress={() => openImmersive(1)} style={[styles.fill, { width: cell, height: rowH }]}>
             <Image source={{ uri: urls[1] }} style={StyleSheet.absoluteFillObject} contentFit="cover" cachePolicy="disk" />
           </Pressable>
         </View>
         <View style={styles.row}>
-          <Pressable onPress={() => openGallery(2)} style={[styles.fill, { width: cell, height: rowH }]}>
+          <Pressable onPress={() => openImmersive(2)} style={[styles.fill, { width: cell, height: rowH }]}>
             <Image source={{ uri: urls[2] }} style={StyleSheet.absoluteFillObject} contentFit="cover" cachePolicy="disk" />
           </Pressable>
           <View style={{ width: GAP }} />
@@ -150,22 +143,7 @@ export default function PhotoMosaic({
     );
   }
 
-  return (
-    <>
-      {grid}
-      <PhotoGalleryModal
-        visible={galleryOpen}
-        urls={urls}
-        initialIndex={galleryIndex}
-        onClose={closeGallery}
-        favoritePhotoUrls={favoritePhotoUrls ?? []}
-        onToggleFavoritePhoto={
-          memoryId && onFavoritePhotoUrlsUpdated ? handleToggleFavoritePhoto : undefined
-        }
-        memoryForFavoriteVariants={memoryForFavoriteVariants ?? undefined}
-      />
-    </>
-  );
+  return grid;
 }
 
 const styles = StyleSheet.create({

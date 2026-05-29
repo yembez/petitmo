@@ -5,19 +5,19 @@ import { THEME } from '@/constants/theme';
 /**
  * Hauteur utile **icône + libellé** (zone onglets au-dessus du remplissage safe area).
  */
-export const TAB_BAR_CONTENT_HEIGHT = verticalScale(50);
+export const TAB_BAR_CONTENT_HEIGHT = verticalScale(44);
 
 /** Padding au-dessus des onglets (dans le bandeau). */
-export const TAB_BAR_PADDING_TOP = verticalScale(4);
+export const TAB_BAR_PADDING_TOP = verticalScale(2);
 
 /** Espace sous les libellés dans la zone onglets (au-dessus du bandeau safe). */
-export const TAB_BAR_PADDING_BOTTOM_GAP = verticalScale(6);
+export const TAB_BAR_PADDING_BOTTOM_GAP = verticalScale(4);
 
-/** Fond du bandeau tab bar (maquette : blanc pur, pas off-white). */
-export const TAB_BAR_BACKGROUND = THEME.bg;
+/** Fond tab bar — blanc cassé beige chaleureux (`THEME.tabBarBackground`). */
+export const TAB_BAR_BACKGROUND = THEME.tabBarBackground;
 
-/** Contour fin du bandeau blanc (container flottant). */
-export const TAB_BAR_CONTAINER_BORDER = 'rgba(0, 0, 0, 0.1)';
+/** Contour discret du bandeau flottant. */
+export const TAB_BAR_CONTAINER_BORDER = 'rgba(60, 49, 38, 0.08)';
 
 export const TAB_BAR_BORDER_WIDTH = StyleSheet.hairlineWidth;
 

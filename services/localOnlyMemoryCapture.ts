@@ -2,7 +2,11 @@ import * as FileSystem from 'expo-file-system';
 import { copyAsync, documentDirectory, makeDirectoryAsync } from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 import type { Memory } from '@/types/local';
-import { ensureLocalPhotoDerivatives, persistOriginalToSandbox } from '@/services/memoryLocalStore';
+import {
+  ensureLocalPhotoFeedThumbOnly,
+  persistOriginalToSandbox,
+  scheduleLocalPhotoHeavyDerivatives,
+} from '@/services/memoryLocalStore';
 import {
   persistFeedLocalThumbnail,
   persistFeedLocalVideo,
@@ -101,12 +105,13 @@ function emptyMemoryShell(params: {
   };
 }
 
-/** Souvenir texte 100 % local (SQLite), sans insert Supabase. */
+/** Souvenir texte en SQLite — `local` (gratuit) ou `pending` (Petitmo+, sync cloud en arrière-plan). */
 export function buildLocalTextMemory(params: {
   childId: string;
   userId: string;
   content: string;
   location: string | null;
+  syncStatus?: 'local' | 'pending';
 }): Memory {
   const id = newLocalMemoryId();
   const now = new Date().toISOString();
@@ -120,6 +125,7 @@ export function buildLocalTextMemory(params: {
     location: params.location,
   });
   mem.content = params.content.trim();
+  mem.sync_status = params.syncStatus ?? 'local';
   return mem;
 }
 
@@ -184,8 +190,9 @@ export async function captureMemoryLocalOnly(params: {
 
     const { localOriginalUri } = await persistOriginalToSandbox({ memoryId: id, type: 'photo', sourceUri: uri });
     const src = (localOriginalUri ?? uri).trim();
-    const d = await ensureLocalPhotoDerivatives({ memoryId: id, localOriginalUri: src });
+    const d = await ensureLocalPhotoFeedThumbOnly({ memoryId: id, localOriginalUri: src });
     await persistFeedLocalThumbnail(id, uri, 0);
+    scheduleLocalPhotoHeavyDerivatives(id, src);
     const size = await readBytesSize(src).catch(() => 0);
     const mem = emptyMemoryShell({
       id,
@@ -199,15 +206,15 @@ export async function captureMemoryLocalOnly(params: {
     mem.local_media_path = d.localThumbUri ?? src;
     mem.local_original_path = localOriginalUri;
     mem.local_thumb_path = d.localThumbUri;
-    mem.local_display_path = d.localDisplayUri;
-    mem.local_print_path = d.localPrintUri;
+    mem.local_display_path = null;
+    mem.local_print_path = null;
     mem.original_px_w = d.originalPx?.w ?? null;
     mem.original_px_h = d.originalPx?.h ?? null;
-    mem.print_px_w = d.printPx?.w ?? null;
-    mem.print_px_h = d.printPx?.h ?? null;
+    mem.print_px_w = null;
+    mem.print_px_h = null;
     mem.file_size = size;
     mem.thumb_url = mem.local_thumb_path ?? mem.local_media_path;
-    mem.display_url = mem.local_display_path ?? mem.thumb_url;
+    mem.display_url = mem.thumb_url;
     return stampLibraryAsset(mem);
   }
 
@@ -350,10 +357,13 @@ export async function capturePhotoAlbumLocalOnly(params: {
   capturedAtIso?: string;
   locationOverride?: string | null;
   importSourceFingerprint?: string | null;
+  /** `pending` = Petitmo+ (sync cloud en arrière-plan). */
+  syncStatus?: 'local' | 'pending';
+  memoryId?: string;
 }): Promise<Memory | null> {
   if (params.uris.length === 0) return null;
 
-  const { uris, childId, userId, capturedAtIso, locationOverride } = params;
+  const { uris, childId, userId, capturedAtIso, locationOverride, syncStatus } = params;
 
   const stampAlbumFp = (mem: Memory): Memory => {
     mem.import_source_fingerprint = params.importSourceFingerprint?.trim()
@@ -361,11 +371,18 @@ export async function capturePhotoAlbumLocalOnly(params: {
       : null;
     return mem;
   };
-  const id = newLocalMemoryId();
+  const id = params.memoryId ?? newLocalMemoryId();
   const now = new Date().toISOString();
   const createdAt = capturedAtIso?.trim() || now;
   const insertedAt = now;
   const locationLabel = locationOverride !== undefined ? locationOverride : null;
+  const applySyncStatus = (mem: Memory): Memory => {
+    mem.sync_status = syncStatus ?? 'local';
+    if (syncStatus === 'pending') {
+      mem.upload_status = 'pending';
+    }
+    return mem;
+  };
 
   const first = uris[0]?.trim();
   if (!first) return null;
@@ -394,13 +411,14 @@ export async function capturePhotoAlbumLocalOnly(params: {
     mem.display_url = first;
     mem.file_size = totalSize;
     setFeedBootstrapDisplayUrls(id, cleaned);
-    return stampAlbumFp(mem);
+    return applySyncStatus(stampAlbumFp(mem));
   }
 
   const { localOriginalUri } = await persistOriginalToSandbox({ memoryId: id, type: 'photo', sourceUri: first });
   const src = (localOriginalUri ?? first).trim();
-  const d = await ensureLocalPhotoDerivatives({ memoryId: id, localOriginalUri: src });
+  const d = await ensureLocalPhotoFeedThumbOnly({ memoryId: id, localOriginalUri: src });
   await persistFeedLocalThumbnail(id, first, 0);
+  scheduleLocalPhotoHeavyDerivatives(id, src);
 
   const extraUris: string[] = [];
   const extraThumb: string[] = [];
@@ -435,15 +453,15 @@ export async function capturePhotoAlbumLocalOnly(params: {
   mem.local_media_path = d.localThumbUri ?? src;
   mem.local_original_path = localOriginalUri;
   mem.local_thumb_path = d.localThumbUri;
-  mem.local_display_path = d.localDisplayUri;
-  mem.local_print_path = d.localPrintUri;
+  mem.local_display_path = null;
+  mem.local_print_path = null;
   mem.original_px_w = d.originalPx?.w ?? null;
   mem.original_px_h = d.originalPx?.h ?? null;
-  mem.print_px_w = d.printPx?.w ?? null;
-  mem.print_px_h = d.printPx?.h ?? null;
+  mem.print_px_w = null;
+  mem.print_px_h = null;
   mem.file_size = totalSize;
   mem.extra_photo_paths = extraUris;
   mem.thumb_url = mem.local_thumb_path ?? mem.local_media_path;
-  mem.display_url = mem.local_display_path ?? mem.thumb_url;
-  return stampAlbumFp(mem);
+  mem.display_url = mem.thumb_url;
+  return applySyncStatus(stampAlbumFp(mem));
 }

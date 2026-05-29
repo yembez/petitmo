@@ -565,9 +565,41 @@ const styles = StyleSheet.create({
     paddingVertical: verticalScale(12),
     flexDirection: 'row',
     alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: scale(8),
     backgroundColor: '#FFFFFF',
+  },
+  postActionsSpread: {
+    justifyContent: 'space-between',
+  },
+  postActionsLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: scale(8),
+    flexShrink: 1,
+  },
+  /** Disque crayon fil — parité CTA « Importer » (Capturer, `#FBD1C1`). */
+  feedPencilDiscCta: {
+    width: scale(40),
+    height: scale(40),
+    borderRadius: scale(20),
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: THEME.captureImportCtaBackground,
+    borderWidth: scale(1),
+    borderColor: 'rgba(0, 0, 0, 0.28)',
+  },
+  /** Disque favori aligné sur le crayon (sous le post). */
+  feedFavoriteDiscCta: {
+    width: scale(40),
+    height: scale(40),
+    borderRadius: scale(20),
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: scale(1),
+    borderColor: 'rgba(0, 0, 0, 0.28)',
+  },
+  feedFavoriteDiscCtaActive: {
+    backgroundColor: 'rgba(252, 87, 87, 0.1)',
   },
   actionButton: {
     flexDirection: 'row',
@@ -579,12 +611,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: FEED_BLACK_HAIRLINE,
     backgroundColor: 'rgba(255,255,255,0.5)',
-  },
-  /** CTA crayon fil — ardoise `#526779` (exception au rosé charte). */
-  actionButtonPencilAccent: {
-    backgroundColor: THEME.feedPencilCtaBackground,
-    borderWidth: PETITMO_CTA_BORDER_WIDTH,
-    borderColor: THEME.feedPencilCtaBorderColor,
   },
   swipeDeleteContainer: {
     justifyContent: 'center',

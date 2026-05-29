@@ -34,7 +34,7 @@ export function useFilFeedList(
   handlePickVoiceCover: (m: Memory) => void | Promise<void>,
   handleDeleteMemory: (m: Memory) => void,
   swipeRefs: MutableRefObject<Map<string, Swipeable | null>>,
-  immersiveLaunchRef: RefObject<(index: number) => void>,
+  immersiveLaunchRef: RefObject<(memoryId: string, albumPhotoIndex?: number) => void>,
   feedAutoplayMemoryId: string | null
 ): {
   feedData: FeedListItem[];

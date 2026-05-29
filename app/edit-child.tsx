@@ -3,7 +3,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Image,
   TextInput,
   ScrollView,
   Keyboard,
@@ -12,8 +11,9 @@ import {
   Platform,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { ArrowLeft, Camera, Menu } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -27,7 +27,9 @@ import {
   setSelectedChild,
   updateChild,
   uploadChildPhoto,
-  sanitizeChildLocalAvatarIfMissing,
+  ensureChildFaceBounds,
+  notifyChildProfileUpdated,
+  refreshChildProfileFromLocal,
   resolveChildAvatarCropSourceUri,
 } from '@/services/children';
 import { getCachedUserMode } from '@/lib/userMode';
@@ -40,6 +42,7 @@ import DatePicker from '@/components/DatePicker';
 import { CropModal } from '@/components/CropModal';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
 import { normalizeChildGivenName } from '@/utils/childDisplayName';
+import { ChildAvatar } from '@/components/ChildAvatar';
 
 export default function EditChildScreen() {
   const router = useRouter();
@@ -67,6 +70,16 @@ export default function EditChildScreen() {
     loadChild();
   }, []);
 
+  useFocusEffect(
+    useCallback(() => {
+      const id = (typeof params.childId === 'string' ? params.childId : child?.id)?.trim();
+      if (!id) return;
+      void refreshChildProfileFromLocal(id).then(row => {
+        if (row) setChild(row);
+      });
+    }, [params.childId, child?.id]),
+  );
+
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
@@ -90,7 +103,7 @@ export default function EditChildScreen() {
 
       if (currentChild) {
         await setSelectedChild(currentChild.id);
-        const cleaned = await sanitizeChildLocalAvatarIfMissing(currentChild);
+        const cleaned = await ensureChildFaceBounds(currentChild);
         setChild(cleaned);
         setName(cleaned.name);
         setBirthdate(cleaned.birthdate || '');
@@ -176,8 +189,9 @@ export default function EditChildScreen() {
         Alert.alert('Erreur', 'Profil introuvable');
         return;
       }
-      const cleaned = await sanitizeChildLocalAvatarIfMissing(cur);
+      const cleaned = await ensureChildFaceBounds(cur);
       setChild(cleaned);
+      notifyChildProfileUpdated(child.id, cleaned);
       const display =
         Platform.OS !== 'web'
           ? resolveChildProfileImageDisplayUri(
@@ -283,10 +297,11 @@ export default function EditChildScreen() {
             disabled={isUploadingPhoto || isPreparingCrop}
             style={styles.photoContainer}
           >
-            {photoUrl ? (
-              <Image
-                source={{ uri: photoUrl }}
-                style={styles.photo}
+            {child ? (
+              <ChildAvatar
+                key={`${child.id}-${child.updated_at ?? ''}-${child.local_photo_path ?? ''}`}
+                child={child}
+                size={PROFILE_SIZES.large}
               />
             ) : (
               <View style={[styles.photo, styles.photoPlaceholder]}>
@@ -421,6 +436,8 @@ const styles = StyleSheet.create({
   },
   photoContainer: {
     position: 'relative',
+    width: PROFILE_SIZES.large,
+    height: PROFILE_SIZES.large,
   },
   photo: {
     width: PROFILE_SIZES.large,

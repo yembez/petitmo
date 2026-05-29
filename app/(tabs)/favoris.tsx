@@ -894,6 +894,8 @@ export default function FavorisScreen() {
   /** Prérempli après `hydrateTabScreensFromLocal` : pas de roue si les données locales sont déjà connues. */
   const [loading, setLoading] = useState(() => feedChildHydrationSnapshot === null);
   const [memories, setMemories] = useState<Memory[]>(() => [...feedMemoriesHydrationSnapshot]);
+  const memoriesRef = useRef(memories);
+  memoriesRef.current = memories;
   const [hasChild, setHasChild] = useState(() => feedChildHydrationSnapshot !== null);
   /** Pixels d’overscroll en haut (y négatif → valeur positive), suit le doigt */
   const [pullOverscrollPx, setPullOverscrollPx] = useState(0);
@@ -905,7 +907,7 @@ export default function FavorisScreen() {
   const [bookModalVisible, setBookModalVisible] = useState(false);
   const [createBookFlowTitle, setCreateBookFlowTitle] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { background?: boolean }) => {
     const childId = await getOrSelectFirstChild();
     if (!childId) {
       setMemories([]);
@@ -916,7 +918,15 @@ export default function FavorisScreen() {
     setHasChild(true);
 
     const list = await getMemories(childId);
-    setMemories(list);
+    setMemories(prev => {
+      if (
+        prev.length === list.length &&
+        prev.every((m, i) => m.id === list[i]?.id && m.updated_at === list[i]?.updated_at)
+      ) {
+        return prev;
+      }
+      return list;
+    });
     void requestMissingMediaDerivatives(list);
     setLoading(false);
   }, []);
@@ -949,7 +959,24 @@ export default function FavorisScreen() {
   useFocusEffect(
     useCallback(() => {
       setStatusBarStyle('light');
-      load();
+      /** Déjà hydraté (onglet resté monté) → pas de resync au focus. */
+      if (memoriesRef.current.length > 0) {
+        setLoading(false);
+        return;
+      }
+
+      const hasCached =
+        feedMemoriesHydrationSnapshot.length > 0 || feedChildHydrationSnapshot !== null;
+      if (hasCached) {
+        if (feedMemoriesHydrationSnapshot.length > 0) {
+          setMemories([...feedMemoriesHydrationSnapshot]);
+        }
+        setHasChild(feedChildHydrationSnapshot !== null);
+        setLoading(false);
+        void load({ background: true });
+      } else {
+        void load();
+      }
       return () => {
         setPullOverscrollPx(0);
         galleryScrollY.value = 0;

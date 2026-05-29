@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import type { MemoryRow } from '@/services/media';
 import { setFeedBootstrapDisplayUrls, setFeedBootstrapVideoUri } from '@/services/feedLocalPhotoCache';
 import { armSilentInitialFilLoadAfterMediaImport } from '@/services/feedAfterImportFlags';
+import { armFeedSnapToLatestOnFocus } from '@/services/feedScrollRestore';
 import { IMPORT_DUPLICATE_ASSET } from '@/lib/importDuplicate';
 
 export type PendingMediaKind = 'photo' | 'video';
@@ -61,6 +62,7 @@ export function PendingMediaUploadsProvider({ children }: { children: React.Reac
       upload: () => Promise<MemoryRow[] | null>;
     }) => {
       armSilentInitialFilLoadAfterMediaImport();
+      armFeedSnapToLatestOnFocus();
       const tempId = `pending_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
       /** Dès la carte « envoi » : mêmes URI que `FilMemoryRow` optimiste → pas d’attente du serveur pour le 1er pixel. */
       if (kind === 'video' && previewUris[0]?.trim()) {

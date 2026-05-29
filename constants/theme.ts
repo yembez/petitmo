@@ -1,6 +1,10 @@
 /** Rosé charte — couleur d’accent / CTA / marque (remplace ardoise + terracotta). */
 const BRAND_PRIMARY = '#FC5757';
 const BRAND_PRIMARY_RGB = '252, 87, 87';
+/** Corail brique — fond splash natif (`app.json` `splash.backgroundColor`), adaptive icon. */
+const BRAND_SPLASH_BRICK = '#D9683A';
+/** Disques CTA écran Capturer. */
+const CAPTURE_DISC_CTA = '#FF7F4F';
 /** Gris — CTA secondaires (paywall, livres, modales, favoris, memory-view…). */
 const BRAND_CTA_GRAY = '#51545E';
 const BRAND_CTA_GRAY_RGB = '81, 84, 94';
@@ -21,6 +25,10 @@ export const THEME = {
 
   /** Couleur de marque — CTA, cœurs favoris, paywall, spinners d’accent… */
   brandPrimary: BRAND_PRIMARY,
+  /** Fond splash (Expo / Android / iOS) — corail brique, distinct du rosé `brandPrimary`. */
+  splashScreenBackground: BRAND_SPLASH_BRICK,
+  /** Disques CTA écran Capturer. */
+  captureDiscCtaBackground: CAPTURE_DISC_CTA,
   /** @deprecated — `brandPrimary` */
   brandTerracotta: BRAND_PRIMARY,
   /** Vignette onboarding / hero photo (dérivé du rosé). */
@@ -34,10 +42,18 @@ export const THEME = {
   /** @deprecated — `brandPrimarySoft` */
   captureCtaSoftTerracotta: '#F4A0A0',
 
-  /** Fond CTA rond « Importer » — écran Capturer uniquement. */
-  captureImportCtaBackground: '#ffd9cd',
-  /** Fond CTA rond « Enregistrer » — écran Capturer uniquement. */
-  captureRecordCtaBackground: '#f2f2f2',
+  /** Fond CTA rond « Importer » — écran Capturer (maquette V3). */
+  captureImportCtaBackground: '#FBD1C1',
+  /** Fond CTA rond « Enregistrer » — écran Capturer (maquette V3). */
+  captureRecordCtaBackground: '#FFFFFF',
+  /** Fond CTA rond « Écrire » — écran Capturer (maquette V3). */
+  captureWriteCtaBackground: '#F88E73',
+  /** Icônes dans les disques CTA Capturer — marron fondu bas hero. */
+  captureCtaIconColor: '#3C3126',
+  /** Fond bas Capturer — dégradé photo, bandeau CTA (blanc cassé beige). */
+  captureScreenBg: '#FAFAF7',
+  /** Libellés sous les disques CTA Capturer. */
+  captureCtaLabelColor: '#3C3126',
   /** CTA primaires, liens, spinners (hors cœur du fil) — noir. */
   accent: '#1C1C1E',
   /** Fond type paywall — espace parent, création / édition profil enfant */
@@ -80,8 +96,10 @@ export const THEME = {
   tabBarActiveTint: BRAND_PRIMARY,
   /** Icône + libellé onglets inactifs. */
   tabBarInactiveTint: '#8E8E93',
-  /** Fond de la tab bar flottante (off-white). */
-  tabBarSurface: '#F2F0F6',
+  /** Fond tab bar — blanc cassé beige chaleureux. */
+  tabBarBackground: '#F6F4F1',
+  /** @deprecated — `tabBarBackground` */
+  tabBarSurface: '#F6F4F1',
   /** @deprecated pastille onglet actif supprimée — teinte via `tabBarActiveTint` uniquement. */
   tabBarActivePill: `rgba(${BRAND_PRIMARY_RGB}, 0.14)`,
   /** @deprecated anneau lavande (tab bar violette) — non utilisé sur le bandeau blanc actuel. */

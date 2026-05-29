@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, memo } from 'react';
 import {
   View,
   Text,
@@ -18,15 +18,95 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { BookOpen, Plus } from 'lucide-react-native';
-import { Image } from 'expo-image';
 import { Swipeable } from 'react-native-gesture-handler';
+import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { scale, verticalScale } from '@/utils/responsive';
 import { THEME } from '@/constants/theme';
+import BookCoverThumbnail from '@/components/BookCoverThumbnail';
+import { bookCoverPeriodLabelForBook } from '@/utils/bookCoverPeriodLabel';
 import type { Book } from '@/services/books';
 import { deleteBook, listBooks } from '@/services/books';
 import { feedBooksHydrationSnapshot } from '@/services/tabScreensCache';
 import { supabase } from '@/lib/supabase';
 import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+const BOOK_ROW_PRESS_SPRING = { damping: 18, stiffness: 320 };
+
+type BookListRowProps = {
+  book: Book;
+  authToken: string | null;
+  onOpen: (bookId: string) => void;
+  onDelete: (book: Book) => void;
+};
+
+const BookListRow = memo(function BookListRow({ book, authToken, onOpen, onDelete }: BookListRowProps) {
+  const pressScale = useSharedValue(1);
+  const rowAnimStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: pressScale.value }],
+  }));
+
+  const uri = (book.coverPhotoUrl ?? '').trim() || null;
+  const count = book.memoryIds.length;
+  const needsAuthHeader = !!uri && /^https?:\/\//i.test(uri) && uri.includes('supabase');
+  const imageHeaders =
+    needsAuthHeader && authToken ? { Authorization: `Bearer ${authToken}` } : undefined;
+  const dateLabel = bookCoverPeriodLabelForBook(book);
+
+  return (
+    <Swipeable
+      renderRightActions={() => (
+        <View style={styles.swipeActions}>
+          <TouchableOpacity
+            style={styles.swipeDeleteBtn}
+            onPress={() => onDelete(book)}
+            activeOpacity={0.9}
+            accessibilityRole="button"
+            accessibilityLabel={`Supprimer le livre ${book.title}`}
+          >
+            <Text style={styles.swipeDeleteText}>Supprimer</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+      rightThreshold={scale(42)}
+      overshootRight={false}
+    >
+      <AnimatedPressable
+        style={[styles.row, rowAnimStyle]}
+        onPress={() => onOpen(book.id)}
+        onPressIn={() => {
+          pressScale.value = withSpring(0.98, BOOK_ROW_PRESS_SPRING);
+        }}
+        onPressOut={() => {
+          pressScale.value = withSpring(1, BOOK_ROW_PRESS_SPRING);
+        }}
+        accessibilityRole="button"
+        accessibilityLabel={`Livre ${book.title}`}
+      >
+        <BookCoverThumbnail
+          title={book.title}
+          coverImageUri={uri}
+          dateLabel={dateLabel}
+          imageHeaders={imageHeaders}
+        />
+        <View style={styles.rowText}>
+          <Text style={styles.rowTitle} numberOfLines={2}>
+            {book.title}
+          </Text>
+          <Text style={styles.rowMeta}>
+            {count === 0
+              ? 'Aucun souvenir'
+              : count === 1
+                ? '1 souvenir'
+                : `${count} souvenirs`}
+          </Text>
+        </View>
+        <Text style={styles.chevron}>→</Text>
+      </AnimatedPressable>
+    </Swipeable>
+  );
+});
 
 export default function LivresScreen() {
   const router = useRouter();
@@ -119,11 +199,6 @@ export default function LivresScreen() {
     });
   }, [draftTitle, router]);
 
-  const coverUri = (b: Book): string | null => {
-    const direct = (b.coverPhotoUrl ?? '').trim();
-    return direct || null;
-  };
-
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + verticalScale(12) }]}>
@@ -170,72 +245,14 @@ export default function LivresScreen() {
             </TouchableOpacity>
           </View>
         }
-        renderItem={({ item }) => {
-          const uri = coverUri(item);
-          const count = item.memoryIds.length;
-          const needsAuthHeader = !!uri && /^https?:\/\//i.test(uri) && uri.includes('supabase');
-          const imageSource =
-            uri && needsAuthHeader && authToken
-              ? ({ uri, headers: { Authorization: `Bearer ${authToken}` } } as const)
-              : uri
-                ? ({ uri } as const)
-                : null;
-          return (
-            <Swipeable
-              renderRightActions={() => (
-                <View style={styles.swipeActions}>
-                  <TouchableOpacity
-                    style={styles.swipeDeleteBtn}
-                    onPress={() => confirmDelete(item)}
-                    activeOpacity={0.9}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Supprimer le livre ${item.title}`}
-                  >
-                    <Text style={styles.swipeDeleteText}>Supprimer</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-              rightThreshold={scale(42)}
-              overshootRight={false}
-            >
-              <TouchableOpacity
-                style={styles.row}
-                onPress={() => openBook(item.id)}
-                activeOpacity={0.88}
-                accessibilityRole="button"
-                accessibilityLabel={`Livre ${item.title}`}
-              >
-                <View style={styles.thumb}>
-                  {imageSource ? (
-                    <Image
-                      source={imageSource}
-                      style={StyleSheet.absoluteFillObject}
-                      contentFit="cover"
-                      cachePolicy="disk"
-                    />
-                  ) : (
-                    <View style={styles.thumbPh}>
-                      <BookOpen size={scale(22)} color="#FFFFFF" strokeWidth={2.2} />
-                    </View>
-                  )}
-                </View>
-                <View style={styles.rowText}>
-                  <Text style={styles.rowTitle} numberOfLines={2}>
-                    {item.title}
-                  </Text>
-                  <Text style={styles.rowMeta}>
-                    {count === 0
-                      ? 'Aucun souvenir'
-                      : count === 1
-                        ? '1 souvenir'
-                        : `${count} souvenirs`}
-                  </Text>
-                </View>
-                <Text style={styles.chevron}>→</Text>
-              </TouchableOpacity>
-            </Swipeable>
-          );
-        }}
+        renderItem={({ item }) => (
+          <BookListRow
+            book={item}
+            authToken={authToken}
+            onOpen={openBook}
+            onDelete={confirmDelete}
+          />
+        )}
       />
 
       <Modal visible={createModalOpen} transparent animationType="fade" onRequestClose={() => setCreateModalOpen(false)}>
@@ -406,8 +423,10 @@ const styles = StyleSheet.create({
     backgroundColor: THEME.bg,
     borderRadius: scale(14),
     padding: scale(14),
+    paddingLeft: scale(12),
     borderWidth: 1,
     borderColor: 'rgba(0,0,0,0.08)',
+    gap: scale(14),
   },
   swipeActions: {
     justifyContent: 'center',
@@ -425,22 +444,10 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     fontSize: scale(14),
   },
-  thumb: {
-    width: scale(64),
-    height: scale(64),
-    borderRadius: scale(12),
-    overflow: 'hidden',
-    backgroundColor: '#111827',
-  },
-  thumbPh: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   rowText: {
     flex: 1,
-    marginLeft: scale(14),
     minWidth: 0,
+    justifyContent: 'center',
   },
   rowTitle: {
     fontSize: scale(16),

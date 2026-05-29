@@ -13,7 +13,12 @@ import * as VideoThumbnails from 'expo-video-thumbnails';
 import type { Database } from '@/types/database';
 import type { Memory } from '@/types/local';
 import type { UploadStatus } from '@/types/local';
-import { ensureLocalPhotoDerivatives, persistOriginalToSandbox } from '@/services/memoryLocalStore';
+import {
+  ensureLocalPhotoDerivatives,
+  ensureLocalPhotoFeedThumbOnly,
+  persistOriginalToSandbox,
+  scheduleLocalPhotoHeavyDerivatives,
+} from '@/services/memoryLocalStore';
 import {
   mergeServerMemoryRowWithExistingLocal,
   withLocalFields,
@@ -53,6 +58,10 @@ import {
 } from '@/lib/localDb';
 import { captureMemoryLocalOnly, capturePhotoAlbumLocalOnly } from '@/services/localOnlyMemoryCapture';
 import { getSignedUrlAfterMediaUpload } from '@/lib/mediaSignedUrl';
+import {
+  getAlbumCanonicalFavoriteUrls,
+  isFeedMultiPhotoAlbum,
+} from '@/utils/memoryPhotos';
 import { isLocalMediaUriReadable } from '@/utils/localMediaReadable';
 
 export type MemoryRow = Memory;
@@ -685,6 +694,179 @@ function newCloudSyncMemoryId(): string {
   return randomUUIDv4Fallback();
 }
 
+/** URIs sandbox / picker pour un album (photo principale + extras locaux). */
+function albumLocalPhotoUris(memory: Memory): string[] {
+  const primary = (memory.local_original_path ?? memory.local_media_path ?? '').trim();
+  const extraRaw = [...(memory.extra_photo_paths ?? []), ...(memory.extra_photo_urls ?? [])];
+  const extras = extraRaw
+    .map(u => (typeof u === 'string' ? u : '').trim())
+    .filter(u => u.length > 0 && !/^https?:\/\//i.test(u));
+  const out: string[] = [];
+  if (primary) out.push(primary);
+  for (const e of extras) {
+    if (!out.includes(e)) out.push(e);
+  }
+  return out;
+}
+
+function memoryIsPhotoAlbum(memory: Memory): boolean {
+  if (memory.type !== 'photo') return false;
+  if ((memory.extra_photo_paths?.length ?? 0) > 0) return true;
+  return (memory.extra_photo_urls ?? []).some(u => {
+    const t = (u ?? '').trim();
+    return t.length > 0 && !/^https?:\/\//i.test(t);
+  });
+}
+
+/**
+ * Petitmo+ album : upload de toutes les photos + insert Supabase en arrière-plan.
+ */
+async function syncCloudPhotoAlbumInBackground(params: {
+  memoryId: string;
+  childId: string;
+  userId: string;
+  isPaid: boolean;
+  capturedAtIso?: string;
+  locationLabel: string | null;
+}): Promise<void> {
+  const { memoryId, childId, userId, capturedAtIso, locationLabel } = params;
+  try {
+    const memory = getLocalMemoryById(memoryId);
+    if (!memory || memory.type !== 'photo') return;
+
+    const uris = albumLocalPhotoUris(memory);
+    if (uris.length === 0) return;
+
+    const results = await Promise.all(
+      uris.map(uri => readAndUploadPhotoFile(uri, userId, childId)),
+    );
+    const publicUrls = results.map(r => r.publicUrl);
+    const paths = results.map(r => r.path);
+    const totalSize = results.reduce((s, r) => s + r.size, 0);
+    const extras = publicUrls.slice(1);
+    const insertedAtIso = memory.inserted_at ?? new Date().toISOString();
+
+    const insertPayload: Database['public']['Tables']['memories']['Insert'] = {
+      id: memoryId,
+      child_id: childId,
+      user_id: userId,
+      type: 'photo',
+      media_url: publicUrls[0],
+      media_path: paths[0] ?? null,
+      extra_photo_urls: extras,
+      extra_photo_paths: paths.slice(1),
+      thumb_url: publicUrls[0],
+      display_url: publicUrls[0],
+      extra_thumb_urls: extras,
+      extra_display_urls: extras,
+      duration: null,
+      file_size: totalSize,
+      location: locationLabel,
+      voice_cover_url: null,
+      voice_cover_path: null,
+      inserted_at: insertedAtIso,
+    };
+
+    if (capturedAtIso) {
+      insertPayload.created_at = capturedAtIso;
+    } else if (memory.created_at) {
+      insertPayload.created_at = memory.created_at;
+    }
+
+    const { data: insertedRows, error: insertError } = await supabase
+      .from('memories')
+      .insert(insertPayload)
+      .select('*');
+
+    if (insertError) throw insertError;
+
+    const nowIso = new Date().toISOString();
+    let insertedRow = insertedRows?.[0] as MemoryRowDb | undefined;
+    if (!insertedRow) {
+      insertedRow = {
+        id: memoryId,
+        child_id: childId,
+        user_id: userId,
+        type: 'photo',
+        content: null,
+        media_url: publicUrls[0] ?? null,
+        media_path: paths[0] ?? null,
+        extra_photo_urls: extras as MemoryRowDb['extra_photo_urls'],
+        extra_photo_paths: paths.slice(1) as MemoryRowDb['extra_photo_paths'],
+        extra_thumb_urls: extras as MemoryRowDb['extra_thumb_urls'],
+        extra_display_urls: extras as MemoryRowDb['extra_display_urls'],
+        favorite_photo_urls: [] as MemoryRowDb['favorite_photo_urls'],
+        voice_cover_url: null,
+        voice_cover_path: null,
+        voice_playback_start_sec: null,
+        edited_media_url: null,
+        is_favorite: memory.is_favorite,
+        duration: null,
+        thumbnail_url: null,
+        thumbnail_path: null,
+        file_size: totalSize,
+        location: locationLabel,
+        inserted_at: insertedAtIso,
+        captured_overlay_ink: null,
+        thumb_url: publicUrls[0] ?? null,
+        display_url: publicUrls[0] ?? null,
+        print_url: null,
+        poster_url: null,
+        poster_print_url: null,
+        upload_status: 'full',
+        created_at: insertPayload.created_at ?? nowIso,
+        updated_at: nowIso,
+      };
+    }
+
+    if (!insertedRow?.id) return;
+
+    for (let i = 0; i < results.length; i++) {
+      const loc = results[i].compressedLocalUri;
+      if (loc) await persistFeedLocalThumbnail(insertedRow.id, loc, i);
+    }
+    void triggerProcessMemory(insertedRow.id);
+
+    const prev = getLocalMemoryById(insertedRow.id);
+    const out: Memory = {
+      ...withLocalFields(insertedRow, { clientUploadStatus: 'full' }),
+      local_media_path: prev?.local_media_path ?? prev?.local_thumb_path ?? null,
+      local_original_path: prev?.local_original_path ?? null,
+      local_thumb_path: prev?.local_thumb_path ?? null,
+      local_display_path: prev?.local_display_path ?? null,
+      local_print_path: prev?.local_print_path ?? null,
+      original_px_w: prev?.original_px_w ?? null,
+      original_px_h: prev?.original_px_h ?? null,
+      print_px_w: prev?.print_px_w ?? null,
+      print_px_h: prev?.print_px_h ?? null,
+      sync_status: 'synced',
+      import_asset_id: prev?.import_asset_id ?? null,
+      import_source_fingerprint: prev?.import_source_fingerprint ?? null,
+    };
+    upsertLocalMemory(out);
+    DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId: insertedRow.id });
+  } catch (e) {
+    console.warn('[media] syncCloudPhotoAlbumInBackground', params.memoryId, e);
+  }
+}
+
+/** Reprise / migration d’un album photo local ou pending vers Supabase. */
+export async function pushPhotoAlbumMemoryToCloud(
+  memory: Memory,
+  userId: string,
+  isPaid: boolean,
+): Promise<void> {
+  if (memory.type !== 'photo' || !memoryIsPhotoAlbum(memory)) return;
+  await syncCloudPhotoAlbumInBackground({
+    memoryId: memory.id,
+    childId: memory.child_id,
+    userId,
+    isPaid,
+    capturedAtIso: memory.created_at,
+    locationLabel: memory.location ?? null,
+  });
+}
+
 /**
  * Petitmo+ photo native : upload Storage + insert Supabase en arrière-plan après affichage local.
  */
@@ -1030,14 +1212,29 @@ export async function resumePetitmoPlusCloudCaptureOrMerge(
   }
 
   if (memory.type === 'photo') {
-    const src = (memory.local_original_path ?? memory.local_media_path ?? '').trim();
-    if (!src) return false;
-    if (Platform.OS !== 'web' && !(await isLocalMediaUriReadable(src))) return false;
+    const uris = albumLocalPhotoUris(memory);
+    if (uris.length === 0) return false;
+    if (Platform.OS !== 'web') {
+      for (const uri of uris) {
+        if (!(await isLocalMediaUriReadable(uri))) return false;
+      }
+    }
+    if (memoryIsPhotoAlbum(memory) || uris.length > 1) {
+      await syncCloudPhotoAlbumInBackground({
+        memoryId: memory.id,
+        childId: memory.child_id,
+        userId,
+        isPaid,
+        capturedAtIso: memory.created_at,
+        locationLabel: memory.location ?? null,
+      });
+      return true;
+    }
     await syncCloudPhotoMemoryInBackground({
       memoryId: memory.id,
       childId: memory.child_id,
       userId,
-      localOriginalUri: src,
+      localOriginalUri: uris[0],
       isPaid,
       capturedAtIso: memory.created_at,
       locationLabel: memory.location ?? null,
@@ -1083,6 +1280,12 @@ export async function resumePetitmoPlusCloudCaptureOrMerge(
       capturedAtIso: memory.created_at,
       locationLabel: memory.location ?? null,
     });
+    return true;
+  }
+
+  if (memory.type === 'text' && (memory.content ?? '').trim()) {
+    const { ensureMemoryUploadedForCloud } = await import('@/services/migration');
+    await ensureMemoryUploadedForCloud(memory);
     return true;
   }
 
@@ -1175,8 +1378,9 @@ export async function uploadMedia({
         sourceUri: uri,
       });
       const src = (localOriginalUri ?? uri).trim();
-      const d = await ensureLocalPhotoDerivatives({ memoryId, localOriginalUri: src });
+      const d = await ensureLocalPhotoFeedThumbOnly({ memoryId, localOriginalUri: src });
       await persistFeedLocalThumbnail(memoryId, uri, 0);
+      scheduleLocalPhotoHeavyDerivatives(memoryId, src);
 
       let fileSize = 0;
       try {
@@ -1212,7 +1416,7 @@ export async function uploadMedia({
         inserted_at: insertedAt,
         captured_overlay_ink: null,
         thumb_url: localThumb,
-        display_url: d.localDisplayUri ?? localThumb,
+        display_url: localThumb,
         print_url: null,
         poster_url: null,
         poster_print_url: null,
@@ -1222,12 +1426,12 @@ export async function uploadMedia({
         local_media_path: localThumb,
         local_original_path: localOriginalUri,
         local_thumb_path: d.localThumbUri,
-        local_display_path: d.localDisplayUri,
-        local_print_path: d.localPrintUri,
+        local_display_path: null,
+        local_print_path: null,
         original_px_w: d.originalPx?.w ?? null,
         original_px_h: d.originalPx?.h ?? null,
-        print_px_w: d.printPx?.w ?? null,
-        print_px_h: d.printPx?.h ?? null,
+        print_px_w: null,
+        print_px_h: null,
         synced_at: null,
         sync_status: 'pending',
         import_asset_id: importAssetId?.trim() ? importAssetId.trim() : null,
@@ -1697,107 +1901,35 @@ export async function uploadPhotoAlbum({
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('User not authenticated');
 
-    const results = await Promise.all(
-      uris.map(uri => readAndUploadPhotoFile(uri, user.id, childId))
-    );
-    const publicUrls = results.map(r => r.publicUrl);
-    const paths = results.map(r => r.path);
-    const totalSize = results.reduce((s, r) => s + r.size, 0);
+    const paid = (await getUserTier()) === 'paid';
+    const memoryId = newCloudSyncMemoryId();
+    const localMem = await capturePhotoAlbumLocalOnly({
+      uris,
+      childId,
+      userId: user.id,
+      capturedAtIso,
+      locationOverride,
+      importSourceFingerprint,
+      syncStatus: 'pending',
+      memoryId,
+    });
+    if (!localMem) return null;
+
+    upsertLocalMemory(localMem);
+    invalidateMemoryLimitCache(childId);
+    DeviceEventEmitter.emit('petitmo:memories-inserted', { memories: [localMem] });
 
     const locationLabel =
       locationOverride !== undefined ? locationOverride : null;
-
-    const extras = publicUrls.slice(1);
-    const memoryId = newCloudSyncMemoryId();
-    const insertedAtIso = new Date().toISOString();
-    const insertPayload: Database['public']['Tables']['memories']['Insert'] = {
-      id: memoryId,
-      child_id: childId,
-      user_id: user.id,
-      type: 'photo',
-      media_url: publicUrls[0],
-      media_path: paths[0] ?? null,
-      extra_photo_urls: extras,
-      extra_photo_paths: paths.slice(1),
-      // Même principe que l’upload simple : vignettes = URLs uploadées jusqu’au passage du worker.
-      thumb_url: publicUrls[0],
-      display_url: publicUrls[0],
-      extra_thumb_urls: extras,
-      extra_display_urls: extras,
-      duration: null,
-      file_size: totalSize,
-      location: locationLabel,
-      voice_cover_url: null,
-      voice_cover_path: null,
-      inserted_at: insertedAtIso,
-    };
-
-    if (capturedAtIso) {
-      insertPayload.created_at = capturedAtIso;
-    }
-
-    const { data: insertedRows, error: insertError } = await supabase
-      .from('memories')
-      .insert(insertPayload)
-      .select('*');
-
-    if (insertError) throw insertError;
-
-    const nowIso = new Date().toISOString();
-    let insertedRow = insertedRows?.[0] as MemoryRowDb | undefined;
-    if (!insertedRow) {
-      // RLS / returning vide : l’insert peut réussir sans ligne renvoyée — on reconstruit la ligne (id connu).
-      insertedRow = {
-        id: memoryId,
-        child_id: childId,
-        user_id: user.id,
-        type: 'photo',
-        content: null,
-        media_url: publicUrls[0] ?? null,
-        media_path: paths[0] ?? null,
-        extra_photo_urls: extras as MemoryRowDb['extra_photo_urls'],
-        extra_photo_paths: paths.slice(1) as MemoryRowDb['extra_photo_paths'],
-        extra_thumb_urls: extras as MemoryRowDb['extra_thumb_urls'],
-        extra_display_urls: extras as MemoryRowDb['extra_display_urls'],
-        favorite_photo_urls: [] as MemoryRowDb['favorite_photo_urls'],
-        voice_cover_url: null,
-        voice_cover_path: null,
-        voice_playback_start_sec: null,
-        edited_media_url: null,
-        is_favorite: false,
-        duration: null,
-        thumbnail_url: null,
-        thumbnail_path: null,
-        file_size: totalSize,
-        location: locationLabel,
-        inserted_at: insertedAtIso,
-        captured_overlay_ink: null,
-        thumb_url: publicUrls[0] ?? null,
-        display_url: publicUrls[0] ?? null,
-        print_url: null,
-        poster_url: null,
-        poster_print_url: null,
-        upload_status: 'full',
-        created_at: insertPayload.created_at ?? nowIso,
-        updated_at: nowIso,
-      };
-    }
-
-    if (!insertedRow?.id) return null;
-
-    for (let i = 0; i < results.length; i++) {
-      const loc = results[i].compressedLocalUri;
-      if (loc) await persistFeedLocalThumbnail(insertedRow.id, loc, i);
-    }
-    void triggerProcessMemory(insertedRow.id);
-
-    const out: Memory = {
-      ...withLocalFields(insertedRow, { clientUploadStatus: 'full' }),
-      sync_status: 'synced',
-      import_source_fingerprint: importSourceFingerprint?.trim() ? importSourceFingerprint.trim() : null,
-    };
-    upsertLocalMemory(out);
-    return out;
+    void syncCloudPhotoAlbumInBackground({
+      memoryId,
+      childId,
+      userId: user.id,
+      isPaid: paid,
+      capturedAtIso,
+      locationLabel,
+    });
+    return localMem;
   } catch (error) {
     if (error instanceof Error) {
       if (
@@ -1919,16 +2051,33 @@ export async function fetchMemoriesByIds(ids: string[]): Promise<MemoryRow[]> {
 
 export async function toggleFavorite(memoryId: string, isFavorite: boolean) {
   try {
+    const row = getLocalMemoryById(memoryId);
+    const albumAllUrls =
+      row && row.type === 'photo' && isFeedMultiPhotoAlbum(row)
+        ? getAlbumCanonicalFavoriteUrls(row)
+        : null;
+
     if ((await getCachedUserMode()) === 'local') {
       updateLocalMemoryFavorite(memoryId, isFavorite);
+      if (albumAllUrls) {
+        updateLocalMemoryFavoritePhotoUrls(memoryId, isFavorite ? albumAllUrls : []);
+      }
       DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId });
       return true;
     }
 
     // Mise à jour optimiste locale AVANT Supabase
     updateLocalMemoryFavorite(memoryId, isFavorite);
+    if (albumAllUrls) {
+      updateLocalMemoryFavoritePhotoUrls(memoryId, isFavorite ? albumAllUrls : []);
+    }
 
-    const updateData: { is_favorite: boolean } = { is_favorite: isFavorite };
+    const updateData: { is_favorite: boolean; favorite_photo_urls?: string[] } = {
+      is_favorite: isFavorite,
+    };
+    if (albumAllUrls) {
+      updateData.favorite_photo_urls = isFavorite ? albumAllUrls : [];
+    }
     const { error } = await supabase
       .from('memories')
       .update(updateData)

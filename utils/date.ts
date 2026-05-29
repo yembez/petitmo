@@ -3,6 +3,16 @@ const MONTH_NAMES_FR = [
   'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre',
 ] as const;
 
+const MONTH_ABBR_FR = [
+  'janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin',
+  'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.',
+] as const;
+
+/** En-tête Capturer — ex. « 29 mai » (jour + mois abrégé). */
+export function formatCaptureHeaderDate(date: Date = new Date()): string {
+  return `${date.getDate()} ${MONTH_ABBR_FR[date.getMonth()]}`;
+}
+
 export function formatDate(dateString: string): string {
   const date = new Date(dateString);
   const day = date.getDate();
@@ -157,6 +167,15 @@ export function calculateAge(birthdate: string): string {
   if (months > 0) parts.push(`${months} mois`);
 
   return parts.join(' ') || 'nouveau-né';
+}
+
+/** Pilule âge Capturer — « mois » → « m », « semaine(s) » → « s » (ex. « 3 m et 2 s »). */
+export function formatCaptureChildAge(birthdate: string | null | undefined): string {
+  if (!birthdate?.trim()) return '';
+  return calculateAge(birthdate)
+    .replace(/\bmois\b/g, 'm')
+    .replace(/\bsemaines\b/g, 's')
+    .replace(/\bsemaine\b/g, 's');
 }
 
 export function formatDuration(seconds: number): string {

@@ -10,9 +10,23 @@ import { getLocalChild, listLocalChildren, upsertLocalChild } from '@/lib/localD
 import { getSignedMediaDisplayUrl } from '@/lib/mediaSignedUrl';
 import { resolveChildProfileImageUri } from '@/utils/childPhotoUri';
 import { ensureLocalImageForPalette } from '@/hooks/ensureLocalImageForPalette';
-import { normalizeChildGivenName } from '@/utils/childDisplayName';
+import { normalizeChildGivenName } from '@/utils/childDisplayName'
+import { isLegacyHeroHeuristicOnProfileCrop, isValidFaceBounds } from '@/utils/avatarFaceBounds';
+import { detectFaceBounds, estimatePortraitFaceBounds } from '@/utils/detectFace';
 
 type ChildRow = Database['public']['Tables']['children']['Row'];
+
+/**
+ * ChildRow étendu avec les colonnes face bounds — présentes en BDD après la migration
+ * 20260527000000_add_face_bounds_to_children.sql mais pas encore dans les types générés.
+ * À supprimer une fois `supabase gen types` relancé.
+ */
+type ChildRowWithFace = ChildRow & {
+  face_cx?: number | null
+  face_cy?: number | null
+  face_h?: number | null
+  face_img_aspect?: number | null
+}
 
 /** Émis après mise à jour profil enfant (photo, nom…) — ex. rafraîchir l’onglet Capturer. */
 export const PETITMO_CHILD_PROFILE_UPDATED_EVENT = 'petitmo:child-profile-updated' as const;
@@ -23,7 +37,7 @@ export type ChildProfileUpdatedPayload = {
   child?: LocalChild;
 };
 
-function notifyChildProfileUpdated(childId: string, child?: LocalChild): void {
+export function notifyChildProfileUpdated(childId: string, child?: LocalChild): void {
   const id = childId.trim();
   if (!id) return;
   const payload: ChildProfileUpdatedPayload = { childId: id };
@@ -42,7 +56,108 @@ function isChildDuplicateKeyError(error: unknown): boolean {
 }
 
 function withLocalChildFields(row: ChildRow): LocalChild {
-  return { ...row, local_photo_path: null };
+  const r = row as ChildRowWithFace
+  return {
+    ...row,
+    local_photo_path: null,
+    face_cx: typeof r.face_cx === 'number' && Number.isFinite(r.face_cx) ? r.face_cx : null,
+    face_cy: typeof r.face_cy === 'number' && Number.isFinite(r.face_cy) ? r.face_cy : null,
+    face_h: typeof r.face_h === 'number' && Number.isFinite(r.face_h) ? r.face_h : null,
+    face_img_aspect:
+      typeof r.face_img_aspect === 'number' && Number.isFinite(r.face_img_aspect)
+        ? r.face_img_aspect
+        : null,
+  }
+}
+
+/** Extrait les bounds visage d'un objet quelconque (Supabase row, LocalChild…). */
+/** Photo présente mais bounds visage absents ou invalides. */
+export function childNeedsFaceBoundsBackfill(child: LocalChild): boolean {
+  const hasPhoto =
+    !!(child.local_photo_path ?? '').trim() || !!(child.photo_url ?? '').trim();
+  if (!hasPhoto) return false;
+  if (!isValidFaceBounds(child)) return true;
+  return isLegacyHeroHeuristicOnProfileCrop(child);
+}
+
+/**
+ * Garantit des bounds visage en SQLite (ML, heuristique fichier, ou repli portrait).
+ * À appeler après lecture profil / avant affichage fil.
+ */
+/** Profil enfant à jour depuis SQLite (fil / focus onglet). */
+export async function refreshChildProfileFromLocal(childId: string): Promise<LocalChild | null> {
+  const id = childId.trim();
+  if (!id) return null;
+  const row = getLocalChild(id);
+  if (!row) return null;
+  return ensureChildFaceBounds(row);
+}
+
+export async function ensureChildFaceBounds(child: LocalChild): Promise<LocalChild> {
+  const row = getLocalChild(child.id) ?? child;
+  let current = await sanitizeChildLocalAvatarIfMissing(row);
+  if (!childNeedsFaceBoundsBackfill(current)) return current;
+
+  const lp = (current.local_photo_path ?? '').trim();
+  const remote = (current.photo_url ?? '').trim();
+
+  if (lp) {
+    const uri = resolveChildProfileImageUri(lp, null);
+    if (uri?.startsWith('file')) {
+      try {
+        const info = await getInfoAsync(uri);
+        if (info.exists && !info.isDirectory) {
+          const bounds =
+            (await detectFaceBounds(uri)) ?? (await estimatePortraitFaceBounds(uri));
+          const next: LocalChild = {
+            ...current,
+            ...bounds,
+            updated_at: new Date().toISOString(),
+          };
+          upsertLocalChild(next);
+          notifyChildProfileUpdated(current.id, next);
+          return next;
+        }
+      } catch {
+        /* fichier illisible → repli ci-dessous */
+      }
+    }
+  }
+
+  if (remote && !lp) {
+    return cacheRemoteChildProfilePhotoLocally(current);
+  }
+
+  const uri = lp ? resolveChildProfileImageUri(lp, null) : null;
+  const bounds = uri
+    ? await estimatePortraitFaceBounds(uri).catch(() => estimatePortraitFaceBounds(''))
+    : await estimatePortraitFaceBounds('');
+
+  const next: LocalChild = {
+    ...current,
+    ...bounds,
+    updated_at: new Date().toISOString(),
+  };
+  upsertLocalChild(next);
+  notifyChildProfileUpdated(current.id, next);
+  return next;
+}
+
+function pickFaceBounds(src: {
+  face_cx?: number | null
+  face_cy?: number | null
+  face_h?: number | null
+  face_img_aspect?: number | null
+} | null | undefined) {
+  if (!src) return { face_cx: null, face_cy: null, face_h: null, face_img_aspect: null }
+  const n = (v: unknown) =>
+    typeof v === 'number' && Number.isFinite(v) ? v : null
+  return {
+    face_cx: n(src.face_cx),
+    face_cy: n(src.face_cy),
+    face_h: n(src.face_h),
+    face_img_aspect: n(src.face_img_aspect),
+  }
 }
 
 /**
@@ -85,7 +200,9 @@ export async function sanitizeChildLocalAvatarIfMissing(child: LocalChild): Prom
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const info = await getInfoAsync(uri);
-      if (info.exists && !info.isDirectory) return child;
+      if (info.exists && !info.isDirectory) {
+        return child;
+      }
     } catch {
       /* fichier inaccessible */
     }
@@ -157,7 +274,7 @@ export async function loadCaptureChildFromLocalDbFirst(): Promise<LocalChild | n
   if (!id?.trim()) return null;
   const row = getLocalChild(id.trim());
   if (!row) return null;
-  return sanitizeChildLocalAvatarIfMissing(row);
+  return ensureChildFaceBounds(row);
 }
 
 /**
@@ -197,12 +314,34 @@ export async function cacheRemoteChildProfilePhotoLocally(child: LocalChild): Pr
     );
     if (res.status !== 200) return row;
 
+    // Détecter le visage sur l'image fraîchement téléchargée si les bounds sont absentes.
+    // Couvre la reconnexion sur nouveau téléphone avant que cette feature n'existe
+    // (bounds nulles en Supabase) — on les calcule une fois puis on les persiste dans les 2 sens.
+    const hasBounds = isValidFaceBounds(row);
+    const detectedFace = hasBounds ? null : await detectFaceBounds(res.uri).catch(() => null);
+    const faceToSave = hasBounds
+      ? pickFaceBounds(row)
+      : detectedFace ?? (await estimatePortraitFaceBounds(res.uri));
+
     const next: LocalChild = {
       ...row,
       local_photo_path: res.uri,
       updated_at: new Date().toISOString(),
+      ...faceToSave,
     };
     upsertLocalChild(next);
+
+    // Si on vient de détecter des bounds manquantes → les pousser vers Supabase silencieusement.
+    if (!hasBounds && detectedFace) {
+      supabase
+        .from('children')
+        .update(faceToSave as Record<string, unknown>)
+        .eq('id', row.id)
+        .then(({ error }) => {
+          if (error) console.warn('[children] face bounds sync to Supabase', row.id, error.message)
+        })
+    }
+
     return next;
   } catch (e) {
     console.warn('[children] cacheRemoteChildProfilePhotoLocally', row.id, e);
@@ -245,7 +384,8 @@ export async function warmSelectedChildIdFromStorage(): Promise<void> {
 export async function getChildren() {
   try {
     if ((await getCachedUserMode()) === 'local') {
-      return listLocalChildren();
+      const list = listLocalChildren();
+      return Promise.all(list.map(c => ensureChildFaceBounds(c)));
     }
 
     const { data, error } = await supabase
@@ -259,10 +399,23 @@ export async function getChildren() {
       /** Copie sandbox déjà en SQLite (gratuit → payant, etc.) : affichage local-first si dispo. */
       const local = getLocalChild(row.id);
       const lp = (local?.local_photo_path ?? '').trim();
-      if (lp) {
-        return { ...base, local_photo_path: lp };
+
+      // Bounds visage : priorité local (plus récent), repli sur Supabase (nouveau téléphone).
+      const remoteFace = pickFaceBounds(base)
+      const localFace = pickFaceBounds(local)
+      const face = {
+        face_cx: localFace.face_cx ?? remoteFace.face_cx,
+        face_cy: localFace.face_cy ?? remoteFace.face_cy,
+        face_h: localFace.face_h ?? remoteFace.face_h,
+        face_img_aspect: localFace.face_img_aspect ?? remoteFace.face_img_aspect,
       }
-      return base;
+
+      const merged: LocalChild = { ...base, local_photo_path: lp || null, ...face }
+
+      // Persister en SQLite pour que les lectures locales-first soient à jour.
+      upsertLocalChild(merged)
+
+      return merged
     });
   } catch (error) {
     console.error('Get children error:', error);
@@ -291,12 +444,15 @@ export async function uploadChildPhoto(childId: string, photoUri: string): Promi
       if (!cur) {
         throw new Error('Enfant introuvable en local');
       }
+      const detected = await detectFaceBounds(dest).catch(() => null);
+      const faceMeta = detected ?? (await estimatePortraitFaceBounds(dest));
       const now = new Date().toISOString();
       const next: LocalChild = {
         ...cur,
         local_photo_path: dest,
         photo_url: null,
         updated_at: now,
+        ...faceMeta,
       };
       upsertLocalChild(next);
       notifyChildProfileUpdated(childId, next);
@@ -338,6 +494,13 @@ export async function uploadChildPhoto(childId: string, photoUri: string): Promi
     const signedUrl = data.signedUrl;
 
     const sandboxPath = await copyChildAvatarSourceToSandbox(childId, photoUri.trim());
+    // Détection visage sur le fichier local (sandbox ou source originale)
+    const faceSource = sandboxPath || (photoUri.startsWith('file') ? photoUri : null);
+    const detectedFace = faceSource
+      ? await detectFaceBounds(faceSource).catch(() => null)
+      : null;
+    const faceMeta = pickFaceBounds(detectedFace);
+
     const existing = getLocalChild(childId);
     const now = new Date().toISOString();
     if (sandboxPath) {
@@ -347,6 +510,7 @@ export async function uploadChildPhoto(childId: string, photoUri: string): Promi
           photo_url: signedUrl,
           local_photo_path: sandboxPath,
           updated_at: now,
+          ...faceMeta,
         });
       } else {
         const { data: row, error: fetchErr } = await supabase
@@ -360,6 +524,7 @@ export async function uploadChildPhoto(childId: string, photoUri: string): Promi
             photo_url: signedUrl,
             local_photo_path: sandboxPath,
             updated_at: now,
+            ...faceMeta,
           });
         }
       }
@@ -368,7 +533,16 @@ export async function uploadChildPhoto(childId: string, photoUri: string): Promi
         ...existing,
         photo_url: signedUrl,
         updated_at: now,
+        ...faceMeta,
       });
+    }
+
+    const { error: faceSyncErr } = await supabase
+      .from('children')
+      .update(faceMeta as Record<string, unknown>)
+      .eq('id', childId);
+    if (faceSyncErr) {
+      console.warn('[children] face bounds sync after photo upload', childId, faceSyncErr.message);
     }
 
     const refreshed = getLocalChild(childId);
@@ -504,6 +678,10 @@ export async function createChild(rawName: string, birthdate?: string, photoUri?
       } else if (photoUri?.trim() && Platform.OS === 'web') {
         // TODO: persistance profil enfant côté web en mode local (V1 cible plutôt iOS ; pas de documentDirectory)
       }
+      const faceMeta = localPhotoPath
+        ? (await detectFaceBounds(localPhotoPath).catch(() => null)) ??
+          (await estimatePortraitFaceBounds(localPhotoPath))
+        : pickFaceBounds(null);
       const row: LocalChild = {
         id,
         user_id: user.id,
@@ -513,8 +691,10 @@ export async function createChild(rawName: string, birthdate?: string, photoUri?
         created_at: now,
         updated_at: now,
         local_photo_path: localPhotoPath,
+        ...faceMeta,
       };
       upsertLocalChild(row);
+      notifyChildProfileUpdated(id, row);
       return row;
     }
 
@@ -615,6 +795,13 @@ export async function updateChild(
       ...updates,
       ...(updates.name !== undefined ? { name: normalizeChildGivenName(updates.name) } : {}),
     };
+
+    // Si un nouveau chemin local est fourni, on tente une détection de visage en arrière-plan.
+    // Les résultats seront intégrés dans `next` avant upsert.
+    const newLocalPath = updates.local_photo_path ?? null;
+    const faceBounds =
+      newLocalPath ? await detectFaceBounds(newLocalPath).catch(() => null) : undefined;
+
     if ((await getCachedUserMode()) === 'local') {
       const cur = getLocalChild(childId);
       if (!cur) throw new Error('Child not found locally');
@@ -624,15 +811,33 @@ export async function updateChild(
         birthdate:
           updates.birthdate !== undefined ? updates.birthdate ?? '' : cur.birthdate,
         updated_at: new Date().toISOString(),
+        // Si on a un nouveau chemin, on écrase les bounds ; sinon on conserve les anciennes
+        ...(newLocalPath !== undefined
+          ? {
+              face_cx: faceBounds?.face_cx ?? null,
+              face_cy: faceBounds?.face_cy ?? null,
+              face_h: faceBounds?.face_h ?? null,
+              face_img_aspect: faceBounds?.face_img_aspect ?? null,
+            }
+          : {}),
       };
       upsertLocalChild(next);
       notifyChildProfileUpdated(childId, next);
       return next;
     }
 
+    // Inclure les face bounds dans la mise à jour Supabase si on en a calculé de nouvelles.
+    const cloudPatch: Record<string, unknown> = { ...patch }
+    if (newLocalPath !== undefined) {
+      cloudPatch.face_cx = faceBounds?.face_cx ?? null
+      cloudPatch.face_cy = faceBounds?.face_cy ?? null
+      cloudPatch.face_h = faceBounds?.face_h ?? null
+      cloudPatch.face_img_aspect = faceBounds?.face_img_aspect ?? null
+    }
+
     const { data, error } = await supabase
       .from('children')
-      .update(patch)
+      .update(cloudPatch)
       .eq('id', childId)
       .select()
       .single();
@@ -647,6 +852,20 @@ export async function updateChild(
       ...base,
       local_photo_path: lp || null,
       updated_at: data.updated_at ?? base.updated_at,
+      // Face bounds : nouvelles si on a changé la photo, sinon on conserve les locales
+      ...(newLocalPath !== undefined
+        ? {
+            face_cx: faceBounds?.face_cx ?? null,
+            face_cy: faceBounds?.face_cy ?? null,
+            face_h: faceBounds?.face_h ?? null,
+            face_img_aspect: faceBounds?.face_img_aspect ?? null,
+          }
+        : {
+            face_cx: local?.face_cx ?? null,
+            face_cy: local?.face_cy ?? null,
+            face_h: local?.face_h ?? null,
+            face_img_aspect: local?.face_img_aspect ?? null,
+          }),
     };
     upsertLocalChild(next);
     notifyChildProfileUpdated(childId, next);

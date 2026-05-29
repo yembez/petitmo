@@ -56,7 +56,7 @@ export function CropModal({ visible, imageUri, onCancel, onConfirm, onChangePhot
   const stageW = screenW;
   const maxCropH = Math.max(180, Math.round(stageH - bodyPadV * 2));
 
-  /** Même ratio que le hero photo de l’onglet Capturer (plein cadre, sans bandes après export). */
+  /** Même ratio que la zone photo Capturer (~70 % hauteur écran), pas le plein écran. */
   const captureHeroViewport = useMemo(
     () => computeCaptureHeroPhotoViewport(frame.height, screenH, screenW, insets.top),
     [frame.height, insets.top, screenH, screenW],

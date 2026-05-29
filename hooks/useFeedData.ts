@@ -8,7 +8,8 @@ import {
   type MutableRefObject,
   type SetStateAction,
 } from 'react';
-import { DeviceEventEmitter } from 'react-native';
+import { DeviceEventEmitter, InteractionManager } from 'react-native';
+import { getLocalMemoryById } from '@/lib/localDb';
 import { useFocusEffect } from '@react-navigation/native';
 import { setStatusBarStyle } from 'expo-status-bar';
 import {
@@ -20,7 +21,9 @@ import {
   getChildren,
   getOrSelectFirstChild,
   setSelectedChild,
-  sanitizeChildLocalAvatarIfMissing,
+  ensureChildFaceBounds,
+  refreshChildProfileFromLocal,
+  childNeedsFaceBoundsBackfill,
   PETITMO_CHILD_PROFILE_UPDATED_EVENT,
   type ChildProfileUpdatedPayload,
 } from '@/services/children';
@@ -81,6 +84,7 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
   const autoRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const memoryFlatListKeyByIdRef = useRef<Map<string, string>>(new Map());
   const loadDataSeqRef = useRef(0);
+  const silentReloadDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadData = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent === true;
@@ -101,15 +105,14 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
       }
 
       /**
-       * Pendant un import (`pending` non vide), l’enfant affiché ne change pas : inutile de rappeler
-       * `getChildren` + `setChild` (nouvelle référence) → évite flash header / saut layout.
-       * Pull-to-refresh ou `silent` sans pending continue à recharger le profil.
+       * Resync silencieux : ne pas rappeler `getChildren` si l’enfant affiché est déjà le bon
+       * (évite latence après long séjour sur un autre onglet).
        */
       const skipChildRefetch =
         silent &&
-        pendingLenRef.current > 0 &&
         childRef.current !== null &&
-        childRef.current.id === selectedChildId;
+        childRef.current.id === selectedChildId &&
+        !childNeedsFaceBoundsBackfill(childRef.current);
 
       let activeChild: Child | null = null;
 
@@ -133,7 +136,17 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
           return;
         }
 
-        setChild(activeChild);
+        const cleaned = await ensureChildFaceBounds(activeChild);
+        if (seq !== loadDataSeqRef.current) return;
+        setChild(cleaned);
+        activeChild = cleaned;
+      }
+
+      if (activeChild && childNeedsFaceBoundsBackfill(activeChild)) {
+        const cleaned = await ensureChildFaceBounds(activeChild);
+        if (seq !== loadDataSeqRef.current) return;
+        setChild(cleaned);
+        activeChild = cleaned;
       }
 
       if (activeChild === null) {
@@ -160,11 +173,30 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
     }
   }, []);
 
+  const scheduleSilentReload = useCallback(() => {
+    if (silentReloadDebounceRef.current) {
+      clearTimeout(silentReloadDebounceRef.current);
+    }
+    silentReloadDebounceRef.current = setTimeout(() => {
+      silentReloadDebounceRef.current = null;
+      void loadData({ silent: true });
+    }, 500);
+  }, [loadData]);
+
   useEffect(() => {
     const silentFromImport = consumeSilentInitialFilLoadAfterMediaImport();
+    const hasHydration = feedChildHydrationSnapshot != null;
     const silent =
-      pendingUploads.length > 0 || feedChildHydrationSnapshot != null || silentFromImport;
-    void loadData({ silent });
+      pendingUploads.length > 0 || hasHydration || silentFromImport;
+    const run = () => {
+      void loadData({ silent });
+    };
+
+    if (hasHydration && feedMemoriesHydrationSnapshot.length > 0) {
+      const task = InteractionManager.runAfterInteractions(run);
+      return () => task.cancel();
+    }
+    run();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 1er montage : silent si pending, réhydratation fil, ou retour import
   }, [loadData]);
 
@@ -172,8 +204,29 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
     const subInvalidate = DeviceEventEmitter.addListener('petitmo:memories-invalidate', () => {
       void loadData({ silent: true });
     });
-    const subUpdated = DeviceEventEmitter.addListener('petitmo:memories-updated', () => {
-      void loadData({ silent: true });
+    const subUpdated = DeviceEventEmitter.addListener('petitmo:memories-updated', (payload: unknown) => {
+      const memoryId =
+        payload &&
+        typeof payload === 'object' &&
+        payload !== null &&
+        'memoryId' in payload &&
+        typeof (payload as { memoryId?: unknown }).memoryId === 'string'
+          ? (payload as { memoryId: string }).memoryId.trim()
+          : '';
+      if (memoryId) {
+        const row = getLocalMemoryById(memoryId);
+        if (row) {
+          setMemories(prev => {
+            const idx = prev.findIndex(m => m.id === memoryId);
+            if (idx < 0) return prev;
+            const next = [...prev];
+            next[idx] = row;
+            return next;
+          });
+          return;
+        }
+      }
+      scheduleSilentReload();
     });
     const subChildProfile = DeviceEventEmitter.addListener(
       PETITMO_CHILD_PROFILE_UPDATED_EVENT,
@@ -188,7 +241,9 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
               row = all.find(c => c.id === id) ?? null;
             }
             if (!row) return;
-            const cleaned = await sanitizeChildLocalAvatarIfMissing(row);
+            const cleaned =
+              (await refreshChildProfileFromLocal(id)) ??
+              (await ensureChildFaceBounds(row));
             setChild(cleaned);
           } catch (e) {
             console.error('Fil: refresh profil enfant', e);
@@ -243,12 +298,35 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
       subUpdated.remove();
       subChildProfile.remove();
       subInserted.remove();
+      if (silentReloadDebounceRef.current) {
+        clearTimeout(silentReloadDebounceRef.current);
+        silentReloadDebounceRef.current = null;
+      }
     };
-  }, [loadData]);
+  }, [loadData, scheduleSilentReload]);
 
   useFocusEffect(
     useCallback(() => {
       setStatusBarStyle('dark');
+      const childId = childRef.current?.id;
+      if (childId) {
+        void refreshChildProfileFromLocal(childId).then(refreshed => {
+          if (refreshed && childRef.current?.id === refreshed.id) {
+            setChild(refreshed);
+          }
+        });
+      }
+      /** Onglet remonté après longue absence : resync légère seulement si le fil est vide. */
+      if (memoriesRef.current.length === 0 && feedMemoriesHydrationSnapshot.length > 0) {
+        setMemories([...feedMemoriesHydrationSnapshot]);
+        if (feedChildHydrationSnapshot) {
+          void ensureChildFaceBounds(feedChildHydrationSnapshot).then(refreshed => {
+            setChild(refreshed);
+          });
+        }
+        setBooks([...feedBooksHydrationSnapshot]);
+        setIsLoading(false);
+      }
     }, [])
   );
 

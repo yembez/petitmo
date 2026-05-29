@@ -1,6 +1,5 @@
 import { memo } from 'react';
 import { View, Text, TouchableOpacity, Platform, StyleSheet } from 'react-native';
-import { Image } from 'expo-image';
 import { BlurView } from 'expo-blur';
 import { Menu } from 'lucide-react-native';
 import { calculateAge } from '@/utils/date';
@@ -8,8 +7,8 @@ import { scale, verticalScale } from '@/utils/responsive';
 import type { Child } from '@/utils/feedHelpers';
 import { styles } from '@/components/feed/feedStyles';
 import { THEME } from '@/constants/theme';
-import { resolveChildProfileImageDisplayUri } from '@/utils/childPhotoUri';
-import { childDisplayGivenName, childDisplayInitial } from '@/utils/childDisplayName';
+import { childDisplayGivenName } from '@/utils/childDisplayName';
+import { ChildAvatar } from '@/components/ChildAvatar';
 
 export type FeedHeaderProps = {
   child: Child | null;
@@ -36,33 +35,17 @@ export const FeedHeader = memo(function FeedHeader({ child, paddingTop, onMenuPr
     );
   }
 
-  const photoUri =
-    resolveChildProfileImageDisplayUri(
-      child.local_photo_path,
-      child.photo_url,
-      child.updated_at,
-    ) ?? '';
   const givenName = childDisplayGivenName(child.name) || child.name.trim();
   const agePresent = child.birthdate ? calculateAge(child.birthdate) : '';
 
   const inner = (
     <View style={styles.headerRow}>
       <View style={styles.headerLeft}>
-        {photoUri ? (
-          <View style={styles.headerAvatarImg}>
-            <Image
-              source={{ uri: photoUri }}
-              style={StyleSheet.absoluteFillObject}
-              contentFit="cover"
-              cachePolicy="memory-disk"
-              recyclingKey={`${child.id}-${child.updated_at ?? ''}`}
-            />
-          </View>
-        ) : (
-          <View style={styles.headerAvatarPlaceholder}>
-            <Text style={styles.headerAvatarLetter}>{childDisplayInitial(child.name)}</Text>
-          </View>
-        )}
+        <ChildAvatar
+          key={`${child.id}-${child.updated_at ?? ''}-${child.local_photo_path ?? ''}`}
+          child={child}
+          size={scale(68)}
+        />
         <View style={styles.headerNameBlock}>
           <Text style={styles.headerTitleLine} numberOfLines={1}>
             <Text style={styles.headerChildName}>{givenName}</Text>

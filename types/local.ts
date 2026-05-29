@@ -33,5 +33,11 @@ export type Memory = SupabaseMemory & LocalFields
 
 export type Child = Database['public']['Tables']['children']['Row'] & {
   local_photo_path: string | null
+  /** Coordonnées du visage détecté (normalisées 0-1 par rapport aux dimensions de l'image). */
+  face_cx?: number | null
+  face_cy?: number | null
+  face_h?: number | null
+  /** Ratio largeur/hauteur de l'image source (pour recalculer les dimensions à l'affichage). */
+  face_img_aspect?: number | null
 }
 

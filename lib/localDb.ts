@@ -65,7 +65,11 @@ export function initLocalDb(): void {
       photo_url TEXT,
       local_photo_path TEXT,
       created_at TEXT NOT NULL,
-      updated_at TEXT
+      updated_at TEXT,
+      face_cx REAL,
+      face_cy REAL,
+      face_h REAL,
+      face_img_aspect REAL
     );
 
     CREATE INDEX IF NOT EXISTS idx_memories_child_created
@@ -83,6 +87,22 @@ export function initLocalDb(): void {
 
   // Backfill schema for existing installs (CREATE TABLE IF NOT EXISTS ne rajoute pas de colonnes).
   // SQLite: ADD COLUMN est idempotent seulement si on teste la présence via PRAGMA.
+  // Migration douce : ajout des colonnes face sur les installs existantes
+  try {
+    const childCols = db.getAllSync(`PRAGMA table_info(children)`, []) as { name?: string }[]
+    const childNames = new Set(childCols.map(c => (c?.name ?? '').trim()).filter(Boolean))
+    const addChild = (name: string, type: string) => {
+      if (childNames.has(name)) return
+      db.execSync(`ALTER TABLE children ADD COLUMN ${name} ${type};`)
+    }
+    addChild('face_cx', 'REAL')
+    addChild('face_cy', 'REAL')
+    addChild('face_h', 'REAL')
+    addChild('face_img_aspect', 'REAL')
+  } catch {
+    // Silencieux
+  }
+
   try {
     const cols = db.getAllSync(`PRAGMA table_info(memories)`, []) as { name?: string }[];
     const names = new Set(cols.map(c => (c?.name ?? '').trim()).filter(Boolean));
@@ -451,8 +471,9 @@ export function listLocalChildren(): Child[] {
 export function upsertLocalChild(child: Child): void {
   db.runSync(
     `INSERT OR REPLACE INTO children
-     (id, user_id, name, birthdate, photo_url, local_photo_path, created_at, updated_at)
-     VALUES (?,?,?,?,?,?,?,?)`,
+     (id, user_id, name, birthdate, photo_url, local_photo_path, created_at, updated_at,
+      face_cx, face_cy, face_h, face_img_aspect)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
       child.id,
       child.user_id,
@@ -462,6 +483,10 @@ export function upsertLocalChild(child: Child): void {
       child.local_photo_path ?? null,
       child.created_at,
       child.updated_at ?? null,
+      child.face_cx ?? null,
+      child.face_cy ?? null,
+      child.face_h ?? null,
+      child.face_img_aspect ?? null,
     ]
   )
 }
@@ -555,6 +580,9 @@ function deserializeChild(row: Record<string, unknown>): Child {
   const createdAt = (row.created_at as string) ?? new Date().toISOString()
   const updatedAt = (row.updated_at as string | null) ?? createdAt
 
+  const toNum = (v: unknown): number | null =>
+    typeof v === 'number' && Number.isFinite(v) ? v : null
+
   return {
     id: row.id as string,
     user_id: typeof row.user_id === 'string' ? row.user_id : '',
@@ -564,6 +592,10 @@ function deserializeChild(row: Record<string, unknown>): Child {
     created_at: createdAt,
     updated_at: updatedAt,
     local_photo_path: (row.local_photo_path as string | null) ?? null,
+    face_cx: toNum(row.face_cx),
+    face_cy: toNum(row.face_cy),
+    face_h: toNum(row.face_h),
+    face_img_aspect: toNum(row.face_img_aspect),
   }
 }
 

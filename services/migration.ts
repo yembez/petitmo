@@ -4,9 +4,12 @@ import { setUserTier } from '@/lib/userTier';
 import { ensureLocalChildrenSyncedToSupabase } from '@/services/children';
 import {
   persistVoiceCoverToCloudForPdfExport,
+  pushPhotoAlbumMemoryToCloud,
+  resumePetitmoPlusCloudCaptureOrMerge,
   uploadFileToSupabase,
   uploadVoiceCoverToSupabaseFromLocal,
 } from '@/services/media';
+import { getUserTier } from '@/lib/userTier';
 import { supabase } from '@/lib/supabase';
 import type { Database } from '@/types/database';
 import type { Memory } from '@/types/local';
@@ -28,6 +31,14 @@ function isDuplicateKeyError(error: unknown): boolean {
   if (code === '23505') return true;
   const msg = String((error as { message?: string }).message ?? '');
   return /duplicate key|unique constraint/i.test(msg);
+}
+
+function memoryHasAlbumExtras(memory: Memory): boolean {
+  if ((memory.extra_photo_paths?.length ?? 0) > 0) return true;
+  return (memory.extra_photo_urls ?? []).some(u => {
+    const t = (u ?? '').trim();
+    return t.length > 0 && !/^https?:\/\//i.test(t);
+  });
 }
 
 async function fileExists(uri: string): Promise<boolean> {
@@ -308,19 +319,34 @@ export async function ensureMemoryUploadedForCloud(memory: Memory): Promise<void
 
   if (markSyncedIfRemote(memory)) return;
 
+  if (
+    memory.type === 'text' &&
+    (memory.sync_status === 'local' || memory.sync_status === 'pending')
+  ) {
+    await migrateText(memory, user.id);
+    return;
+  }
+
+  if (
+    memory.type === 'photo' &&
+    (memory.sync_status === 'local' || memory.sync_status === 'pending')
+  ) {
+    const paid = (await getUserTier()) === 'paid';
+    if (memoryHasAlbumExtras(memory)) {
+      await pushPhotoAlbumMemoryToCloud(memory, user.id, paid);
+    } else if (memory.sync_status === 'local') {
+      await migratePhoto(memory, user.id);
+    } else {
+      await resumePetitmoPlusCloudCaptureOrMerge(memory, user.id, paid);
+    }
+    return;
+  }
+
   const isStrictLocal = memory.sync_status === 'local';
 
   if (isStrictLocal) {
-    if (memory.type === 'text') {
-      await migrateText(memory, user.id);
-      return;
-    }
     if (memory.type === 'voice') {
       await migrateVoice(memory, user.id);
-      return;
-    }
-    if (memory.type === 'photo') {
-      await migratePhoto(memory, user.id);
       return;
     }
     if (memory.type === 'video') {

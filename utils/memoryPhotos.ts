@@ -229,10 +229,24 @@ export function getAllPhotoUrlsForFeedRemoteOnly(memory: Memory): string[] {
   return [first, ...cleaned].filter(u => u.length > 0);
 }
 
-/** Album multi-photos dans le fil : garde la visionneuse galerie (pas le viewer vertical immersif). */
+/** Souvenir photo avec plusieurs images dans le fil / viewer immersif. */
 export function isFeedMultiPhotoAlbum(memory: Memory): boolean {
   if (memory.type !== 'photo') return false;
   return getAllPhotoUrlsForFeed(memory).length > 1;
+}
+
+/** URLs canoniques pour `favorite_photo_urls` (une par case d’album, alignées sur le fil). */
+export function getAlbumCanonicalFavoriteUrls(memory: Memory): string[] {
+  if (memory.type !== 'photo') return [];
+  return getAllPhotoUrlsForFeed(memory);
+}
+
+/** Toutes les photos de l’album sont dans `favorite_photo_urls` (variantes URL acceptées). */
+export function isAlbumFullyFavorited(memory: Memory): boolean {
+  const slots = getAlbumCanonicalFavoriteUrls(memory);
+  if (slots.length <= 1) return !!memory.is_favorite;
+  const favs = parseFavoritePhotoUrls(memory);
+  return slots.every(u => isPhotoUrlFavoritedWithVariants(memory, favs, u));
 }
 
 /**

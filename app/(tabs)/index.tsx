@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -10,35 +10,56 @@ import {
   Dimensions,
   Platform,
   ActivityIndicator,
+  ScrollView,
   useWindowDimensions,
   DeviceEventEmitter,
-  ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets, useSafeAreaFrame } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Heart, Menu, Pencil } from 'lucide-react-native';
-import { ImagesIcon, MicrophoneIcon } from 'phosphor-react-native';
+import { BlurView } from 'expo-blur';
+import { Menu } from 'lucide-react-native';
+import ImageImportIcon from '@/components/ImageImportIcon';
+import MicIcon from '@/components/MicIcon';
+import PenIcon from '@/components/PenIcon';
 import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
 import * as Haptics from 'expo-haptics';
-import { useFonts, DMSans_400Regular, DMSans_700Bold } from '@expo-google-fonts/dm-sans';
+import { useFonts, Sora_600SemiBold } from '@expo-google-fonts/sora';
+
+const CAPTURE_PHOTO_TAGLINE_FONT = 'Sora-LightItalic';
+import { Manrope_400Regular } from '@expo-google-fonts/manrope';
+import { DMSans_500Medium } from '@expo-google-fonts/dm-sans';
+
+/** Tailles maquette capture (px logiques). */
+const CAPTURE_TITLE_FONT_SIZE = 15;
+const CAPTURE_TITLE_LINE_HEIGHT = 20;
+const CAPTURE_SUBTITLE_FONT_SIZE = 11;
+const CAPTURE_SUBTITLE_LINE_HEIGHT = 15;
+const CAPTURE_HEADER_DATE_FONT_SIZE = 24;
+const CAPTURE_HEADER_DATE_LINE_HEIGHT = 28;
+
+const CAPTURE_PHOTO_TAGLINE =
+  '« Chaque moment ordinaire devient extraordinaire avec toi. »';
+const CAPTURE_PHOTO_TAGLINE_FONT_SIZE = 13;
+const CAPTURE_PHOTO_TAGLINE_LINE_HEIGHT = 18;
+
+const CAPTURE_PHOTO_TAGLINE_GRADIENT = [
+  'rgba(0, 0, 0, 0)',
+  'rgba(0, 0, 0, 0.28)',
+  'rgba(0, 0, 0, 0.52)',
+] as const;
+import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
 import { scale, verticalScale } from '@/utils/responsive';
 import { THEME } from '@/constants/theme';
-import {
-  PETITMO_CTA_BORDER_RADIUS,
-  PETITMO_CTA_BORDER_WIDTH,
-  PETITMO_CTA_SOFT_ELEVATION,
-} from '@/constants/petitmoCtaStyles';
-import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
 import {
   cacheRemoteChildProfilePhotoLocally,
   getChildren,
   getOrSelectFirstChild,
   getCaptureTabChildSnapshot,
   PETITMO_CHILD_PROFILE_UPDATED_EVENT,
-  sanitizeChildLocalAvatarIfMissing,
+  ensureChildFaceBounds,
   setCaptureTabChildSnapshot,
   type ChildProfileUpdatedPayload,
 } from '@/services/children';
@@ -49,230 +70,117 @@ import { getLocalChild } from '@/lib/localDb';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { resolveChildProfileImageDisplayUri } from '@/utils/childPhotoUri';
 import { childDisplayGivenName, childDisplayInitial } from '@/utils/childDisplayName';
+import { formatCaptureChildAge, formatCaptureHeaderDate } from '@/utils/date';
+import { CaptureHeroSkiaPhoto } from '@/components/CaptureHeroSkiaPhoto';
 import { CAPTURE_HERO_COLOR_MATRIX } from '@/utils/captureHeroColorMatrix';
 import {
   CAPTURE_HERO_IMAGE_CONTENT_POSITION,
   CAPTURE_HERO_IMAGE_OBJECT_POSITION,
-  computeCaptureHeroPhotoViewport,
 } from '@/utils/captureHeroMetrics';
 import { ColorMatrix } from 'react-native-color-matrix-image-filters';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
-/** Marge latérale autour de la carte (0 = plein écran horizontal). */
-const CAPTURE_CARD_MARGIN_H = 0;
-
-/**
- * Décale le bandeau logo + menu (vue absolue). Valeur plus basse = bandeau plus haut sur l’écran.
- */
-const CAPTURE_HEADER_LOGO_MENU_TRANSLATE_Y = verticalScale(8);
-
-/** Zoom « respiration » sur le hero (1 → max). */
+/** Zoom « respiration » sur la photo carte (1 → max). */
 const CAPTURE_HERO_BREATHE_MIN = 1;
 const CAPTURE_HERO_BREATHE_MAX = 1.03;
 const CAPTURE_HERO_BREATHE_HALF_MS = 8500;
 
-/** Fondu noir léger en haut du hero (lisibilité logo / menu). */
-const HERO_TOP_BLACK_FADE = [
-  'rgba(0, 0, 0, 0.52)',
-  'rgba(0, 0, 0, 0.22)',
-  'rgba(0, 0, 0, 0)',
-] as const;
+const CAPTURE_PHOTO_CARD_RADIUS = scale(32);
+const CAPTURE_PHOTO_CARD_ASPECT = 0.86;
+const CAPTURE_PHOTO_CARD_ASPECT_COMPACT = 0.78;
+/** Padding horizontal du scroll ; la photo utilise `capturePhotoBleed` pour des bords symétriques. */
+const CAPTURE_CONTENT_PADDING_H = scale(20);
+const CAPTURE_PHOTO_EDGE_PADDING_H = scale(14);
 
-/** Fondu noir en bas du hero (titre blanc sur la photo). */
-const HERO_BOTTOM_BLACK_FADE = [
-  'rgba(0, 0, 0, 0)',
-  'rgba(0, 0, 0, 0.38)',
-  'rgba(0, 0, 0, 0.78)',
-] as const;
-
-/** Hauteur du fondu haut ≈ 30 % du hero (px, pas de % pour fiabilité layout). */
-function captureHeroTopFadeHeight(heroHeight: number): number {
-  return Math.max(verticalScale(72), Math.round(heroHeight * 0.3));
-}
-
-/** Hauteur du fondu bas ≈ 42 % du hero (bande titre). */
-function captureHeroBottomFadeHeight(heroHeight: number): number {
-  return Math.max(verticalScale(108), Math.round(heroHeight * 0.42));
-}
-
-/** Écart vertical uniforme entre les CTA (Écrire, Importer, Enregistrer). */
-const CAPTURE_CTA_GAP = verticalScale(16);
-
-/** Fond du CTA principal « Écrire » — écran Capturer. */
-const CAPTURE_WRITE_CTA_BACKGROUND = THEME.captureScreenCtaBackground;
-/** Liseré CTA Importer / Enregistrer — même rosé, plus clair que le fond « Écrire ». */
-const CAPTURE_WRITE_CTA_BORDER = THEME.captureCtaBorderColor;
-/** Libellé + crayon sur fond `CAPTURE_WRITE_CTA_BACKGROUND`. */
-const CAPTURE_WRITE_CTA_FOREGROUND = THEME.captureScreenCtaForeground;
-
-/** Titre Capturer — essai San Francisco sur iOS (`System`), graisses via `fontWeight`. */
-const CAPTURE_TITLE_FONT_FAMILY = Platform.select({
-  ios: 'System',
-  default: undefined,
-});
-
-function captureTitleFont(weight: '400' | '700') {
-  return CAPTURE_TITLE_FONT_FAMILY
-    ? { fontFamily: CAPTURE_TITLE_FONT_FAMILY, fontWeight: weight }
-    : { fontWeight: weight };
-}
-
-/** Phosphor `fill` — CTA secondaires Enregistrer / Importer (noir). */
-const CAPTURE_PHOSPHOR_SECONDARY = {
-  weight: 'fill' as const,
-  color: THEME.textPrimary,
-};
+const CAPTURE_CTA_SIZE = scale(68);
+const CAPTURE_CTA_SIZE_COMPACT = scale(58);
+const CAPTURE_CTA_ICON_SIZE = scale(30);
+const CAPTURE_CTA_ICON_SIZE_COMPACT = scale(26);
+const CAPTURE_CTA_MIC_ICON_SIZE = scale(34);
+const CAPTURE_CTA_MIC_ICON_SIZE_COMPACT = scale(28);
 
 type CaptureRoute = '/write' | '/record-voice' | '/import-media';
 
-function CaptureSecondaryRow({
-  icon,
-  labelBold,
-  labelSuffix,
-  onPress,
-  fontFamilyBold,
-  fontFamilyRegular,
+function CapturePhotoGlassPill({
+  label,
+  labelFontFamily,
+  align = 'left',
 }: {
-  icon: React.ReactNode;
-  labelBold: string;
-  labelSuffix: string;
-  onPress: () => void;
-  fontFamilyBold?: string;
-  fontFamilyRegular?: string;
+  label: string;
+  labelFontFamily?: string;
+  align?: 'left' | 'right';
 }) {
-  const accessibilityLabel = `${labelBold}${labelSuffix}`;
-  const pressScale = useRef(new Animated.Value(1)).current;
-  const pressOpacity = useRef(new Animated.Value(1)).current;
-
-  const runPressIn = useCallback(() => {
-    if (Platform.OS === 'ios' || Platform.OS === 'android') {
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
-    Animated.parallel([
-      Animated.spring(pressScale, {
-        toValue: 0.97,
-        useNativeDriver: true,
-        friction: 5,
-        tension: 340,
-      }),
-      Animated.timing(pressOpacity, {
-        toValue: 0.92,
-        duration: 90,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, [pressOpacity, pressScale]);
-
-  const runPressOut = useCallback(() => {
-    Animated.parallel([
-      Animated.spring(pressScale, {
-        toValue: 1,
-        useNativeDriver: true,
-        friction: 4,
-        tension: 220,
-      }),
-      Animated.spring(pressOpacity, {
-        toValue: 1,
-        useNativeDriver: true,
-        friction: 6,
-        tension: 140,
-      }),
-    ]).start();
-  }, [pressOpacity, pressScale]);
-
-  return (
-    <TouchableOpacity
-      activeOpacity={1}
-      onPress={onPress}
-      onPressIn={runPressIn}
-      onPressOut={runPressOut}
-      style={styles.captureSecondaryRow}
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
+  const text = (
+    <Text
+      style={[
+        styles.capturePhotoPillText,
+        align === 'right' && styles.capturePhotoPillTextRight,
+        labelFontFamily ? { fontFamily: labelFontFamily } : null,
+      ]}
+      numberOfLines={1}
     >
-      <Animated.View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          width: '100%',
-          transform: [{ scale: pressScale }],
-          opacity: pressOpacity,
-        }}
-      >
-        <View style={styles.captureSecondaryIconWrap}>{icon}</View>
-        <View style={styles.captureSecondaryTextCol}>
-          <Text style={styles.captureSecondaryLabelRow} numberOfLines={1} ellipsizeMode="tail">
-            <Text
-              style={[
-                styles.captureSecondaryLabelBold,
-                fontFamilyBold ? { fontFamily: fontFamilyBold } : { fontWeight: '700' },
-              ]}
-            >
-              {labelBold}
-            </Text>
-            <Text
-              style={[
-                styles.captureSecondaryLabel,
-                fontFamilyRegular ? { fontFamily: fontFamilyRegular } : { fontWeight: '400' },
-              ]}
-            >
-              {labelSuffix}
-            </Text>
-          </Text>
-        </View>
-      </Animated.View>
-    </TouchableOpacity>
+      {label}
+    </Text>
   );
+
+  if (Platform.OS === 'ios') {
+    return (
+      <BlurView intensity={48} tint="light" style={styles.capturePhotoPill}>
+        {text}
+      </BlurView>
+    );
+  }
+
+  return <View style={[styles.capturePhotoPill, styles.capturePhotoPillFallback]}>{text}</View>;
 }
 
-function CapturePrimaryWriteButton({
-  title,
+function CaptureDiscCta({
+  label,
+  icon,
+  discColor,
   onPress,
-  fontFamilyBold,
+  labelFontFamily,
+  compact = false,
+  accessibilityLabel,
+  haptic = 'medium',
 }: {
-  title: string;
+  label: string;
+  icon: React.ReactNode;
+  discColor: string;
   onPress: () => void;
-  fontFamilyBold?: string;
+  labelFontFamily?: string;
+  compact?: boolean;
+  accessibilityLabel?: string;
+  haptic?: 'light' | 'medium';
 }) {
   const pressScale = useRef(new Animated.Value(1)).current;
-  const pressOpacity = useRef(new Animated.Value(1)).current;
+  const ctaSize = compact ? CAPTURE_CTA_SIZE_COMPACT : CAPTURE_CTA_SIZE;
 
   const runPressIn = useCallback(() => {
     if (Platform.OS === 'ios' || Platform.OS === 'android') {
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      void Haptics.impactAsync(
+        haptic === 'light'
+          ? Haptics.ImpactFeedbackStyle.Light
+          : Haptics.ImpactFeedbackStyle.Medium,
+      );
     }
-    Animated.parallel([
-      Animated.spring(pressScale, {
-        toValue: 0.97,
-        useNativeDriver: true,
-        friction: 5,
-        tension: 340,
-      }),
-      Animated.timing(pressOpacity, {
-        toValue: 0.94,
-        duration: 90,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, [pressOpacity, pressScale]);
+    Animated.spring(pressScale, {
+      toValue: 0.94,
+      useNativeDriver: true,
+      friction: 6,
+      tension: 380,
+    }).start();
+  }, [haptic, pressScale]);
 
   const runPressOut = useCallback(() => {
-    Animated.parallel([
-      Animated.spring(pressScale, {
-        toValue: 1,
-        useNativeDriver: true,
-        friction: 4,
-        tension: 220,
-      }),
-      Animated.spring(pressOpacity, {
-        toValue: 1,
-        useNativeDriver: true,
-        friction: 6,
-        tension: 140,
-      }),
-    ]).start();
-  }, [pressOpacity, pressScale]);
+    Animated.spring(pressScale, {
+      toValue: 1,
+      useNativeDriver: true,
+      friction: 5,
+      tension: 260,
+    }).start();
+  }, [pressScale]);
 
   return (
     <TouchableOpacity
@@ -281,29 +189,33 @@ function CapturePrimaryWriteButton({
       onPressIn={runPressIn}
       onPressOut={runPressOut}
       accessibilityRole="button"
-      accessibilityLabel={title}
+      accessibilityLabel={accessibilityLabel ?? label}
+      style={styles.captureCtaTouch}
     >
       <Animated.View
         style={[
-          styles.capturePrimaryWriteBtn,
-          { transform: [{ scale: pressScale }], opacity: pressOpacity },
+          styles.captureCtaDisc,
+          {
+            width: ctaSize,
+            height: ctaSize,
+            borderRadius: ctaSize / 2,
+            backgroundColor: discColor,
+            transform: [{ scale: pressScale }],
+          },
         ]}
       >
-        <Pencil
-          size={scale(20)}
-          color={CAPTURE_WRITE_CTA_FOREGROUND}
-          strokeWidth={2.4}
-          style={styles.capturePrimaryWritePencil}
-        />
-        <Text
-          style={[
-            styles.capturePrimaryWriteBtnText,
-            fontFamilyBold ? { fontFamily: fontFamilyBold } : { fontWeight: '700' },
-          ]}
-        >
-          {title}
-        </Text>
+        {icon}
       </Animated.View>
+      <Text
+        style={[
+          styles.captureCtaLabel,
+          compact && styles.captureCtaLabelCompact,
+          labelFontFamily ? { fontFamily: labelFontFamily } : null,
+        ]}
+        numberOfLines={1}
+      >
+        {label}
+      </Text>
     </TouchableOpacity>
   );
 }
@@ -314,29 +226,19 @@ export default function CapturerScreen() {
   const frame = useSafeAreaFrame();
   const { height: windowH } = useWindowDimensions();
 
-  const [fontsLoaded] = useFonts({
-    DMSans_400Regular,
-    DMSans_700Bold,
+  const [captureFontsLoaded] = useFonts({
+    Sora_600SemiBold,
+    [CAPTURE_PHOTO_TAGLINE_FONT]: require('@/assets/fonts/Sora-LightItalic.ttf'),
+    Manrope_400Regular,
+    DMSans_500Medium,
   });
-  const dmSans700 = fontsLoaded ? 'DMSans_700Bold' : undefined;
-  const dmSans = fontsLoaded ? 'DMSans_400Regular' : undefined;
-
+  const captureTitleFont = captureFontsLoaded ? 'Sora_600SemiBold' : undefined;
+  const capturePhotoTaglineFont = captureFontsLoaded ? CAPTURE_PHOTO_TAGLINE_FONT : undefined;
+  const captureSubtitleFont = captureFontsLoaded ? 'Manrope_400Regular' : undefined;
+  const captureCtaLabelFont = captureFontsLoaded ? 'DMSans_500Medium' : undefined;
   const usableH = Math.max(280, windowH);
   const layoutH = Math.min(frame.height > 1 ? frame.height : usableH, usableH);
   const compact = layoutH < 600;
-
-  const captureHeroHeight = useMemo(
-    () => Math.round(computeCaptureHeroPhotoViewport(frame.height, windowH, frame.width, insets.top).heroH),
-    [frame.height, frame.width, windowH, insets.top],
-  );
-  const captureHeroTopFadeH = useMemo(
-    () => captureHeroTopFadeHeight(captureHeroHeight),
-    [captureHeroHeight],
-  );
-  const captureHeroBottomFadeH = useMemo(
-    () => captureHeroBottomFadeHeight(captureHeroHeight),
-    [captureHeroHeight],
-  );
 
   const [child, setChild] = useState<Child | null>(() => getCaptureTabChildSnapshot());
   const [isLoading, setIsLoading] = useState(() => getCaptureTabChildSnapshot() === null);
@@ -361,7 +263,7 @@ export default function CapturerScreen() {
               row = all.find(c => c.id === id) ?? null;
             }
             if (!row) return;
-            const cleaned = await sanitizeChildLocalAvatarIfMissing(row);
+            const cleaned = await ensureChildFaceBounds(row);
             setChild(cleaned);
             if (cleaned.photo_url?.trim() && !cleaned.local_photo_path?.trim()) {
               void cacheRemoteChildProfilePhotoLocally(cleaned).then(refreshed => {
@@ -423,7 +325,7 @@ export default function CapturerScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      setStatusBarStyle('light');
+      setStatusBarStyle('dark');
 
       let cancelled = false;
 
@@ -455,7 +357,7 @@ export default function CapturerScreen() {
 
           if (storedSelectedId && allChildren.length > 0) {
             const selected = allChildren.find(c => c.id === storedSelectedId) ?? allChildren[0];
-            const cleaned = await sanitizeChildLocalAvatarIfMissing(selected);
+            const cleaned = await ensureChildFaceBounds(selected);
             setChild(cleaned);
             if (cleaned.photo_url?.trim() && !cleaned.local_photo_path?.trim()) {
               void cacheRemoteChildProfilePhotoLocally(cleaned).then(refreshed => {
@@ -469,7 +371,7 @@ export default function CapturerScreen() {
             router.push('/create-child');
           } else {
             const first = allChildren[0];
-            const cleaned = await sanitizeChildLocalAvatarIfMissing(first);
+            const cleaned = await ensureChildFaceBounds(first);
             setChild(cleaned);
             if (cleaned.photo_url?.trim() && !cleaned.local_photo_path?.trim()) {
               void cacheRemoteChildProfilePhotoLocally(cleaned).then(refreshed => {
@@ -530,17 +432,17 @@ export default function CapturerScreen() {
   const heroSignedRemote = useSignedMediaUrl(heroRawUri && !heroIsLocalAsset ? heroRawUri : null);
   const photoUri = heroRawUri ? (heroIsLocalAsset ? heroRawUri : heroSignedRemote ?? heroRawUri) : '';
 
-  const captureLogoH = scale(34);
-  const captureLogoW = captureLogoH * (PETITMO_LOGO_VIEWBOX.width / PETITMO_LOGO_VIEWBOX.height);
   const headerMenuIconSize = scale(22);
-  const captureWhiteMinHeight = Math.max(0, layoutH - captureHeroHeight);
-  /** Réserve sous les CTA pour la tab bar flottante (zone de centrage vertical). */
-  const captureTabBarReserve = tabBarFloatingOverlapPad(insets.bottom);
+  const captureLogoH = scale(28);
+  const captureLogoW = captureLogoH * (PETITMO_LOGO_VIEWBOX.width / PETITMO_LOGO_VIEWBOX.height);
+  const captureHeaderDate = formatCaptureHeaderDate();
+  const captureBottomReserve = tabBarFloatingOverlapPad(insets.bottom);
   const childGivenName = childDisplayGivenName(child.name);
+  const childAgeLabel = child.birthdate ? formatCaptureChildAge(child.birthdate) : '';
 
   return (
     <View style={styles.root}>
-      <StatusBar style="light" />
+      <StatusBar style="dark" />
 
       <Animated.View
         style={[
@@ -551,180 +453,174 @@ export default function CapturerScreen() {
           },
         ]}
       >
-        {/*
-          Ne pas utiliser marginTop négatif (safe area) : la scène onglet clippe le haut —
-          une partie du hero disparaissait hors écran.
-        */}
         <ScrollView
-          style={styles.captureScrollView}
-          contentContainerStyle={[styles.captureScrollContent, { minHeight: layoutH }]}
+          style={styles.captureScroll}
+          contentContainerStyle={[
+            styles.captureScrollContent,
+            { paddingBottom: captureBottomReserve + verticalScale(20) },
+          ]}
           showsVerticalScrollIndicator={false}
-          bounces
-          alwaysBounceVertical={Platform.OS === 'ios'}
-          keyboardShouldPersistTaps="handled"
-          scrollEventThrottle={32}
+          bounces={false}
         >
-        <View style={[styles.captureCardWrap, { minHeight: layoutH }]}>
-          <View style={[styles.captureCard, { minHeight: layoutH }]}>
-            <View style={[styles.captureHeroSection, { height: captureHeroHeight }]}>
-              <TouchableOpacity
-                activeOpacity={0.92}
-                onPress={openEditChild}
-                style={StyleSheet.absoluteFillObject}
-                accessibilityRole="button"
-                accessibilityLabel="Modifier le profil de l'enfant"
-              >
-                {photoUri ? (
-                  <CaptureHeroImageStack
-                    photoUri={photoUri}
-                    reactKey={`capture-hero-${child.id}-${child.updated_at}`}
-                  />
-                ) : (
-                  <View style={[StyleSheet.absoluteFillObject, styles.heroPlaceholder]}>
-                    <Text style={styles.heroPlaceholderText}>{childDisplayInitial(child.name)}</Text>
-                  </View>
-                )}
-                <LinearGradient
-                  colors={[...HERO_TOP_BLACK_FADE]}
-                  locations={[0, 0.5, 1]}
-                  pointerEvents="none"
-                  style={[styles.captureHeroTopBlackFade, { height: captureHeroTopFadeH }]}
-                />
-              </TouchableOpacity>
-
-              <View
-                style={[
-                  styles.captureCardHeader,
-                  {
-                    paddingTop: insets.top + verticalScale(4),
-                    transform: [{ translateY: CAPTURE_HEADER_LOGO_MENU_TRANSLATE_Y }],
-                  },
-                ]}
-                pointerEvents="box-none"
-              >
-                <PetitmoLogoManuscrit
-                  width={captureLogoW}
-                  height={captureLogoH}
-                  color="#FFFFFF"
-                  shadow
-                />
-                <TouchableOpacity
-                  style={styles.captureHeaderMenuHit}
-                  onPress={() => router.push('/parent-space')}
-                  activeOpacity={0.72}
-                  accessibilityRole="button"
-                  accessibilityLabel="Menu"
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                >
-                  <Menu size={headerMenuIconSize} color={THEME.textPrimary} strokeWidth={2} />
-                </TouchableOpacity>
-              </View>
-
-              <LinearGradient
-                colors={[...HERO_BOTTOM_BLACK_FADE]}
-                locations={[0, 0.45, 1]}
-                pointerEvents="none"
-                style={[styles.captureHeroBottomBlackFade, { height: captureHeroBottomFadeH }]}
-              />
-
-              <View style={styles.captureHeroTitleOverlay} pointerEvents="none">
-                <View style={styles.captureTitleBlock} accessibilityRole="header">
-                  <View
-                    style={[
-                      styles.captureTitleLine1Row,
-                      compact && styles.captureTitleLine1RowCompact,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.captureTitleLine1,
-                        compact && styles.captureTitleLine1Compact,
-                        captureTitleFont('400'),
-                      ]}
-                    >
-                      Quel souvenir pour{' '}
-                    </Text>
-                    <View style={styles.captureTitleNameHeartRow}>
-                      <Text
-                        style={[
-                          styles.captureTitleLine1,
-                          compact && styles.captureTitleLine1Compact,
-                          captureTitleFont('400'),
-                        ]}
-                      >
-                        {childGivenName || 'l’enfant'}
-                      </Text>
-                      <Heart
-                        size={scale(compact ? 13 : 16)}
-                        color={THEME.brandPrimary}
-                        fill={THEME.brandPrimary}
-                        strokeWidth={1.6}
-                        style={styles.captureTitleHeart}
-                      />
-                    </View>
-                  </View>
-
-                  <View style={styles.captureTitleLine2Row}>
-                    <Text
-                      style={[
-                        styles.captureTitleLine2Bold,
-                        compact && styles.captureTitleLine2BoldCompact,
-                        captureTitleFont('400'),
-                      ]}
-                    >
-                      <Text style={[styles.captureTitleTodayEmphasis, captureTitleFont('700')]}>
-                        aujourd&apos;hui
-                      </Text>
-                      <Text> ?</Text>
-                    </Text>
-                  </View>
-                </View>
-              </View>
-            </View>
-
-            <View
+          <View
+            style={[
+              styles.capturePageHeader,
+              { paddingTop: insets.top + verticalScale(8) },
+            ]}
+          >
+            <Text
               style={[
-                styles.captureContentWhite,
-                {
-                  minHeight: captureWhiteMinHeight,
-                  paddingHorizontal: scale(20),
-                  paddingBottom: captureTabBarReserve,
-                },
+                styles.captureHeaderDate,
+                captureTitleFont ? { fontFamily: captureTitleFont } : { fontWeight: '600' },
               ]}
+              accessibilityRole="header"
             >
-              <View style={styles.captureCtaZone}>
-                <View style={styles.captureCtaBlock}>
-                  <View style={styles.capturePrimaryWriteWrap}>
-                    <CapturePrimaryWriteButton
-                      title="Écrire"
-                      fontFamilyBold={dmSans700}
-                      onPress={() => handleCaptureCtaPress('/write')}
-                    />
-                  </View>
-
-                  <View style={styles.captureSecondaryList}>
-                    <CaptureSecondaryRow
-                      icon={<ImagesIcon size={scale(28)} {...CAPTURE_PHOSPHOR_SECONDARY} />}
-                      labelBold="Importer"
-                      labelSuffix=" des photos ou vidéos"
-                      fontFamilyBold={dmSans700}
-                      fontFamilyRegular={dmSans}
-                      onPress={() => handleCaptureCtaPress('/import-media')}
-                    />
-                    <CaptureSecondaryRow
-                      icon={<MicrophoneIcon size={scale(28)} {...CAPTURE_PHOSPHOR_SECONDARY} />}
-                      labelBold="Enregistrer"
-                      labelSuffix=" sa voix ou la votre"
-                      fontFamilyBold={dmSans700}
-                      fontFamilyRegular={dmSans}
-                      onPress={() => handleCaptureCtaPress('/record-voice')}
-                    />
-                  </View>
-                </View>
-              </View>
+              {captureHeaderDate}
+            </Text>
+            <View style={styles.capturePageHeaderRight}>
+              <PetitmoLogoManuscrit
+                width={captureLogoW}
+                height={captureLogoH}
+                color={THEME.textPrimary}
+              />
+              <TouchableOpacity
+                style={styles.captureHeaderMenuHit}
+                onPress={() => router.push('/parent-space')}
+                activeOpacity={0.72}
+                accessibilityRole="button"
+                accessibilityLabel="Menu"
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Menu size={headerMenuIconSize} color={THEME.textPrimary} strokeWidth={2} />
+              </TouchableOpacity>
             </View>
           </View>
-        </View>
+
+          <View
+            style={[
+              styles.capturePhotoBleed,
+              compact && styles.capturePhotoBleedCompact,
+            ]}
+          >
+          <TouchableOpacity
+            activeOpacity={0.92}
+            onPress={openEditChild}
+            style={[
+              styles.capturePhotoCard,
+              compact && styles.capturePhotoCardCompact,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Modifier le profil de l'enfant"
+          >
+            {photoUri ? (
+              <CaptureHeroImageStack
+                photoUri={photoUri}
+                reactKey={`capture-hero-${child.id}-${child.updated_at}`}
+              />
+            ) : (
+              <View style={[StyleSheet.absoluteFillObject, styles.heroPlaceholder]}>
+                <Text style={styles.heroPlaceholderText}>{childDisplayInitial(child.name)}</Text>
+              </View>
+            )}
+            <View style={styles.capturePhotoPillsBar} pointerEvents="none">
+              <CapturePhotoGlassPill
+                label={childGivenName || 'Enfant'}
+                labelFontFamily={captureSubtitleFont}
+                align="left"
+              />
+              {childAgeLabel ? (
+                <CapturePhotoGlassPill
+                  label={childAgeLabel}
+                  labelFontFamily={captureSubtitleFont}
+                  align="right"
+                />
+              ) : null}
+            </View>
+            <LinearGradient
+              colors={[...CAPTURE_PHOTO_TAGLINE_GRADIENT]}
+              locations={[0, 0.5, 1]}
+              pointerEvents="none"
+              style={styles.capturePhotoTaglineGradient}
+            />
+            <View style={styles.capturePhotoTaglineWrap} pointerEvents="none">
+              <Text
+                style={[
+                  styles.capturePhotoTagline,
+                  compact && styles.capturePhotoTaglineCompact,
+                  capturePhotoTaglineFont ? { fontFamily: capturePhotoTaglineFont } : null,
+                ]}
+              >
+                {CAPTURE_PHOTO_TAGLINE}
+              </Text>
+            </View>
+          </TouchableOpacity>
+          </View>
+
+          <View style={styles.captureContentSection} accessibilityRole="header">
+            <Text
+              style={[
+                styles.captureTitle,
+                captureTitleFont ? { fontFamily: captureTitleFont } : { fontWeight: '600' },
+              ]}
+            >
+              Quel souvenir pour {childGivenName || "l'enfant"} aujourd&apos;hui ?
+            </Text>
+            <Text
+              style={[
+                styles.captureSubtitle,
+                compact && styles.captureSubtitleCompact,
+                captureSubtitleFont ? { fontFamily: captureSubtitleFont } : null,
+              ]}
+            >
+              Écris, importe photos ou vidéos ou enregistre
+            </Text>
+          </View>
+
+          <View style={[styles.captureCtaRow, compact && styles.captureCtaRowCompact]}>
+            <CaptureDiscCta
+              label="Enregistrer"
+              labelFontFamily={captureCtaLabelFont}
+              accessibilityLabel="Enregistrer un audio"
+              discColor={THEME.captureDiscCtaBackground}
+              icon={
+                <MicIcon
+                  size={compact ? CAPTURE_CTA_MIC_ICON_SIZE_COMPACT : CAPTURE_CTA_MIC_ICON_SIZE}
+                  color="#FFFFFF"
+                />
+              }
+              onPress={() => handleCaptureCtaPress('/record-voice')}
+              compact={compact}
+              haptic="light"
+            />
+            <CaptureDiscCta
+              label="Écrire"
+              labelFontFamily={captureCtaLabelFont}
+              discColor={THEME.captureDiscCtaBackground}
+              icon={
+                <PenIcon
+                  size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
+                  color="#FFFFFF"
+                />
+              }
+              onPress={() => handleCaptureCtaPress('/write')}
+              compact={compact}
+            />
+            <CaptureDiscCta
+              label="Importer"
+              labelFontFamily={captureCtaLabelFont}
+              accessibilityLabel="Importer des photos ou vidéos"
+              discColor={THEME.captureDiscCtaBackground}
+              icon={
+                <ImageImportIcon
+                  size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
+                  color="#FFFFFF"
+                />
+              }
+              onPress={() => handleCaptureCtaPress('/import-media')}
+              compact={compact}
+              haptic="light"
+            />
+          </View>
         </ScrollView>
       </Animated.View>
     </View>
@@ -745,29 +641,36 @@ const styles = StyleSheet.create({
     flex: 1,
     width: SCREEN_W,
     minHeight: 0,
-    backgroundColor: THEME.bg,
+    backgroundColor: THEME.captureScreenBg,
   },
-  /** Scroll vertical léger sur tout l’écran Capturer (la tab bar reste flottante au-dessus, hors de cet écran). */
-  captureScrollView: {
+  captureScroll: {
     flex: 1,
-    minHeight: 0,
+    backgroundColor: THEME.captureScreenBg,
   },
   captureScrollContent: {
     flexGrow: 1,
+    paddingHorizontal: CAPTURE_CONTENT_PADDING_H,
   },
-  captureCardHeader: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
+  capturePageHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: scale(16),
-    paddingBottom: verticalScale(10),
-    backgroundColor: 'transparent',
-    zIndex: 6,
-    pointerEvents: 'box-none',
+    marginBottom: verticalScale(12),
+    paddingBottom: verticalScale(4),
+  },
+  captureHeaderDate: {
+    fontSize: CAPTURE_HEADER_DATE_FONT_SIZE,
+    lineHeight: CAPTURE_HEADER_DATE_LINE_HEIGHT,
+    color: THEME.textPrimary,
+    letterSpacing: -0.3,
+    flexShrink: 1,
+    ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
+  },
+  capturePageHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: scale(10),
+    flexShrink: 0,
   },
   captureHeaderMenuHit: {
     width: scale(40),
@@ -775,212 +678,164 @@ const styles = StyleSheet.create({
     borderRadius: scale(20),
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.92)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(0, 0, 0, 0.06)',
+    backgroundColor: 'rgba(0, 0, 0, 0.06)',
   },
-  captureCardWrap: {
-    flex: 1,
-    minHeight: 0,
-    paddingHorizontal: CAPTURE_CARD_MARGIN_H,
-    paddingTop: 0,
-    paddingBottom: 0,
+  capturePhotoBleed: {
+    width: SCREEN_W,
+    marginLeft: -CAPTURE_CONTENT_PADDING_H,
+    paddingHorizontal: CAPTURE_PHOTO_EDGE_PADDING_H,
+    marginBottom: verticalScale(22),
   },
-  captureCard: {
-    position: 'relative',
-    flex: 1,
-    minHeight: 0,
-    flexDirection: 'column',
-    borderRadius: 0,
-    overflow: 'hidden',
-    backgroundColor: THEME.bg,
+  capturePhotoBleedCompact: {
+    marginBottom: verticalScale(16),
   },
-  captureHeroSection: {
+  capturePhotoCard: {
     width: '100%',
+    aspectRatio: CAPTURE_PHOTO_CARD_ASPECT,
+    borderRadius: CAPTURE_PHOTO_CARD_RADIUS,
     overflow: 'hidden',
-    position: 'relative',
     backgroundColor: '#000',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: verticalScale(8) },
+        shadowOpacity: 0.12,
+        shadowRadius: scale(16),
+      },
+      android: {
+        elevation: 6,
+      },
+      default: {},
+    }),
   },
-  captureHeroTopBlackFade: {
+  capturePhotoCardCompact: {
+    aspectRatio: CAPTURE_PHOTO_CARD_ASPECT_COMPACT,
+  },
+  capturePhotoPillsBar: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 10,
-    elevation: 10,
+    top: scale(12),
+    left: scale(12),
+    right: scale(12),
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    zIndex: 4,
+    gap: scale(8),
   },
-  captureHeroBottomBlackFade: {
+  capturePhotoPill: {
+    flexShrink: 1,
+    maxWidth: '48%',
+    borderRadius: scale(999),
+    overflow: 'hidden',
+    paddingHorizontal: scale(14),
+    paddingVertical: verticalScale(7),
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.5)',
+  },
+  capturePhotoPillFallback: {
+    backgroundColor: 'rgba(255, 255, 255, 0.28)',
+  },
+  capturePhotoPillText: {
+    fontSize: scale(12),
+    lineHeight: scale(16),
+    fontWeight: '600',
+    color: '#FFFFFF',
+    textAlign: 'left',
+    ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
+  },
+  capturePhotoPillTextRight: {
+    textAlign: 'right',
+  },
+  capturePhotoTaglineGradient: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
-    zIndex: 11,
-    elevation: 11,
+    height: '46%',
+    zIndex: 2,
   },
-  captureHeroTitleOverlay: {
+  capturePhotoTaglineWrap: {
     position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 12,
-    elevation: 12,
-    paddingHorizontal: scale(20),
-    paddingBottom: verticalScale(14),
-    paddingTop: verticalScale(8),
-    alignItems: 'center',
+    left: scale(16),
+    right: scale(16),
+    bottom: verticalScale(18),
+    zIndex: 3,
   },
-  captureContentWhite: {
-    width: '100%',
-    flex: 1,
-    minHeight: 0,
-    backgroundColor: THEME.bg,
-    alignItems: 'stretch',
-  },
-  captureTitleBlock: {
-    alignItems: 'center',
-    maxWidth: '100%',
-  },
-  /** Zone CTA sous le hero — centrée verticalement dans le bandeau blanc. */
-  captureCtaZone: {
-    flex: 1,
-    minHeight: 0,
-    justifyContent: 'center',
-    alignItems: 'stretch',
-    paddingTop: verticalScale(8),
-  },
-  captureCtaBlock: {
-    alignItems: 'stretch',
-    alignSelf: 'center',
-    width: '100%',
-  },
-  captureTitleLine1Row: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: verticalScale(3),
-  },
-  captureTitleLine1RowCompact: {
-    marginBottom: verticalScale(2),
-  },
-  captureTitleNameHeartRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: scale(5),
-  },
-  captureTitleLine1: {
-    textAlign: 'center',
-    fontSize: scale(23),
-    lineHeight: scale(29),
+  capturePhotoTagline: {
+    fontSize: CAPTURE_PHOTO_TAGLINE_FONT_SIZE,
+    lineHeight: CAPTURE_PHOTO_TAGLINE_LINE_HEIGHT,
     color: '#FFFFFF',
-    letterSpacing: -0.35,
-    textShadowColor: 'rgba(0,0,0,0.35)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
+    textAlign: 'left',
+    letterSpacing: 0.1,
+    ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
   },
-  captureTitleLine1Compact: {
-    fontSize: scale(20),
-    lineHeight: scale(26),
+  capturePhotoTaglineCompact: {
+    fontSize: CAPTURE_PHOTO_TAGLINE_FONT_SIZE,
+    lineHeight: CAPTURE_PHOTO_TAGLINE_LINE_HEIGHT,
   },
-  captureTitleLine2Row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexWrap: 'wrap',
-    marginBottom: 0,
+  captureContentSection: {
+    width: '100%',
+    alignItems: 'flex-start',
+    marginBottom: verticalScale(20),
   },
-  captureTitleLine2Bold: {
-    fontSize: scale(23),
-    lineHeight: scale(29),
-    color: '#FFFFFF',
-    letterSpacing: -0.35,
-    textShadowColor: 'rgba(0,0,0,0.35)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
-  },
-  captureTitleLine2BoldCompact: {
-    fontSize: scale(20),
-    lineHeight: scale(26),
-  },
-  /** « aujourd'hui » en bold sur le hero. */
-  captureTitleTodayEmphasis: {
-    letterSpacing: -0.35,
-  },
-  captureTitleHeart: {
-    marginTop: verticalScale(1),
-  },
-  capturePrimaryWriteWrap: {
-    alignItems: 'center',
-    marginBottom: CAPTURE_CTA_GAP,
-  },
-  capturePrimaryWriteBtn: {
-    minWidth: Math.min(scale(300), SCREEN_W - scale(40)),
-    width: '88%',
-    maxWidth: scale(340),
-    backgroundColor: CAPTURE_WRITE_CTA_BACKGROUND,
-    borderRadius: PETITMO_CTA_BORDER_RADIUS,
-    paddingVertical: verticalScale(14),
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...PETITMO_CTA_SOFT_ELEVATION,
-  },
-  capturePrimaryWritePencil: {
-    marginRight: scale(8),
-  },
-  /** Compense le crayon à gauche pour centrer visuellement « Écrire » dans le bouton. */
-  capturePrimaryWriteBtnText: {
-    fontSize: scale(17),
-    color: CAPTURE_WRITE_CTA_FOREGROUND,
+  captureTitle: {
+    fontSize: CAPTURE_TITLE_FONT_SIZE,
+    lineHeight: CAPTURE_TITLE_LINE_HEIGHT,
+    color: THEME.textPrimary,
+    textAlign: 'left',
+    alignSelf: 'stretch',
     letterSpacing: -0.2,
-    paddingRight: scale(30),
+    ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
   },
-  captureSecondaryList: {
-    alignSelf: 'center',
-    width: '88%',
-    maxWidth: scale(340),
-    minWidth: Math.min(scale(300), SCREEN_W - scale(40)),
-    gap: CAPTURE_CTA_GAP,
+  captureSubtitle: {
+    marginTop: verticalScale(6),
+    fontSize: CAPTURE_SUBTITLE_FONT_SIZE,
+    lineHeight: CAPTURE_SUBTITLE_LINE_HEIGHT,
+    color: THEME.textSecondary,
+    textAlign: 'left',
+    alignSelf: 'stretch',
+    letterSpacing: 0,
+    ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
   },
-  captureSecondaryRow: {
-    width: '100%',
+  captureSubtitleCompact: {
+    marginTop: verticalScale(5),
+  },
+  captureCtaRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: verticalScale(10),
-    paddingHorizontal: scale(12),
-    borderRadius: PETITMO_CTA_BORDER_RADIUS,
-    borderWidth: PETITMO_CTA_BORDER_WIDTH,
-    borderColor: CAPTURE_WRITE_CTA_BORDER,
-    backgroundColor: THEME.bg,
-    ...PETITMO_CTA_SOFT_ELEVATION,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    gap: scale(24),
+    width: '100%',
+    paddingBottom: verticalScale(8),
   },
-  captureSecondaryIconWrap: {
-    width: scale(48),
+  captureCtaRowCompact: {
+    gap: scale(18),
+  },
+  captureCtaTouch: {
+    alignItems: 'center',
+    gap: verticalScale(8),
+    maxWidth: CAPTURE_CTA_SIZE + scale(16),
+    paddingHorizontal: scale(6),
+    paddingTop: verticalScale(8),
+  },
+  captureCtaDisc: {
     alignItems: 'center',
     justifyContent: 'center',
   },
-  captureSecondaryTextCol: {
-    flex: 1,
-    minWidth: 0,
-    paddingLeft: scale(4),
+  captureCtaLabel: {
+    fontSize: scale(12),
+    lineHeight: scale(14),
+    color: THEME.captureCtaLabelColor,
+    letterSpacing: 0.15,
+    textAlign: 'center',
+    maxWidth: '100%',
+    paddingHorizontal: scale(2),
+    ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
   },
-  captureSecondaryLabelRow: {
-    fontSize: scale(15),
-    lineHeight: scale(20),
-    color: THEME.textPrimary,
-    letterSpacing: -0.25,
-  },
-  captureSecondaryLabelBold: {
-    fontSize: scale(15),
-    lineHeight: scale(20),
-    color: THEME.textPrimary,
-    letterSpacing: -0.25,
-  },
-  captureSecondaryLabel: {
-    fontSize: scale(15),
-    lineHeight: scale(20),
-    color: THEME.textPrimary,
-    letterSpacing: -0.25,
+  captureCtaLabelCompact: {
+    fontSize: scale(11),
+    lineHeight: scale(13),
   },
   heroImageCover: {
     width: '100%',
@@ -1057,15 +912,18 @@ function CaptureHeroImageStack({ photoUri, reactKey }: CaptureHeroImageStackProp
             resizeMode="cover"
           />
         ) : (
-          <ColorMatrix matrix={CAPTURE_HERO_COLOR_MATRIX} style={StyleSheet.absoluteFillObject}>
-            <ExpoImage
-              source={{ uri: photoUri }}
-              style={[StyleSheet.absoluteFillObject, styles.heroImageCover]}
-              contentFit="cover"
-              contentPosition={CAPTURE_HERO_IMAGE_CONTENT_POSITION}
-              accessibilityIgnoresInvertColors
-            />
-          </ColorMatrix>
+          <>
+            <ColorMatrix matrix={CAPTURE_HERO_COLOR_MATRIX} style={StyleSheet.absoluteFillObject}>
+              <ExpoImage
+                source={{ uri: photoUri }}
+                style={[StyleSheet.absoluteFillObject, styles.heroImageCover]}
+                contentFit="cover"
+                contentPosition={CAPTURE_HERO_IMAGE_CONTENT_POSITION}
+                accessibilityIgnoresInvertColors
+              />
+            </ColorMatrix>
+            <CaptureHeroSkiaPhoto photoUri={photoUri} />
+          </>
         )}
       </Animated.View>
     </View>

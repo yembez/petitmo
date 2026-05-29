@@ -3,6 +3,8 @@ import type { Memory } from '@/types/local';
 export type MemoryViewerSessionPayload = {
   memories: Memory[];
   initialIndex: number;
+  /** Index dans l’album (souvenir photo multi-images) à l’ouverture depuis le fil. */
+  initialAlbumPhotoIndex?: number;
 };
 
 let session: MemoryViewerSessionPayload | null = null;

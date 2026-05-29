@@ -1,34 +1,54 @@
 import { verticalScale } from '@/utils/responsive';
 
-/** Part de la hauteur utile pour le hero (écran compact, hauteur utile sous 600 pt). */
-export const CAPTURE_HERO_HEIGHT_RATIO_COMPACT = 0.53;
-/** Part de la hauteur utile pour le hero (écrans standards). */
-export const CAPTURE_HERO_HEIGHT_RATIO = 0.56;
-const CAPTURE_HERO_MAX_HEIGHT = verticalScale(580);
-
 /**
- * Ancrage `cover` du hero — cadre très vertical, visage / buste légèrement au-dessus du centre.
+ * Ancrage `cover` du hero — visage / buste légèrement au-dessus du centre.
  * Aligné entre l’écran Capturer et `CropModal`.
  */
-export const CAPTURE_HERO_IMAGE_CONTENT_POSITION = { top: '30%', left: '50%' } as const;
+export const CAPTURE_HERO_IMAGE_CONTENT_POSITION = { top: '32%', left: '50%' } as const;
 
 /** `object-position` pour le hero web (`ImageBackground`). */
-export const CAPTURE_HERO_IMAGE_OBJECT_POSITION = 'center 30%';
+export const CAPTURE_HERO_IMAGE_OBJECT_POSITION = 'center 32%';
 
 /**
- * Métrique du bloc photo hero de l’onglet **Capturer** (même formule que `app/(tabs)/index.tsx`).
- * `computeCaptureHeroCardInnerPhotoSize` : même ratio que le viewport → aligné avec `CropModal`.
- *
- * Le ratio largeur/hauteur utilise **`heroH` seul** (sans ajouter `insetTop` à `height`) : sinon le
- * cadre cible est plus « portrait » que le hero réellement affiché dans la carte → `cover` rogne
- * davantage (haut/bas) par rapport à l’éditeur de profil.
+ * Viewport d’affichage + recadrage profil = zone photo Capturer (≈ 70 % hauteur écran).
+ * Même ratio que `capturePhotoZone` dans `app/(tabs)/index.tsx` et `CropModal`.
  */
 export type CaptureHeroViewport = {
   width: number;
   height: number;
+  /** Hauteur utile = zone photo (pas l’écran entier). */
   heroH: number;
 };
 
+/** Zone photo (titre en overlay en bas) — le bandeau marron ne sert qu’aux CTA. */
+export const CAPTURE_PHOTO_ZONE_HEIGHT_RATIO = 0.7;
+
+/** Bandeau marron CTA uniquement. */
+export const CAPTURE_BROWN_PANEL_HEIGHT_RATIO = 1 - CAPTURE_PHOTO_ZONE_HEIGHT_RATIO;
+
+/** Hauteur du fondu beige sur le bas de la zone photo (sous le titre). */
+export const CAPTURE_PHOTO_GRADIENT_HEIGHT_RATIO = 0.42;
+
+export function computeCaptureBrownPanelHeight(layoutHeight: number): number {
+  return Math.round(layoutHeight * CAPTURE_BROWN_PANEL_HEIGHT_RATIO);
+}
+
+/** Hauteur photo = écran moins bandeau — bord bas photo = bord haut bandeau. */
+export function computeCapturePhotoZoneHeight(layoutHeight: number): number {
+  const brownH = computeCaptureBrownPanelHeight(layoutHeight);
+  return Math.max(verticalScale(240), layoutHeight - brownH);
+}
+
+export function computeCapturePhotoGradientHeight(photoZoneHeight: number): number {
+  return Math.max(
+    verticalScale(140),
+    Math.round(photoZoneHeight * CAPTURE_PHOTO_GRADIENT_HEIGHT_RATIO),
+  );
+}
+
+/**
+ * Ratio largeur/hauteur du crop profil = zone photo Capturer (70 % écran, pleine largeur).
+ */
 export function computeCaptureHeroPhotoViewport(
   frameHeight: number,
   windowHeight: number,
@@ -37,21 +57,17 @@ export function computeCaptureHeroPhotoViewport(
 ): CaptureHeroViewport {
   const usableH = Math.max(280, windowHeight);
   const layoutH = Math.min(frameHeight > 1 ? frameHeight : usableH, usableH);
-  const compact = layoutH < 600;
-  const heroH = Math.min(
-    layoutH * (compact ? CAPTURE_HERO_HEIGHT_RATIO_COMPACT : CAPTURE_HERO_HEIGHT_RATIO),
-    CAPTURE_HERO_MAX_HEIGHT,
-  );
+  const photoZoneH = computeCapturePhotoZoneHeight(layoutH);
   return {
     width: screenWidth,
-    height: heroH,
-    heroH,
+    height: photoZoneH,
+    heroH: photoZoneH,
   };
 }
 
 /**
- * Taille du bloc photo quand le hero est dans une carte avec marges horizontales
- * (même ratio largeur/hauteur que le viewport plein écran → parité avec `CropModal`).
+ * Taille du bloc photo dans une carte avec marges horizontales
+ * (même ratio que la zone photo Capturer / `CropModal`).
  */
 export function computeCaptureHeroCardInnerPhotoSize(
   viewport: CaptureHeroViewport,
