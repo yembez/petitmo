@@ -61,7 +61,7 @@ export type GenerateBookPdfPayload = {
    * Flux ticket (`init-export`) : enfant et médias hors table `children` / `memories`.
    * Requis si l’auth est un JWT ticket `export_pdf`.
    */
-  guestChild?: { name: string; photo_url?: string | null };
+  guestChild?: { name: string; photo_url?: string | null; birthdate?: string | null };
   guestMemories?: GuestMemoryForPdfPayload[];
 };
 

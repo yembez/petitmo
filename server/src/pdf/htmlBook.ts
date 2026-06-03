@@ -13,7 +13,7 @@ import { clampAudioBookAnnotation } from './audioBookAnnotation';
 import {
   audioWaveformSvg,
   bookPdfLocationLabel,
-  dateFrCaps,
+  dateWithAgeCaps,
   normalizeQuoteBodyLikeMaquette,
   quoteFitLevelFromBody,
 } from './maquetteAlign';
@@ -171,15 +171,20 @@ function pageChapter(month: string, chapterNum: number, chapterTitle: string, pa
 </div>`;
 }
 
-function pagePhotoFull(m: MemoryRow, rot: number, pageNum: number, crop: PhotoCrop | undefined, printBleed: boolean): string {
+function pagePhotoFull(
+  m: MemoryRow,
+  rot: number,
+  pageNum: number,
+  crop: PhotoCrop | undefined,
+  birthdate: string | null | undefined
+): string {
   const src = imgAttr(photoMainUrl(m));
   const captionRaw = sanitizeText((m.content ?? '').trim());
   const rotCss = rot ? `transform: rotate(${rot}deg); transform-origin: center;` : '';
   const captionHtml = captionRaw ? romanHtml(captionRaw) : '';
-  const imgCls = printBleed ? 'pf-image bleed-x' : 'pf-image';
   const locLabel = bookPdfLocationLabel(m.location);
   return `<div class="page photo-full-stack">
-  <div class="${imgCls}">
+  <div class="pf-image">
     ${
       src
         ? `<div class="crop-frame" style="width:100%;height:100%;"><img class="crop-img" src="${src}" alt="" style="${cropCss(crop)}${rotCss}" /></div>`
@@ -188,7 +193,7 @@ function pagePhotoFull(m: MemoryRow, rot: number, pageNum: number, crop: PhotoCr
   </div>
   <div class="pf-footer">
     <div class="pf-meta-row">
-      <div class="pf-meta">${esc(dateFrCaps(memoryBookDisplayDateIso(m)))}</div>
+      <div class="pf-meta">${esc(dateWithAgeCaps(memoryBookDisplayDateIso(m), birthdate))}</div>
       ${locLabel ? `<div class="pf-meta pf-meta-loc">${esc(locLabel)}</div>` : ''}
     </div>
     ${captionHtml ? `<div class="pf-caption body">${captionHtml}</div>` : ''}
@@ -197,21 +202,26 @@ function pagePhotoFull(m: MemoryRow, rot: number, pageNum: number, crop: PhotoCr
 </div>`;
 }
 
-function pagePhotoNote(m: MemoryRow, rot: number, pageNum: number, crop: PhotoCrop | undefined, printBleed: boolean): string {
+function pagePhotoNote(
+  m: MemoryRow,
+  rot: number,
+  pageNum: number,
+  crop: PhotoCrop | undefined,
+  birthdate: string | null | undefined
+): string {
   const src = imgAttr(photoMainUrl(m));
   const legend = clampWithEllipsis(sanitizeText((m.content ?? '').trim()), 420);
   const rotCss = rot ? `transform: rotate(${rot}deg); transform-origin: center;` : '';
-  const pnCls = printBleed ? 'pn-image bleed-x' : 'pn-image';
   const locLabel = bookPdfLocationLabel(m.location);
   return `<div class="page photo-note">
-  <div class="${pnCls}">
+  <div class="pn-image">
     ${src
       ? `<div class="crop-frame" style="width:100%;height:100%;"><img class="crop-img" src="${src}" alt="" style="${cropCss(crop)}${rotCss}" /></div>`
       : '<div class="placeholder" style="width:100%;height:100%;"></div>'}
   </div>
   <div class="pn-text">
     <div class="pn-meta-row">
-      <div class="label">${esc(dateFrCaps(memoryBookDisplayDateIso(m)))}</div>
+      <div class="label">${esc(dateWithAgeCaps(memoryBookDisplayDateIso(m), birthdate))}</div>
       ${locLabel ? `<div class="label pn-meta-loc">${esc(locLabel)}</div>` : ''}
     </div>
     ${legend ? `<div class="body">${romanHtml(legend)}</div>` : ''}
@@ -220,7 +230,11 @@ function pagePhotoNote(m: MemoryRow, rot: number, pageNum: number, crop: PhotoCr
 </div>`;
 }
 
-function pageQuote(m: MemoryRow, pageNum: number): string {
+function pageQuote(
+  m: MemoryRow,
+  pageNum: number,
+  birthdate: string | null | undefined
+): string {
   const raw = clampChars(sanitizeText((m.content ?? '').trim()), 600);
   const body = normalizeQuoteBodyLikeMaquette(raw);
   const fitLevel = quoteFitLevelFromBody(body);
@@ -242,7 +256,7 @@ function pageQuote(m: MemoryRow, pageNum: number): string {
         <div class="quote-rule-seg"></div>
       </div>
       <div class="quote-meta-row">
-        <div class="label">${esc(dateFrCaps(memoryBookDisplayDateIso(m)))}</div>
+        <div class="label">${esc(dateWithAgeCaps(memoryBookDisplayDateIso(m), birthdate))}</div>
         ${locLabel ? `<div class="label quote-meta-loc">${esc(locLabel)}</div>` : ''}
       </div>
     </div>
@@ -257,17 +271,16 @@ function pageAudio(
   pageNum: number,
   rot: number,
   crop: PhotoCrop | undefined,
-  printBleed: boolean
+  birthdate: string | null | undefined
 ): string {
   const titleRaw = clampAudioBookAnnotation(sanitizeText((m.content ?? '').trim()));
   const dur = fmtDuration(m.duration);
   const titleHtml = titleRaw ? romanHtml(titleRaw) : '';
   const coverUrl = imgAttr(m.voice_cover_url);
   const rotCss = rot ? `transform: rotate(${rot}deg); transform-origin: center;` : '';
-  const pnCls = printBleed ? 'pn-image bleed-x' : 'pn-image';
   const locLabel = bookPdfLocationLabel(m.location);
   return `<div class="page audio audio-note-layout">
-  <div class="${pnCls}">
+  <div class="pn-image">
     ${
       coverUrl
         ? `<div class="crop-frame" style="width:100%;height:100%;"><img class="crop-img" src="${coverUrl}" alt="" style="${cropCss(crop)}${rotCss}" /></div>`
@@ -281,7 +294,7 @@ function pageAudio(
         <span class="label audio-type-label">Vocal</span>
       </div>
       <div class="audio-meta-right">
-        <span class="label audio-meta-date">${esc(dateFrCaps(memoryBookDisplayDateIso(m)))}</span>
+        <span class="label audio-meta-date">${esc(dateWithAgeCaps(memoryBookDisplayDateIso(m), birthdate))}</span>
         ${locLabel ? `<span class="label audio-meta-loc">${esc(locLabel)}</span>` : ''}
       </div>
     </div>
@@ -307,21 +320,25 @@ function pageAudio(
 </div>`;
 }
 
-function pageVideo(m: MemoryRow, qrUrl: string, pageNum: number, printBleed: boolean): string {
+function pageVideo(
+  m: MemoryRow,
+  qrUrl: string,
+  pageNum: number,
+  birthdate: string | null | undefined
+): string {
   const raw = sanitizeText((m.content ?? '').trim());
   const { title: videoTitleRaw, body: videoBodyRaw } = splitVideoTitleBody(raw);
   const vTitle = (videoTitleRaw || 'Vidéo').trim();
   const sub = videoBodyRaw.trim() ? videoBodyRaw : 'Regarde ce moment en vidéo.';
   const thumbUrl = imgAttrFirst([m.thumbnail_url, m.poster_url]);
-  const vtCls = printBleed ? 'video-thumb bleed-x' : 'video-thumb';
   const locLabel = bookPdfLocationLabel(m.location);
   return `<div class="page video">
-  <div class="${vtCls}">
+  <div class="video-thumb">
     ${thumbUrl ? `<img src="${thumbUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;" />` : '<div class="placeholder" style="width:100%;height:100%;"></div>'}
   </div>
   <div class="inner video-text-block">
     <div class="video-meta-row">
-      <div class="label">${esc(dateFrCaps(memoryBookDisplayDateIso(m)))}</div>
+      <div class="label">${esc(dateWithAgeCaps(memoryBookDisplayDateIso(m), birthdate))}</div>
       ${locLabel ? `<div class="label video-meta-loc">${esc(locLabel)}</div>` : ''}
     </div>
     <div class="video-title-line">${esc(vTitle)}</div>
@@ -367,22 +384,23 @@ function renderPage(page: BookPageServer, input: BuildBookHtmlInput, pageNum: nu
       const m = mergedMemory(raw, page.textOverride);
       const rot = page.rotation ?? 0;
       const crop = page.crop;
+      const birthdate = child.birthdate;
       switch (page.type) {
         case 'photo-full':
-          return pagePhotoFull(m, rot, pageNum, crop, printBleed);
+          return pagePhotoFull(m, rot, pageNum, crop, birthdate);
         case 'photo-note':
-          return pagePhotoNote(m, rot, pageNum, crop, printBleed);
+          return pagePhotoNote(m, rot, pageNum, crop, birthdate);
         case 'quote':
-          return pageQuote(m, pageNum);
+          return pageQuote(m, pageNum, birthdate);
         case 'audio': {
           const tok = qrTokensByMemoryId.get(id) ?? '';
           const qrTarget = tok ? `${qrBaseUrl}/${tok}` : '';
-          return pageAudio(m, qrTarget, pageNum, rot, crop, printBleed);
+          return pageAudio(m, qrTarget, pageNum, rot, crop, birthdate);
         }
         case 'video': {
           const tok = qrTokensByMemoryId.get(id) ?? '';
           const qrTarget = tok ? `${qrBaseUrl}/${tok}` : '';
-          return pageVideo(m, qrTarget, pageNum, printBleed);
+          return pageVideo(m, qrTarget, pageNum, birthdate);
         }
         default:
           return '';
@@ -431,6 +449,7 @@ function buildHtmlDocument(
   --video-thumb-h:${videoThumbHmm}mm;
   --pad-x:15mm;
   --pad-x-safe:calc(15mm + var(--bleed));
+  --visual-margin:10mm;
 }
 html { margin:0; padding:0; background:#fff; }
 body {
@@ -539,7 +558,7 @@ body.print-bleed .chapter-inner {
 .photo-full-stack { flex-direction:column; }
 .pf-image {
   width:var(--page-w); height:var(--pf-img-h); flex-shrink:0; overflow:hidden;
-  background:#F2F2F7;
+  box-sizing:border-box; padding:var(--visual-margin); background:#FFFFFF;
 }
 .pf-footer {
   flex:1; min-height:0; overflow:hidden;
@@ -567,7 +586,10 @@ body.print-bleed .pf-footer {
 .placeholder { background:#F2F2F7; }
 
 .photo-note { flex-direction:column; }
-.pn-image { width:var(--page-w); height:var(--pn-img-h); flex-shrink:0; overflow:hidden; }
+.pn-image {
+  width:var(--page-w); height:var(--pn-img-h); flex-shrink:0; overflow:hidden;
+  box-sizing:border-box; padding:var(--visual-margin); background:#FFFFFF;
+}
 .pn-text {
   flex:1; min-height:0; overflow:hidden;
   padding:4mm var(--pad-x) 14mm;
@@ -744,7 +766,10 @@ body.print-bleed .bleed-x {
 .qr { width:22mm; height:22mm; }
 
 .video { flex-direction:column; }
-.video-thumb { width:var(--page-w); height:var(--video-thumb-h); flex-shrink:0; overflow:hidden; }
+.video-thumb {
+  width:var(--page-w); height:var(--video-thumb-h); flex-shrink:0; overflow:hidden;
+  box-sizing:border-box; padding:var(--visual-margin); background:#FFFFFF;
+}
 .video-text-block {
   flex:1; min-height:0; display:flex; flex-direction:column;
   padding:5.3mm var(--pad-x) 0;

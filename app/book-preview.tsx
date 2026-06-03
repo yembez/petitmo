@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactElement,
+} from 'react';
 import {
   View,
   Text,
@@ -21,6 +29,8 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Image as ExpoImage } from 'expo-image';
 import { buildBookPages, type BookPage } from '@/src/book/BookEngine';
 import MaquetteBookPages from '@/src/book/maquette/MaquetteBookPages';
 import {
@@ -46,7 +56,15 @@ import {
 } from '@/services/bookPdfServer';
 import { BookPdfGeneratingOverlay } from '@/components/BookPdfGeneratingOverlay';
 import { GuestPdfExportModal } from '@/components/GuestPdfExportModal';
-import { parseFavoritePhotoUrls, mapPhotoUrlToThumb, getAllPhotoUrls } from '@/utils/memoryPhotos';
+import {
+  parseFavoritePhotoUrls,
+  mapPhotoUrlToThumb,
+  getAlbumCanonicalFavoriteUrls,
+  normalizeMemoryMediaUriForDisplay,
+  getPrimaryPhotoUriForBookPreview,
+  getVoiceCoverUriForBookPreview,
+  getVideoPosterUriForBookPreview,
+} from '@/utils/memoryPhotos';
 import { runBookExportPrepInBackground } from '@/services/bookExportPrep';
 import { getBookExportPrepIssues } from '@/services/bookExportPrep';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
@@ -57,9 +75,20 @@ import { canExportBookPdfViaServer } from '@/lib/digitalExportPurchase';
 import { setLastGuestExportEmail } from '@/lib/guestExportPrefs';
 import { setPendingBookOrderPdfPayload } from '@/lib/pendingBookOrderPdf';
 import { supabase } from '@/lib/supabase';
+import { THEME } from '@/constants/theme';
 
 const HEADER_H = 44;
 const BOTTOM_H = 82;
+/** Vue verticale (Phase 1) : marge latérale ; pages collées à la reliure (trait + ombres latérales). */
+const BROWSE_SIDE_PAD = 16;
+const BROWSE_PAGE_GAP = 0;
+const BROWSE_ROW_GAP = 24;
+/** Largeur de la « reliure » (dégradé d’ombre) au centre d’un spread. */
+const BROWSE_SPINE_W = 16;
+/** Largeur de l’effet de tranche/reliure sur le bord gauche de la couverture (vue spread). */
+const COVER_SPINE_W = 7;
+/** Fond du viewer : gris neutre clair, identique au fond de la page fil (`THEME.bgScreen`). */
+const BROWSE_BG = THEME.bgScreen;
 const QR_BASE = 'https://petitmo.app/m';
 const MIN_BOOK_SELECTION_KEYS = 5;
 const MAX_BOOK_SELECTION_KEYS = 80;
@@ -67,6 +96,8 @@ const MAX_BOOK_SELECTION_KEYS = 80;
 /** Aligné sur `printFrameMmFor` — ratio largeur / hauteur de la page à l’impression. */
 const BOOK_PAGE_W_MM = 154;
 const BOOK_PAGE_H_MM = 216;
+/** Marge blanche autour des visuels (photo/vidéo/audio) — parité serveur `--visual-margin`. */
+const BOOK_VISUAL_MARGIN_MM = 10;
 
 /**
  * Spread paysage : deux pages → même gabarit **A5 plein** (154×216 mm à l’échelle), comme un livre ouvert.
@@ -221,6 +252,32 @@ function memoryForMaquette(
   }
 }
 
+/** URI image principale d’une page livre (prefetch avant ouverture de l’éditeur). */
+function bookPageMainImageUri(
+  row: PageRow,
+  merge: (m: Memory) => Memory,
+  coverPhotoDisplayUri: string | null,
+): string | null {
+  const { page } = row;
+  if (page.type === 'cover') {
+    const u = coverPhotoDisplayUri?.trim();
+    return u || null;
+  }
+  const m = memoryForMaquette(page, merge);
+  if (!m) return null;
+  if (page.type === 'photo-full' || page.type === 'photo-note') {
+    return getPrimaryPhotoUriForBookPreview(m).trim() || null;
+  }
+  if (page.type === 'audio') return getVoiceCoverUriForBookPreview(m).trim() || null;
+  if (page.type === 'video') return getVideoPosterUriForBookPreview(m).trim() || null;
+  return null;
+}
+
+function prefetchBookPageImage(uri: string | null): void {
+  if (!uri) return;
+  void ExpoImage.prefetch(uri, 'memory-disk').catch(() => {});
+}
+
 function pageLabel(current: number, total: number): string {
   return `Page ${current} · ${total} pages`;
 }
@@ -237,6 +294,10 @@ export default function BookPreviewScreen() {
     DMSans_600SemiBold,
     DMSans_700Bold,
   });
+  const dm400 = fontsLoaded ? 'DMSans_400Regular' : undefined;
+  const dm500 = fontsLoaded ? 'DMSans_500Medium' : undefined;
+  const dm600 = fontsLoaded ? 'DMSans_600SemiBold' : undefined;
+  const dm700 = fontsLoaded ? 'DMSans_700Bold' : undefined;
 
   const [child, setChild] = useState<Child | null>(null);
   const [bookMemories, setBookMemories] = useState<Memory[]>([]);
@@ -248,6 +309,11 @@ export default function BookPreviewScreen() {
   const [photoCrops, setPhotoCrops] = useState<Record<string, { xPct: number; yPct: number; scale: number }>>({});
   const [imagePxCache, setImagePxCache] = useState<Record<string, { w: number; h: number }>>({});
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
+  /** Éditeur plein écran (Phase 1) : ouvert au tap sur une page de la vue verticale. */
+  const [editorOpen, setEditorOpen] = useState(false);
+  /** Contenu lourd (FlatList) monté après le 1er frame du slide — évite de bloquer l’animation. */
+  const [editorBodyReady, setEditorBodyReady] = useState(false);
+  const [editorPageIndex, setEditorPageIndex] = useState(0);
   /** Titre principal de la couverture (ligne complète, ex. « Journal de … »). */
   const [coverTitleLine, setCoverTitleLine] = useState<string | null>(null);
   const [coverPhotoUrl, setCoverPhotoUrl] = useState<string | null>(null);
@@ -273,6 +339,8 @@ export default function BookPreviewScreen() {
   } | null>(null);
 
   const listRef = useRef<FlatList<any>>(null);
+  const editorListRef = useRef<FlatList<any>>(null);
+  const editorOpenRef = useRef(false);
 
   const pages = useMemo(() => {
     if (!child) return [];
@@ -303,7 +371,6 @@ export default function BookPreviewScreen() {
    * - Entre les deux: paires (2–3), (4–5), etc. (gauche=page paire, droite=page impaire suivante)
    */
   const spreadRows = useMemo<SpreadRow[]>(() => {
-    if (!isLandscape) return [];
     if (pageRows.length === 0) return [];
 
     const out: SpreadRow[] = [];
@@ -346,7 +413,7 @@ export default function BookPreviewScreen() {
     }
 
     return out;
-  }, [isLandscape, pageRows]);
+  }, [pageRows]);
 
   const totalSlides = isLandscape ? spreadRows.length : pageRows.length;
 
@@ -363,8 +430,24 @@ export default function BookPreviewScreen() {
     screenHeight - HEADER_H - BOTTOM_H - insets.top - insets.bottom;
   const availHLandscape = screenHeight - HEADER_H - insets.top - insets.bottom;
 
+  /**
+   * Vue verticale (Phase 1, style Google Photos) : couverture seule en tête,
+   * puis doubles-pages côte à côte avec un petit espace. Pages au ratio A5 154:216.
+   */
+  const browseLeaf = useMemo(() => {
+    const availW = screenWidth - BROWSE_SIDE_PAD * 2;
+    const pageW = Math.max(1, Math.floor((availW - BROWSE_PAGE_GAP) / 2));
+    const pageH = Math.max(1, Math.round((pageW * BOOK_PAGE_H_MM) / BOOK_PAGE_W_MM));
+    return { pageW, pageH };
+  }, [screenWidth]);
+
   const signedCoverPhotoUrl = useSignedMediaUrl(coverPhotoUrl);
-  const coverPhotoDisplayUri = (signedCoverPhotoUrl ?? coverPhotoUrl ?? null)?.trim() ? (signedCoverPhotoUrl ?? coverPhotoUrl ?? null) : null;
+  const coverPhotoDisplayUriRaw = (signedCoverPhotoUrl ?? coverPhotoUrl ?? null)?.trim()
+    ? (signedCoverPhotoUrl ?? coverPhotoUrl ?? null)
+    : null;
+  const coverPhotoDisplayUri = coverPhotoDisplayUriRaw
+    ? normalizeMemoryMediaUriForDisplay(coverPhotoDisplayUriRaw)
+    : null;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -401,12 +484,15 @@ export default function BookPreviewScreen() {
         // Le titre du livre sert de titre PDF/couverture dans l’aperçu.
         setCoverTitleLine(b.title);
         const rawCover = typeof b.coverPhotoUrl === 'string' ? b.coverPhotoUrl.trim() : '';
-        // Réinstall / purge sandbox : un `file://...petitmo_memories/...` peut rester en base alors que le fichier n’existe plus.
-        if (rawCover && isProbablyStalePetitmoSandboxPath(rawCover)) {
-          const ok = await isLocalMediaUriReadable(rawCover);
-          setCoverPhotoUrl(ok ? rawCover : null);
+        if (!rawCover) {
+          setCoverPhotoUrl(null);
+        } else if (
+          isProbablyStalePetitmoSandboxPath(rawCover) &&
+          !(await isLocalMediaUriReadable(rawCover))
+        ) {
+          setCoverPhotoUrl(null);
         } else {
-          setCoverPhotoUrl(rawCover || null);
+          setCoverPhotoUrl(rawCover);
         }
         if (b.rotations) setRotations(b.rotations);
         if (b.photoCrops) setPhotoCrops(b.photoCrops);
@@ -524,8 +610,10 @@ export default function BookPreviewScreen() {
     const pageWmm = 154;
     const pageHmm = 216;
     if (pageType === 'cover') return { w: pageWmm, h: 142 };
-    if (pageType === 'photo-note' || pageType === 'audio') return { w: pageWmm, h: pageHmm * 0.6 };
-    return { w: pageWmm, h: pageHmm };
+    // Marge visuelle 10mm autour de l’image (parité serveur `--visual-margin`) : le cadre est inséré.
+    const m = BOOK_VISUAL_MARGIN_MM;
+    const bandHmm = pageType === 'photo-note' || pageType === 'audio' ? pageHmm * 0.6 : pageHmm * 0.82;
+    return { w: pageWmm - 2 * m, h: bandHmm - 2 * m };
   }
 
   const openBookCrop = useCallback(
@@ -577,8 +665,45 @@ export default function BookPreviewScreen() {
     router.replace('/(tabs)/favoris');
   }, [router, unlockOrientationPortrait]);
 
+  const openEditor = useCallback((pageIndex: number) => {
+    const safe = Math.max(0, Math.min(pageIndex, Math.max(0, pageRows.length - 1)));
+    setEditorPageIndex(safe);
+    setCurrentPageIndex(safe);
+    setEditorOpen(true);
+  }, [pageRows.length]);
+
+  const closeEditor = useCallback(() => {
+    setEditorOpen(false);
+  }, []);
+
+  // Slide natif d’abord (coque légère), puis montage de la FlatList au frame suivant.
+  useEffect(() => {
+    if (!editorOpen) {
+      setEditorBodyReady(false);
+      return;
+    }
+    const raf = requestAnimationFrame(() => setEditorBodyReady(true));
+    return () => cancelAnimationFrame(raf);
+  }, [editorOpen]);
+
+  useLayoutEffect(() => {
+    if (!editorOpen || !editorBodyReady || editorPageIndex <= 0) return;
+    editorListRef.current?.scrollToOffset({
+      offset: screenWidth * editorPageIndex,
+      animated: false,
+    });
+  }, [editorOpen, editorBodyReady, editorPageIndex, screenWidth]);
+
+  useEffect(() => {
+    editorOpenRef.current = editorOpen;
+  }, [editorOpen]);
+
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (editorOpenRef.current) {
+        setEditorOpen(false);
+        return true;
+      }
       unlockAndBack();
       return true;
     });
@@ -750,11 +875,12 @@ export default function BookPreviewScreen() {
     for (const m of allMemories) {
       if (m.type !== 'photo') continue;
       const favUrls = parseFavoritePhotoUrls(m);
-      const allUrls = favUrls.length > 0 ? favUrls : (m.is_favorite ? getAllPhotoUrls(m) : []);
+      const allUrls =
+        favUrls.length > 0 ? favUrls : m.is_favorite ? getAlbumCanonicalFavoriteUrls(m) : [];
       for (const u of allUrls) {
-        const source = u.trim();
+        const source = normalizeMemoryMediaUriForDisplay(u.trim());
         if (!source) continue;
-        const mapped = mapPhotoUrlToThumb(m, u).trim();
+        const mapped = normalizeMemoryMediaUriForDisplay(mapPhotoUrlToThumb(m, u));
         if (!mapped) continue;
         // On déduplique par source réelle (pas par thumb), pour éviter de sauvegarder un thumbnail comme couverture.
         if (seen.has(source)) continue;
@@ -926,6 +1052,133 @@ export default function BookPreviewScreen() {
       rotations,
       screenWidth,
     ]
+  );
+
+  /** Un feuillet (page) en lecture seule dans la vue verticale ; tap → éditeur plein écran. */
+  const renderBrowseLeaf = useCallback(
+    (row: PageRow, w: number, h: number) => {
+      const mem = memoryForMaquette(row.page, merge);
+      const qrUrl = mem ? `${QR_BASE}/${mem.id}` : '';
+      const showFolio = row.page.type !== 'cover' && row.page.type !== 'back-cover';
+      return (
+        <View style={styles.browseLeafCol}>
+          <View style={[styles.browseLeafShadow, { width: w, height: h }]}>
+            <Pressable
+              onPressIn={() =>
+                prefetchBookPageImage(bookPageMainImageUri(row, merge, coverPhotoDisplayUri))
+              }
+              onPress={() => openEditor(row.pageNum - 1)}
+              style={({ pressed }) => [
+                styles.browseLeafCard,
+                { width: w, height: h },
+                pressed && { opacity: 0.85 },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={`Modifier la page ${row.pageNum}`}
+            >
+              <MaquetteBookPages
+              page={row.page}
+              pageNum={row.pageNum}
+              width={w}
+              height={h}
+              child={child!}
+              memory={mem}
+              rotation={mem ? rotations[mem.id] ?? 0 : 0}
+              photoCrop={
+                mem &&
+                (row.page.type === 'photo-full' ||
+                  row.page.type === 'photo-note' ||
+                  row.page.type === 'audio')
+                  ? photoCrops[mem.id]
+                  : undefined
+              }
+              truncated={false}
+              coverYearLabel={coverYearLabel}
+              coverDisplayTitle={row.page.type === 'cover' ? (coverTitleLine ?? `Journal de ${child!.name}`) : undefined}
+              coverPhotoUri={row.page.type === 'cover' ? coverPhotoDisplayUri : null}
+              coverPhotoCrop={photoCrops.cover}
+              chapterDisplayTitle={row.page.type === 'chapter' ? (chapterTitleLine ?? undefined) : undefined}
+              onRotate={() => {}}
+              onRequestTextEdit={() => {}}
+              qrUrl={qrUrl}
+            />
+            {row.page.type === 'cover' ? (
+              <LinearGradient
+                colors={['rgba(0,0,0,0.30)', 'rgba(0,0,0,0.12)', 'rgba(0,0,0,0)']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                pointerEvents="none"
+                style={[styles.coverSpineEdge, { width: COVER_SPINE_W }]}
+              >
+                <View style={styles.coverSpineLine} pointerEvents="none" />
+              </LinearGradient>
+            ) : null}
+            </Pressable>
+          </View>
+          <Text style={[styles.browseFolio, dm400 && { fontFamily: dm400 }]}>
+            {showFolio ? String(row.pageNum) : ' '}
+          </Text>
+        </View>
+      );
+    },
+    [
+      child,
+      chapterTitleLine,
+      coverPhotoDisplayUri,
+      coverTitleLine,
+      coverYearLabel,
+      dm400,
+      merge,
+      openEditor,
+      photoCrops,
+      rotations,
+    ]
+  );
+
+  const renderVerticalSpreadItem: ListRenderItem<SpreadRow> = useCallback(
+    ({ item }) => {
+      const { pageW, pageH } = browseLeaf;
+      const isPair = Boolean(item.left && item.right);
+      if (isPair) {
+        return (
+          <View style={styles.browseRow}>
+            <View style={styles.browsePairWrap}>
+              <View style={styles.browsePairRow}>
+                {renderBrowseLeaf(item.left!, pageW, pageH)}
+                {renderBrowseLeaf(item.right!, pageW, pageH)}
+              </View>
+              {/* Reliure : ombres légères de part et d'autre + trait central. */}
+              <LinearGradient
+                colors={[
+                  'rgba(0,0,0,0)',
+                  'rgba(0,0,0,0.14)',
+                  'rgba(0,0,0,0.30)',
+                  'rgba(0,0,0,0.14)',
+                  'rgba(0,0,0,0)',
+                ]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                pointerEvents="none"
+                style={[
+                  styles.browseSpine,
+                  { height: pageH, width: BROWSE_SPINE_W, left: pageW - BROWSE_SPINE_W / 2 },
+                ]}
+              >
+                <View style={styles.browseSpineLine} pointerEvents="none" />
+              </LinearGradient>
+            </View>
+          </View>
+        );
+      }
+      const only = item.left ?? item.right;
+      if (!only) return <View />;
+      return (
+        <View style={[styles.browseRow, styles.browseRowSingle]}>
+          {renderBrowseLeaf(only, pageW, pageH)}
+        </View>
+      );
+    },
+    [browseLeaf, renderBrowseLeaf]
   );
 
   const currentPage = isLandscape
@@ -1127,11 +1380,15 @@ export default function BookPreviewScreen() {
         const pageWmm = 154;
         const pageHmm = 216;
         const coverHmm = 142;
-        const pnHmm = pageHmm * 0.6;
-        const frameMmFor = (t: 'cover' | 'photo-full' | 'photo-note') => ({
-          w: pageWmm,
-          h: t === 'cover' ? coverHmm : t === 'photo-note' ? pnHmm : pageHmm,
-        });
+        const m = BOOK_VISUAL_MARGIN_MM;
+        // Cadre image inséré (marge 10mm) pour les pages photo ; couverture inchangée (pleine page).
+        const frameMmFor = (t: 'cover' | 'photo-full' | 'photo-note') =>
+          t === 'cover'
+            ? { w: pageWmm, h: coverHmm }
+            : {
+                w: pageWmm - 2 * m,
+                h: (t === 'photo-note' ? pageHmm * 0.6 : pageHmm * 0.82) - 2 * m,
+              };
         const effDpi = (pxW: number, pxH: number, mmW: number, mmH: number, scale: number) => {
           const s = Math.max(1, scale);
           const dpiX = (pxW / s) / mmToIn(mmW);
@@ -1443,11 +1700,6 @@ export default function BookPreviewScreen() {
     ]
   );
 
-  const dm400 = fontsLoaded ? 'DMSans_400Regular' : undefined;
-  const dm500 = fontsLoaded ? 'DMSans_500Medium' : undefined;
-  const dm600 = fontsLoaded ? 'DMSans_600SemiBold' : undefined;
-  const dm700 = fontsLoaded ? 'DMSans_700Bold' : undefined;
-
   const showManyDots = pages.length > 28;
 
   if (loading && !child) {
@@ -1548,81 +1800,138 @@ export default function BookPreviewScreen() {
         <Text style={styles.bannerErr}>{error}</Text>
       ) : null}
 
-      <FlatList
-        ref={listRef}
-        key={isLandscape ? 'spread' : 'page'}
-        data={isLandscape ? spreadRows : pageRows}
-        keyExtractor={(_, i) => i.toString()}
-        renderItem={isLandscape ? (renderSpreadItem as any) : (renderPageItem as any)}
-        horizontal
-        pagingEnabled
-        decelerationRate="fast"
-        disableIntervalMomentum
-        showsHorizontalScrollIndicator={false}
-        onMomentumScrollEnd={onBookPagerMomentumEnd}
-        // IMPORTANT perf: éviter un nouvel objet `extraData` à chaque render (a-coups).
-        // Les items se rerender déjà via `renderItem`/closures quand l'écran rerender.
-        style={styles.list}
-        getItemLayout={(_, index) => ({
-          length: screenWidth,
-          offset: screenWidth * index,
-          index,
-        })}
-        initialNumToRender={4}
-        maxToRenderPerBatch={4}
-        windowSize={7}
-        updateCellsBatchingPeriod={50}
-        removeClippedSubviews={false}
-      />
+      {isLandscape ? (
+        <FlatList
+          ref={listRef}
+          key="spread"
+          data={spreadRows}
+          keyExtractor={(_, i) => i.toString()}
+          renderItem={renderSpreadItem as any}
+          horizontal
+          pagingEnabled
+          decelerationRate="fast"
+          disableIntervalMomentum
+          showsHorizontalScrollIndicator={false}
+          onMomentumScrollEnd={onBookPagerMomentumEnd}
+          // IMPORTANT perf: éviter un nouvel objet `extraData` à chaque render (a-coups).
+          // Les items se rerender déjà via `renderItem`/closures quand l'écran rerender.
+          style={styles.list}
+          getItemLayout={(_, index) => ({
+            length: screenWidth,
+            offset: screenWidth * index,
+            index,
+          })}
+          initialNumToRender={4}
+          maxToRenderPerBatch={4}
+          windowSize={7}
+          updateCellsBatchingPeriod={50}
+          removeClippedSubviews={false}
+        />
+      ) : (
+        <FlatList
+          key="browse"
+          data={spreadRows}
+          keyExtractor={(_, i) => i.toString()}
+          renderItem={renderVerticalSpreadItem as any}
+          showsVerticalScrollIndicator={false}
+          style={[styles.list, styles.browseList]}
+          contentContainerStyle={styles.browseContent}
+          initialNumToRender={6}
+          maxToRenderPerBatch={6}
+          windowSize={9}
+          removeClippedSubviews={false}
+        />
+      )}
 
-      {!isLandscape ? (
-        <View style={styles.bottomBar}>
-          <View style={styles.bottomIndicatorRow}>
-            {showManyDots ? (
-              <Text style={[styles.pageFraction, dm400 && { fontFamily: dm400 }]}>
-                {currentPageIndex + 1} / {Math.max(1, totalSlides)}
-              </Text>
-            ) : (
-              <View style={styles.dotsRow}>
-                {pageRows.map((_, i) => (
-                  <View
-                    key={i.toString()}
-                    style={i === currentPageIndex ? styles.dotActive : styles.dotIdle}
-                  />
-                ))}
-              </View>
-            )}
-            <Text style={[styles.bottomPageLabel, dm400 && { fontFamily: dm400 }]}>
-              {pages.length > 0 ? pageLabel(currentPageIndex + 1, pages.length) : ''}
+      <Modal
+        visible={editorOpen}
+        animationType="slide"
+        onRequestClose={closeEditor}
+      >
+        <View style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+          <View style={styles.header}>
+            <Pressable onPress={closeEditor} hitSlop={12} accessibilityRole="button">
+              <Text style={[styles.headerBack, dm500 && { fontFamily: dm500 }]}>Terminé</Text>
+            </Pressable>
+            <Text style={[styles.headerTitle, dm600 && { fontFamily: dm600 }]} numberOfLines={1}>
+              Page {Math.min(currentPageIndex + 1, Math.max(1, pages.length))} · {pages.length}
             </Text>
+            <View style={styles.headerRightSpacer} accessibilityElementsHidden />
           </View>
-          <View style={styles.bottomButtonsRow}>
-            {canDeletePage ? (
+
+          {editorBodyReady ? (
+            <FlatList
+              ref={editorListRef}
+              key="editor"
+              data={pageRows}
+              keyExtractor={(_, i) => i.toString()}
+              renderItem={renderPageItem as any}
+              horizontal
+              pagingEnabled
+              decelerationRate="fast"
+              disableIntervalMomentum
+              showsHorizontalScrollIndicator={false}
+              onMomentumScrollEnd={onBookPagerMomentumEnd}
+              style={styles.list}
+              getItemLayout={(_, index) => ({
+                length: screenWidth,
+                offset: screenWidth * index,
+                index,
+              })}
+              initialNumToRender={1}
+              maxToRenderPerBatch={2}
+              windowSize={3}
+              updateCellsBatchingPeriod={50}
+              removeClippedSubviews={false}
+            />
+          ) : (
+            <View style={styles.editorBodyPlaceholder} />
+          )}
+
+          <View style={styles.bottomBar}>
+            <View style={styles.bottomIndicatorRow}>
+              {showManyDots ? (
+                <Text style={[styles.pageFraction, dm400 && { fontFamily: dm400 }]}>
+                  {currentPageIndex + 1} / {Math.max(1, pages.length)}
+                </Text>
+              ) : (
+                <View style={styles.dotsRow}>
+                  {pageRows.map((_, i) => (
+                    <View
+                      key={i.toString()}
+                      style={i === currentPageIndex ? styles.dotActive : styles.dotIdle}
+                    />
+                  ))}
+                </View>
+              )}
+              <Text style={[styles.bottomPageLabel, dm400 && { fontFamily: dm400 }]}>
+                {pages.length > 0 ? pageLabel(currentPageIndex + 1, pages.length) : ''}
+              </Text>
+            </View>
+            <View style={styles.bottomButtonsRow}>
+              {canDeletePage ? (
+                <Pressable style={styles.pill} onPress={handleDeleteCurrentPage} accessibilityRole="button">
+                  <View style={styles.pillInner}>
+                    <Trash2 size={14} color="rgba(255,255,255,0.7)" strokeWidth={2} />
+                    <Text style={[styles.pillText, dm400 && { fontFamily: dm400 }]}>Supprimer</Text>
+                  </View>
+                </Pressable>
+              ) : null}
               <Pressable
-                style={styles.pill}
-                onPress={handleDeleteCurrentPage}
+                style={[styles.pill, !editOk && styles.pillDisabled]}
+                onPress={handleToolbarEdit}
+                disabled={!editOk}
                 accessibilityRole="button"
               >
                 <View style={styles.pillInner}>
-                  <Trash2 size={14} color="rgba(255,255,255,0.7)" strokeWidth={2} />
-                  <Text style={[styles.pillText, dm400 && { fontFamily: dm400 }]}>Supprimer</Text>
+                  <Pencil size={14} color="rgba(255,255,255,0.7)" strokeWidth={2} />
+                  <Text style={[styles.pillText, dm400 && { fontFamily: dm400 }]}>Modifier</Text>
                 </View>
               </Pressable>
-            ) : null}
-            <Pressable
-              style={[styles.pill, !editOk && styles.pillDisabled]}
-              onPress={handleToolbarEdit}
-              disabled={!editOk}
-              accessibilityRole="button"
-            >
-              <View style={styles.pillInner}>
-                <Pencil size={14} color="rgba(255,255,255,0.7)" strokeWidth={2} />
-                <Text style={[styles.pillText, dm400 && { fontFamily: dm400 }]}>Modifier</Text>
-              </View>
-            </Pressable>
+            </View>
           </View>
         </View>
-      ) : null}
+      </Modal>
 
       {isTitleBodyModal ? (
         <EditTextModal
@@ -1831,6 +2140,87 @@ const styles = StyleSheet.create({
   },
   list: {
     flex: 1,
+  },
+  editorBodyPlaceholder: {
+    flex: 1,
+    backgroundColor: '#1C1C1E',
+  },
+  browseList: {
+    backgroundColor: BROWSE_BG,
+  },
+  browseContent: {
+    paddingHorizontal: BROWSE_SIDE_PAD,
+    paddingTop: BROWSE_ROW_GAP,
+    paddingBottom: BROWSE_ROW_GAP * 2,
+    backgroundColor: BROWSE_BG,
+  },
+  browseRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    marginBottom: BROWSE_ROW_GAP,
+  },
+  browseRowSingle: {
+    justifyContent: 'center',
+  },
+  browsePairWrap: {
+    position: 'relative',
+  },
+  browsePairRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  /** Reliure centrale : dégradé d’ombre (les couleurs viennent du LinearGradient). */
+  browseSpine: {
+    position: 'absolute',
+    top: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  /** Trait fin au creux de la reliure. */
+  browseSpineLine: {
+    width: StyleSheet.hairlineWidth,
+    height: '100%',
+    backgroundColor: 'rgba(0,0,0,0.22)',
+  },
+  /** Effet de tranche sur le bord gauche de la couverture : bande d’ombre fine depuis l’arête. */
+  coverSpineEdge: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+  },
+  /** Trait léger marquant l’arête intérieure de la tranche (ombre fine à sa gauche). */
+  coverSpineLine: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+  },
+  browseLeafCol: {
+    alignItems: 'center',
+  },
+  /** Porte l’ombre : surtout PAS d’overflow:hidden ici (sinon iOS coupe l’ombre). */
+  browseLeafShadow: {
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000000',
+    shadowOpacity: 0.5,
+    shadowRadius: 1.5,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 5,
+  },
+  /** Rogne le contenu de la page ; ne porte pas l’ombre. */
+  browseLeafCard: {
+    overflow: 'hidden',
+    backgroundColor: '#FFFFFF',
+  },
+  browseFolio: {
+    marginTop: 8,
+    fontSize: 11,
+    color: 'rgba(60,60,67,0.5)',
+    textAlign: 'center',
   },
   pageSlide: {
     alignItems: 'center',

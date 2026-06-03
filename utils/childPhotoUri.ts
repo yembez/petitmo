@@ -1,3 +1,5 @@
+import { rebaseSandboxUriToCurrentContainer } from '@/utils/localMediaReadable';
+
 /**
  * URI affichable pour la photo de profil d’un enfant (expo-image / Image).
  * Priorité au fichier local, sinon URL distante (comme sur l’onglet Capturer).
@@ -6,7 +8,9 @@ export function resolveChildProfileImageUri(
   localPhotoPath: string | null | undefined,
   remotePhotoUrl: string | null | undefined,
 ): string | null {
-  const local = (localPhotoPath ?? '').trim();
+  const localRaw = (localPhotoPath ?? '').trim();
+  // Rebase container iOS (UUID change au build/réinstall) avant de composer `file://`.
+  const local = rebaseSandboxUriToCurrentContainer(localRaw);
   if (local) {
     if (
       local.startsWith('file:') ||

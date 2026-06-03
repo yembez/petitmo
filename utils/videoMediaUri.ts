@@ -1,6 +1,9 @@
 import { Platform } from 'react-native';
 import type { Memory } from '@/types/local';
-import { isLocalMediaUriReadable } from '@/utils/localMediaReadable';
+import {
+  isLocalMediaUriReadable,
+  rebaseSandboxUriToCurrentContainer,
+} from '@/utils/localMediaReadable';
 
 const VIDEO_EXT_RE = /\.(mp4|mov|m4v|webm|mkv|avi)(\?|$)/i;
 
@@ -100,8 +103,10 @@ export async function resolveReadableVideoPlaybackUri(
 
 /** URI exploitable par `expo-av` `Video` (préfixe `file://` si chemin absolu). */
 export function normalizeVideoPlaybackUri(raw: string): string {
-  const t = raw.trim();
-  if (!t) return '';
+  const input = raw.trim();
+  if (!input) return '';
+  // Rebase container iOS (UUID change au build/réinstall) avant de composer l’URI de lecture.
+  const t = rebaseSandboxUriToCurrentContainer(input);
   if (
     /^https?:\/\//i.test(t) ||
     t.startsWith('file:') ||

@@ -35,6 +35,7 @@ import {
 import { useFeedPhotoDisplayUrls } from "@/hooks/useFeedPhotoDisplayUrls";
 import { useFeedVideoPlaybackUri } from '@/hooks/useFeedVideoPlaybackUri';
 import { useExpoAvShouldPlay } from '@/hooks/useExpoAvShouldPlay';
+import { getVideoPosterUriForFeedAndViewer } from '@/utils/memoryPhotos';
 import { normalizeVideoPlaybackUri } from '@/utils/videoMediaUri';
 import { clampAudioBookAnnotation } from '@/lib/audioBookAnnotation';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
@@ -213,8 +214,7 @@ function FilMemoryRow({
     const parts = raw.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
     return parts.length > 0 ? parts : ['Un joli mot du cœur'];
   })();
-  const videoPosterRaw =
-    (memory.poster_url?.trim() || memory.thumbnail_url?.trim() || '') || '';
+  const videoPosterRaw = getVideoPosterUriForFeedAndViewer(memory);
   const videoPosterSigned = useSignedMediaUrl(videoPosterRaw || null) ?? '';
   const videoPosterUri = normalizeVideoPlaybackUri((videoPosterSigned || videoPosterRaw).trim());
   const voiceCoverDisplayUri =

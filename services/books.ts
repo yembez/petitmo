@@ -4,6 +4,10 @@ import { getLocalMemoryById } from '@/lib/localDb';
 import { getUserTier } from '@/lib/userTier';
 import { supabase } from '@/lib/supabase';
 import { FREE_TIER_BOOK_AUDIO_MAX_COUNT, FREE_TIER_BOOK_VOICE_MAX_DURATION } from '@/lib/limits';
+import {
+  getPrimaryPhotoUriForBookPreview,
+  normalizeMemoryMediaUriForDisplay,
+} from '@/utils/memoryPhotos';
 
 export class BookUpgradeRequiredError extends Error {
   code: 'BOOK_VIDEO_REQUIRES_PLUS';
@@ -232,6 +236,27 @@ export function listBooksFromSqliteSync(): Book[] {
 
 export async function listBooks(): Promise<Book[]> {
   return listBooksFromSqliteSync();
+}
+
+/**
+ * URI couverture pour la liste des livres : `coverPhotoUrl` rebasée (container iOS),
+ * sinon première photo du livre via `getPrimaryPhotoUriForBookPreview`.
+ */
+export function resolveBookListCoverDisplayUri(book: Book): string | null {
+  const direct = (book.coverPhotoUrl ?? '').trim();
+  if (direct) {
+    const normalized = normalizeMemoryMediaUriForDisplay(direct);
+    if (normalized) return normalized;
+  }
+
+  for (const memoryId of book.memoryIds) {
+    const m = getLocalMemoryById(memoryId);
+    if (m?.type !== 'photo') continue;
+    const uri = getPrimaryPhotoUriForBookPreview(m);
+    if (uri) return uri;
+  }
+
+  return null;
 }
 
 export async function getBook(bookId: string): Promise<Book | null> {

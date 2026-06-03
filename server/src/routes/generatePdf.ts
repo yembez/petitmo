@@ -45,7 +45,9 @@ function isGuestMemoryList(x: unknown): x is GuestMemoryForPdfPayload[] {
   return true;
 }
 
-function isGuestChild(x: unknown): x is { name: string; photo_url?: string | null } {
+function isGuestChild(
+  x: unknown
+): x is { name: string; photo_url?: string | null; birthdate?: string | null } {
   if (!x || typeof x !== 'object') return false;
   const o = x as Record<string, unknown>;
   return typeof o.name === 'string' && o.name.trim().length > 0;
@@ -156,7 +158,7 @@ export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient,
     const { childId } = body;
     const { data: child, error: childErr } = await supabase
       .from('children')
-      .select('id, user_id, name, photo_url')
+      .select('id, user_id, name, photo_url, birthdate')
       .eq('id', childId)
       .eq('user_id', userId)
       .maybeSingle();
@@ -425,6 +427,7 @@ async function handleTicketPdf(
       user_id: ticket.export_request_id,
       name: body.guestChild.name,
       photo_url: body.guestChild.photo_url ?? null,
+      birthdate: body.guestChild.birthdate ?? null,
     };
 
     const memoriesForHtml = await signMemoriesMapForPdfRender(supabase, projectOrigin, memoriesById);
@@ -615,6 +618,7 @@ async function handleTicketPrintPdf(
       user_id: ticket.export_request_id,
       name: body.guestChild.name,
       photo_url: body.guestChild.photo_url ?? null,
+      birthdate: body.guestChild.birthdate ?? null,
     };
 
     const memoriesForHtmlPrint = await signMemoriesMapForPdfRender(supabase, projectOrigin, memoriesById);

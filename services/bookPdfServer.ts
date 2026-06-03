@@ -988,6 +988,7 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
     guestChild: {
       name: input.child.name,
       photo_url: input.child.photo_url ?? null,
+      birthdate: input.child.birthdate ?? null,
     },
     guestMemories,
   };

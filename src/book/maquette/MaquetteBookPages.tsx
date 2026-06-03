@@ -1,9 +1,8 @@
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  Image,
   Pressable,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
@@ -20,7 +19,7 @@ import { EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
 import { Video, ResizeMode } from 'expo-av';
 import type { BookPage } from '@/src/book/BookEngine';
 import type { Child, Memory } from '@/types/local';
-import { formatDuration, formatBookLocationShort } from '@/utils/date';
+import { formatDuration, formatBookLocationShort, formatAgeAtMemory } from '@/utils/date';
 import { splitPhotoNoteTitleBody, splitVideoTitleBody } from '@/src/book/bookTextParts';
 import type { PhotoCrop } from '@/src/book/photoCrop';
 import { clampAudioBookAnnotation } from '@/lib/audioBookAnnotation';
@@ -87,7 +86,8 @@ const TYPO_REF_INTERIOR_H = 520;
 const TYPO_REF_COVER_H = TYPO_REF_INTERIOR_H * (142 / 216);
 
 function clampTypoScale(s: number): number {
-  return Math.max(0.5, Math.min(1.38, s));
+  // Plancher bas pour rester proportionnel jusqu'à la vue spread (vignettes ~moitié de page).
+  return Math.max(0.4, Math.min(1.38, s));
 }
 
 /** Échelle typo selon le type de page et la hauteur rendue en px (couverture = référence plus basse). */
@@ -100,9 +100,9 @@ function typographyScaleForMaquette(pageType: BookPage['type'], heightPx: number
 
 /** Taille de police / interligne cohérents avec l’échelle de la page. */
 function scaledTypo(scale: number, fontSize: number, lineHeight?: number): { fontSize: number; lineHeight?: number } {
-  const fs = Math.max(7.5, Math.round(fontSize * scale * 10) / 10);
+  const fs = Math.max(1, Math.round(fontSize * scale * 10) / 10);
   if (lineHeight == null) return { fontSize: fs };
-  const lh = Math.max(fs + 2, Math.round(lineHeight * scale * 10) / 10);
+  const lh = Math.max(fs + 1, Math.round(lineHeight * scale * 10) / 10);
   return { fontSize: fs, lineHeight: lh };
 }
 
@@ -110,6 +110,18 @@ function dateFrCaps(iso: string): string {
   const d = new Date(iso);
   const s = d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
   return s.replace(/\b\w/g, c => c.toUpperCase());
+}
+
+/**
+ * Libellé date + âge de l'enfant à la date du souvenir (`memories.created_at` :
+ * prise de vue pour photo/vidéo, création pour texte/audio). Ex. « 12 Mars 2026 · 2 ans 3 mois ».
+ * DOIT rester identique au PDF serveur (`dateWithAgeCaps` dans `htmlBook.ts`).
+ */
+function dateWithAgeCaps(memory: Memory, childBirthdate?: string): string {
+  const iso = memoryBookDisplayDateIso(memory);
+  const date = dateFrCaps(iso);
+  const age = formatAgeAtMemory(childBirthdate, iso);
+  return age ? `${date} · ${age}` : date;
 }
 
 function monthYearCaps(label: string): string {
@@ -158,15 +170,61 @@ function CroppedPhotoDisplay({
   const y = ((crop?.yPct ?? 0) / 100) * height;
   const s = Math.max(1, crop?.scale ?? 1);
   return (
-    <View style={{ width, height, overflow: 'hidden' }}>
+    <View style={{ width, height, overflow: 'hidden', backgroundColor: '#F2F2F7' }}>
       <ExpoImage
         source={{ uri }}
+        recyclingKey={uri}
+        cachePolicy="memory-disk"
+        transition={0}
+        priority="high"
         style={[
           StyleSheet.absoluteFillObject,
           { transform: [{ translateX: x }, { translateY: y }, { scale: s }] },
         ]}
         contentFit="cover"
       />
+    </View>
+  );
+}
+
+/**
+ * Marge blanche autour des visuels (photo, poster vidéo, vignette audio) — 10 mm symétriques.
+ * DOIT rester identique au CSS serveur (`--visual-margin` sur `.pf-image` / `.pn-image` / `.video-thumb`)
+ * pour garder la parité aperçu ↔ PDF.
+ */
+const VISUAL_MARGIN_MM = 10;
+
+/** Bandeau visuel à pleine largeur de page, avec marge blanche autour de l'image (cadre inséré). */
+function VisualBand({
+  width,
+  height,
+  bandH,
+  children,
+}: {
+  width: number;
+  height: number;
+  bandH: number;
+  children: (frameW: number, frameH: number) => ReactNode;
+}) {
+  const mx = pdfMmToPreviewPxW(VISUAL_MARGIN_MM, width);
+  const my = pdfMmToPreviewPxH(VISUAL_MARGIN_MM, height);
+  const frameW = Math.max(1, width - 2 * mx);
+  const frameH = Math.max(1, bandH - 2 * my);
+  return (
+    <View style={{ width, height: bandH, backgroundColor: '#FFFFFF' }}>
+      <View
+        style={{
+          position: 'absolute',
+          left: mx,
+          top: my,
+          width: frameW,
+          height: frameH,
+          overflow: 'hidden',
+          backgroundColor: '#F2F2F7',
+        }}
+      >
+        {children(frameW, frameH)}
+      </View>
     </View>
   );
 }
@@ -347,6 +405,7 @@ export default function MaquetteBookPages(props: Props) {
       return (
         <MaquettePhotoSimple
           memory={memory}
+          childBirthdate={child?.birthdate ?? undefined}
           width={width}
           height={height}
           pad={pad}
@@ -366,6 +425,7 @@ export default function MaquetteBookPages(props: Props) {
       return (
         <MaquettePhotoNote
           memory={memory}
+          childBirthdate={child?.birthdate ?? undefined}
           width={width}
           height={height}
           pad={pad}
@@ -386,6 +446,7 @@ export default function MaquetteBookPages(props: Props) {
       return (
         <MaquetteQuote
           memory={memory}
+          childBirthdate={child?.birthdate ?? undefined}
           width={width}
           height={height}
           pad={pad}
@@ -404,6 +465,7 @@ export default function MaquetteBookPages(props: Props) {
       return (
         <MaquetteAudio
           memory={memory}
+          childBirthdate={child?.birthdate ?? undefined}
           width={width}
           height={height}
           pad={pad}
@@ -425,6 +487,7 @@ export default function MaquetteBookPages(props: Props) {
       return (
         <MaquetteVideo
           memory={memory}
+          childBirthdate={child?.birthdate ?? undefined}
           width={width}
           height={height}
           pad={pad}
@@ -559,6 +622,7 @@ function MaquetteCover({
 
 function MaquettePhotoSimple({
   memory,
+  childBirthdate,
   width,
   height,
   pad,
@@ -573,6 +637,7 @@ function MaquettePhotoSimple({
   garamondIt,
 }: {
   memory: Memory;
+  childBirthdate?: string;
   width: number;
   height: number;
   pad: number;
@@ -599,49 +664,59 @@ function MaquettePhotoSimple({
 
   return (
     <View style={[styles.paper, { width, height }]}>
-      <View style={[styles.photoImgWrap, { height: imgH }]}>
-        {uri ? (
-          <View style={StyleSheet.absoluteFill}>
-            <View style={[styles.rot, { transform: [{ rotate: `${rotation}deg` }] }]}>
-              <CroppedPhotoDisplay uri={uri} width={width} height={imgH} crop={photoCrop} />
-            </View>
-            {onRequestBookCrop ? (
-              <Pressable
-                style={StyleSheet.absoluteFill}
-                onPress={() => onRequestBookCrop({ storageKey: memory.id, uri, frameW: width, frameH: imgH, pageType: 'photo-full' })}
-                accessibilityRole="button"
-                accessibilityLabel="Recadrer la photo"
-              />
-            ) : null}
-            <Pressable
-              style={[
-                styles.rotateOverlayBtn,
-                {
-                  width: Math.max(28, Math.round(34 * typoScale)),
-                  height: Math.max(28, Math.round(34 * typoScale)),
-                  borderRadius: Math.max(14, Math.round(17 * typoScale)),
-                  bottom: Math.round(10 * typoScale),
-                  right: Math.round(10 * typoScale),
-                },
-              ]}
-              onPress={onRotate}
-              accessibilityLabel="Pivoter la photo"
-            >
-              <Text style={[styles.rotateOverlayIcon, scaledTypo(typoScale, 20)]}>↻</Text>
-            </Pressable>
-          </View>
-        ) : (
-          <View style={[styles.coverPh, { height: imgH }]} />
-        )}
-      </View>
+      <VisualBand width={width} height={height} bandH={imgH}>
+        {(fw, fh) =>
+          uri ? (
+            <>
+              <View style={[styles.rot, { transform: [{ rotate: `${rotation}deg` }] }]}>
+                <CroppedPhotoDisplay uri={uri} width={fw} height={fh} crop={photoCrop} />
+              </View>
+              {onRequestBookCrop ? (
+                <Pressable
+                  style={StyleSheet.absoluteFill}
+                  onPress={() => onRequestBookCrop({ storageKey: memory.id, uri, frameW: fw, frameH: fh, pageType: 'photo-full' })}
+                  accessibilityRole="button"
+                  accessibilityLabel="Recadrer la photo"
+                />
+              ) : null}
+              {onRequestBookCrop ? (
+                <Pressable
+                  style={[
+                    styles.rotateOverlayBtn,
+                    {
+                      width: Math.max(28, Math.round(34 * typoScale)),
+                      height: Math.max(28, Math.round(34 * typoScale)),
+                      borderRadius: Math.max(14, Math.round(17 * typoScale)),
+                      bottom: Math.round(10 * typoScale),
+                      right: Math.round(10 * typoScale),
+                    },
+                  ]}
+                  onPress={onRotate}
+                  accessibilityLabel="Pivoter la photo"
+                >
+                  <Text style={[styles.rotateOverlayIcon, scaledTypo(typoScale, 20)]}>↻</Text>
+                </Pressable>
+              ) : null}
+            </>
+          ) : null
+        }
+      </VisualBand>
       <Pressable
-        style={[styles.photoFooter, { paddingHorizontal: pad }]}
+        style={[
+          styles.photoFooter,
+          {
+            paddingHorizontal: pad,
+            paddingTop: pdfMmToPreviewPxH(3.7, height),
+            paddingBottom: pdfMmToPreviewPxH(10, height),
+            minHeight: 0,
+          },
+        ]}
         onPress={onRequestTextEdit}
         accessibilityRole="button"
       >
-        <View style={styles.photoDateLocRow}>
+        <View style={[styles.photoDateLocRow, { gap: pdfMmToPreviewPxW(3, width) }]}>
           <Text style={[styles.photoDate, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
-            {dateFrCaps(memoryBookDisplayDateIso(memory))}
+            {dateWithAgeCaps(memory, childBirthdate)}
           </Text>
           {bookLoc ? (
             <Text
@@ -657,6 +732,7 @@ function MaquettePhotoSimple({
             style={[
               styles.photoCaption,
               pdfPhotoCaptionStyle(width),
+              { marginTop: pdfMmToPreviewPxH(2.1, height) },
               garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
             ]}
             numberOfLines={3}
@@ -672,6 +748,7 @@ function MaquettePhotoSimple({
 
 function MaquettePhotoNote({
   memory,
+  childBirthdate,
   width,
   height,
   pad,
@@ -687,6 +764,7 @@ function MaquettePhotoNote({
   garamondIt,
 }: {
   memory: Memory;
+  childBirthdate?: string;
   width: number;
   height: number;
   pad: number;
@@ -711,58 +789,64 @@ function MaquettePhotoNote({
   const legend = (memory.content ?? '').trim();
   const imgH = height * 0.6;
   const bookLoc = bookMaquetteLocationLabel(memory);
-  const pb = Math.max(28, Math.round(40 * typoScale));
 
   return (
     <View style={[styles.paper, { width, height }]}>
-      <View style={[styles.page4ImageBleed, { height: imgH, width }]}>
-        {uri ? (
-          <View style={StyleSheet.absoluteFill}>
-            <View style={[styles.rot, { transform: [{ rotate: `${rotation}deg` }] }]}>
-              <CroppedPhotoDisplay uri={uri} width={width} height={imgH} crop={photoCrop} />
-            </View>
-            {onRequestBookCrop ? (
-              <Pressable
-                style={StyleSheet.absoluteFill}
-                onPress={() => onRequestBookCrop({ storageKey: memory.id, uri, frameW: width, frameH: imgH, pageType: 'photo-note' })}
-                accessibilityRole="button"
-                accessibilityLabel="Recadrer la photo"
-              />
-            ) : null}
-            <Pressable
-              style={[
-                styles.rotateOverlayBtn,
-                {
-                  width: Math.max(28, Math.round(34 * typoScale)),
-                  height: Math.max(28, Math.round(34 * typoScale)),
-                  borderRadius: Math.max(14, Math.round(17 * typoScale)),
-                  bottom: Math.round(10 * typoScale),
-                  right: Math.round(10 * typoScale),
-                },
-              ]}
-              onPress={onRotate}
-              accessibilityLabel="Pivoter la photo"
-            >
-              <Text style={[styles.rotateOverlayIcon, scaledTypo(typoScale, 20)]}>↻</Text>
-            </Pressable>
-          </View>
-        ) : (
-          <View style={[styles.coverPh, { height: imgH }]} />
-        )}
-      </View>
+      <VisualBand width={width} height={height} bandH={imgH}>
+        {(fw, fh) =>
+          uri ? (
+            <>
+              <View style={[styles.rot, { transform: [{ rotate: `${rotation}deg` }] }]}>
+                <CroppedPhotoDisplay uri={uri} width={fw} height={fh} crop={photoCrop} />
+              </View>
+              {onRequestBookCrop ? (
+                <Pressable
+                  style={StyleSheet.absoluteFill}
+                  onPress={() => onRequestBookCrop({ storageKey: memory.id, uri, frameW: fw, frameH: fh, pageType: 'photo-note' })}
+                  accessibilityRole="button"
+                  accessibilityLabel="Recadrer la photo"
+                />
+              ) : null}
+              {onRequestBookCrop ? (
+                <Pressable
+                  style={[
+                    styles.rotateOverlayBtn,
+                    {
+                      width: Math.max(28, Math.round(34 * typoScale)),
+                      height: Math.max(28, Math.round(34 * typoScale)),
+                      borderRadius: Math.max(14, Math.round(17 * typoScale)),
+                      bottom: Math.round(10 * typoScale),
+                      right: Math.round(10 * typoScale),
+                    },
+                  ]}
+                  onPress={onRotate}
+                  accessibilityLabel="Pivoter la photo"
+                >
+                  <Text style={[styles.rotateOverlayIcon, scaledTypo(typoScale, 20)]}>↻</Text>
+                </Pressable>
+              ) : null}
+            </>
+          ) : null
+        }
+      </VisualBand>
       <View style={[styles.page4TextBlock, { flex: 1, minHeight: 0 }]}>
         <View
           style={{
             flex: 1,
             paddingHorizontal: pad,
-            paddingTop: Math.round(14 * typoScale),
-            paddingBottom: pb,
+            paddingTop: pdfMmToPreviewPxH(4, height),
+            paddingBottom: pdfMmToPreviewPxH(14, height),
           }}
         >
           <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
-            <View style={[styles.page4MetaRow, { marginBottom: Math.round(8 * typoScale) }]}>
+            <View
+              style={[
+                styles.page4MetaRow,
+                { marginBottom: pdfMmToPreviewPxH(2, height), gap: pdfMmToPreviewPxW(3, width) },
+              ]}
+            >
               <Text style={[styles.page4Meta, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
-                {dateFrCaps(memoryBookDisplayDateIso(memory))}
+                {dateWithAgeCaps(memory, childBirthdate)}
               </Text>
               {bookLoc ? (
                 <Text
@@ -796,6 +880,7 @@ function MaquettePhotoNote({
 
 function MaquetteQuote({
   memory,
+  childBirthdate,
   width,
   height,
   pad,
@@ -809,6 +894,7 @@ function MaquetteQuote({
   garamondIt,
 }: {
   memory: Memory;
+  childBirthdate?: string;
   width: number;
   height: number;
   pad: number;
@@ -913,7 +999,7 @@ function MaquetteQuote({
             </View>
             <View style={styles.photoDateLocRow}>
               <Text style={[styles.photoDate, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
-                {dateFrCaps(memoryBookDisplayDateIso(memory))}
+                {dateWithAgeCaps(memory, childBirthdate)}
               </Text>
               {bookLoc ? (
                 <Text
@@ -934,6 +1020,7 @@ function MaquetteQuote({
 
 function MaquetteAudio({
   memory,
+  childBirthdate,
   width,
   height,
   pad,
@@ -950,6 +1037,7 @@ function MaquetteAudio({
   garamondIt,
 }: {
   memory: Memory;
+  childBirthdate?: string;
   width: number;
   height: number;
   pad: number;
@@ -976,64 +1064,78 @@ function MaquetteAudio({
   const durLabel = formatDuration(Math.max(0, Math.floor(totalSec)));
   const waveContentW = BAR_COUNT * BAR_W + (BAR_COUNT - 1) * BAR_GAP;
   const titleRaw = clampAudioBookAnnotation((memory.content ?? '').trim());
-  const qrSize = Math.max(40, Math.round(Math.min(64, width * 0.19) * Math.min(1.15, typoScale)));
+  // Proportions réelles PDF : QR audio = 17mm (`.page.audio .audio-qr-block .qr`).
+  const qrSize = Math.max(12, Math.round(pdfMmToPreviewPxW(17, width)));
   const coverUri = getVoiceCoverUriForBookPreview(memory);
   /** Même `.pn-image` que photo-note / PDF (`pageH * 0.6`). */
   const imgH = height * 0.6;
   const bookLoc = bookMaquetteLocationLabel(memory);
-  const ringSize = Math.max(32, Math.round(44 * typoScale));
-  const playerGap = Math.max(8, Math.round(10 * typoScale));
-  const waveSvgH = Math.max(14, Math.round(18 * typoScale));
+  // Proportions réelles PDF : anneau lecteur = 19mm (`.audio-ring`).
+  const ringSize = Math.max(12, Math.round(pdfMmToPreviewPxW(19, width)));
+  const playerGap = Math.max(4, Math.round(pdfMmToPreviewPxW(4, width)));
+  const waveSvgH = Math.max(8, Math.round(18 * typoScale));
   const waveSvgW = Math.max(56, width - 2 * pad - ringSize - playerGap);
   const dotSize = Math.max(6, Math.round(8 * typoScale));
 
   return (
     <View style={[styles.paper, { width, height }]}>
-      <View style={[styles.page4ImageBleed, { height: imgH, width }]}>
-        {coverUri ? (
-          <View style={StyleSheet.absoluteFill}>
-            <View style={[styles.rot, { transform: [{ rotate: `${rotation}deg` }] }]}>
-              <CroppedPhotoDisplay uri={coverUri} width={width} height={imgH} crop={photoCrop} />
-            </View>
-            {onRequestBookCrop ? (
-              <Pressable
-                style={StyleSheet.absoluteFill}
-                onPress={() =>
-                  onRequestBookCrop({
-                    storageKey: memory.id,
-                    uri: coverUri,
-                    frameW: width,
-                    frameH: imgH,
-                    pageType: 'audio',
-                  })
-                }
-                accessibilityRole="button"
-                accessibilityLabel="Recadrer la photo"
-              />
-            ) : null}
-            <Pressable
-              style={[
-                styles.rotateOverlayBtn,
-                {
-                  width: Math.max(28, Math.round(34 * typoScale)),
-                  height: Math.max(28, Math.round(34 * typoScale)),
-                  borderRadius: Math.max(14, Math.round(17 * typoScale)),
-                  bottom: Math.round(10 * typoScale),
-                  right: Math.round(10 * typoScale),
-                },
-              ]}
-              onPress={onRotate}
-              accessibilityLabel="Pivoter la photo"
-            >
-              <Text style={[styles.rotateOverlayIcon, scaledTypo(typoScale, 20)]}>↻</Text>
-            </Pressable>
-          </View>
-        ) : (
-          <View style={[styles.coverPh, { height: imgH }]} />
-        )}
-      </View>
-      <View style={styles.audioBelowPhoto}>
-        <View style={[styles.audioMetaRow, { paddingHorizontal: pad }]}>
+      <VisualBand width={width} height={height} bandH={imgH}>
+        {(fw, fh) =>
+          coverUri ? (
+            <>
+              <View style={[styles.rot, { transform: [{ rotate: `${rotation}deg` }] }]}>
+                <CroppedPhotoDisplay uri={coverUri} width={fw} height={fh} crop={photoCrop} />
+              </View>
+              {onRequestBookCrop ? (
+                <Pressable
+                  style={StyleSheet.absoluteFill}
+                  onPress={() =>
+                    onRequestBookCrop({
+                      storageKey: memory.id,
+                      uri: coverUri,
+                      frameW: fw,
+                      frameH: fh,
+                      pageType: 'audio',
+                    })
+                  }
+                  accessibilityRole="button"
+                  accessibilityLabel="Recadrer la photo"
+                />
+              ) : null}
+              {onRequestBookCrop ? (
+                <Pressable
+                  style={[
+                    styles.rotateOverlayBtn,
+                    {
+                      width: Math.max(28, Math.round(34 * typoScale)),
+                      height: Math.max(28, Math.round(34 * typoScale)),
+                      borderRadius: Math.max(14, Math.round(17 * typoScale)),
+                      bottom: Math.round(10 * typoScale),
+                      right: Math.round(10 * typoScale),
+                    },
+                  ]}
+                  onPress={onRotate}
+                  accessibilityLabel="Pivoter la photo"
+                >
+                  <Text style={[styles.rotateOverlayIcon, scaledTypo(typoScale, 20)]}>↻</Text>
+                </Pressable>
+              ) : null}
+            </>
+          ) : null
+        }
+      </VisualBand>
+      <View style={[styles.audioBelowPhoto, { paddingBottom: pdfMmToPreviewPxH(14, height) }]}>
+        <View
+          style={[
+            styles.audioMetaRow,
+            {
+              paddingHorizontal: pad,
+              paddingTop: pdfMmToPreviewPxH(3, height),
+              paddingBottom: pdfMmToPreviewPxH(3, height),
+              gap: pdfMmToPreviewPxW(4, width),
+            },
+          ]}
+        >
           <View style={styles.quoteHeaderLeft}>
             <View
               style={[
@@ -1047,7 +1149,7 @@ function MaquetteAudio({
           </View>
           <View style={[styles.page4MetaRow, { flex: 1, minWidth: 0 }]}>
             <Text style={[styles.page4Meta, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
-              {dateFrCaps(memoryBookDisplayDateIso(memory))}
+              {dateWithAgeCaps(memory, childBirthdate)}
             </Text>
             {bookLoc ? (
               <Text
@@ -1064,8 +1166,8 @@ function MaquetteAudio({
             style={{
               flex: 1,
               paddingHorizontal: pad,
-              paddingTop: Math.round(8 * typoScale),
-              paddingBottom: Math.round(8 * typoScale),
+              paddingTop: pdfMmToPreviewPxH(2, height),
+              paddingBottom: pdfMmToPreviewPxH(2, height),
             }}
           >
             <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
@@ -1080,7 +1182,7 @@ function MaquetteAudio({
                   {romanParagraphs(titleRaw)}
                 </Text>
               ) : null}
-              <View style={[styles.audioQrCenter, { marginTop: Math.round(8 * typoScale) }]}>
+              <View style={[styles.audioQrCenter, { marginTop: pdfMmToPreviewPxH(2, height) }]}>
                 {qrUrl.trim().length > 0 ? (
                   <QRCode value={qrUrl} size={qrSize} backgroundColor="#FFFFFF" color={INK} />
                 ) : (
@@ -1093,13 +1195,25 @@ function MaquetteAudio({
                     }}
                   />
                 )}
-                <Text style={[styles.audioQrHint, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
+                <Text
+                  style={[
+                    styles.audioQrHint,
+                    pdfLabelStyle(width),
+                    { marginTop: pdfMmToPreviewPxH(2.5, height) },
+                    dm400 && { fontFamily: dm400 },
+                  ]}
+                >
                   Scanner pour écouter
                 </Text>
               </View>
             </Pressable>
           </View>
-          <View style={[styles.audioPlayerRow, { paddingHorizontal: pad, paddingTop: Math.round(6 * typoScale) }]}>
+          <View
+            style={[
+              styles.audioPlayerRow,
+              { paddingHorizontal: pad, paddingTop: pdfMmToPreviewPxH(1, height), gap: playerGap },
+            ]}
+          >
             <View
               style={[
                 styles.audioRingInline,
@@ -1149,6 +1263,7 @@ function MaquetteAudio({
 
 function MaquetteVideo({
   memory,
+  childBirthdate,
   width,
   height,
   pad,
@@ -1161,6 +1276,7 @@ function MaquetteVideo({
   garamondIt,
 }: {
   memory: Memory;
+  childBirthdate?: string;
   width: number;
   height: number;
   pad: number;
@@ -1178,23 +1294,32 @@ function MaquetteVideo({
   const title = videoTitleRaw || 'Vidéo';
   const sub = videoBodyRaw.trim() ? videoBodyRaw : 'Regarde ce moment en vidéo.';
   const bookLoc = bookMaquetteLocationLabel(memory);
-  const videoQrSize = Math.max(44, Math.round(Math.min(100, width * 0.26) * Math.min(1.1, typoScale)));
+  // Proportions réelles PDF : QR vidéo = 22mm (`.qr`).
+  const videoQrSize = Math.max(14, Math.round(pdfMmToPreviewPxW(22, width)));
 
   return (
     <View style={[styles.paper, { width, height }]}>
-      <View style={[styles.photoImgWrap, { height: imgH }]}>
-        {posterImageUri ? (
-          <Image source={{ uri: posterImageUri }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
-        ) : (
-          <View style={[styles.coverPh, { height: imgH }]} />
-        )}
-      </View>
+      <VisualBand width={width} height={height} bandH={imgH}>
+        {() =>
+          posterImageUri ? (
+            <ExpoImage
+              source={{ uri: posterImageUri }}
+              recyclingKey={posterImageUri}
+              cachePolicy="memory-disk"
+              transition={0}
+              priority="high"
+              style={StyleSheet.absoluteFillObject}
+              contentFit="cover"
+            />
+          ) : null
+        }
+      </VisualBand>
       <View style={{ flex: 1, minHeight: 0, paddingHorizontal: pad, paddingTop: Math.round(20 * typoScale) }}>
         <View style={{ flex: 1, paddingBottom: Math.round(16 * typoScale) }}>
           <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
             <View style={[styles.noteMetaRow, { marginBottom: Math.round(8 * typoScale) }]}>
               <Text style={[styles.noteMeta, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
-                {dateFrCaps(memoryBookDisplayDateIso(memory))}
+                {dateWithAgeCaps(memory, childBirthdate)}
               </Text>
               {bookLoc ? (
                 <Text

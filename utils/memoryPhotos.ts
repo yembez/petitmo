@@ -1,8 +1,7 @@
 import type { Memory } from '@/types/local';
 import { extractMediaBucketPath } from '@/lib/mediaSignedUrl';
 import { peekFeedBootstrapDisplayUrls } from '@/services/feedLocalPhotoCache';
-import { isProbablyStalePetitmoSandboxPath } from '@/utils/localMediaReadable';
-
+import { rebaseSandboxUriToCurrentContainer } from '@/utils/localMediaReadable';
 function asTrimmedStringArray(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -19,9 +18,11 @@ function firstNonEmpty(...candidates: (string | null | undefined)[]): string {
 }
 
 /** URI pour composants Image : `file://` pour fichiers disque, laisse tel quel HTTP et chemins bucket signables. */
-function normalizeMemoryMediaUriForDisplay(u: string): string {
-  const t = u.trim();
-  if (!t) return '';
+export function normalizeMemoryMediaUriForDisplay(u: string): string {
+  const raw = u.trim();
+  if (!raw) return '';
+  // Rebase container iOS (nouvel UUID après build/réinstall) avant tout : sinon `file://…/<ancien UUID>/…` mort.
+  const t = rebaseSandboxUriToCurrentContainer(raw);
   if (
     /^https?:\/\//i.test(t) ||
     t.startsWith('file:') ||
@@ -59,11 +60,7 @@ export function pickPrimaryPhotoNormalizedForFeedAndViewer(memory: Memory): stri
     memory.media_url,
     typeof memory.media_path === 'string' ? memory.media_path : '',
   );
-  const ghostLocal = !!localPick.trim() && isProbablyStalePetitmoSandboxPath(localPick);
-  const raw =
-    ghostLocal && remotePick.trim()
-      ? remotePick.trim()
-      : localPick.trim() || remotePick.trim();
+  const raw = localPick.trim() || remotePick.trim();
   return raw ? normalizeMemoryMediaUriForDisplay(raw) : '';
 }
 
@@ -91,12 +88,6 @@ function pickAlbumExtraSlotNormalized(
 ): string {
   const loc = typeof localExtra === 'string' ? localExtra.trim() : '';
   const rem = firstNonEmpty(display, thumb, original);
-  const ghostLocal = !!loc && isProbablyStalePetitmoSandboxPath(loc);
-  if (ghostLocal) {
-    if (rem.trim()) return normalizeMemoryMediaUriForDisplay(rem.trim());
-    if (loc && extractMediaBucketPath(loc)) return normalizeMemoryMediaUriForDisplay(loc);
-    return '';
-  }
   const raw = loc || rem;
   return raw ? normalizeMemoryMediaUriForDisplay(raw) : '';
 }
@@ -127,28 +118,25 @@ export function getPrimaryPhotoUriForBookPreview(memory: Memory): string {
     memory.media_url,
     typeof memory.media_path === 'string' ? memory.media_path : '',
   );
-  const ghostLocal = !!localPick.trim() && isProbablyStalePetitmoSandboxPath(localPick);
-  const raw =
-    ghostLocal && remotePick.trim()
-      ? remotePick.trim()
-      : localPick.trim() || remotePick.trim();
+  const raw = localPick.trim() || remotePick.trim();
   return raw ? normalizeMemoryMediaUriForDisplay(raw) : '';
 }
 
-/** Photo de fond d’un vocal : sandbox d’abord, sauf chemin Petitmo fantôme → URL cloud. */
+/** Photo de fond d’un vocal : `voice_cover_path` puis `voice_cover_url`. */
 export function getVoiceCoverUriForBookPreview(memory: Memory): string {
   const localPick = firstNonEmpty(memory.voice_cover_path);
   const remotePick = firstNonEmpty(memory.voice_cover_url);
-  const ghostLocal = !!localPick.trim() && isProbablyStalePetitmoSandboxPath(localPick);
-  const raw =
-    ghostLocal && remotePick.trim()
-      ? remotePick.trim()
-      : localPick.trim() || remotePick.trim();
+  const raw = localPick.trim() || remotePick.trim();
   return raw ? normalizeMemoryMediaUriForDisplay(raw) : '';
 }
 
-/** Vignette / poster vidéo pour la maquette : dérivés locaux, puis URLs (même heuristique sandbox que le fil). */
-export function getVideoPosterUriForBookPreview(memory: Memory): string {
+/** Fil, favoris, viewer — alias vocal aligné sur la maquette livre. */
+export function getVoiceCoverUriForFeedAndViewer(memory: Memory): string {
+  return getVoiceCoverUriForBookPreview(memory);
+}
+
+/** Vignette / poster vidéo : fil, favoris, viewer immersif, maquette livre. */
+export function getVideoPosterUriForFeedAndViewer(memory: Memory): string {
   const localPick = firstNonEmpty(
     memory.local_thumb_path,
     memory.thumbnail_url,
@@ -159,12 +147,13 @@ export function getVideoPosterUriForBookPreview(memory: Memory): string {
     memory.poster_url,
     memory.thumbnail_url,
   );
-  const ghostLocal = !!localPick.trim() && isProbablyStalePetitmoSandboxPath(localPick);
-  const raw =
-    ghostLocal && remotePick.trim()
-      ? remotePick.trim()
-      : localPick.trim() || remotePick.trim();
+  const raw = localPick.trim() || remotePick.trim();
   return raw ? normalizeMemoryMediaUriForDisplay(raw) : '';
+}
+
+/** @deprecated — `getVideoPosterUriForFeedAndViewer` */
+export function getVideoPosterUriForBookPreview(memory: Memory): string {
+  return getVideoPosterUriForFeedAndViewer(memory);
 }
 
 /** Toutes les URLs d’un souvenir photo (1ère = version éditée si présente, puis `extra_photo_urls`). */
@@ -178,8 +167,7 @@ export function getAllPhotoUrls(memory: Memory): string[] {
 }
 
 /**
- * URLs pour le fil : alignées sur le viewer immersif (sandbox Petitmo « fantôme » → distant tout de suite),
- * puis dérivés display/thumb par case d’album.
+ * URLs pour le fil : `local_*` d’abord, puis colonnes distantes ; repli cloud après réinstall dans `useFeedPhotoDisplayUrls`.
  */
 export function getAllPhotoUrlsForFeed(memory: Memory): string[] {
   const first = pickPrimaryPhotoNormalizedForFeedAndViewer(memory);
@@ -346,18 +334,10 @@ export function mapPhotoUrlToThumb(memory: Memory, originalUrl: string): string 
   const o = originalUrl.trim();
   if (!o) return '';
 
-  const mainOrig = (memory.edited_media_url?.trim() || memory.media_url?.trim() || '');
-  if (mainOrig && mainOrig === o && memory.thumb_url?.trim()) return memory.thumb_url.trim();
-
-  const extraOrig: string[] = Array.isArray(memory.extra_photo_urls)
-    ? (memory.extra_photo_urls as unknown[]).filter((u): u is string => typeof u === 'string' && u.trim().length > 0).map(u => u.trim())
-    : [];
-  const extraThumb: string[] = Array.isArray(memory.extra_thumb_urls)
-    ? (memory.extra_thumb_urls as unknown[]).filter((u): u is string => typeof u === 'string' && u.trim().length > 0).map(u => u.trim())
-    : [];
-
-  const idx = extraOrig.findIndex(u => u === o);
-  if (idx >= 0 && extraThumb[idx]) return extraThumb[idx];
+  const slots = getAllPhotoUrlsForFeed(memory);
+  for (const slot of slots) {
+    if (urlsInSamePhotoVariantGroup(memory, slot, o)) return slot;
+  }
 
   return o;
 }
@@ -372,7 +352,7 @@ export function parseFavoritePhotoUrls(memory: Memory): string[] {
 }
 
 export function normalizePhotoUrlForCompare(url: string): string {
-  return url.trim();
+  return rebaseSandboxUriToCurrentContainer(url.trim());
 }
 
 export function isPhotoUrlFavorited(favoriteUrls: string[], photoUrl: string): boolean {

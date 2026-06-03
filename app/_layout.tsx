@@ -1,9 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import { Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import {
   View,
-  ActivityIndicator,
   StyleSheet,
   AppState,
   AppStateStatus,
@@ -63,8 +62,13 @@ export default function RootLayout() {
     })();
   }, [isAuthReady, pathname]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     initLocalDb();
+    hydrateTabScreensFromSqliteSync();
+    setIsAuthReady(true);
+  }, []);
+
+  useEffect(() => {
     // TEMPORAIRE — retirer avant la mise en production
     // void resetUserTierForTesting();
     // Migration durable : livres AsyncStorage → SQLite (one-shot).
@@ -72,10 +76,6 @@ export default function RootLayout() {
     void runWeeklyCleanup();
     void processPendingGuestRawUploads();
 
-    /**
-     * En parallèle de l’auth : ID enfant depuis AsyncStorage puis cache onglets **SQLite pur**
-     * → onglets peuvent déjà avoir données locales au 1er rendu (multi-enfants : ID connu dès que la promesse résout).
-     */
     void warmSelectedChildIdFromStorage().then(() => {
       hydrateTabScreensFromSqliteSync();
     });
@@ -166,8 +166,8 @@ export default function RootLayout() {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           console.log('User authenticated:', user.id);
-          /** Enfant + souvenirs + livres en local avant le 1er rendu des onglets → pas de roue au 1er tap. */
-          await hydrateTabScreensFromLocal();
+          /** SQLite sync déjà fait ; sync cloud / livres en arrière-plan sans bloquer l’UI. */
+          void hydrateTabScreensFromLocal();
         } else {
           console.error('No user after auth');
           setFeedHydrationSnapshots(null, [], []);
@@ -175,12 +175,10 @@ export default function RootLayout() {
         }
       } catch (error) {
         console.error('Auth initialization error:', error);
-      } finally {
-        setIsAuthReady(true);
       }
     };
 
-    initAuth();
+    void initAuth();
   }, []);
 
   /** Retour au premier plan : réaligner cache onglets (robuste après sync / autre appareil). */
@@ -228,11 +226,7 @@ export default function RootLayout() {
   }, [isAuthReady]);
 
   if (!isAuthReady) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={THEME.accent} />
-      </View>
-    );
+    return <View style={styles.bootShell} />;
   }
 
   return (
@@ -271,10 +265,8 @@ export default function RootLayout() {
 }
 
 const styles = StyleSheet.create({
-  loadingContainer: {
+  bootShell: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
     backgroundColor: THEME.bgScreen,
   },
 });

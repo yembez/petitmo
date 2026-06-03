@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { Redirect } from 'expo-router';
 import { THEME } from '@/constants/theme';
+import { listLocalChildren } from '@/lib/localDb';
 import { getChildren } from '@/services/children';
+import { hydrateTabScreensFromSqliteSync } from '@/services/tabScreensHydrate';
 
 /**
  * Règle d'or (cf. AGENTS.md / docs/specs/architecture-locale-cloud.md) :
@@ -13,18 +15,19 @@ import { getChildren } from '@/services/children';
  * Petitmo+" (restauration cloud).
  */
 export default function Index() {
-  const [isChecking, setIsChecking] = useState(true);
-  const [hasChild, setHasChild] = useState(false);
+  const [hasChild, setHasChild] = useState(() => {
+    hydrateTabScreensFromSqliteSync();
+    return listLocalChildren().length > 0;
+  });
+  const [isChecking, setIsChecking] = useState(() => listLocalChildren().length === 0);
 
   useEffect(() => {
-    const checkChild = async () => {
-      const children = await getChildren();
+    if (!isChecking) return;
+    void getChildren().then(children => {
       setHasChild(children.length > 0);
       setIsChecking(false);
-    };
-
-    checkChild();
-  }, []);
+    });
+  }, [isChecking]);
 
   if (isChecking) {
     return (

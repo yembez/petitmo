@@ -118,6 +118,59 @@ export function dateFrCaps(iso: string): string {
   return s.replace(/\b\w/g, c => c.toUpperCase());
 }
 
+function monthsBetweenBirthAndEvent(birth: Date, event: Date): number {
+  let months =
+    (event.getFullYear() - birth.getFullYear()) * 12 + (event.getMonth() - birth.getMonth());
+  if (event.getDate() < birth.getDate()) months -= 1;
+  return Math.max(0, months);
+}
+
+/**
+ * Âge de l'enfant à la date du souvenir. DOIT rester identique au client
+ * (`formatAgeAtMemory` dans `utils/date.ts`).
+ */
+export function formatAgeAtMemory(
+  birthdate: string | null | undefined,
+  memoryDateIso: string
+): string {
+  if (!birthdate) return '';
+  const birth = new Date(birthdate);
+  const event = new Date(memoryDateIso);
+  if (Number.isNaN(birth.getTime()) || Number.isNaN(event.getTime()) || event < birth) {
+    return '';
+  }
+
+  const diffMs = event.getTime() - birth.getTime();
+  const diffDays = Math.floor(diffMs / 86400000);
+  const totalMonths = monthsBetweenBirthAndEvent(birth, event);
+
+  if (totalMonths < 1) {
+    if (diffDays < 1) return 'nouveau-né';
+    if (diffDays < 7) return `${diffDays} jour${diffDays > 1 ? 's' : ''}`;
+    const w = Math.floor(diffDays / 7);
+    return `${w} semaine${w > 1 ? 's' : ''}`;
+  }
+
+  if (totalMonths < 12) {
+    return `${totalMonths} mois`;
+  }
+
+  const years = Math.floor(totalMonths / 12);
+  const mo = totalMonths % 12;
+  if (mo === 0) return `${years} an${years > 1 ? 's' : ''}`;
+  return `${years} an${years > 1 ? 's' : ''} ${mo} mois`;
+}
+
+/**
+ * Libellé date + âge (parité avec `dateWithAgeCaps` de la maquette client).
+ * Ex. « 12 Mars 2026 · 2 ans 3 mois ».
+ */
+export function dateWithAgeCaps(iso: string, birthdate: string | null | undefined): string {
+  const date = dateFrCaps(iso);
+  const age = formatAgeAtMemory(birthdate, iso);
+  return age ? `${date} · ${age}` : date;
+}
+
 /** Même logique que l’app : retirer le suffixe « (région) » du géocodage. */
 export function formatBookLocationShort(location: string | null | undefined): string {
   const raw = typeof location === 'string' ? location.trim() : '';

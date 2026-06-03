@@ -32,4 +32,6 @@ export type ChildRow = {
   user_id: string;
   name: string;
   photo_url: string | null;
+  /** Date de naissance (ISO) — sert au calcul de l'âge sous chaque souvenir. */
+  birthdate?: string | null;
 };

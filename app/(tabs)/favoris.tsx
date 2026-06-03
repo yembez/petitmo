@@ -53,13 +53,13 @@ import { Image as ExpoImage } from 'expo-image';
 import {
   getAllPhotoUrls,
   getAllPhotoUrlsForFeed,
-  getAllPhotoUrlsForFeedRemoteOnly,
   parseFavoritePhotoUrls,
   normalizePhotoUrlForCompare,
   mapPhotoUrlToThumb,
-  pickPrimaryPhotoNormalizedForFeedAndViewer,
   getVoiceCoverUriForBookPreview,
-  getVideoPosterUriForBookPreview,
+  getVoiceCoverUriForFeedAndViewer,
+  getVideoPosterUriForFeedAndViewer,
+  normalizeMemoryMediaUriForDisplay,
 } from '@/utils/memoryPhotos';
 import { useFeedPhotoDisplayUrls } from '@/hooks/useFeedPhotoDisplayUrls';
 import { clampAudioBookAnnotation } from '@/lib/audioBookAnnotation';
@@ -80,7 +80,7 @@ function thumbUri(m: Memory): string | null {
     return u.trim() || null;
   }
   if (m.type === 'video') {
-    const u = getVideoPosterUriForBookPreview(m);
+    const u = getVideoPosterUriForFeedAndViewer(m);
     return u.trim() || null;
   }
   return null;
@@ -88,20 +88,17 @@ function thumbUri(m: Memory): string | null {
 
 /** Identique à `FilMemoryRow` : vignette vidéo dans le fil. */
 function feedVideoPosterRaw(memory: Memory): string {
-  return (memory.poster_url?.trim() || memory.thumbnail_url?.trim() || '') || '';
+  return getVideoPosterUriForFeedAndViewer(memory);
 }
 
-/** Identique à `FilMemoryRow` : cover vocale dans le fil. */
+/** Identique au fil : cover vocale rebasée + normalisée. */
 function feedVoiceCoverRaw(memory: Memory): string {
-  return (memory.voice_cover_path ?? memory.voice_cover_url ?? '').trim();
+  return getVoiceCoverUriForFeedAndViewer(memory);
 }
 
 function primaryDisplayThumb(m: Memory): string {
-  // Même donnée affichable que le fil : distant d’abord pour les photos (SQLite peut encore pointer vers un fichier sandbox mort).
   if (m.type === 'photo') {
-    const fromRemote = getAllPhotoUrlsForFeedRemoteOnly(m)[0]?.trim();
-    if (fromRemote) return fromRemote;
-    return pickPrimaryPhotoNormalizedForFeedAndViewer(m);
+    return getAllPhotoUrlsForFeed(m)[0]?.trim() || '';
   }
   if (m.type === 'video') {
     const v = feedVideoPosterRaw(m);
@@ -256,7 +253,7 @@ function SlideshowSlideImage({
   const signedVideo = useSignedMediaUrl(memory.type === 'video' ? rawVideo || null : null);
   const signedVoice = useSignedMediaUrl(memory.type === 'voice' ? rawVoice || null : null);
 
-  const uri =
+  const uriRaw =
     memory.type === 'photo'
       ? rawPhoto
       : memory.type === 'video'
@@ -264,6 +261,7 @@ function SlideshowSlideImage({
         : memory.type === 'voice'
           ? (signedVoice ?? rawVoice).trim()
           : '';
+  const uri = uriRaw ? normalizeMemoryMediaUriForDisplay(uriRaw) : '';
 
   useEffect(() => {
     if (!uri) return;
@@ -716,19 +714,23 @@ const GalleryTile = memo(function GalleryTile({
   const voiceCoverSigned = useSignedMediaUrl(memory.type === 'voice' ? voiceCoverRaw || null : null);
 
   const videoPosterUri =
-    memory.type === 'video' ? (videoPosterSigned ?? videoPosterRaw).trim() : '';
+    memory.type === 'video'
+      ? normalizeMemoryMediaUriForDisplay((videoPosterSigned ?? videoPosterRaw).trim())
+      : '';
   const voiceCoverUri =
-    memory.type === 'voice' ? (voiceCoverSigned ?? voiceCoverRaw).trim() : '';
+    memory.type === 'voice'
+      ? normalizeMemoryMediaUriForDisplay((voiceCoverSigned ?? voiceCoverRaw).trim())
+      : '';
 
   /** Comme `PhotoMosaic` / `FilMemoryRow` : pas de seconde signature sur les URLs déjà résolues par le hook photo. */
   const uri =
     memory.type === 'photo'
-      ? photoUri
+      ? normalizeMemoryMediaUriForDisplay(photoUri)
       : memory.type === 'video'
         ? videoPosterUri
         : memory.type === 'voice'
           ? voiceCoverUri
-          : thumbUrl.trim();
+          : normalizeMemoryMediaUriForDisplay(thumbUrl.trim());
 
   const showRasterThumb =
     !!uri &&

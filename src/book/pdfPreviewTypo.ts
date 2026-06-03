@@ -25,20 +25,28 @@ export function pdfMmToPreviewPxH(mm: number, pageHeightPx: number): number {
   return (mm / BOOK_DIGITAL_PAGE_HEIGHT_MM) * pageHeightPx;
 }
 
+/**
+ * Garde minimal anti sous-pixel. Volontairement très bas : la maquette doit rester
+ * STRICTEMENT proportionnelle à la largeur de page, y compris en vue spread (vignettes
+ * ~moitié de page). À pleine largeur (éditeur) ces tailles dépassent largement ce garde,
+ * donc l'éditeur est inchangé ; seul l'aperçu réduit cesse d'être « trop gros ».
+ */
+const MIN_FS = 1;
+
 /** PDF `.label` — 7 pt (méta date/lieu, folio, pastilles). */
 export function pdfLabelStyle(pageWidthPx: number): { fontSize: number } {
-  return { fontSize: Math.max(5.5, pdfPtToPreviewPx(7, pageWidthPx)) };
+  return { fontSize: Math.max(MIN_FS, pdfPtToPreviewPx(7, pageWidthPx)) };
 }
 
 /** PDF `.body` (citation niveau 0) — 11 pt, interligne 1.65 */
 export function pdfBodyStyle(pageWidthPx: number): { fontSize: number; lineHeight: number } {
-  const fs = Math.max(6, pdfPtToPreviewPx(11, pageWidthPx));
+  const fs = Math.max(MIN_FS, pdfPtToPreviewPx(11, pageWidthPx));
   return { fontSize: fs, lineHeight: pdfPtToPreviewPx(11 * 1.65, pageWidthPx) };
 }
 
 /** `.pf-caption` — 12.75 pt, lh 1.45 */
 export function pdfPhotoCaptionStyle(pageWidthPx: number): { fontSize: number; lineHeight: number } {
-  const fs = Math.max(6, pdfPtToPreviewPx(12.75, pageWidthPx));
+  const fs = Math.max(MIN_FS, pdfPtToPreviewPx(12.75, pageWidthPx));
   return { fontSize: fs, lineHeight: pdfPtToPreviewPx(12.75 * 1.45, pageWidthPx) };
 }
 
@@ -48,13 +56,13 @@ export type QuotePdfFitLevel = 0 | 1 | 2;
 export function pdfQuoteBodyStyle(fit: QuotePdfFitLevel, pageWidthPx: number): { fontSize: number; lineHeight: number } {
   if (fit === 2) {
     return {
-      fontSize: Math.max(6, pdfPtToPreviewPx(9.8, pageWidthPx)),
+      fontSize: Math.max(MIN_FS, pdfPtToPreviewPx(9.8, pageWidthPx)),
       lineHeight: pdfPtToPreviewPx(9.8 * 1.42, pageWidthPx),
     };
   }
   if (fit === 1) {
     return {
-      fontSize: Math.max(6, pdfPtToPreviewPx(10.4, pageWidthPx)),
+      fontSize: Math.max(MIN_FS, pdfPtToPreviewPx(10.4, pageWidthPx)),
       lineHeight: pdfPtToPreviewPx(10.4 * 1.48, pageWidthPx),
     };
   }
@@ -64,36 +72,36 @@ export function pdfQuoteBodyStyle(fit: QuotePdfFitLevel, pageWidthPx: number): {
 /** Guillemet `.quote-mark` + quote-fit (42 / 37 / 33 pt). */
 export function pdfQuoteMarkStyle(fit: QuotePdfFitLevel, pageWidthPx: number): { fontSize: number; lineHeight: number } {
   const pt = fit === 2 ? 33 : fit === 1 ? 37 : 42;
-  const fs = Math.max(8, pdfPtToPreviewPx(pt, pageWidthPx));
+  const fs = Math.max(MIN_FS, pdfPtToPreviewPx(pt, pageWidthPx));
   return { fontSize: fs, lineHeight: fs };
 }
 
 export function pdfChapterMonthStyle(pageWidthPx: number): { fontSize: number } {
-  return { fontSize: Math.max(6, pdfPtToPreviewPx(9, pageWidthPx)) };
+  return { fontSize: Math.max(MIN_FS, pdfPtToPreviewPx(9, pageWidthPx)) };
 }
 
 export function pdfChapterTitleStyle(pageWidthPx: number): { fontSize: number } {
-  return { fontSize: Math.max(10, pdfPtToPreviewPx(22, pageWidthPx)) };
+  return { fontSize: Math.max(MIN_FS, pdfPtToPreviewPx(22, pageWidthPx)) };
 }
 
 export function pdfChapterSubStyle(pageWidthPx: number): { fontSize: number } {
-  return { fontSize: Math.max(6, pdfPtToPreviewPx(9, pageWidthPx)) };
+  return { fontSize: Math.max(MIN_FS, pdfPtToPreviewPx(9, pageWidthPx)) };
 }
 
 export function pdfCoverTitleStyle(pageWidthPx: number): { fontSize: number } {
-  return { fontSize: Math.max(10, pdfPtToPreviewPx(22, pageWidthPx)) };
+  return { fontSize: Math.max(MIN_FS, pdfPtToPreviewPx(22, pageWidthPx)) };
 }
 
 export function pdfCoverPeriodStyle(pageWidthPx: number): { fontSize: number } {
-  return { fontSize: Math.max(6, pdfPtToPreviewPx(11, pageWidthPx)) };
+  return { fontSize: Math.max(MIN_FS, pdfPtToPreviewPx(11, pageWidthPx)) };
 }
 
 export function pdfVideoTitleStyle(pageWidthPx: number): { fontSize: number } {
-  return { fontSize: Math.max(8, pdfPtToPreviewPx(13.5, pageWidthPx)) };
+  return { fontSize: Math.max(MIN_FS, pdfPtToPreviewPx(13.5, pageWidthPx)) };
 }
 
 export function pdfVideoSubStyle(pageWidthPx: number): { fontSize: number; lineHeight: number } {
-  const fs = Math.max(6, pdfPtToPreviewPx(10.5, pageWidthPx));
+  const fs = Math.max(MIN_FS, pdfPtToPreviewPx(10.5, pageWidthPx));
   return { fontSize: fs, lineHeight: pdfPtToPreviewPx(10.5 * 1.5, pageWidthPx) };
 }
 
@@ -103,7 +111,7 @@ export function pdfFolioStyle(
   pageHeightPx: number
 ): { fontSize: number; bottom: number } {
   return {
-    fontSize: Math.max(5.5, pdfPtToPreviewPx(7, pageWidthPx)),
+    fontSize: Math.max(MIN_FS, pdfPtToPreviewPx(7, pageWidthPx)),
     bottom: pdfMmToPreviewPxH(8, pageHeightPx),
   };
 }

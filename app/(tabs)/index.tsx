@@ -18,7 +18,6 @@ import { useSafeAreaInsets, useSafeAreaFrame } from 'react-native-safe-area-cont
 import { useRouter } from 'expo-router';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { Image as ExpoImage } from 'expo-image';
-import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Heart, Menu } from 'lucide-react-native';
 import ImageImportIcon from '@/components/ImageImportIcon';
@@ -28,43 +27,33 @@ import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
 import * as Haptics from 'expo-haptics';
 import { useFonts, Sora_600SemiBold } from '@expo-google-fonts/sora';
 
-const CAPTURE_PHOTO_TAGLINE_FONT = 'Sora-LightItalic';
 import { Manrope_400Regular, Manrope_700Bold } from '@expo-google-fonts/manrope';
 import { DMSans_500Medium } from '@expo-google-fonts/dm-sans';
 
 /** Tailles maquette capture (px logiques). */
-const CAPTURE_TITLE_FONT_SIZE = 15;
-const CAPTURE_TITLE_LINE_HEIGHT = 20;
-const CAPTURE_SUBTITLE_FONT_SIZE = 11;
-const CAPTURE_SUBTITLE_LINE_HEIGHT = 15;
+const CAPTURE_TITLE_FONT_SIZE = 18;
+const CAPTURE_TITLE_LINE_HEIGHT = 24;
+const CAPTURE_TITLE_HEART_SIZE = scale(16);
 const CAPTURE_HEADER_DATE_FONT_SIZE = 20;
 const CAPTURE_HEADER_DATE_LINE_HEIGHT = 24;
+/** Hauteur de la ligne date / logo / menu (alignés sur le bouton burger). */
+const CAPTURE_HEADER_ROW_H = scale(40);
 
-const CAPTURE_PHOTO_TAGLINE =
-  '\u201CAvec toi, l\'ordinaire devient extraordinaire.\u201D';
-const CAPTURE_PHOTO_TAGLINE_FONT_SIZE = 13;
-const CAPTURE_PHOTO_TAGLINE_LINE_HEIGHT = 18;
-
-const CAPTURE_PHOTO_TAGLINE_GRADIENT = [
-  'rgba(0, 0, 0, 0)',
-  'rgba(0, 0, 0, 0.28)',
-  'rgba(0, 0, 0, 0.52)',
-] as const;
 import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
 import { scale, verticalScale } from '@/utils/responsive';
 import { THEME } from '@/constants/theme';
 import {
-  getChildren,
   getOrSelectFirstChild,
   getCaptureTabChildSnapshot,
   PETITMO_CHILD_PROFILE_UPDATED_EVENT,
   setCaptureTabChildSnapshot,
   type ChildProfileUpdatedPayload,
 } from '@/services/children';
+import { hydrateTabScreensFromSqliteSync } from '@/services/tabScreensHydrate';
 import type { Child } from '@/types/local';
 import PetitmoLogoManuscrit, { PETITMO_LOGO_VIEWBOX } from '@/components/PetitmoLogoManuscrit';
 import { checkMemoryLimit } from '@/lib/limits';
-import { getLocalChild } from '@/lib/localDb';
+import { getLocalChild, listLocalChildren } from '@/lib/localDb';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { resolveChildProfileImageDisplayUri } from '@/utils/childPhotoUri';
 import { childDisplayGivenName, childDisplayInitial } from '@/utils/childDisplayName';
@@ -90,14 +79,29 @@ const CAPTURE_PHOTO_CARD_ASPECT_COMPACT = 0.85;
 const CAPTURE_CONTENT_PADDING_H = scale(20);
 const CAPTURE_PHOTO_EDGE_PADDING_H = scale(14);
 
-const CAPTURE_CTA_SIZE = scale(68);
-const CAPTURE_CTA_SIZE_COMPACT = scale(58);
-const CAPTURE_CTA_ICON_SIZE = scale(30);
-const CAPTURE_CTA_ICON_SIZE_COMPACT = scale(26);
-const CAPTURE_CTA_MIC_ICON_SIZE = scale(34);
-const CAPTURE_CTA_MIC_ICON_SIZE_COMPACT = scale(28);
+const CAPTURE_CTA_SIZE = scale(78);
+const CAPTURE_CTA_SIZE_COMPACT = scale(64);
+const CAPTURE_CTA_ICON_SIZE = scale(34);
+const CAPTURE_CTA_ICON_SIZE_COMPACT = scale(29);
+const CAPTURE_CTA_MIC_ICON_SIZE = scale(38);
+const CAPTURE_CTA_MIC_ICON_SIZE_COMPACT = scale(32);
 
 type CaptureRoute = '/write' | '/record-voice' | '/import-media';
+
+/** Révision photo (chemins + date) — `updated_at` change à chaque upload même si le chemin fichier est identique. */
+function captureHeroPhotoRevision(child: Child): string {
+  return `${(child.local_photo_path ?? '').trim()}|${(child.photo_url ?? '').trim()}|${(child.updated_at ?? '').trim()}`;
+}
+
+function captureChildDisplayEqual(a: Child | null, b: Child | null): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.id !== b.id) return false;
+  return (
+    captureHeroPhotoRevision(a) === captureHeroPhotoRevision(b) &&
+    a.name === b.name &&
+    a.birthdate === b.birthdate
+  );
+}
 
 function CapturePhotoGlassPill({
   label,
@@ -144,6 +148,8 @@ function CaptureDiscCta({
   label,
   icon,
   discColor,
+  discBorderColor,
+  discBorderWidth = 0,
   onPress,
   labelFontFamily,
   compact = false,
@@ -153,6 +159,8 @@ function CaptureDiscCta({
   label: string;
   icon: React.ReactNode;
   discColor: string;
+  discBorderColor?: string;
+  discBorderWidth?: number;
   onPress: () => void;
   labelFontFamily?: string;
   compact?: boolean;
@@ -205,6 +213,8 @@ function CaptureDiscCta({
             height: ctaSize,
             borderRadius: ctaSize / 2,
             backgroundColor: discColor,
+            borderWidth: discBorderWidth,
+            borderColor: discBorderColor ?? 'transparent',
             transform: [{ scale: pressScale }],
           },
         ]}
@@ -234,13 +244,11 @@ export default function CapturerScreen() {
 
   const [captureFontsLoaded] = useFonts({
     Sora_600SemiBold,
-    [CAPTURE_PHOTO_TAGLINE_FONT]: require('@/assets/fonts/Sora-LightItalic.ttf'),
     Manrope_400Regular,
     Manrope_700Bold,
     DMSans_500Medium,
   });
   const captureTitleFont = captureFontsLoaded ? 'Sora_600SemiBold' : undefined;
-  const capturePhotoTaglineFont = captureFontsLoaded ? CAPTURE_PHOTO_TAGLINE_FONT : undefined;
   const captureSubtitleFont = captureFontsLoaded ? 'Manrope_400Regular' : undefined;
   const capturePhotoPillNameFont = captureFontsLoaded ? 'Manrope_700Bold' : undefined;
   const captureCtaLabelFont = captureFontsLoaded ? 'DMSans_500Medium' : undefined;
@@ -248,8 +256,13 @@ export default function CapturerScreen() {
   const layoutH = Math.min(frame.height > 1 ? frame.height : usableH, usableH);
   const compact = layoutH < 600;
 
-  const [child, setChild] = useState<Child | null>(() => getCaptureTabChildSnapshot());
-  const [isLoading, setIsLoading] = useState(() => getCaptureTabChildSnapshot() === null);
+  const [child, setChild] = useState<Child | null>(() => {
+    const snap = getCaptureTabChildSnapshot();
+    if (snap) return snap;
+    hydrateTabScreensFromSqliteSync();
+    return getCaptureTabChildSnapshot();
+  });
+  const [isLoading, setIsLoading] = useState(() => child === null);
   const childRef = useRef<Child | null>(null);
   childRef.current = child;
 
@@ -271,12 +284,17 @@ export default function CapturerScreen() {
       ? resolveChildProfileImageDisplayUri(null, child.photo_url, child.updated_at)
       : null;
   const heroSignedRemote = useSignedMediaUrl(heroRemoteBase);
-  /** Comme le fil : `petitmo_v` sur fichier local quand la photo est remplacée au même chemin. */
   const photoUri = heroDisplayUri
     ? heroIsLocalAsset
       ? heroDisplayUri
       : heroSignedRemote ?? heroDisplayUri
     : '';
+  const heroPhotoCacheKey = child ? captureHeroPhotoRevision(child) : '';
+
+  useEffect(() => {
+    if (!photoUri.trim()) return;
+    void ExpoImage.prefetch(photoUri).catch(() => {});
+  }, [photoUri]);
 
   useEffect(() => {
     setCaptureTabChildSnapshot(child);
@@ -288,12 +306,11 @@ export default function CapturerScreen() {
       (payload: ChildProfileUpdatedPayload) => {
         const id = payload?.childId?.trim();
         if (!id || childRef.current?.id !== id) return;
-        if (payload.child?.id === id) {
-          setChild(payload.child);
-          return;
-        }
-        const row = getLocalChild(id);
-        if (row) setChild(row);
+        const next =
+          payload.child?.id === id ? payload.child : getLocalChild(id);
+        if (!next) return;
+        setCaptureTabChildSnapshot(next);
+        setChild(prev => (captureChildDisplayEqual(prev, next) ? prev : next));
       }
     );
     return () => sub.remove();
@@ -358,34 +375,26 @@ export default function CapturerScreen() {
           if (silent && storedSelectedId) {
             const row = getLocalChild(storedSelectedId);
             if (row && !cancelled) {
-              setChild(prev => {
-                if (
-                  prev?.id === row.id &&
-                  prev.local_photo_path === row.local_photo_path &&
-                  prev.photo_url === row.photo_url &&
-                  prev.name === row.name &&
-                  prev.birthdate === row.birthdate &&
-                  prev.updated_at === row.updated_at
-                ) {
-                  return prev;
-                }
-                return row;
-              });
+              setCaptureTabChildSnapshot(row);
+              setChild(prev => (captureChildDisplayEqual(prev, row) ? prev : row));
             }
             return;
           }
 
-          const allChildren = await getChildren();
+          /** SQLite uniquement — pas `getChildren()` (évite ML face bounds + sanitize async). */
+          const allChildren = listLocalChildren();
           if (cancelled) return;
 
           if (storedSelectedId && allChildren.length > 0) {
             const selected = allChildren.find(c => c.id === storedSelectedId) ?? allChildren[0];
-            if (!cancelled) setChild(selected);
+            if (!cancelled) {
+              setChild(prev => (captureChildDisplayEqual(prev, selected) ? prev : selected));
+            }
           } else if (allChildren.length === 0) {
             setChild(null);
             router.push('/create-child');
-          } else {
-            if (!cancelled) setChild(allChildren[0]);
+          } else if (!cancelled) {
+            setChild(prev => (captureChildDisplayEqual(prev, allChildren[0]) ? prev : allChildren[0]));
           }
         } catch (error) {
           console.error('Error loading child:', error);
@@ -403,7 +412,7 @@ export default function CapturerScreen() {
     }, [router])
   );
 
-  if (isLoading) {
+  if (isLoading && !child) {
     return (
       <View style={[styles.root, styles.loadingContainer]}>
         <StatusBar style="dark" />
@@ -424,7 +433,7 @@ export default function CapturerScreen() {
   }
 
   const headerMenuIconSize = scale(22);
-  const captureLogoH = scale(28);
+  const captureLogoH = scale(36);
   const captureLogoW = captureLogoH * (PETITMO_LOGO_VIEWBOX.width / PETITMO_LOGO_VIEWBOX.height);
   const captureHeaderDate = formatCaptureHeaderDate();
   const captureBottomReserve = tabBarFloatingOverlapPad(insets.bottom);
@@ -453,27 +462,19 @@ export default function CapturerScreen() {
           showsVerticalScrollIndicator={false}
           bounces={false}
         >
-          <View
-            style={[
-              styles.capturePageHeader,
-              { paddingTop: insets.top + verticalScale(8) },
-            ]}
-          >
-            <Text
-              style={[
-                styles.captureHeaderDate,
-                captureTitleFont ? { fontFamily: captureTitleFont } : { fontWeight: '600' },
-              ]}
-              accessibilityRole="header"
-            >
-              {captureHeaderDate}
-            </Text>
-            <View style={styles.capturePageHeaderRight}>
-              <PetitmoLogoManuscrit
-                width={captureLogoW}
-                height={captureLogoH}
-                color={THEME.textPrimary}
-              />
+          <View style={{ paddingTop: insets.top + verticalScale(8) }}>
+            <View style={styles.capturePageHeader}>
+              <View style={styles.captureHeaderLeading}>
+                <Text
+                  style={[
+                    styles.captureHeaderDate,
+                    captureTitleFont ? { fontFamily: captureTitleFont } : { fontWeight: '600' },
+                  ]}
+                  accessibilityRole="header"
+                >
+                  {captureHeaderDate}
+                </Text>
+              </View>
               <TouchableOpacity
                 style={styles.captureHeaderMenuHit}
                 onPress={() => router.push('/parent-space')}
@@ -484,6 +485,13 @@ export default function CapturerScreen() {
               >
                 <Menu size={headerMenuIconSize} color={THEME.textPrimary} strokeWidth={2} />
               </TouchableOpacity>
+              <View style={styles.captureHeaderLogoAbsolute} pointerEvents="none">
+                <PetitmoLogoManuscrit
+                  width={captureLogoW}
+                  height={captureLogoH}
+                  color={THEME.textTertiary}
+                />
+              </View>
             </View>
           </View>
 
@@ -507,8 +515,9 @@ export default function CapturerScreen() {
               <CaptureHeroImageStack
                 photoUri={photoUri}
                 reactKey={`capture-hero-${child.id}`}
-                imageRevision={child.updated_at ?? child.id}
+                imageRevision={heroPhotoCacheKey}
                 isTabFocused={isTabFocused}
+                instantReveal={heroIsLocalAsset}
               />
             ) : (
               <View style={[StyleSheet.absoluteFillObject, styles.heroPlaceholder]}>
@@ -531,60 +540,41 @@ export default function CapturerScreen() {
                 />
               ) : null}
             </View>
-            <LinearGradient
-              colors={[...CAPTURE_PHOTO_TAGLINE_GRADIENT]}
-              locations={[0, 0.5, 1]}
-              pointerEvents="none"
-              style={styles.capturePhotoTaglineGradient}
-            />
-            <View style={styles.capturePhotoTaglineWrap} pointerEvents="none">
-              <Text
-                style={[
-                  styles.capturePhotoTagline,
-                  compact && styles.capturePhotoTaglineCompact,
-                  capturePhotoTaglineFont ? { fontFamily: capturePhotoTaglineFont } : null,
-                ]}
-              >
-                {CAPTURE_PHOTO_TAGLINE}
-              </Text>
-            </View>
           </TouchableOpacity>
           </View>
 
-          <View style={styles.captureContentSection} accessibilityRole="header">
-            <View style={styles.captureTitleRow}>
-              <Text
-                style={[
-                  styles.captureTitle,
-                  captureTitleFont ? { fontFamily: captureTitleFont } : { fontWeight: '600' },
-                ]}
-              >
-                Quel souvenir pour {childGivenName || "l'enfant"}{' '}
-              </Text>
-              <Heart
-                size={scale(14)}
-                color={THEME.captureDiscCtaBackground}
-                fill={THEME.captureDiscCtaBackground}
-                style={styles.captureTitleHeart}
-              />
-              <Text
-                style={[
-                  styles.captureTitle,
-                  captureTitleFont ? { fontFamily: captureTitleFont } : { fontWeight: '600' },
-                ]}
-              >
-                aujourd&apos;hui ?
-              </Text>
+          <View
+            style={[
+              styles.captureTitleBridge,
+              compact && styles.captureTitleBridgeCompact,
+            ]}
+          >
+            <View style={styles.captureContentSection} accessibilityRole="header">
+              <View style={styles.captureTitleRow}>
+                <Text
+                  style={[
+                    styles.captureTitle,
+                    captureTitleFont ? { fontFamily: captureTitleFont } : { fontWeight: '600' },
+                  ]}
+                >
+                  Quel souvenir pour {childGivenName || "l'enfant"}{' '}
+                </Text>
+                <Heart
+                  size={CAPTURE_TITLE_HEART_SIZE}
+                  color={THEME.captureDiscCtaBackground}
+                  fill={THEME.captureDiscCtaBackground}
+                  style={styles.captureTitleHeart}
+                />
+                <Text
+                  style={[
+                    styles.captureTitle,
+                    captureTitleFont ? { fontFamily: captureTitleFont } : { fontWeight: '600' },
+                  ]}
+                >
+                  aujourd&apos;hui ?
+                </Text>
+              </View>
             </View>
-            <Text
-              style={[
-                styles.captureSubtitle,
-                compact && styles.captureSubtitleCompact,
-                captureSubtitleFont ? { fontFamily: captureSubtitleFont } : null,
-              ]}
-            >
-              Écris, enregistre ou importe photos et vidéos
-            </Text>
           </View>
 
           <View style={[styles.captureCtaRow, compact && styles.captureCtaRowCompact]}>
@@ -592,11 +582,13 @@ export default function CapturerScreen() {
               label="Enregistrer"
               labelFontFamily={captureCtaLabelFont}
               accessibilityLabel="Enregistrer un audio"
-              discColor={THEME.captureDiscCtaBackground}
+              discColor={THEME.captureRecordCtaBackground}
+              discBorderColor={THEME.captureRecordCtaBorderColor}
+              discBorderWidth={StyleSheet.hairlineWidth}
               icon={
                 <MicIcon
                   size={compact ? CAPTURE_CTA_MIC_ICON_SIZE_COMPACT : CAPTURE_CTA_MIC_ICON_SIZE}
-                  color="#FFFFFF"
+                  color={THEME.brandCtaOrange}
                 />
               }
               onPress={() => handleCaptureCtaPress('/record-voice')}
@@ -606,7 +598,7 @@ export default function CapturerScreen() {
             <CaptureDiscCta
               label="Écrire"
               labelFontFamily={captureCtaLabelFont}
-              discColor={THEME.captureDiscCtaBackground}
+              discColor={THEME.captureWriteCtaBackground}
               icon={
                 <PenIcon
                   size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
@@ -620,11 +612,11 @@ export default function CapturerScreen() {
               label="Importer"
               labelFontFamily={captureCtaLabelFont}
               accessibilityLabel="Importer des photos ou vidéos"
-              discColor={THEME.captureDiscCtaBackground}
+              discColor={THEME.captureImportCtaBackground}
               icon={
                 <ImageImportIcon
                   size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
-                  color="#FFFFFF"
+                  color={THEME.captureCtaIconColor}
                 />
               }
               onPress={() => handleCaptureCtaPress('/import-media')}
@@ -666,26 +658,37 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    position: 'relative',
+    minHeight: CAPTURE_HEADER_ROW_H,
     marginBottom: verticalScale(12),
-    paddingBottom: verticalScale(4),
+    overflow: 'visible',
+  },
+  captureHeaderLeading: {
+    flexShrink: 1,
+    maxWidth: '40%',
+    zIndex: 1,
   },
   captureHeaderDate: {
     fontSize: CAPTURE_HEADER_DATE_FONT_SIZE,
     lineHeight: CAPTURE_HEADER_DATE_LINE_HEIGHT,
     color: THEME.textPrimary,
     letterSpacing: -0.3,
-    flexShrink: 1,
     ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
   },
-  capturePageHeaderRight: {
-    flexDirection: 'row',
+  /** Centré sur la largeur écran — indépendant de la longueur de la date. */
+  captureHeaderLogoAbsolute: {
+    position: 'absolute',
+    left: -CAPTURE_CONTENT_PADDING_H,
+    right: -CAPTURE_CONTENT_PADDING_H,
+    top: 0,
+    height: CAPTURE_HEADER_ROW_H,
     alignItems: 'center',
-    gap: scale(10),
-    flexShrink: 0,
+    justifyContent: 'center',
   },
   captureHeaderMenuHit: {
-    width: scale(40),
-    height: scale(40),
+    zIndex: 1,
+    width: CAPTURE_HEADER_ROW_H,
+    height: CAPTURE_HEADER_ROW_H,
     borderRadius: scale(20),
     alignItems: 'center',
     justifyContent: 'center',
@@ -695,17 +698,17 @@ const styles = StyleSheet.create({
     width: SCREEN_W,
     marginLeft: -CAPTURE_CONTENT_PADDING_H,
     paddingHorizontal: CAPTURE_PHOTO_EDGE_PADDING_H,
-    marginBottom: verticalScale(22),
+    marginBottom: verticalScale(10),
   },
   capturePhotoBleedCompact: {
-    marginBottom: verticalScale(16),
+    marginBottom: verticalScale(8),
   },
   capturePhotoCard: {
     width: '100%',
     aspectRatio: CAPTURE_PHOTO_CARD_ASPECT,
     borderRadius: CAPTURE_PHOTO_CARD_RADIUS,
     overflow: 'hidden',
-    backgroundColor: '#000',
+    backgroundColor: THEME.captureScreenBg,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -771,37 +774,18 @@ const styles = StyleSheet.create({
   capturePhotoPillTextRight: {
     textAlign: 'right',
   },
-  capturePhotoTaglineGradient: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: '46%',
-    zIndex: 2,
+  captureTitleBridge: {
+    flex: 1,
+    width: '100%',
+    justifyContent: 'center',
+    minHeight: verticalScale(52),
   },
-  capturePhotoTaglineWrap: {
-    position: 'absolute',
-    left: scale(16),
-    right: scale(16),
-    bottom: verticalScale(18),
-    zIndex: 3,
-  },
-  capturePhotoTagline: {
-    fontSize: CAPTURE_PHOTO_TAGLINE_FONT_SIZE,
-    lineHeight: CAPTURE_PHOTO_TAGLINE_LINE_HEIGHT,
-    color: '#FFFFFF',
-    textAlign: 'left',
-    letterSpacing: 0.1,
-    ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
-  },
-  capturePhotoTaglineCompact: {
-    fontSize: CAPTURE_PHOTO_TAGLINE_FONT_SIZE,
-    lineHeight: CAPTURE_PHOTO_TAGLINE_LINE_HEIGHT,
+  captureTitleBridgeCompact: {
+    minHeight: verticalScale(40),
   },
   captureContentSection: {
     width: '100%',
     alignItems: 'flex-start',
-    marginBottom: verticalScale(20),
   },
   captureTitle: {
     fontSize: CAPTURE_TITLE_FONT_SIZE,
@@ -816,43 +800,28 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     alignItems: 'center',
     alignSelf: 'stretch',
-    marginBottom: verticalScale(6),
   },
   captureTitleHeart: {
     marginHorizontal: scale(4),
     marginBottom: scale(1),
-  },
-  captureSubtitle: {
-    marginTop: verticalScale(6),
-    fontSize: CAPTURE_SUBTITLE_FONT_SIZE,
-    lineHeight: CAPTURE_SUBTITLE_LINE_HEIGHT,
-    color: THEME.textSecondary,
-    textAlign: 'left',
-    alignSelf: 'stretch',
-    letterSpacing: 0,
-    ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
-  },
-  captureSubtitleCompact: {
-    marginTop: verticalScale(5),
   },
   captureCtaRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'center',
     alignSelf: 'center',
-    gap: scale(24),
+    gap: scale(26),
     width: '100%',
     paddingBottom: verticalScale(8),
   },
   captureCtaRowCompact: {
-    gap: scale(18),
+    gap: scale(20),
   },
   captureCtaTouch: {
     alignItems: 'center',
-    gap: verticalScale(8),
+    gap: verticalScale(10),
     maxWidth: CAPTURE_CTA_SIZE + scale(16),
     paddingHorizontal: scale(6),
-    paddingTop: verticalScale(8),
   },
   captureCtaDisc: {
     alignItems: 'center',
@@ -869,8 +838,11 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
   },
   captureCtaLabelCompact: {
-    fontSize: scale(11),
-    lineHeight: scale(13),
+    fontSize: scale(12),
+    lineHeight: scale(15),
+  },
+  heroImageMatrixWrap: {
+    backgroundColor: THEME.captureScreenBg,
   },
   heroImageCover: {
     width: '100%',
@@ -911,7 +883,8 @@ function CaptureHeroImageStack({
   reactKey,
   imageRevision,
   isTabFocused,
-}: CaptureHeroImageStackProps & { isTabFocused: boolean }) {
+  instantReveal = false,
+}: CaptureHeroImageStackProps & { isTabFocused: boolean; instantReveal?: boolean }) {
   const breatheScale = useRef(new Animated.Value(CAPTURE_HERO_BREATHE_MIN)).current;
 
   useEffect(() => {
@@ -954,7 +927,10 @@ function CaptureHeroImageStack({
             resizeMode="cover"
           />
         ) : (
-          <ColorMatrix matrix={CAPTURE_HERO_COLOR_MATRIX} style={StyleSheet.absoluteFillObject}>
+          <ColorMatrix
+            matrix={CAPTURE_HERO_COLOR_MATRIX}
+            style={[StyleSheet.absoluteFillObject, styles.heroImageMatrixWrap]}
+          >
             <ExpoImage
               source={{ uri: photoUri }}
               style={[StyleSheet.absoluteFillObject, styles.heroImageCover]}
@@ -962,6 +938,8 @@ function CaptureHeroImageStack({
               contentPosition={CAPTURE_HERO_IMAGE_CONTENT_POSITION}
               cachePolicy="memory-disk"
               recyclingKey={`${reactKey}-${imageRevision}`}
+              priority="high"
+              transition={instantReveal ? 0 : 200}
               accessibilityIgnoresInvertColors
             />
           </ColorMatrix>

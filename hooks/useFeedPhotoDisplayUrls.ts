@@ -1,8 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import type { Memory } from '@/types/local';
-import { getAllPhotoUrlsForFeed, getAllPhotoUrlsForFeedRemoteOnly } from '@/utils/memoryPhotos';
-import { isLocalMediaUriReadable } from '@/utils/localMediaReadable';
+import {
+  getAllPhotoUrlsForFeed,
+  getAllPhotoUrlsForFeedRemoteOnly,
+} from '@/utils/memoryPhotos';
+import {
+  isCloudMediaReference,
+  isLocalMediaUriReadable,
+  isProbablyStalePetitmoSandboxPath,
+} from '@/utils/localMediaReadable';
 import {
   getFeedLocalThumbnail,
   peekFeedBootstrapDisplayUrls,
@@ -39,6 +46,24 @@ async function resolveFeedSlotRemoteUrl(remote: string): Promise<string> {
   return r;
 }
 
+/**
+ * Repli cloud uniquement si le fichier sandbox est confirmé absent (réinstall).
+ * Sinon on garde l’URI locale — ne pas vider les vignettes sur un faux négatif `getInfoAsync`.
+ */
+async function maybeSwapDeadSandboxForCloud(
+  raw: string,
+  cloudFallback: string,
+): Promise<string> {
+  const t = raw.trim();
+  const cloud = cloudFallback.trim();
+  if (!t || !isLikelyDeviceLocalAsset(t)) return t;
+  if (!isProbablyStalePetitmoSandboxPath(t)) return t;
+  const readable = await isLocalMediaUriReadable(t);
+  if (readable) return t;
+  if (cloud && isCloudMediaReference(cloud)) return cloud;
+  return t;
+}
+
 function initialMergedForMemory(memory: Memory): string[] {
   if (memory.type !== 'photo') return [];
   const boot = peekFeedBootstrapDisplayUrls(memory.id);
@@ -46,12 +71,13 @@ function initialMergedForMemory(memory: Memory): string[] {
   return getAllPhotoUrlsForFeed(memory);
 }
 
+function nonEmptyUrls(urls: string[]): string[] {
+  return urls.map(u => u.trim()).filter(Boolean);
+}
+
 /**
- * URLs affichées dans le fil.
- * - Après import : bootstrap = **les mêmes** `previewUris` que la carte « envoi » (évite un reload Image).
- * - Ne remplace pas une URI locale déjà affichée par une autre URI locale (ex. copie sandbox) : même pixels,
- *   autre chemin → RN remontait l’Image (flash court).
- * - Puis : fichier cache disque préféré au **http** pour un slot quand le worker change seulement l’URL.
+ * URLs affichées dans le fil — local-first (`getAllPhotoUrlsForFeed`).
+ * Passe async : cache fil disque, signature cloud, repli réinstall si fichier sandbox confirmé mort.
  */
 export function useFeedPhotoDisplayUrls(memory: Memory): string[] {
   const [merged, setMerged] = useState<string[]>(() => initialMergedForMemory(memory));
@@ -106,11 +132,9 @@ export function useFeedPhotoDisplayUrls(memory: Memory): string[] {
       const remoteOnly = getAllPhotoUrlsForFeedRemoteOnly(memory);
       const resolvedRaw: string[] = [];
       for (let i = 0; i < remRaw.length; i++) {
-        let raw = remRaw[i]?.trim() || '';
-        if (raw && isLikelyDeviceLocalAsset(raw)) {
-          const ok = await isLocalMediaUriReadable(raw);
-          if (!ok) raw = (remoteOnly[i]?.trim() ?? '').trim();
-        }
+        const rawIn = remRaw[i]?.trim() || '';
+        const cloudOnly = (remoteOnly[i]?.trim() ?? '').trim();
+        const raw = await maybeSwapDeadSandboxForCloud(rawIn, cloudOnly);
         resolvedRaw.push(raw);
       }
       if (!alive) return;
@@ -167,9 +191,19 @@ export function useFeedPhotoDisplayUrls(memory: Memory): string[] {
             chosen = prevU;
           }
           if (chosen) next.push(chosen);
-          else if (i >= rem.length) break;
+          else if (i >= remRaw.length) break;
         }
-        const nextMerged = next.length > 0 ? next : rem;
+        const fromSlots = nonEmptyUrls(next);
+        const fromRem = nonEmptyUrls(rem);
+        const fromSync = nonEmptyUrls(remRaw);
+        const nextMerged =
+          fromSlots.length > 0
+            ? fromSlots
+            : fromRem.length > 0
+              ? fromRem
+              : fromSync.length > 0
+                ? fromSync
+                : nonEmptyUrls(prev);
         if (
           prev.length === nextMerged.length &&
           prev.every((u, j) => u === nextMerged[j])

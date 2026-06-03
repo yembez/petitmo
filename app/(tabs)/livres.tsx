@@ -24,8 +24,9 @@ import { scale, verticalScale } from '@/utils/responsive';
 import { THEME } from '@/constants/theme';
 import BookCoverThumbnail from '@/components/BookCoverThumbnail';
 import { bookCoverPeriodLabelForBook } from '@/utils/bookCoverPeriodLabel';
+import { normalizeMemoryMediaUriForDisplay } from '@/utils/memoryPhotos';
 import type { Book } from '@/services/books';
-import { deleteBook, listBooks } from '@/services/books';
+import { deleteBook, listBooks, resolveBookListCoverDisplayUri } from '@/services/books';
 import { feedBooksHydrationSnapshot } from '@/services/tabScreensCache';
 import { supabase } from '@/lib/supabase';
 import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
@@ -47,7 +48,7 @@ const BookListRow = memo(function BookListRow({ book, authToken, onOpen, onDelet
     transform: [{ scale: pressScale.value }],
   }));
 
-  const uri = (book.coverPhotoUrl ?? '').trim() || null;
+  const uri = resolveBookListCoverDisplayUri(book);
   const count = book.memoryIds.length;
   const needsAuthHeader = !!uri && /^https?:\/\//i.test(uri) && uri.includes('supabase');
   const imageHeaders =

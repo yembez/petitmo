@@ -74,7 +74,7 @@ export type GenerateBookPdfPayload = {
    */
   digitalExportPaid?: boolean;
   /** Flux ticket : enfant inline (pas de ligne `children`). */
-  guestChild?: { name: string; photo_url?: string | null };
+  guestChild?: { name: string; photo_url?: string | null; birthdate?: string | null };
   guestMemories?: GuestMemoryForPdfPayload[];
 };
 

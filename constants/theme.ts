@@ -23,6 +23,8 @@ export const THEME = {
   textPrimary: '#1C1C1E',
   textMuted: '#6B7280',
   textSecondary: '#8E8E93',
+  /** Logo header, filigranes — gris très clair sur fond beige/blanc. */
+  textTertiary: '#C7C7CC',
 
   /** Couleur de marque — CTA, cœurs favoris, paywall, spinners d’accent… */
   brandPrimary: BRAND_PRIMARY,
@@ -49,8 +51,10 @@ export const THEME = {
   captureImportCtaBackground: '#FBD1C1',
   /** Fond CTA rond « Enregistrer » — écran Capturer (maquette V3). */
   captureRecordCtaBackground: '#FFFFFF',
+  /** Liseré disque « Enregistrer » — écran Capturer. */
+  captureRecordCtaBorderColor: BRAND_CTA_ORANGE,
   /** Fond CTA rond « Écrire » — écran Capturer (maquette V3). */
-  captureWriteCtaBackground: '#F88E73',
+  captureWriteCtaBackground: BRAND_CTA_ORANGE,
   /** Icônes dans les disques CTA Capturer — marron fondu bas hero. */
   captureCtaIconColor: '#3C3126',
   /** Fond bas Capturer — dégradé photo, bandeau CTA (blanc cassé beige). */

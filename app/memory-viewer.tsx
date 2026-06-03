@@ -38,6 +38,7 @@ import { formatAgeAtMemory, formatDateLong } from '@/utils/date';
 import { childDisplayGivenName } from '@/utils/childDisplayName';
 import { useFeedVideoPlaybackUri } from '@/hooks/useFeedVideoPlaybackUri';
 import { useExpoAvShouldPlay } from '@/hooks/useExpoAvShouldPlay';
+import { getVideoPosterUriForFeedAndViewer } from '@/utils/memoryPhotos';
 import { normalizeVideoPlaybackUri } from '@/utils/videoMediaUri';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { ensurePlaybackAudioForListening } from '@/lib/playbackAudioMode';
@@ -622,8 +623,7 @@ function ImmersiveVideo({
   onToggleFavorite: (id: string) => void | Promise<void>;
 }) {
   const uri = useFeedVideoPlaybackUri(memory);
-  const posterRaw =
-    (memory.poster_url?.trim() || memory.thumbnail_url?.trim() || '') || '';
+  const posterRaw = getVideoPosterUriForFeedAndViewer(memory);
   const posterSigned = useSignedMediaUrl(posterRaw || null) ?? '';
   const posterUri = normalizeVideoPlaybackUri((posterSigned || posterRaw).trim());
 

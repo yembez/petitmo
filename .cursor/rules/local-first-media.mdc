@@ -48,9 +48,42 @@ La normalisation (`file://`, `content://`, `ph://`, `assets-library://`, `data:`
 
 Tout mapping ad hoc (style `data.map(row => row)`) sur des données serveur écrase les `local_*` à `null` → **les photos disparaissent du fil après le moindre refresh**. C'est la cause racine n°1 des bugs "souvenirs perdus dans tel onglet".
 
-### 4. Sandbox fantôme (post-réinstall)
+### 4. Sandbox fantôme (post-réinstall) — fichier **confirmé** absent uniquement
 
-Si un `local_*` pointe vers un fichier disparu (réinstall), basculer sur la chaîne distante. C'est l'heuristique `isProbablyStalePetitmoSandboxPath` (`utils/localMediaReadable.ts`). Les helpers du point 1 l'appliquent déjà — ne pas la dupliquer dans un composant.
+`isProbablyStalePetitmoSandboxPath` signifie seulement « chemin sous `petitmo_memories/` / `petitmo_feed_local_*` » — **pas** « fichier mort ». Un chemin sandbox **valide** ne doit jamais être ignoré ni remplacé par une URL cloud expirée.
+
+- Repli cloud : uniquement si `isLocalMediaUriReadable` échoue **et** qu’une URL http/bucket existe (`isCloudMediaReference`).
+- Ne jamais renvoyer `''` pour un slot photo album quand le local existe encore.
+- Ne pas dupliquer cette logique dans un composant : `useFeedPhotoDisplayUrls` + helpers `memoryPhotos.ts`.
+
+### 4b. Container iOS — chemins absolus en SQLite (cause n°1 des vignettes « tout cassé »)
+
+Sur iOS, `documentDirectory` change d’**UUID** à chaque réinstall / souvent à chaque `expo run:ios` :
+
+`…/Application/<UUID>/Documents/petitmo_memories/…`
+
+Les colonnes `local_*`, `voice_cover_path`, `coverPhotoUrl` (livres), `favorite_photo_urls` stockent souvent le **chemin absolu complet**. Après un nouveau build, l’UUID change : les **fichiers** sont dans le nouveau container, les **chaînes en base** pointent encore vers l’ancien → vignettes vides partout (fil, favoris, livres) **sans** perte SQLite.
+
+**Obligatoire avant tout `Image` / `expo-image` / `Video` :**
+
+- `rebaseSandboxUriToCurrentContainer` puis `normalizeMemoryMediaUriForDisplay` (`utils/localMediaReadable.ts` + `utils/memoryPhotos.ts`).
+- Les helpers du §1 appellent déjà `normalizeMemoryMediaUriForDisplay` — ne pas lire `memory.local_thumb_path` ou `book.coverPhotoUrl` brut dans un composant.
+
+**Interdit :** vider une liste d’URLs affichées parce que `getInfoAsync` a échoué sur l’ancien chemin, si aucun repli cloud n’existe (mode gratuit).
+
+### 4c. Parité d’écrans (fil = référence)
+
+Même URI affichable sur **fil, favoris, viewer immersif, liste livres, aperçu livre** :
+
+| Besoin | Helper |
+|--------|--------|
+| Photos fil / favoris / immersif | `getAllPhotoUrlsForFeed` + `useFeedPhotoDisplayUrls` |
+| Poster vidéo | `getVideoPosterUriForFeedAndViewer` |
+| Cover vocal | `getVoiceCoverUriForFeedAndViewer` |
+| Couverture liste livres | `resolveBookListCoverDisplayUri` (`services/books.ts`) |
+| Comparer / indexer favoris par photo | `normalizePhotoUrlForCompare` (rebase sandbox) + `mapPhotoUrlToThumb` |
+
+Pas de variante « favoris lit `voice_cover_path` brut » ou « livres lit `coverPhotoUrl` sans rebase ».
 
 ### 5. Capture en gratuit ≠ capture en cloud
 
@@ -87,4 +120,6 @@ Bug type "la photo ne s'affiche plus dans tel onglet" → vérifier d'abord, dan
 - Quels champs de la ligne SQLite sont renseignés (`SELECT * FROM memories WHERE id = ?`) ?
 - Le helper utilisé regarde-t-il ces champs ?
 - Un pull récent a-t-il pu écraser un `local_*` ? (point 3)
-- Le fichier du `local_*` existe-t-il encore sur disque ? (point 4)
+- L’UUID du container a-t-il changé ? Comparer un `local_thumb_path` en base avec `documentDirectory` courant — si les UUID diffèrent, appliquer §4b avant de conclure à une perte de fichier.
+- Le fichier existe-t-il **après rebase** (`rebaseSandboxUriToCurrentContainer`) ? (point 4)
+- L’écran utilise-t-il le **même helper** que le fil ? (point 4c)

@@ -93,7 +93,11 @@ export async function refreshChildProfileFromLocal(childId: string): Promise<Loc
   return sanitizeChildLocalAvatarIfMissing(row);
 }
 
-export async function ensureChildFaceBounds(child: LocalChild): Promise<LocalChild> {
+export async function ensureChildFaceBounds(
+  child: LocalChild,
+  opts?: { notify?: boolean },
+): Promise<LocalChild> {
+  const shouldNotify = opts?.notify !== false;
   const row = getLocalChild(child.id) ?? child;
   let current = await sanitizeChildLocalAvatarIfMissing(row);
   if (!childNeedsFaceBoundsBackfill(current)) return current;
@@ -112,10 +116,9 @@ export async function ensureChildFaceBounds(child: LocalChild): Promise<LocalChi
           const next: LocalChild = {
             ...current,
             ...bounds,
-            updated_at: new Date().toISOString(),
           };
           upsertLocalChild(next);
-          notifyChildProfileUpdated(current.id, next);
+          if (shouldNotify) notifyChildProfileUpdated(current.id, next);
           return next;
         }
       } catch {
@@ -136,11 +139,23 @@ export async function ensureChildFaceBounds(child: LocalChild): Promise<LocalChi
   const next: LocalChild = {
     ...current,
     ...bounds,
-    updated_at: new Date().toISOString(),
   };
   upsertLocalChild(next);
-  notifyChildProfileUpdated(current.id, next);
+  if (shouldNotify) notifyChildProfileUpdated(current.id, next);
   return next;
+}
+
+function scheduleChildFaceBoundsBackfill(children: LocalChild[]): void {
+  void (async () => {
+    for (const c of children) {
+      if (!childNeedsFaceBoundsBackfill(c)) continue;
+      try {
+        await ensureChildFaceBounds(c, { notify: false });
+      } catch {
+        /* ignore */
+      }
+    }
+  })();
 }
 
 function pickFaceBounds(src: {
@@ -387,7 +402,8 @@ export async function getChildren() {
   try {
     if ((await getCachedUserMode()) === 'local') {
       const list = listLocalChildren();
-      return Promise.all(list.map(c => ensureChildFaceBounds(c)));
+      scheduleChildFaceBoundsBackfill(list);
+      return list;
     }
 
     const { data, error } = await supabase
