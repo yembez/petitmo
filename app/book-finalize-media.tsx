@@ -212,7 +212,7 @@ export default function BookFinalizeMediaScreen() {
 
             {loading ? (
               <View style={styles.spinnerRow}>
-                <ActivityIndicator color={THEME.brandPrimary} />
+                <ActivityIndicator color={THEME.brandCtaOrange} />
               </View>
             ) : null}
           </>
@@ -228,7 +228,7 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 520,
     alignSelf: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: THEME.surfaceCard,
     borderRadius: scale(18),
     padding: scale(20),
     shadowColor: '#000',
@@ -249,7 +249,7 @@ const styles = StyleSheet.create({
   },
   progressFill: {
     height: '100%',
-    backgroundColor: THEME.brandPrimary,
+    backgroundColor: THEME.brandCtaOrange,
     borderRadius: scale(999),
   },
   progressLabel: { marginTop: scale(10), textAlign: 'center', color: THEME.textMuted, fontSize: scale(14) },
@@ -258,7 +258,7 @@ const styles = StyleSheet.create({
   spinnerRow: { marginTop: scale(14), alignItems: 'center' },
   cta: {
     marginTop: scale(18),
-    backgroundColor: THEME.brandPrimary,
+    backgroundColor: THEME.brandCtaOrange,
     paddingVertical: scale(14),
     borderRadius: scale(12),
     alignItems: 'center',

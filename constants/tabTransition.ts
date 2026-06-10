@@ -1,5 +1,7 @@
-/** Fond + flash pendant le fondu entre onglets — blanc pur. */
-export const TAB_TRANSITION_FADE_BG = '#FFFFFF';
+import { THEME } from '@/constants/theme';
+
+/** Fond + flash pendant le fondu entre onglets — blanc cassé charte. */
+export const TAB_TRANSITION_FADE_BG = THEME.bg;
 
 export const TAB_TRANSITION_DURATION_MS = 300;
 /** Montée verticale de l’écran entrant (depuis le bas). */

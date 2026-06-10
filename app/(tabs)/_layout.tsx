@@ -126,7 +126,7 @@ function TabLayoutInner() {
          * au retour sur Fil / Favoris, zoom diaporama et autoplay vidéo ne repartaient plus.
          */
         freezeOnBlur: false,
-        sceneStyle: { backgroundColor: '#FFFFFF' },
+        sceneStyle: { backgroundColor: THEME.bg },
         tabBarActiveTintColor: THEME.tabBarActiveTint,
         tabBarInactiveTintColor: THEME.tabBarInactiveTint,
         tabBarActiveBackgroundColor: 'transparent',

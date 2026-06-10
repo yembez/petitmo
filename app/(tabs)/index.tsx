@@ -687,11 +687,11 @@ const styles = StyleSheet.create({
     flex: 1,
     width: SCREEN_W,
     minHeight: 0,
-    backgroundColor: THEME.captureScreenBg,
+    backgroundColor: THEME.bg,
   },
   captureScroll: {
     flex: 1,
-    backgroundColor: THEME.captureScreenBg,
+    backgroundColor: THEME.bg,
   },
   captureScrollContent: {
     flexGrow: 1,
@@ -751,7 +751,7 @@ const styles = StyleSheet.create({
     aspectRatio: CAPTURE_PHOTO_CARD_ASPECT,
     borderRadius: CAPTURE_PHOTO_CARD_RADIUS,
     overflow: 'hidden',
-    backgroundColor: THEME.captureScreenBg,
+    backgroundColor: THEME.bg,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -922,7 +922,7 @@ const styles = StyleSheet.create({
     lineHeight: scale(15),
   },
   heroImageMatrixWrap: {
-    backgroundColor: THEME.captureScreenBg,
+    backgroundColor: THEME.bg,
   },
   heroImageCover: {
     width: '100%',

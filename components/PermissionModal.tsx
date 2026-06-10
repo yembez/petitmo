@@ -114,7 +114,7 @@ const styles = StyleSheet.create({
     maxWidth: scale(400),
   },
   modal: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: THEME.bg,
     borderRadius: scale(24),
     padding: SPACING.xl,
     alignItems: 'center',

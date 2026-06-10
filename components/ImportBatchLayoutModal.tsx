@@ -96,7 +96,7 @@ const styles = StyleSheet.create({
   modal: {
     width: '100%',
     maxWidth: scale(400),
-    backgroundColor: '#fffffc',
+    backgroundColor: THEME.bg,
     borderRadius: scale(20),
     padding: SPACING.xl,
     shadowColor: '#000',

@@ -200,7 +200,7 @@ const styles = StyleSheet.create({
     padding: SPACING.lg,
   },
   modalContent: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: THEME.bg,
     borderRadius: scale(16),
     width: '100%',
     maxWidth: scale(400),
@@ -249,7 +249,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   pickerItemSelected: {
-    backgroundColor: THEME.brandPrimary,
+    backgroundColor: THEME.brandCtaOrange,
     marginHorizontal: SPACING.xs,
     borderRadius: scale(6),
   },

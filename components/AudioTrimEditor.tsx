@@ -531,7 +531,7 @@ const styles = StyleSheet.create({
     top: '50%',
     marginTop: -scale(2),
     height: scale(4),
-    backgroundColor: THEME.brandPrimary,
+    backgroundColor: THEME.brandCtaOrange,
     borderRadius: scale(999),
   },
   thumb: {
@@ -539,7 +539,7 @@ const styles = StyleSheet.create({
     top: '50%',
     backgroundColor: '#fff',
     borderWidth: 2,
-    borderColor: THEME.brandPrimary,
+    borderColor: THEME.brandCtaOrange,
     shadowColor: '#000',
     shadowOpacity: 0.08,
     shadowRadius: 8,

@@ -467,7 +467,7 @@ const styles = StyleSheet.create({
     width: scale(40),
     height: scale(40),
     borderRadius: scale(20),
-    backgroundColor: THEME.brandPrimary,
+    backgroundColor: THEME.brandCtaOrange,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 3,

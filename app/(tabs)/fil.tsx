@@ -220,7 +220,7 @@ function FilScreen() {
     return (
       <View style={[styles.container, styles.centered]}>
         <StatusBar style="dark" />
-        <ActivityIndicator size="large" color={THEME.brandPrimary} />
+        <ActivityIndicator size="large" color={THEME.brandCtaOrange} />
       </View>
     );
   }
@@ -277,7 +277,7 @@ function FilScreen() {
           showsVerticalScrollIndicator={false}
           nestedScrollEnabled
           refreshControl={
-            <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor={THEME.brandPrimary} />
+            <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor={THEME.brandCtaOrange} />
           }
           ListEmptyComponent={
             feedData.length === 0 ? (
@@ -373,7 +373,7 @@ const localStyles = StyleSheet.create({
     flex: 1,
   },
   nudgeCta: {
-    color: THEME.brandPrimary,
+    color: THEME.brandCtaOrange,
     fontSize: 13,
     fontWeight: '600',
     marginLeft: 8,

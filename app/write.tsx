@@ -281,7 +281,7 @@ export default function WriteScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: THEME.bg,
   },
   header: {
     flexDirection: 'row',

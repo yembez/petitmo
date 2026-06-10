@@ -1111,7 +1111,7 @@ function FavorisScreen() {
       {isTabFocused ? <StatusBar style="light" /> : null}
       {loading ? (
         <View style={styles.centered}>
-          <ActivityIndicator size="large" color={THEME.brandPrimary} />
+          <ActivityIndicator size="large" color={THEME.brandCtaOrange} />
         </View>
       ) : !hasChild ? (
         <View style={[styles.centered, styles.noChildPad]}>
@@ -1293,16 +1293,16 @@ export default function FavorisScreenTab() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: THEME.bg,
   },
   mainColumn: {
     flex: 1,
   },
   mainColumnGallery: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: THEME.bg,
   },
   mainColumnLight: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: THEME.bg,
   },
   /** Colonne liste pleine hauteur ; chrome titre en absolu par-dessus (sans bandeau réservé). */
   galleryShell: {
@@ -1330,7 +1330,7 @@ const styles = StyleSheet.create({
   heroGridWhiteGap: {
     width: '100%',
     height: GALLERY_TILE_GAP,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: THEME.bg,
   },
   heroSlideshowLayer: {
     ...StyleSheet.absoluteFillObject,
@@ -1367,7 +1367,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: THEME.surfaceCard,
     borderRadius: scale(12),
     padding: SPACING.xl,
     borderWidth: 1,
@@ -1388,7 +1388,7 @@ const styles = StyleSheet.create({
   },
   gallery: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: THEME.bg,
   },
   galleryContent: {
     paddingTop: 0,

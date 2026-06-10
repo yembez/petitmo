@@ -101,8 +101,8 @@ const BROWSE_PAGE_GAP = 0;
 const BROWSE_ROW_GAP = 24;
 /** Largeur de la « reliure » (dégradé d’ombre) au centre d’un spread. */
 const BROWSE_SPINE_W = 16;
-/** Fond du viewer : gris neutre clair, identique au fond de la page fil (`THEME.bgScreen`). */
-const BROWSE_BG = THEME.bgScreen;
+/** Fond du viewer livre — blanc cassé charte (`THEME.bg`). */
+const BROWSE_BG = THEME.bg;
 const QR_BASE = 'https://petitmo.app/m';
 const MIN_BOOK_SELECTION_KEYS = 5;
 const MAX_BOOK_SELECTION_KEYS = 80;

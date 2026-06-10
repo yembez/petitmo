@@ -13,13 +13,18 @@ const BRAND_CTA_GRAY_RGB = '81, 84, 94';
 const FEED_PENCIL_SLATE = '#526779';
 const FEED_PENCIL_SLATE_RGB = '82, 103, 121';
 
+/** Fond d’écran officiel — blanc cassé beige (Capturer, onglets, modales, écrans stack). */
+export const APP_SCREEN_BG = '#FAFAF7';
+export const APP_SCREEN_BG_RGB = { r: 250, g: 250, b: 247 } as const;
+
 /**
  * Charte couleur Petitmo — typographies (encre / gris), fonds neutres, accent rosé (`brandPrimary`).
  */
 export const THEME = {
-  bg: '#FFFFFF',
-  /** Fonds d’écran doux (remplace le beige #F5F5F0) */
-  bgScreen: '#F5F7FA',
+  /** Fond d’écran principal — blanc cassé charte. */
+  bg: APP_SCREEN_BG,
+  /** @deprecated alias — `bg` */
+  bgScreen: APP_SCREEN_BG,
   textPrimary: '#1C1C1E',
   textMuted: '#6B7280',
   textSecondary: '#8E8E93',
@@ -57,14 +62,14 @@ export const THEME = {
   captureWriteCtaBackground: BRAND_CTA_ORANGE,
   /** Icônes dans les disques CTA Capturer — marron fondu bas hero. */
   captureCtaIconColor: '#3C3126',
-  /** Fond bas Capturer — dégradé photo, bandeau CTA (blanc cassé beige). */
-  captureScreenBg: '#FAFAF7',
+  /** @deprecated alias — `bg` (bandeau bas Capturer, dégradé hero). */
+  captureScreenBg: APP_SCREEN_BG,
   /** Libellés sous les disques CTA Capturer. */
   captureCtaLabelColor: '#3C3126',
   /** CTA primaires, liens, spinners (hors cœur du fil) — noir. */
   accent: '#1C1C1E',
-  /** Fond type paywall — espace parent, création / édition profil enfant */
-  familyFlowScreenBg: '#F6F4F1',
+  /** Fond écrans famille / fil header — aligné fond d’écran charte. */
+  familyFlowScreenBg: APP_SCREEN_BG,
   /** Séparateurs légers (cartes header) alignés paywall */
   familyFlowLine: 'rgba(0,0,0,0.08)',
   /** Variations plus douces (utile pour hover / badges / backgrounds). */
@@ -73,15 +78,15 @@ export const THEME = {
   accentSoft: '#8E8E93',
 
   /** @deprecated — `captureScreenCtaBackground` */
-  captureCoralCtaBackground: BRAND_PRIMARY,
+  captureCoralCtaBackground: BRAND_CTA_ORANGE,
   /** @deprecated — `captureScreenCtaBackground` */
-  captureAccentYellow: BRAND_PRIMARY,
-  /** Fond CTA primaire app — `petitmoCtaStyles`, favoris « Sélectionner », modales… */
-  captureScreenCtaBackground: BRAND_PRIMARY,
-  /** Libellé + icône sur fond CTA primaire rosé. */
+  captureAccentYellow: BRAND_CTA_ORANGE,
+  /** Fond CTA primaire app — `petitmoCtaStyles`, modales, onboarding, livres… */
+  captureScreenCtaBackground: BRAND_CTA_ORANGE,
+  /** Libellé + icône sur fond CTA primaire orange. */
   captureScreenCtaForeground: '#FFFFFF',
   /** @deprecated — `captureScreenCtaBackground` */
-  captureWriteCtaRose: BRAND_PRIMARY,
+  captureWriteCtaRose: BRAND_CTA_ORANGE,
   /** Gris `#51545E` — CTA paywall, livres, modales, favoris « Ajouter au livre », memory-view… */
   brandArdoise: BRAND_CTA_GRAY,
   /** Fond doux badges / sélection plan paywall. */
@@ -93,23 +98,25 @@ export const THEME = {
   feedPencilCtaBackground: `rgba(${FEED_PENCIL_SLATE_RGB}, 0.20)`,
   feedPencilCtaBorderColor: `rgba(${FEED_PENCIL_SLATE_RGB}, 0.36)`,
   feedPencilCtaForeground: FEED_PENCIL_SLATE,
-  /** CTA « Sélectionner » — héros favoris (rosé à 80 %). */
-  favorisSelectCtaBackground: `rgba(${BRAND_PRIMARY_RGB}, 0.8)`,
+  /** CTA « Sélectionner » — héros favoris (orange à 80 %). */
+  favorisSelectCtaBackground: `rgba(${BRAND_CTA_ORANGE_RGB}, 0.8)`,
   /**
    * Contour CTA primaire — `PETITMO_CTA_BORDER_WIDTH`.
-   * Liseré rosé discret sur fond `captureScreenCtaBackground`.
+   * Liseré orange discret sur fond `captureScreenCtaBackground`.
    */
-  captureCtaBorderColor: `rgba(${BRAND_PRIMARY_RGB}, 0.32)`,
+  captureCtaBorderColor: `rgba(${BRAND_CTA_ORANGE_RGB}, 0.32)`,
   /** @deprecated violet maquette initiale — conservé si besoin legacy. */
   captureMaquetteViolet: '#5B47D6',
   /** Icône + libellé onglet actif tab bar. */
   tabBarActiveTint: BRAND_CTA_ORANGE,
   /** Icône + libellé onglets inactifs. */
   tabBarInactiveTint: '#8E8E93',
-  /** Fond tab bar — blanc cassé beige chaleureux. */
-  tabBarBackground: '#F6F4F1',
+  /** Fond tab bar — aligné fond d’écran charte. */
+  tabBarBackground: APP_SCREEN_BG,
   /** @deprecated — `tabBarBackground` */
-  tabBarSurface: '#F6F4F1',
+  tabBarSurface: APP_SCREEN_BG,
+  /** Surfaces élevées (cartes souvenir, CTA disque blanc, pages livre à l’écran). */
+  surfaceCard: '#FFFFFF',
   /** @deprecated pastille onglet actif supprimée — teinte via `tabBarActiveTint` uniquement. */
   tabBarActivePill: `rgba(${BRAND_CTA_ORANGE_RGB}, 0.14)`,
   /** @deprecated anneau lavande (tab bar violette) — non utilisé sur le bandeau blanc actuel. */

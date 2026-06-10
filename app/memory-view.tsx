@@ -728,7 +728,7 @@ export default function MemoryViewScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: THEME.bg,
   },
   centered: {
     justifyContent: 'center',
@@ -1014,7 +1014,7 @@ const styles = StyleSheet.create({
     padding: scale(16),
   },
   modalCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: THEME.bg,
     borderRadius: scale(16),
     padding: scale(18),
     maxHeight: '85%',

@@ -299,7 +299,7 @@ function LivresScreen() {
         data={books}
         keyExtractor={item => item.id}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={THEME.brandPrimary} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={THEME.brandCtaOrange} />
         }
         ItemSeparatorComponent={() => <View style={styles.rowSep} />}
         contentContainerStyle={[

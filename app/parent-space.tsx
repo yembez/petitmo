@@ -102,7 +102,7 @@ export default function ParentSpaceScreen() {
   if (!fontsLoaded) {
     return (
       <View style={[styles.container, styles.fontsGate, { paddingTop: insets.top }]}>
-        <ActivityIndicator color={THEME.brandPrimary} size="large" />
+        <ActivityIndicator color={THEME.brandCtaOrange} size="large" />
       </View>
     );
   }
@@ -466,7 +466,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   rowLabelAccent: {
-    color: THEME.brandPrimary,
+    color: THEME.brandCtaOrange,
     fontWeight: '600',
   },
   rowLabelDestructive: {
@@ -502,7 +502,7 @@ const styles = StyleSheet.create({
     width: scale(34),
     height: scale(34),
     borderRadius: scale(17),
-    backgroundColor: THEME.brandPrimary,
+    backgroundColor: THEME.brandCtaOrange,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: SPACING.sm,

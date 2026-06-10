@@ -19,7 +19,7 @@ type Props = {
 };
 
 /**
- * Fondu blanc pur + montée verticale légère à l’entrée sur un onglet.
+ * Fondu blanc cassé charte + montée verticale légère à l’entrée sur un onglet.
  */
 export default function TabSceneTransition({ children }: Props) {
   const isFocused = useIsFocused();

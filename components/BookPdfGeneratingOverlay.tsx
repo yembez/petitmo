@@ -112,7 +112,7 @@ const styles = StyleSheet.create({
     width: scale(96),
     height: scale(96),
     borderRadius: scale(48),
-    backgroundColor: THEME.brandPrimary,
+    backgroundColor: THEME.brandCtaOrange,
   },
   iconRing: {
     alignItems: 'center',

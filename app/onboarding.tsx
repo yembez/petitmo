@@ -151,7 +151,7 @@ export default function OnboardingScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fffffc',
+    backgroundColor: THEME.bg,
   },
   backgroundImage: {
     flex: 1,
@@ -231,7 +231,7 @@ const styles = StyleSheet.create({
   ctaButton: {
     width: '100%',
     maxWidth: scale(320),
-    backgroundColor: THEME.brandPrimary,
+    backgroundColor: THEME.brandCtaOrange,
     borderRadius: scale(100),
     borderWidth: 0,
     borderColor: 'transparent',
@@ -264,7 +264,7 @@ const styles = StyleSheet.create({
   ctaButtonSecondaryText: {
     fontSize: FONT_SIZES.md,
     fontWeight: '600',
-    color: THEME.brandPrimary,
+    color: THEME.brandCtaOrange,
     textAlign: 'center',
   },
   linkTertiaryWrap: {

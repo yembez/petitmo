@@ -23,11 +23,11 @@ export const PETITMO_CTA_SOFT_ELEVATION = Platform.select({
   default: {},
 });
 
-/** Spinner sur fond CTA rosé. */
+/** Spinner sur fond CTA orange. */
 export const PETITMO_CTA_SPINNER_COLOR = THEME.captureScreenCtaForeground;
 
 /**
- * CTA primaire app : rosé charte (`THEME.brandPrimary`), liseré discret, coins `PETITMO_CTA_BORDER_RADIUS`.
+ * CTA primaire app : orange charte (`THEME.brandCtaOrange`), liseré discret, coins `PETITMO_CTA_BORDER_RADIUS`.
  */
 export const petitmoCtaStyles = StyleSheet.create({
   primary: {

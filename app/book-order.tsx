@@ -516,7 +516,7 @@ export default function BookOrderScreen() {
   if (loading) {
     return (
       <View style={[styles.center, { paddingTop: insets.top }]}>
-        <ActivityIndicator size="large" color={THEME.brandPrimary} />
+        <ActivityIndicator size="large" color={THEME.brandCtaOrange} />
       </View>
     );
   }
@@ -524,7 +524,7 @@ export default function BookOrderScreen() {
   if (blockedEmptyMemories) {
     return (
       <View style={[styles.center, { paddingTop: insets.top }]}>
-        <ActivityIndicator size="large" color={THEME.brandPrimary} />
+        <ActivityIndicator size="large" color={THEME.brandCtaOrange} />
       </View>
     );
   }
@@ -784,7 +784,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: scale(10),
     paddingVertical: scale(6),
   },
-  chipOn: { borderColor: THEME.brandPrimary, backgroundColor: 'rgba(252, 87, 87, 0.08)' },
+  chipOn: { borderColor: THEME.brandCtaOrange, backgroundColor: 'rgba(255, 127, 79, 0.08)' },
   chipText: { fontSize: scale(13), color: THEME.textPrimary },
   chipTextOn: { fontWeight: '600' },
   checkRow: { flexDirection: 'row', alignItems: 'center', gap: scale(10), marginTop: scale(8), marginBottom: scale(12) },
@@ -795,7 +795,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: THEME.textSecondary,
   },
-  checkboxOn: { backgroundColor: THEME.brandPrimary, borderColor: THEME.brandPrimary },
+  checkboxOn: { backgroundColor: THEME.brandCtaOrange, borderColor: THEME.brandCtaOrange },
   checkLabel: { flex: 1, fontSize: scale(14), color: THEME.textPrimary, lineHeight: scale(20) },
   cta: {
     marginTop: scale(8),

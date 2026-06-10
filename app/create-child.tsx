@@ -251,7 +251,7 @@ const styles = StyleSheet.create({
   },
   addPhotoText: {
     fontSize: FONT_SIZES.sm,
-    color: THEME.brandPrimary,
+    color: THEME.brandCtaOrange,
     fontWeight: '500',
     marginBottom: verticalScale(8),
   },

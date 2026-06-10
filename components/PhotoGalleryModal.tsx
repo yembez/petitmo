@@ -308,7 +308,7 @@ export default function PhotoGalleryModal({
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: THEME.bg,
   },
   header: {
     flexDirection: 'row',
@@ -316,7 +316,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: scale(8),
     zIndex: 2,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: THEME.bg,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(0,0,0,0.08)',
   },
@@ -340,24 +340,24 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: THEME.bg,
   },
   list: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: THEME.bg,
   },
   listContent: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: THEME.bg,
     paddingBottom: verticalScale(24),
   },
   row: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: THEME.bg,
     alignItems: 'center',
     justifyContent: 'flex-start',
   },
   imageWrap: {
     position: 'relative',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: THEME.bg,
   },
   heartBtn: {
     position: 'absolute',

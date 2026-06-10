@@ -198,7 +198,7 @@ const styles = StyleSheet.create({
     fontSize: scale(56),
     lineHeight: scale(60),
     textAlign: 'center',
-    color: THEME.brandPrimary,
+    color: THEME.brandCtaOrange,
     marginBottom: scale(12),
   },
   title: {
@@ -231,7 +231,7 @@ const styles = StyleSheet.create({
     color: THEME.textPrimary,
   },
   terracottaCta: {
-    backgroundColor: THEME.brandPrimary,
+    backgroundColor: THEME.brandCtaOrange,
     paddingVertical: scale(14),
     borderRadius: scale(12),
     alignItems: 'center',

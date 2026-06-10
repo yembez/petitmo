@@ -153,7 +153,7 @@ const PAYWALL_MESSAGES: Record<
 
 type Plan = 'yearly' | 'monthly'
 
-const PAYWALL_BG = '#F6F4F1'
+const PAYWALL_BG = THEME.bg
 /** Gris CTA charte — paywall (`THEME.brandArdoise`). */
 const ACCENT = THEME.brandArdoise
 const ACCENT_SOFT = THEME.paywallAccentSoft
@@ -280,7 +280,7 @@ export default function PaywallScreen() {
           pointerEvents="none"
         />
         <LinearGradient
-          colors={['rgba(246,244,241,0)', 'rgba(246,244,241,0.5)', PAYWALL_BG]}
+          colors={['rgba(250,250,247,0)', 'rgba(250,250,247,0.5)', PAYWALL_BG]}
           locations={[0.55, 0.88, 1]}
           style={styles.heroFade}
           pointerEvents="none"
@@ -779,7 +779,7 @@ const styles = StyleSheet.create({
   },
   planCardSelected: {
     borderColor: ACCENT,
-    backgroundColor: '#FFFCFA',
+    backgroundColor: THEME.surfaceCard,
   },
   planCardIdle: {
     borderColor: 'rgba(0,0,0,0.1)',

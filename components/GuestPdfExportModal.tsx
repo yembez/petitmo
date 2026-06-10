@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getLastGuestExportEmail } from '@/lib/guestExportPrefs';
 import { getPrivacyPolicyUrl } from '@/lib/privacyPolicyUrl';
 import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
+import { THEME } from '@/constants/theme';
 
 export type GuestPdfExportSubmit = {
   email: string;
@@ -154,7 +155,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.45)',
   },
   sheet: {
-    backgroundColor: '#fff',
+    backgroundColor: THEME.bg,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     paddingHorizontal: 20,
