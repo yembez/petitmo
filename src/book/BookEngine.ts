@@ -1,5 +1,6 @@
 import type { Child, Memory } from '@/types/local';
 export type { Memory, Child } from '@/types/local';
+import { bookChapterStarts, planBookChapters } from '@/utils/bookChapterPlan';
 
 export type BookPage =
   | { type: 'cover'; child: Child }
@@ -15,18 +16,6 @@ function countWords(s: string | null | undefined): number {
   const t = (s ?? '').trim();
   if (!t) return 0;
   return t.split(/\s+/).filter(Boolean).length;
-}
-
-function diffCalendarMonth(a: Date, b: Date): boolean {
-  return a.getFullYear() !== b.getFullYear() || a.getMonth() !== b.getMonth();
-}
-
-function diffDays(a: Date, b: Date): number {
-  return Math.floor((a.getTime() - b.getTime()) / (24 * 60 * 60 * 1000));
-}
-
-function monthLabel(d: Date): string {
-  return d.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
 }
 
 function resolutionFromThumbnailUrl(url: string | null): { width: number; height: number } | undefined {
@@ -52,56 +41,44 @@ function getResolutionFromThumbnail(memory: Memory): { width: number; height: nu
   return resolutionFromThumbnailUrl(memory.thumbnail_url);
 }
 
+function memoryToPage(memory: Memory): BookPage {
+  switch (memory.type) {
+    case 'photo': {
+      void getResolutionFromThumbnail(memory);
+      const words = countWords(memory.content);
+      if (words > 10) {
+        return { type: 'photo-note', memory };
+      }
+      return { type: 'photo-full', memory };
+    }
+    case 'text':
+      return { type: 'quote', memory };
+    case 'voice':
+      return { type: 'audio', memory };
+    case 'video':
+      return { type: 'video', memory };
+  }
+}
+
 export function buildBookPages(child: Child, memories: Memory[]): BookPage[] {
   const sorted = [...memories].sort(
-    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
   );
 
   const pages: BookPage[] = [{ type: 'cover', child }];
+  const chapterPlans = planBookChapters(sorted);
+  const chapterStarts = bookChapterStarts(chapterPlans);
 
-  let chapterNum = 0;
-  let prev: Memory | null = null;
-
-  for (const m of sorted) {
-    const created = new Date(m.created_at);
-
-    const isFirst = prev === null;
-    const gapGt30 = prev !== null && diffDays(created, new Date(prev.created_at)) > 30;
-    const monthChanged = prev !== null && diffCalendarMonth(created, new Date(prev.created_at));
-
-    if (isFirst || gapGt30 || monthChanged) {
-      chapterNum += 1;
+  for (const memory of sorted) {
+    const chapterStart = chapterStarts.get(memory.id);
+    if (chapterStart) {
       pages.push({
         type: 'chapter',
-        month: monthLabel(created),
-        chapterNum,
+        month: chapterStart.label,
+        chapterNum: chapterStart.chapterNum,
       });
     }
-
-    switch (m.type) {
-      case 'photo': {
-        void getResolutionFromThumbnail(m);
-        const words = countWords(m.content);
-        if (words > 10) {
-          pages.push({ type: 'photo-note', memory: m });
-        } else {
-          pages.push({ type: 'photo-full', memory: m });
-        }
-        break;
-      }
-      case 'text': {
-        pages.push({ type: 'quote', memory: m });
-        break;
-      }
-      case 'voice':
-        pages.push({ type: 'audio', memory: m });
-        break;
-      case 'video':
-        pages.push({ type: 'video', memory: m });
-        break;
-    }
-
-    prev = m;
+    pages.push(memoryToPage(memory));
   }
 
   pages.push({ type: 'back-cover' });

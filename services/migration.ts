@@ -9,6 +9,7 @@ import {
   uploadFileToSupabase,
   uploadVoiceCoverToSupabaseFromLocal,
 } from '@/services/media';
+import { getUserMode } from '@/lib/userMode';
 import { getUserTier } from '@/lib/userTier';
 import { supabase } from '@/lib/supabase';
 import type { Database } from '@/types/database';
@@ -316,6 +317,9 @@ async function legacyPatchMediaUrl(memory: Memory): Promise<void> {
 export async function ensureMemoryUploadedForCloud(memory: Memory): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return;
+
+  // Mode gratuit : souvenirs 100 % locaux — pas de push mémoires vers Supabase (règle d’or).
+  if ((await getUserMode()) === 'local') return;
 
   if (markSyncedIfRemote(memory)) return;
 

@@ -18,3 +18,7 @@ export function setFeedHydrationSnapshots(
   feedMemoriesHydrationSnapshot = memories;
   feedBooksHydrationSnapshot = books;
 }
+
+export function setFeedBooksHydrationSnapshot(books: Book[]): void {
+  feedBooksHydrationSnapshot = books;
+}

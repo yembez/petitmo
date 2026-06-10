@@ -13,22 +13,33 @@ export function feedPhotoOverlayInk(inkOverride?: string | null): '#FFFFFF' | '#
 
 const FEED_FAVORITE_HEART_PX = scale(20);
 
+const FEED_MEDIA_OVERLAY_BOTTOM = scale(12);
+
 /** Pastille bas-gauche : date de prise (ou import vs prise selon règle fil). */
 export function CapturedAtOverlay({
   uriForAnalysis: _uriForAnalysis,
   label,
   inkOverride,
+  bottomInset = 0,
 }: {
   /** Conservé pour compatibilité appelants ; l’encre vient de `inkOverride` ou du blanc par défaut. */
   uriForAnalysis?: string;
   label: string;
   inkOverride?: string | null;
+  /** Relevé supplémentaire au-dessus du bas (ex. viewer immersif + safe area). */
+  bottomInset?: number;
 }) {
   void _uriForAnalysis;
   const ink = feedPhotoOverlayInk(inkOverride);
 
   return (
-    <View style={[styles.capturedOverlay, { maxWidth: '78%', alignSelf: 'flex-end' }]} pointerEvents="none">
+    <View
+      style={[
+        styles.capturedOverlay,
+        { maxWidth: '78%', alignSelf: 'flex-end', bottom: FEED_MEDIA_OVERLAY_BOTTOM + bottomInset },
+      ]}
+      pointerEvents="none"
+    >
       <View style={styles.overlayBadge}>
         <Text
           style={[styles.capturedOverlayText, { color: ink, textAlign: 'right' as const }]}
@@ -46,17 +57,26 @@ export function FeedPhotoFavoriteOverlay({
   isFavorite,
   inkOverride,
   onPress,
+  bottomInset = 0,
 }: {
   isFavorite: boolean;
   inkOverride?: string | null;
   onPress: () => void;
+  /** Relevé supplémentaire au-dessus du bas (ex. viewer immersif + safe area). */
+  bottomInset?: number;
 }) {
   void inkOverride;
   const outlineInk = '#FFFFFF' as const;
-  const favoriteFill = THEME.brandPrimary;
+  const favoriteFill = THEME.brandCtaOrange;
 
   return (
-    <View style={styles.feedPhotoFavoriteOverlay} pointerEvents="box-none">
+    <View
+      style={[
+        styles.feedPhotoFavoriteOverlay,
+        { bottom: FEED_MEDIA_OVERLAY_BOTTOM + bottomInset },
+      ]}
+      pointerEvents="box-none"
+    >
       <TouchableOpacity
         onPress={onPress}
         activeOpacity={0.75}

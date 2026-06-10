@@ -22,6 +22,9 @@ import type { Child, Memory } from '@/types/local';
 import { formatDuration, formatBookLocationShort, formatAgeAtMemory } from '@/utils/date';
 import { splitPhotoNoteTitleBody, splitVideoTitleBody } from '@/src/book/bookTextParts';
 import type { PhotoCrop } from '@/src/book/photoCrop';
+import { bookPhotoCropImageRect } from '@/utils/bookPhotoCropLayout';
+import BookPagePhotoFrame from '@/components/BookPagePhotoFrame';
+import CoverPageSpineOverlay from '@/components/CoverPageSpineOverlay';
 import { clampAudioBookAnnotation } from '@/lib/audioBookAnnotation';
 import {
   getPrimaryPhotoUriForBookPreview,
@@ -160,12 +163,34 @@ function CroppedPhotoDisplay({
   width,
   height,
   crop,
+  coverMode = false,
+  imgPxW,
+  imgPxH,
 }: {
   uri: string;
   width: number;
   height: number;
   crop?: PhotoCrop;
+  coverMode?: boolean;
+  imgPxW?: number;
+  imgPxH?: number;
 }) {
+  if (coverMode && imgPxW && imgPxH) {
+    const rect = bookPhotoCropImageRect(width, height, imgPxW, imgPxH, crop);
+    return (
+      <View style={{ width, height, overflow: 'hidden', backgroundColor: '#F2F2F7' }}>
+        <ExpoImage
+          source={{ uri }}
+          recyclingKey={uri}
+          cachePolicy="memory-disk"
+          transition={0}
+          priority="high"
+          style={{ position: 'absolute', width: rect.width, height: rect.height, left: rect.left, top: rect.top }}
+          contentFit="cover"
+        />
+      </View>
+    );
+  }
   const x = ((crop?.xPct ?? 0) / 100) * width;
   const y = ((crop?.yPct ?? 0) / 100) * height;
   const s = Math.max(1, crop?.scale ?? 1);
@@ -193,6 +218,30 @@ function CroppedPhotoDisplay({
  * pour garder la parité aperçu ↔ PDF.
  */
 const VISUAL_MARGIN_MM = 10;
+
+type InlineCropConfig = {
+  dpiMetaByKey: Record<
+    string,
+    {
+      imgPxW: number;
+      imgPxH: number;
+      dpiPxW?: number;
+      dpiPxH?: number;
+      printMmW: number;
+      printMmH: number;
+    }
+  >;
+  onChange: (storageKey: string, crop: PhotoCrop) => void;
+};
+
+function buildInlineCropProps(config: InlineCropConfig | undefined, storageKey: string) {
+  if (!config) return undefined;
+  return {
+    storageKey,
+    dpiMeta: config.dpiMetaByKey[storageKey],
+    onChange: config.onChange,
+  };
+}
 
 /** Bandeau visuel à pleine largeur de page, avec marge blanche autour de l'image (cadre inséré). */
 function VisualBand({
@@ -281,16 +330,13 @@ type Props = {
   coverPhotoUri?: string | null;
   /** Recadrage de la photo de couverture (pan + zoom). */
   coverPhotoCrop?: PhotoCrop;
+  /** Dimensions fichier couverture (aperçu lecture seule au ratio réel). */
+  coverPhotoImgPxW?: number;
+  coverPhotoImgPxH?: number;
   /** Ouvre le sélecteur de couverture. */
   onRequestCoverPhoto?: () => void;
-  /** Ouvre l’éditeur de recadrage (modal parent). */
-  onRequestBookCrop?: (payload: {
-    storageKey: string;
-    uri: string;
-    frameW: number;
-    frameH: number;
-    pageType: 'cover' | 'photo-full' | 'photo-note' | 'audio';
-  }) => void;
+  /** Recadrage in-place (éditeur livre) : pinch/pan dans le cadre de la page. */
+  inlineCropConfig?: InlineCropConfig;
   /** Texte affiché sur les pages chapitre (éditable). */
   chapterDisplayTitle?: string;
   onRotate: () => void;
@@ -314,8 +360,10 @@ export default function MaquetteBookPages(props: Props) {
     coverDisplayTitle,
     coverPhotoUri,
     coverPhotoCrop,
+    coverPhotoImgPxW,
+    coverPhotoImgPxH,
     onRequestCoverPhoto,
-    onRequestBookCrop,
+    inlineCropConfig,
     chapterDisplayTitle,
     onRequestTextEdit,
     qrUrl,
@@ -353,8 +401,10 @@ export default function MaquetteBookPages(props: Props) {
           titleLine={coverDisplayTitle ?? `Journal de ${page.child.name}`}
           coverPhotoUri={coverPhotoUri ?? null}
           coverPhotoCrop={coverPhotoCrop}
+          coverPhotoImgPxW={coverPhotoImgPxW}
+          coverPhotoImgPxH={coverPhotoImgPxH}
           onPressCoverPhoto={onRequestCoverPhoto}
-          onRequestBookCrop={onRequestBookCrop}
+          inlineCropConfig={inlineCropConfig}
           onPressTitle={onRequestTextEdit}
         />
       );
@@ -414,7 +464,7 @@ export default function MaquetteBookPages(props: Props) {
           rotation={rotation}
           photoCrop={photoCrop}
           onRotate={onRotate}
-          onRequestBookCrop={onRequestBookCrop}
+          inlineCropConfig={inlineCropConfig}
           onRequestTextEdit={onRequestTextEdit}
           dm400={dm400}
           garamondIt={garamondIt}
@@ -434,7 +484,7 @@ export default function MaquetteBookPages(props: Props) {
           rotation={rotation}
           photoCrop={photoCrop}
           onRotate={onRotate}
-          onRequestBookCrop={onRequestBookCrop}
+          inlineCropConfig={inlineCropConfig}
           onRequestTextEdit={onRequestTextEdit}
           dm400={dm400}
           dm600={dm600}
@@ -475,7 +525,7 @@ export default function MaquetteBookPages(props: Props) {
           rotation={rotation}
           photoCrop={photoCrop}
           onRotate={onRotate}
-          onRequestBookCrop={onRequestBookCrop}
+          inlineCropConfig={inlineCropConfig}
           onRequestTextEdit={onRequestTextEdit}
           dm400={dm400}
           dm600={dm600}
@@ -540,8 +590,10 @@ function MaquetteCover({
   titleLine,
   coverPhotoUri,
   coverPhotoCrop,
+  coverPhotoImgPxW,
+  coverPhotoImgPxH,
   onPressCoverPhoto,
-  onRequestBookCrop,
+  inlineCropConfig,
   onPressTitle,
 }: {
   child: Child;
@@ -556,13 +608,9 @@ function MaquetteCover({
   coverPhotoUri: string | null;
   onPressCoverPhoto?: () => void;
   coverPhotoCrop?: PhotoCrop;
-  onRequestBookCrop?: (payload: {
-    storageKey: string;
-    uri: string;
-    frameW: number;
-    frameH: number;
-    pageType: 'cover';
-  }) => void;
+  coverPhotoImgPxW?: number;
+  coverPhotoImgPxH?: number;
+  inlineCropConfig?: InlineCropConfig;
   onPressTitle: () => void;
 }) {
   const photoUri = coverPhotoUri?.trim() || child.photo_url?.trim() || null;
@@ -572,35 +620,66 @@ function MaquetteCover({
   const periodLine = bookYearLabel || `${y - 1} – ${y}`;
 
   const canPickCover = !!onPressCoverPhoto;
-  const canCropCover = !!onRequestBookCrop && !!photoUri;
+  const coverInline = buildInlineCropProps(inlineCropConfig, 'cover');
+  const coverImgPxW = coverPhotoImgPxW ?? coverInline?.dpiMeta?.imgPxW;
+  const coverImgPxH = coverPhotoImgPxH ?? coverInline?.dpiMeta?.imgPxH;
 
   return (
     <View style={[styles.paper, styles.coverPaper, { width, height }]}>
-      <Pressable
-        style={[styles.coverImgBlock, { height: imgH }]}
-        onPress={() => {
-          if (canCropCover && photoUri) {
-            onRequestBookCrop?.({ storageKey: 'cover', uri: photoUri, frameW: width, frameH: imgH, pageType: 'cover' });
-          } else if (canPickCover) {
-            onPressCoverPhoto?.();
-          }
-        }}
-        onLongPress={() => {
-          if (canPickCover) onPressCoverPhoto?.();
-        }}
-        delayLongPress={320}
-        disabled={!photoUri ? !canPickCover : !canCropCover && !canPickCover}
-        accessibilityRole="button"
-        accessibilityLabel={canCropCover ? 'Recadrer ou changer la photo de couverture' : 'Choisir la photo de couverture'}
-      >
+      <View style={[styles.coverImgBlock, { height: imgH }]}>
         {photoUri ? (
-          <View style={StyleSheet.absoluteFill}>
-            <CroppedPhotoDisplay uri={photoUri} width={width} height={imgH} crop={coverPhotoCrop} />
-          </View>
+          coverInline ? (
+            <BookPagePhotoFrame
+              uri={photoUri}
+              frameW={width}
+              frameH={imgH}
+              crop={coverPhotoCrop}
+              inlineCrop={coverInline}
+              coverMode
+              imgPxW={coverImgPxW}
+              imgPxH={coverImgPxH}
+            />
+          ) : canPickCover ? (
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={() => onPressCoverPhoto?.()}
+              accessibilityRole="button"
+              accessibilityLabel="Choisir la photo de couverture"
+            >
+              <CroppedPhotoDisplay
+                uri={photoUri}
+                width={width}
+                height={imgH}
+                crop={coverPhotoCrop}
+                coverMode
+                imgPxW={coverImgPxW}
+                imgPxH={coverImgPxH}
+              />
+            </Pressable>
+          ) : (
+            <CroppedPhotoDisplay
+              uri={photoUri}
+              width={width}
+              height={imgH}
+              crop={coverPhotoCrop}
+              coverMode
+              imgPxW={coverImgPxW}
+              imgPxH={coverImgPxH}
+            />
+          )
+        ) : canPickCover ? (
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => onPressCoverPhoto?.()}
+            accessibilityRole="button"
+            accessibilityLabel="Choisir la photo de couverture"
+          >
+            <View style={[styles.coverPh, { height: imgH }]} />
+          </Pressable>
         ) : (
           <View style={[styles.coverPh, { height: imgH }]} />
         )}
-      </Pressable>
+      </View>
       <View style={[styles.coverTextBlock, { paddingHorizontal: pad, paddingTop: Math.round(8 * typoScale) }]}>
         <Pressable onPress={onPressTitle} accessibilityRole="button">
           <Text
@@ -616,6 +695,7 @@ function MaquetteCover({
         <Text style={[styles.coverYears, pdfCoverPeriodStyle(width), dm400 && { fontFamily: dm400 }]}>{periodLine}</Text>
         <View style={[styles.coverHairline, { marginTop: Math.round(16 * typoScale) }]} />
       </View>
+      <CoverPageSpineOverlay />
     </View>
   );
 }
@@ -631,7 +711,7 @@ function MaquettePhotoSimple({
   rotation,
   photoCrop,
   onRotate,
-  onRequestBookCrop,
+  inlineCropConfig,
   onRequestTextEdit,
   dm400,
   garamondIt,
@@ -646,13 +726,7 @@ function MaquettePhotoSimple({
   rotation: number;
   photoCrop?: PhotoCrop;
   onRotate: () => void;
-  onRequestBookCrop?: (payload: {
-    storageKey: string;
-    uri: string;
-    frameW: number;
-    frameH: number;
-    pageType: 'photo-full';
-  }) => void;
+  inlineCropConfig?: InlineCropConfig;
   onRequestTextEdit: () => void;
   dm400?: string;
   garamondIt?: string;
@@ -661,43 +735,24 @@ function MaquettePhotoSimple({
   const caption = (memory.content ?? '').trim();
   const imgH = height * 0.82;
   const bookLoc = bookMaquetteLocationLabel(memory);
+  const photoInline = buildInlineCropProps(inlineCropConfig, memory.id);
 
   return (
     <View style={[styles.paper, { width, height }]}>
       <VisualBand width={width} height={height} bandH={imgH}>
         {(fw, fh) =>
           uri ? (
-            <>
-              <View style={[styles.rot, { transform: [{ rotate: `${rotation}deg` }] }]}>
-                <CroppedPhotoDisplay uri={uri} width={fw} height={fh} crop={photoCrop} />
-              </View>
-              {onRequestBookCrop ? (
-                <Pressable
-                  style={StyleSheet.absoluteFill}
-                  onPress={() => onRequestBookCrop({ storageKey: memory.id, uri, frameW: fw, frameH: fh, pageType: 'photo-full' })}
-                  accessibilityRole="button"
-                  accessibilityLabel="Recadrer la photo"
-                />
-              ) : null}
-              {onRequestBookCrop ? (
-                <Pressable
-                  style={[
-                    styles.rotateOverlayBtn,
-                    {
-                      width: Math.max(28, Math.round(34 * typoScale)),
-                      height: Math.max(28, Math.round(34 * typoScale)),
-                      borderRadius: Math.max(14, Math.round(17 * typoScale)),
-                      bottom: Math.round(10 * typoScale),
-                      right: Math.round(10 * typoScale),
-                    },
-                  ]}
-                  onPress={onRotate}
-                  accessibilityLabel="Pivoter la photo"
-                >
-                  <Text style={[styles.rotateOverlayIcon, scaledTypo(typoScale, 20)]}>↻</Text>
-                </Pressable>
-              ) : null}
-            </>
+            <BookPagePhotoFrame
+              uri={uri}
+              frameW={fw}
+              frameH={fh}
+              crop={photoCrop}
+              rotation={rotation}
+              inlineCrop={photoInline}
+              showRotateButton={!!photoInline}
+              onRotate={onRotate}
+              typoScale={typoScale}
+            />
           ) : null
         }
       </VisualBand>
@@ -757,7 +812,7 @@ function MaquettePhotoNote({
   rotation,
   photoCrop,
   onRotate,
-  onRequestBookCrop,
+  inlineCropConfig,
   onRequestTextEdit,
   dm400,
   dm600,
@@ -773,13 +828,7 @@ function MaquettePhotoNote({
   rotation: number;
   photoCrop?: PhotoCrop;
   onRotate: () => void;
-  onRequestBookCrop?: (payload: {
-    storageKey: string;
-    uri: string;
-    frameW: number;
-    frameH: number;
-    pageType: 'photo-note';
-  }) => void;
+  inlineCropConfig?: InlineCropConfig;
   onRequestTextEdit: () => void;
   dm400?: string;
   dm600?: string;
@@ -789,43 +838,24 @@ function MaquettePhotoNote({
   const legend = (memory.content ?? '').trim();
   const imgH = height * 0.6;
   const bookLoc = bookMaquetteLocationLabel(memory);
+  const photoInline = buildInlineCropProps(inlineCropConfig, memory.id);
 
   return (
     <View style={[styles.paper, { width, height }]}>
       <VisualBand width={width} height={height} bandH={imgH}>
         {(fw, fh) =>
           uri ? (
-            <>
-              <View style={[styles.rot, { transform: [{ rotate: `${rotation}deg` }] }]}>
-                <CroppedPhotoDisplay uri={uri} width={fw} height={fh} crop={photoCrop} />
-              </View>
-              {onRequestBookCrop ? (
-                <Pressable
-                  style={StyleSheet.absoluteFill}
-                  onPress={() => onRequestBookCrop({ storageKey: memory.id, uri, frameW: fw, frameH: fh, pageType: 'photo-note' })}
-                  accessibilityRole="button"
-                  accessibilityLabel="Recadrer la photo"
-                />
-              ) : null}
-              {onRequestBookCrop ? (
-                <Pressable
-                  style={[
-                    styles.rotateOverlayBtn,
-                    {
-                      width: Math.max(28, Math.round(34 * typoScale)),
-                      height: Math.max(28, Math.round(34 * typoScale)),
-                      borderRadius: Math.max(14, Math.round(17 * typoScale)),
-                      bottom: Math.round(10 * typoScale),
-                      right: Math.round(10 * typoScale),
-                    },
-                  ]}
-                  onPress={onRotate}
-                  accessibilityLabel="Pivoter la photo"
-                >
-                  <Text style={[styles.rotateOverlayIcon, scaledTypo(typoScale, 20)]}>↻</Text>
-                </Pressable>
-              ) : null}
-            </>
+            <BookPagePhotoFrame
+              uri={uri}
+              frameW={fw}
+              frameH={fh}
+              crop={photoCrop}
+              rotation={rotation}
+              inlineCrop={photoInline}
+              showRotateButton={!!photoInline}
+              onRotate={onRotate}
+              typoScale={typoScale}
+            />
           ) : null
         }
       </VisualBand>
@@ -1030,7 +1060,7 @@ function MaquetteAudio({
   rotation,
   photoCrop,
   onRotate,
-  onRequestBookCrop,
+  inlineCropConfig,
   onRequestTextEdit,
   dm400,
   dm600,
@@ -1047,13 +1077,7 @@ function MaquetteAudio({
   rotation: number;
   photoCrop?: PhotoCrop;
   onRotate: () => void;
-  onRequestBookCrop?: (payload: {
-    storageKey: string;
-    uri: string;
-    frameW: number;
-    frameH: number;
-    pageType: 'audio';
-  }) => void;
+  inlineCropConfig?: InlineCropConfig;
   onRequestTextEdit: () => void;
   dm400?: string;
   dm600?: string;
@@ -1070,6 +1094,7 @@ function MaquetteAudio({
   /** Même `.pn-image` que photo-note / PDF (`pageH * 0.6`). */
   const imgH = height * 0.6;
   const bookLoc = bookMaquetteLocationLabel(memory);
+  const photoInline = buildInlineCropProps(inlineCropConfig, memory.id);
   // Proportions réelles PDF : anneau lecteur = 19mm (`.audio-ring`).
   const ringSize = Math.max(12, Math.round(pdfMmToPreviewPxW(19, width)));
   const playerGap = Math.max(4, Math.round(pdfMmToPreviewPxW(4, width)));
@@ -1082,45 +1107,17 @@ function MaquetteAudio({
       <VisualBand width={width} height={height} bandH={imgH}>
         {(fw, fh) =>
           coverUri ? (
-            <>
-              <View style={[styles.rot, { transform: [{ rotate: `${rotation}deg` }] }]}>
-                <CroppedPhotoDisplay uri={coverUri} width={fw} height={fh} crop={photoCrop} />
-              </View>
-              {onRequestBookCrop ? (
-                <Pressable
-                  style={StyleSheet.absoluteFill}
-                  onPress={() =>
-                    onRequestBookCrop({
-                      storageKey: memory.id,
-                      uri: coverUri,
-                      frameW: fw,
-                      frameH: fh,
-                      pageType: 'audio',
-                    })
-                  }
-                  accessibilityRole="button"
-                  accessibilityLabel="Recadrer la photo"
-                />
-              ) : null}
-              {onRequestBookCrop ? (
-                <Pressable
-                  style={[
-                    styles.rotateOverlayBtn,
-                    {
-                      width: Math.max(28, Math.round(34 * typoScale)),
-                      height: Math.max(28, Math.round(34 * typoScale)),
-                      borderRadius: Math.max(14, Math.round(17 * typoScale)),
-                      bottom: Math.round(10 * typoScale),
-                      right: Math.round(10 * typoScale),
-                    },
-                  ]}
-                  onPress={onRotate}
-                  accessibilityLabel="Pivoter la photo"
-                >
-                  <Text style={[styles.rotateOverlayIcon, scaledTypo(typoScale, 20)]}>↻</Text>
-                </Pressable>
-              ) : null}
-            </>
+            <BookPagePhotoFrame
+              uri={coverUri}
+              frameW={fw}
+              frameH={fh}
+              crop={photoCrop}
+              rotation={rotation}
+              inlineCrop={photoInline}
+              showRotateButton={!!photoInline}
+              onRotate={onRotate}
+              typoScale={typoScale}
+            />
           ) : null
         }
       </VisualBand>
@@ -1394,6 +1391,7 @@ const styles = StyleSheet.create({
   coverImgBlock: {
     width: '100%',
     overflow: 'hidden',
+    position: 'relative',
   },
   coverPh: {
     flex: 1,

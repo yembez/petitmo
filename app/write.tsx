@@ -23,11 +23,10 @@ import { checkMemoryLimit, invalidateMemoryLimitCache } from '@/lib/limits';
 import { getOrSelectFirstChild } from '@/services/children';
 import { armFeedSnapToLatestOnFocus } from '@/services/feedScrollRestore';
 import {
-  MAX_TEXT_CHARS,
-  MAX_VISUAL_LINES,
-  estimateVisualLines,
+  MAX_BOOK_LINES,
+  estimateBookLines,
   clampText,
-  clampTextCharBudget,
+  clampTextBookLineBudget,
   TEXT_TRUNCATION_ALERT_TITLE,
   TEXT_TRUNCATION_ALERT_MESSAGE,
   TEXT_TRUNCATION_MODIFY_LABEL,
@@ -98,7 +97,7 @@ export default function WriteScreen() {
           }
 
           if (finalTranscript) {
-            setContent(prev => clampTextCharBudget(prev + finalTranscript));
+            setContent(prev => clampTextBookLineBudget(prev + finalTranscript));
           }
         };
 
@@ -251,12 +250,12 @@ export default function WriteScreen() {
           placeholder="Écris-lui ce que tu aimerais lui dire aujourd'hui…"
           placeholderTextColor="#0F0F0F"
           value={content}
-          onChangeText={(t) => setContent(clampTextCharBudget(t))}
+          onChangeText={(t) => setContent(clampTextBookLineBudget(t))}
           autoFocus
           textAlignVertical="top"
         />
         <Text style={styles.charCounter}>
-          {content.length}/{MAX_TEXT_CHARS}  ·  {estimateVisualLines(content)}/{MAX_VISUAL_LINES} lignes
+          {estimateBookLines(content)}/{MAX_BOOK_LINES} lignes · livre
         </Text>
 
         {Platform.OS === 'web' && isWebSpeechSupported && (

@@ -62,7 +62,10 @@ import {
   getAlbumCanonicalFavoriteUrls,
   isFeedMultiPhotoAlbum,
 } from '@/utils/memoryPhotos';
-import { isLocalMediaUriReadable } from '@/utils/localMediaReadable';
+import {
+  isLocalMediaUriReadable,
+  rebaseSandboxUriToCurrentContainer,
+} from '@/utils/localMediaReadable';
 
 export type MemoryRow = Memory;
 
@@ -729,12 +732,14 @@ async function syncCloudPhotoAlbumInBackground(params: {
   capturedAtIso?: string;
   locationLabel: string | null;
 }): Promise<void> {
+  if (!params.isPaid) return;
+
   const { memoryId, childId, userId, capturedAtIso, locationLabel } = params;
   try {
     const memory = getLocalMemoryById(memoryId);
     if (!memory || memory.type !== 'photo') return;
 
-    const uris = albumLocalPhotoUris(memory);
+    const uris = albumLocalPhotoUris(memory).map(u => rebaseSandboxUriToCurrentContainer(u));
     if (uris.length === 0) return;
 
     const results = await Promise.all(
@@ -856,6 +861,7 @@ export async function pushPhotoAlbumMemoryToCloud(
   userId: string,
   isPaid: boolean,
 ): Promise<void> {
+  if (!isPaid) return;
   if (memory.type !== 'photo' || !memoryIsPhotoAlbum(memory)) return;
   await syncCloudPhotoAlbumInBackground({
     memoryId: memory.id,
@@ -1822,8 +1828,12 @@ async function readAndUploadPhotoFile(
     fileData = blob;
     fileSize = blob.size;
   } else {
+    const localUri = rebaseSandboxUriToCurrentContainer(uri);
+    if (!(await isLocalMediaUriReadable(localUri))) {
+      throw new Error(`Photo file not readable: ${localUri}`);
+    }
     const manipulated = await ImageManipulator.manipulateAsync(
-      uri,
+      localUri,
       [{ resize: { width: MEDIA_BOOK_PRINT_MAX_WIDTH } }],
       { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
     );

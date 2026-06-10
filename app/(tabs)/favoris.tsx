@@ -33,6 +33,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
 import { scale, verticalScale } from '@/utils/responsive';
+import TabSceneTransition from '@/components/TabSceneTransition';
 import { THEME } from '@/constants/theme';
 import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import {
@@ -40,7 +41,7 @@ import {
   tabBarFloatingOverlapPad,
 } from '@/constants/tabBarLayout';
 import { SPACING, FONT_SIZES } from '@/constants/sizes';
-import { MEMORY_TEXT_FONT } from '@/constants/memoryTextFont';
+import { useMemoryTextFont } from '@/contexts/MemoryTextFontContext';
 import { getMemories, requestMissingMediaDerivatives } from '@/services/media';
 import { getOrSelectFirstChild } from '@/services/children';
 import {
@@ -60,6 +61,7 @@ import {
   getVoiceCoverUriForFeedAndViewer,
   getVideoPosterUriForFeedAndViewer,
   normalizeMemoryMediaUriForDisplay,
+  canonicalBookCoverPhotoRef,
 } from '@/utils/memoryPhotos';
 import { useFeedPhotoDisplayUrls } from '@/hooks/useFeedPhotoDisplayUrls';
 import { clampAudioBookAnnotation } from '@/lib/audioBookAnnotation';
@@ -690,6 +692,7 @@ const GalleryTile = memo(function GalleryTile({
   onOpen,
   onToggleSelect,
 }: GalleryTileProps) {
+  const memoryTextFont = useMemoryTextFont();
   const { memory, thumbUrl } = item;
   const feedPhotoUrls = useFeedPhotoDisplayUrls(memory);
 
@@ -803,7 +806,8 @@ const GalleryTile = memo(function GalleryTile({
                   end={{ x: 0.5, y: 1 }}
                   style={StyleSheet.absoluteFillObject}
                 />
-                <Text style={styles.galleryPhotoCaptionText}
+                <Text
+                  style={[styles.galleryPhotoCaptionText, { fontFamily: memoryTextFont }]}
                   numberOfLines={2}
                   ellipsizeMode="tail"
                 >
@@ -858,7 +862,11 @@ const GalleryTile = memo(function GalleryTile({
                   end={{ x: 0.5, y: 1 }}
                   style={StyleSheet.absoluteFillObject}
                 />
-                <Text style={styles.galleryPhotoCaptionText} numberOfLines={2} ellipsizeMode="tail">
+                <Text
+                  style={[styles.galleryPhotoCaptionText, { fontFamily: memoryTextFont }]}
+                  numberOfLines={2}
+                  ellipsizeMode="tail"
+                >
                   {tileCaptionSnippet}
                 </Text>
               </View>
@@ -866,7 +874,10 @@ const GalleryTile = memo(function GalleryTile({
           </View>
         ) : isText ? (
           <View style={styles.galleryPh}>
-            <Text style={styles.galleryTextSnippet} numberOfLines={6}>
+            <Text
+              style={[styles.galleryTextSnippet, { fontFamily: memoryTextFont }]}
+              numberOfLines={6}
+            >
               {(memory.content ?? '').trim() || 'Petits mots'}
             </Text>
           </View>
@@ -898,7 +909,7 @@ const GalleryTile = memo(function GalleryTile({
   );
 }, galleryTilePropsEqual);
 
-export default function FavorisScreen() {
+function FavorisScreen() {
   const router = useRouter();
   const isTabFocused = useIsFocused();
   const params = useLocalSearchParams<{ bookId?: string; createBookTitle?: string }>();
@@ -1235,15 +1246,7 @@ export default function FavorisScreen() {
                     for (const id of selectedMemoryIds) {
                       const m = getLocalMemoryById(id);
                       if (!m || m.type !== 'photo') continue;
-                      const src =
-                        (m.local_print_path ??
-                          m.local_original_path ??
-                          m.local_media_path ??
-                          m.print_url ??
-                          m.display_url ??
-                          m.edited_media_url ??
-                          m.media_url ??
-                          '')?.trim();
+                      const src = canonicalBookCoverPhotoRef(m).trim();
                       if (src) {
                         // IMPORTANT: ne pas écraser memoryIds (utiliser la version déjà enrichie).
                         await upsertBook({ ...(updated ?? created), coverPhotoUrl: src });
@@ -1276,6 +1279,14 @@ export default function FavorisScreen() {
         </View>
       )}
     </View>
+  );
+}
+
+export default function FavorisScreenTab() {
+  return (
+    <TabSceneTransition>
+      <FavorisScreen />
+    </TabSceneTransition>
   );
 }
 
@@ -1604,14 +1615,12 @@ const styles = StyleSheet.create({
   galleryTextSnippet: {
     fontSize: 12,
     lineHeight: 16,
-    fontFamily: MEMORY_TEXT_FONT,
     color: INK,
     textAlign: 'center',
   },
   galleryPhotoCaptionText: {
     fontSize: scale(11),
     lineHeight: scale(14),
-    fontFamily: MEMORY_TEXT_FONT,
     fontWeight: '400',
     color: '#FFFFFF',
     textAlign: 'left',

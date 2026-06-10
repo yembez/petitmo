@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, memo } from 'react';
+import { useCallback, useEffect, useRef, useState, memo } from 'react';
 import {
   View,
   Text,
@@ -18,18 +18,27 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { BookOpen, Plus } from 'lucide-react-native';
+import { useFonts, EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
 import { Swipeable } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { scale, verticalScale } from '@/utils/responsive';
 import { THEME } from '@/constants/theme';
 import BookCoverThumbnail from '@/components/BookCoverThumbnail';
 import { bookCoverPeriodLabelForBook } from '@/utils/bookCoverPeriodLabel';
+import {
+  booksListVisualSignature,
+  deleteBook,
+  healAllBookCovers,
+  listBooks,
+  listBooksFromSqliteSync,
+  resolveBookListRowCoverUri,
+  type Book,
+} from '@/services/books';
+import { feedBooksHydrationSnapshot, setFeedBooksHydrationSnapshot } from '@/services/tabScreensCache';
+import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { normalizeMemoryMediaUriForDisplay } from '@/utils/memoryPhotos';
-import type { Book } from '@/services/books';
-import { deleteBook, listBooks, resolveBookListCoverDisplayUri } from '@/services/books';
-import { feedBooksHydrationSnapshot } from '@/services/tabScreensCache';
-import { supabase } from '@/lib/supabase';
 import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
+import TabSceneTransition from '@/components/TabSceneTransition';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -37,22 +46,56 @@ const BOOK_ROW_PRESS_SPRING = { damping: 18, stiffness: 320 };
 
 type BookListRowProps = {
   book: Book;
-  authToken: string | null;
+  coverTitleFontFamily?: string;
   onOpen: (bookId: string) => void;
   onDelete: (book: Book) => void;
 };
 
-const BookListRow = memo(function BookListRow({ book, authToken, onOpen, onDelete }: BookListRowProps) {
+function coverCropsEqual(
+  a: Book['photoCrops'],
+  b: Book['photoCrops'],
+): boolean {
+  const ca = a?.cover;
+  const cb = b?.cover;
+  if (!ca && !cb) return true;
+  if (!ca || !cb) return false;
+  return ca.xPct === cb.xPct && ca.yPct === cb.yPct && ca.scale === cb.scale;
+}
+
+function bookListRowPropsEqual(prev: BookListRowProps, next: BookListRowProps): boolean {
+  if (prev.coverTitleFontFamily !== next.coverTitleFontFamily) return false;
+  if (prev.onOpen !== next.onOpen || prev.onDelete !== next.onDelete) return false;
+  const a = prev.book;
+  const b = next.book;
+  if (a.id !== b.id || a.title !== b.title || a.createdAt !== b.createdAt) return false;
+  if ((a.coverPhotoUrl ?? '') !== (b.coverPhotoUrl ?? '')) return false;
+  if (!coverCropsEqual(a.photoCrops, b.photoCrops)) return false;
+  if (a.memoryIds.length !== b.memoryIds.length) return false;
+  for (let i = 0; i < a.memoryIds.length; i++) {
+    if (a.memoryIds[i] !== b.memoryIds[i]) return false;
+  }
+  return resolveBookListRowCoverUri(a) === resolveBookListRowCoverUri(b);
+}
+
+const BookListRow = memo(function BookListRow({
+  book,
+  coverTitleFontFamily,
+  onOpen,
+  onDelete,
+}: BookListRowProps) {
   const pressScale = useSharedValue(1);
   const rowAnimStyle = useAnimatedStyle(() => ({
     transform: [{ scale: pressScale.value }],
   }));
 
-  const uri = resolveBookListCoverDisplayUri(book);
+  const coverRaw = resolveBookListRowCoverUri(book);
+  const coverSigned = useSignedMediaUrl(coverRaw || null) ?? '';
+  const coverUri = normalizeMemoryMediaUriForDisplay((coverSigned || coverRaw).trim()) || null;
+  const coverCrop = book.photoCrops?.cover;
+  const coverCropKey = coverCrop
+    ? `${coverCrop.xPct}-${coverCrop.yPct}-${coverCrop.scale}`
+    : '';
   const count = book.memoryIds.length;
-  const needsAuthHeader = !!uri && /^https?:\/\//i.test(uri) && uri.includes('supabase');
-  const imageHeaders =
-    needsAuthHeader && authToken ? { Authorization: `Bearer ${authToken}` } : undefined;
   const dateLabel = bookCoverPeriodLabelForBook(book);
 
   return (
@@ -87,9 +130,11 @@ const BookListRow = memo(function BookListRow({ book, authToken, onOpen, onDelet
       >
         <BookCoverThumbnail
           title={book.title}
-          coverImageUri={uri}
+          coverImageUri={coverUri}
+          coverPhotoCrop={coverCrop}
           dateLabel={dateLabel}
-          imageHeaders={imageHeaders}
+          imageRecyclingKey={`book-cover-${book.id}-${book.coverPhotoUrl ?? ''}-${coverCropKey}`}
+          titleFontFamily={coverTitleFontFamily}
         />
         <View style={styles.rowText}>
           <Text style={styles.rowTitle} numberOfLines={2}>
@@ -107,49 +152,66 @@ const BookListRow = memo(function BookListRow({ book, authToken, onOpen, onDelet
       </AnimatedPressable>
     </Swipeable>
   );
-});
+}, bookListRowPropsEqual);
 
-export default function LivresScreen() {
+function LivresScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [books, setBooks] = useState<Book[]>(() => [...feedBooksHydrationSnapshot]);
   const [refreshing, setRefreshing] = useState(false);
-  const [authToken, setAuthToken] = useState<string | null>(null);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [draftTitle, setDraftTitle] = useState('');
+  const booksRef = useRef(books);
+  const booksSigRef = useRef(booksListVisualSignature(books));
 
-  useFocusEffect(
-    useCallback(() => {
-      let alive = true;
-      void (async () => {
-        try {
-          const { data } = await supabase.auth.getSession();
-          const t = data.session?.access_token ?? null;
-          if (alive) setAuthToken(t);
-        } catch {
-          if (alive) setAuthToken(null);
-        }
-      })();
-      return () => {
-        alive = false;
-      };
-    }, [])
-  );
+  const [coverFontsLoaded] = useFonts({ EBGaramond_400Regular_Italic });
+  const coverTitleFontFamily = coverFontsLoaded ? 'EBGaramond_400Regular_Italic' : undefined;
 
-  const load = useCallback(async (opts?: { pull?: boolean }) => {
+  booksRef.current = books;
+
+  const applyBooksList = useCallback((next: Book[]) => {
+    const sig = booksListVisualSignature(next);
+    if (sig === booksSigRef.current) return;
+    booksSigRef.current = sig;
+    setBooks(next);
+    setFeedBooksHydrationSnapshot(next);
+  }, []);
+
+  const load = useCallback(async (opts?: { pull?: boolean; force?: boolean }) => {
     if (opts?.pull) setRefreshing(true);
     try {
-      const bks = await listBooks();
-      setBooks(bks);
+      const bks = await healAllBookCovers(await listBooks());
+      if (opts?.force) {
+        booksSigRef.current = booksListVisualSignature(bks);
+        setBooks(bks);
+        setFeedBooksHydrationSnapshot(bks);
+        return;
+      }
+      applyBooksList(bks);
     } finally {
       setRefreshing(false);
     }
-  }, []);
+  }, [applyBooksList]);
 
   useFocusEffect(
     useCallback(() => {
+      /** Déjà affiché → resync SQLite ; répare les couvertures favoris en arrière-plan si besoin. */
+      if (booksRef.current.length > 0) {
+        applyBooksList(listBooksFromSqliteSync());
+        void (async () => {
+          const healed = await healAllBookCovers(listBooksFromSqliteSync());
+          applyBooksList(healed);
+        })();
+        return;
+      }
+      const cached = feedBooksHydrationSnapshot;
+      if (cached.length > 0) {
+        applyBooksList(cached);
+        void load();
+        return;
+      }
       void load();
-    }, [load])
+    }, [applyBooksList, load])
   );
 
   useEffect(() => {
@@ -160,7 +222,7 @@ export default function LivresScreen() {
   }, [load]);
 
   const onRefresh = useCallback(() => {
-    void load({ pull: true });
+    void load({ pull: true, force: true });
   }, [load]);
 
   const openBook = useCallback(
@@ -177,7 +239,12 @@ export default function LivresScreen() {
         text: 'Supprimer',
         style: 'destructive',
         onPress: () => {
-          setBooks(prev => prev.filter(x => x.id !== b.id));
+          setBooks(prev => {
+            const next = prev.filter(x => x.id !== b.id);
+            booksSigRef.current = booksListVisualSignature(next);
+            setFeedBooksHydrationSnapshot(next);
+            return next;
+          });
           void deleteBook(b.id);
         },
       },
@@ -188,6 +255,18 @@ export default function LivresScreen() {
     setDraftTitle('');
     setCreateModalOpen(true);
   }, []);
+
+  const renderBookRow = useCallback(
+    ({ item }: { item: Book }) => (
+      <BookListRow
+        book={item}
+        coverTitleFontFamily={coverTitleFontFamily}
+        onOpen={openBook}
+        onDelete={confirmDelete}
+      />
+    ),
+    [coverTitleFontFamily, openBook, confirmDelete]
+  );
 
   const startCreateFlowToFavoris = useCallback(() => {
     const title = draftTitle.trim();
@@ -246,14 +325,7 @@ export default function LivresScreen() {
             </TouchableOpacity>
           </View>
         }
-        renderItem={({ item }) => (
-          <BookListRow
-            book={item}
-            authToken={authToken}
-            onOpen={openBook}
-            onDelete={confirmDelete}
-          />
-        )}
+        renderItem={renderBookRow}
       />
 
       <Modal visible={createModalOpen} transparent animationType="fade" onRequestClose={() => setCreateModalOpen(false)}>
@@ -297,6 +369,14 @@ export default function LivresScreen() {
         </KeyboardAvoidingView>
       </Modal>
     </View>
+  );
+}
+
+export default function LivresScreenTab() {
+  return (
+    <TabSceneTransition>
+      <LivresScreen />
+    </TabSceneTransition>
   );
 }
 

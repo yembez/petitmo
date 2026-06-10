@@ -18,6 +18,8 @@ type Props = {
   height: number;
   /** Page / spread actuellement visible dans le FlatList horizontal. */
   isPagerActive: boolean;
+  /** Désactivé pendant le recadrage in-place photo (évite conflit pinch). */
+  zoomEnabled?: boolean;
   children: ReactNode;
 };
 
@@ -25,7 +27,13 @@ type Props = {
  * Zoom pincement + léger déplacement quand zoomé ; double tap remet le zoom.
  * Le pan ne s’active que si le zoom dépasse un seuil, pour laisser le swipe du pager à zoom 1.
  */
-export function BookPreviewZoomWrap({ width, height, isPagerActive, children }: Props) {
+export function BookPreviewZoomWrap({
+  width,
+  height,
+  isPagerActive,
+  zoomEnabled = true,
+  children,
+}: Props) {
   const scale = useSharedValue(1);
   const tx = useSharedValue(0);
   const ty = useSharedValue(0);
@@ -115,6 +123,14 @@ export function BookPreviewZoomWrap({ width, height, isPagerActive, children }: 
     }),
     []
   );
+
+  if (!zoomEnabled) {
+    return (
+      <View style={[styles.clip, { width, height }]} collapsable={false}>
+        {children}
+      </View>
+    );
+  }
 
   return (
     <GestureDetector gesture={composed}>

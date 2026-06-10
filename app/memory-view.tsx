@@ -22,7 +22,7 @@ import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
 import { useFocusEffect } from '@react-navigation/native';
 import { scale, verticalScale } from '@/utils/responsive';
 import { THEME } from '@/constants/theme';
-import { MEMORY_TEXT_FONT } from '@/constants/memoryTextFont';
+import { useMemoryTextFont } from '@/contexts/MemoryTextFontContext';
 import { MEDIA_CARD_INSET, MEDIA_CARD_RADIUS } from '@/constants/feedLayout';
 import PhotoMosaic from '@/components/PhotoMosaic';
 import AudioPlayer from '@/components/AudioPlayer';
@@ -67,6 +67,7 @@ export default function MemoryViewScreen() {
   const [newBookTitle, setNewBookTitle] = useState('');
   const [booksLoading, setBooksLoading] = useState(false);
   const [dockH, setDockH] = useState(0);
+  const memoryTextFont = useMemoryTextFont();
 
   const load = useCallback(async () => {
     if (!memoryId) {
@@ -469,7 +470,11 @@ export default function MemoryViewScreen() {
                   {bookParagraphs.map((para, idx) => (
                     <Text
                       key={idx}
-                      style={[styles.textContent, idx > 0 && styles.textBookParagraphSpacing]}
+                      style={[
+                        styles.textContent,
+                        { fontFamily: memoryTextFont },
+                        idx > 0 && styles.textBookParagraphSpacing,
+                      ]}
                       {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
                     >
                       {EM_QUAD}
@@ -494,6 +499,7 @@ export default function MemoryViewScreen() {
               <Text
                 style={[
                   styles.captionAnnotation,
+                  { fontFamily: memoryTextFont },
                   !contentText && styles.captionPlaceholder,
                 ]}
               >
@@ -932,11 +938,10 @@ const styles = StyleSheet.create({
   textContent: {
     width: '100%',
     alignSelf: 'stretch',
-    fontSize: scale(17),
+    fontSize: scale(18),
     fontWeight: '400',
-    fontFamily: MEMORY_TEXT_FONT,
     color: THEME.textPrimary,
-    lineHeight: scale(28),
+    lineHeight: scale(29),
     textAlign: 'justify',
     ...Platform.select({
       android: {
@@ -964,7 +969,6 @@ const styles = StyleSheet.create({
   captionAnnotation: {
     fontSize: scale(15),
     fontWeight: '400',
-    fontFamily: MEMORY_TEXT_FONT,
     color: 'rgba(28, 28, 30, 0.82)',
     lineHeight: scale(24),
   },

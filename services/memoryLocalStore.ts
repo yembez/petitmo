@@ -2,6 +2,7 @@ import { DeviceEventEmitter, Platform, Image } from 'react-native';
 import { copyAsync, documentDirectory, makeDirectoryAsync } from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { getLocalMemoryById, upsertLocalMemory } from '@/lib/localDb';
+import type { Memory } from '@/types/local';
 import {
   feedBooksHydrationSnapshot,
   feedChildHydrationSnapshot,
@@ -204,6 +205,57 @@ export function scheduleLocalPhotoHeavyDerivatives(memoryId: string, localOrigin
       heavyDerivativesInFlight.delete(id);
     }
   })();
+}
+
+/**
+ * Génère display + print **de façon synchrone** (couverture livre, export) et met à jour SQLite.
+ * À utiliser quand le badge DPI / `book_covers/` ne doit pas attendre le job arrière-plan.
+ */
+export async function awaitPhotoPrintDerivativesForMemory(memoryId: string): Promise<Memory | null> {
+  const id = memoryId.trim();
+  const cur = getLocalMemoryById(id);
+  if (!cur || cur.type !== 'photo') return cur;
+  const orig = cur.local_original_path?.trim();
+  if (!orig || Platform.OS === 'web') return cur;
+
+  try {
+    const heavy = await ensureLocalPhotoDisplayPrintDerivatives({
+      memoryId: id,
+      localOriginalUri: orig,
+    });
+    const display = heavy.localDisplayUri?.trim() || null;
+    const print = heavy.localPrintUri?.trim() || null;
+    if (!display && !print) return cur;
+
+    const next: Memory = {
+      ...cur,
+      local_display_path: display ?? cur.local_display_path,
+      local_print_path: print ?? cur.local_print_path,
+      display_url: display ?? cur.display_url ?? cur.thumb_url,
+      print_url: print ?? cur.print_url,
+      print_px_w: heavy.printPx?.w ?? cur.print_px_w,
+      print_px_h: heavy.printPx?.h ?? cur.print_px_h,
+      updated_at: new Date().toISOString(),
+    };
+    upsertLocalMemory(next);
+
+    const snapIdx = feedMemoriesHydrationSnapshot.findIndex(m => m.id === id);
+    if (snapIdx >= 0) {
+      const snapMemories = [...feedMemoriesHydrationSnapshot];
+      snapMemories[snapIdx] = next;
+      setFeedHydrationSnapshots(
+        feedChildHydrationSnapshot,
+        snapMemories,
+        feedBooksHydrationSnapshot,
+      );
+    }
+
+    DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId: id });
+    return next;
+  } catch (e) {
+    console.warn('[memoryLocalStore] awaitPhotoPrintDerivativesForMemory', id, e);
+    return cur;
+  }
 }
 
 /** Les 3 dérivés d’un coup — édition photo, export livre, chemins qui exigent print tout de suite. */

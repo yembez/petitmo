@@ -1,13 +1,121 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { deleteLocalBook, getLocalBook, listLocalBooks, upsertLocalBook, type LocalBookRow } from '@/lib/localDb';
-import { getLocalMemoryById } from '@/lib/localDb';
+import { DeviceEventEmitter } from 'react-native';
+import {
+  deleteLocalBook,
+  getLocalBook,
+  getLocalMemoryById,
+  listLocalBooks,
+  updateLocalMemoryFavoritePhotoUrls,
+  upsertLocalBook,
+  type LocalBookRow,
+} from '@/lib/localDb';
+import { awaitPhotoPrintDerivativesForMemory } from '@/services/memoryLocalStore';
+import { getMemories, toggleFavorite, uploadMedia } from '@/services/media';
 import { getUserTier } from '@/lib/userTier';
 import { supabase } from '@/lib/supabase';
 import { FREE_TIER_BOOK_AUDIO_MAX_COUNT, FREE_TIER_BOOK_VOICE_MAX_DURATION } from '@/lib/limits';
+import { Platform } from 'react-native';
+import { copyAsync, documentDirectory, makeDirectoryAsync } from 'expo-file-system/legacy';
 import {
+  canonicalBookCoverPhotoRef,
+  getAlbumCanonicalFavoriteUrls,
+  getAllPhotoUrlsForFeed,
+  getBookPhotoPrintUri,
   getPrimaryPhotoUriForBookPreview,
+  indexOfPhotoUrlInFeed,
+  isPhotoUrlFavoritedWithVariants,
+  mapPhotoUrlToThumb,
+  memoryPhotoMatchesUrl,
   normalizeMemoryMediaUriForDisplay,
+  parseFavoritePhotoUrls,
+  pickPhotoUriForOverlayPalette,
 } from '@/utils/memoryPhotos';
+
+export type BookCoverUriVariant = 'list' | 'editor' | 'print';
+import {
+  isCloudMediaReference,
+  isLocalMediaUriReadable,
+  rebaseSandboxUriToCurrentContainer,
+} from '@/utils/localMediaReadable';
+import type { Memory } from '@/types/local';
+
+function bookCoverMatchesMemory(memory: Memory, coverRef: string): boolean {
+  const ref = coverRef.trim();
+  if (!ref || memory.type !== 'photo') return false;
+  if (memoryPhotoMatchesUrl(memory, ref)) return true;
+  const favs = parseFavoritePhotoUrls(memory);
+  return favs.length > 0 && isPhotoUrlFavoritedWithVariants(memory, favs, ref);
+}
+
+function freshCoverUriFromMatchedMemory(
+  memory: Memory,
+  coverRef: string,
+  variant: BookCoverUriVariant,
+): string | null {
+  if (memory.type !== 'photo') return null;
+  if (variant === 'list') {
+    const light = mapPhotoUrlToThumb(memory, coverRef).trim();
+    if (light) return normalizeMemoryMediaUriForDisplay(light);
+    const palette = pickPhotoUriForOverlayPalette(memory);
+    if (palette) return palette;
+  }
+  if (variant === 'editor') {
+    const slots = getAllPhotoUrlsForFeed(memory);
+    const idx = coverRef.trim() ? indexOfPhotoUrlInFeed(memory, coverRef) : 0;
+    const slot = idx >= 0 ? slots[idx] : slots[0];
+    if (slot) return normalizeMemoryMediaUriForDisplay(slot);
+  }
+  if (variant === 'print') {
+    const printUri = getBookPhotoPrintUri(memory, coverRef);
+    if (printUri) return printUri;
+    return null;
+  }
+  const fallback = normalizeMemoryMediaUriForDisplay(coverRef.trim());
+  return fallback || null;
+}
+
+/** URI print pour une couverture choisie (favori / galerie) — conserve le bon slot d’album. */
+export function resolveCoverPrintUriFromPick(pickUri: string, memoryIds: readonly string[]): string {
+  const trimmed = pickUri.trim();
+  if (!trimmed) return '';
+  for (const memoryId of memoryIds) {
+    const m = getLocalMemoryById(memoryId);
+    if (!m || m.type !== 'photo' || !bookCoverMatchesMemory(m, trimmed)) continue;
+    return getBookPhotoPrintUri(m, trimmed) || normalizeMemoryMediaUriForDisplay(trimmed) || trimmed;
+  }
+  return normalizeMemoryMediaUriForDisplay(trimmed) || trimmed;
+}
+
+function resolveCoverFromBookFavorites(
+  book: Book,
+  coverRef: string,
+  variant: BookCoverUriVariant,
+): string | null {
+  const ref = coverRef.trim();
+  for (const memoryId of book.memoryIds) {
+    const m = getLocalMemoryById(memoryId);
+    if (!m || m.type !== 'photo') continue;
+    const favs = parseFavoritePhotoUrls(m);
+    const sources =
+      favs.length > 0 ? favs : m.is_favorite ? getAlbumCanonicalFavoriteUrls(m) : [];
+    if (sources.length === 0) continue;
+
+    if (ref && bookCoverMatchesMemory(m, ref)) {
+      const uri = freshCoverUriFromMatchedMemory(m, ref, variant);
+      if (uri) return uri;
+      continue;
+    }
+
+    if (!ref) {
+      const first = sources[0]?.trim();
+      if (first) {
+        const uri = freshCoverUriFromMatchedMemory(m, first, variant);
+        if (uri) return uri;
+      }
+    }
+  }
+  return null;
+}
 
 export class BookUpgradeRequiredError extends Error {
   code: 'BOOK_VIDEO_REQUIRES_PLUS';
@@ -239,24 +347,351 @@ export async function listBooks(): Promise<Book[]> {
 }
 
 /**
- * URI couverture pour la liste des livres : `coverPhotoUrl` rebasée (container iOS),
- * sinon première photo du livre via `getPrimaryPhotoUriForBookPreview`.
+ * Résout l’URI affichable d’une couverture livre après redémarrage / changement de container iOS.
+ *
+ * `coverPhotoUrl` stocke souvent `local_print_path` : si ce fichier est absent ou illisible, on
+ * retrouve le souvenir photo correspondant et on renvoie une variante encore présente (`display`/`thumb`
+ * ou `print` pour l’aperçu). Les couvertures galerie sont persistées sous `petitmo_memories/book_covers/`.
  */
-export function resolveBookListCoverDisplayUri(book: Book): string | null {
+/** Chemin sandbox de la copie dédiée `petitmo_memories/book_covers/{bookId}.jpg` (rebasé sur le container courant). */
+export function dedicatedBookCoverUriForBook(bookId: string): string | null {
+  if (Platform.OS === 'web' || !documentDirectory) return null;
+  const raw = `${documentDirectory}petitmo_memories/book_covers/${bookId}.jpg`;
+  const rebased = rebaseSandboxUriToCurrentContainer(raw);
+  return normalizeMemoryMediaUriForDisplay(rebased) || rebased || null;
+}
+
+/** Souvenir photo dont l’URL (ou favori) correspond à `coverRef`. */
+export function findPhotoMemoryByCoverRef(
+  coverRef: string,
+  memoryIds: readonly string[],
+): Memory | null {
+  const ref = coverRef.trim();
+  if (!ref) return null;
+  for (const memoryId of memoryIds) {
+    const m = getLocalMemoryById(memoryId);
+    if (m?.type === 'photo' && bookCoverMatchesMemory(m, ref)) return m;
+  }
+  return null;
+}
+
+export function findBookCoverMemory(book: Book): Memory | null {
   const direct = (book.coverPhotoUrl ?? '').trim();
   if (direct) {
-    const normalized = normalizeMemoryMediaUriForDisplay(direct);
-    if (normalized) return normalized;
+    for (const memoryId of book.memoryIds) {
+      const m = getLocalMemoryById(memoryId);
+      if (m && m.type === 'photo' && bookCoverMatchesMemory(m, direct)) return m;
+    }
   }
+  const photoMemories = book.memoryIds
+    .map(id => getLocalMemoryById(id))
+    .filter((m): m is Memory => m?.type === 'photo');
+  if (photoMemories.length === 1) return photoMemories[0]!;
+  return null;
+}
+
+export function resolveBookCoverDisplayUri(
+  book: Book,
+  { variant = 'list' }: { variant?: BookCoverUriVariant } = {},
+): string | null {
+  const direct = (book.coverPhotoUrl ?? '').trim();
+  const legacyBookCovers = direct.includes('petitmo_memories/book_covers/');
+
+  if (legacyBookCovers) {
+    const dedicated =
+      normalizeMemoryMediaUriForDisplay(direct) ||
+      normalizeMemoryMediaUriForDisplay(rebaseSandboxUriToCurrentContainer(direct));
+    if (dedicated) return dedicated;
+  }
+
+  if (direct && !legacyBookCovers) {
+    for (const memoryId of book.memoryIds) {
+      const m = getLocalMemoryById(memoryId);
+      if (!m || m.type !== 'photo' || !bookCoverMatchesMemory(m, direct)) continue;
+      const fresh = freshCoverUriFromMatchedMemory(m, direct, variant);
+      if (fresh && !isCloudMediaReference(fresh)) return fresh;
+      if (fresh && !isCloudMediaReference(direct)) return fresh;
+    }
+
+    const fromFavorites = resolveCoverFromBookFavorites(book, direct, variant);
+    if (fromFavorites && !isCloudMediaReference(fromFavorites)) return fromFavorites;
+
+    if (isCloudMediaReference(direct)) {
+      return normalizeMemoryMediaUriForDisplay(direct) || direct;
+    }
+
+    if (variant === 'print') {
+      const dedicated = dedicatedBookCoverUriForBook(book.id);
+      if (dedicated) return dedicated;
+    }
+    if (variant === 'list') {
+      const dedicated = dedicatedBookCoverUriForBook(book.id);
+      if (dedicated) return dedicated;
+    }
+
+    return normalizeMemoryMediaUriForDisplay(direct) || null;
+  }
+
+  const fromFavorites = resolveCoverFromBookFavorites(book, '', variant);
+  if (fromFavorites) return fromFavorites;
 
   for (const memoryId of book.memoryIds) {
     const m = getLocalMemoryById(memoryId);
     if (m?.type !== 'photo') continue;
+    if (variant === 'list') {
+      const light = pickPhotoUriForOverlayPalette(m);
+      if (light) return light;
+    }
+    if (variant === 'editor') {
+      const slot = getAllPhotoUrlsForFeed(m)[0];
+      if (slot) return normalizeMemoryMediaUriForDisplay(slot);
+    }
     const uri = getPrimaryPhotoUriForBookPreview(m);
     if (uri) return uri;
   }
 
   return null;
+}
+
+/** URI couverture pour la **liste** des livres (petite vignette) : variante légère privilégiée. */
+export function resolveBookListCoverDisplayUri(book: Book): string | null {
+  return resolveBookCoverDisplayUri(book, { variant: 'list' });
+}
+
+/** URI couverture pour l’**éditeur** (recadrage = fichier display du slot choisi). */
+export function resolveBookCoverEditorUri(book: Book): string | null {
+  return resolveBookCoverDisplayUri(book, { variant: 'editor' });
+}
+
+/** URI couverture **print** (export PDF uniquement). */
+export function resolveBookCoverPrintUri(book: Book): string | null {
+  return resolveBookCoverDisplayUri(book, { variant: 'print' });
+}
+
+/** Copie une couverture dans `petitmo_memories/book_covers/{bookId}.jpg` (indépendant des fichiers souvenir). */
+export async function persistBookCoverUri(bookId: string, sourceUri: string): Promise<string> {
+  const src = sourceUri.trim();
+  if (!src || Platform.OS === 'web' || !documentDirectory) return src;
+
+  const dest = `${documentDirectory}petitmo_memories/book_covers/${bookId}.jpg`;
+  const rebasedSrc = rebaseSandboxUriToCurrentContainer(src);
+
+  if (
+    rebasedSrc.includes(`book_covers/${bookId}.`) &&
+    (await isLocalMediaUriReadable(rebasedSrc))
+  ) {
+    return rebasedSrc;
+  }
+
+  const dir = `${documentDirectory}petitmo_memories/book_covers/`;
+  await makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
+
+  for (const from of [rebasedSrc, src]) {
+    const t = from.trim();
+    if (!t) continue;
+    if (
+      !t.startsWith('content:') &&
+      !t.startsWith('ph://') &&
+      !isCloudMediaReference(t) &&
+      !(await isLocalMediaUriReadable(t))
+    ) {
+      continue;
+    }
+    try {
+      await copyAsync({ from: t, to: dest });
+      return dest;
+    } catch {
+      /* variante suivante */
+    }
+  }
+
+  return rebasedSrc || src;
+}
+
+/** URI éphémère (photothèque / galerie) — à ingérer en souvenir sandbox avant redémarrage. */
+export function isGalleryPickUri(uri: string): boolean {
+  const t = uri.trim();
+  return (
+    t.startsWith('content:') ||
+    t.startsWith('ph://') ||
+    t.startsWith('assets-library://')
+  );
+}
+
+export type ApplyBookCoverResult = {
+  book: Book;
+  editorUri: string | null;
+  /** Nouveau souvenir créé depuis la galerie (favori + ajout au livre). */
+  importedMemoryId?: string;
+};
+
+/**
+ * Applique un choix de couverture : favori existant ou import galerie → souvenir favori + copie `book_covers/`.
+ */
+export async function applyBookCoverFromUri(params: {
+  bookId: string;
+  childId: string;
+  pickUri: string;
+}): Promise<ApplyBookCoverResult> {
+  const trimmed = params.pickUri.trim();
+  const rawBook = getLocalBook(params.bookId);
+  if (!rawBook) throw new Error('Livre introuvable');
+  let book = normalizeBook(rawBook) ?? rawBook;
+
+  if (!trimmed) {
+    book = { ...book, coverPhotoUrl: null };
+    await upsertBook(book);
+    return { book, editorUri: null };
+  }
+
+  let coverRef = trimmed;
+  let importedMemoryId: string | undefined;
+
+  if (isGalleryPickUri(trimmed)) {
+    const row = await uploadMedia({
+      uri: trimmed,
+      type: 'photo',
+      childId: params.childId,
+      suppressFeedEmit: false,
+    });
+    if (!row) throw new Error('Impossible d’importer la photo depuis la galerie.');
+    const memoryId = row.id;
+    importedMemoryId = memoryId;
+
+    await toggleFavorite(memoryId, true);
+    const mem = getLocalMemoryById(memoryId);
+    if (mem?.type === 'photo') {
+      const favRef = canonicalBookCoverPhotoRef(mem).trim();
+      if (favRef) updateLocalMemoryFavoritePhotoUrls(memoryId, [favRef]);
+      coverRef = favRef || trimmed;
+    }
+
+    const withMemory = await addMemoriesToBook(params.bookId, [memoryId]);
+    if (withMemory) book = withMemory;
+
+    await awaitPhotoPrintDerivativesForMemory(memoryId);
+    const refreshed = getLocalMemoryById(memoryId);
+    if (refreshed?.type === 'photo') {
+      const favRef = canonicalBookCoverPhotoRef(refreshed).trim();
+      if (favRef) {
+        updateLocalMemoryFavoritePhotoUrls(memoryId, [favRef]);
+        coverRef = favRef;
+      }
+    }
+  } else {
+    let owner = findPhotoMemoryByCoverRef(coverRef, book.memoryIds);
+    if (!owner) {
+      const all = await getMemories(params.childId);
+      owner = findPhotoMemoryByCoverRef(
+        coverRef,
+        all.map(m => m.id),
+      );
+    }
+    if (owner && !book.memoryIds.includes(owner.id)) {
+      const withMemory = await addMemoriesToBook(params.bookId, [owner.id]);
+      if (withMemory) book = withMemory;
+    }
+  }
+
+  const coverMem = findBookCoverMemory({ ...book, coverPhotoUrl: coverRef });
+  if (coverMem?.type === 'photo' && !coverMem.local_print_path?.trim()) {
+    await awaitPhotoPrintDerivativesForMemory(coverMem.id);
+  }
+
+  let printSrc = resolveCoverPrintUriFromPick(coverRef, book.memoryIds).trim();
+  if (!printSrc && coverMem?.type === 'photo') {
+    printSrc = getBookPhotoPrintUri(coverMem, coverRef).trim();
+  }
+  if (!printSrc) printSrc = coverRef;
+  await persistBookCoverUri(params.bookId, printSrc);
+
+  book = { ...book, coverPhotoUrl: coverRef };
+  await upsertBook(book);
+
+  DeviceEventEmitter.emit('petitmo:memories-invalidate');
+
+  return {
+    book,
+    editorUri: resolveBookCoverEditorUri(book),
+    importedMemoryId,
+  };
+}
+
+/**
+ * Répare uniquement le **choix** de couverture déjà enregistré (rebase sandbox / bascule print).
+ * Ne remplace jamais par « le premier favori » du livre.
+ */
+export async function healBookCoverIfNeeded(book: Book): Promise<Book> {
+  const current = book;
+  const direct = (current.coverPhotoUrl ?? '').trim();
+
+  if (direct.includes('petitmo_memories/book_covers/')) {
+    const rebased = rebaseSandboxUriToCurrentContainer(direct);
+    if (await isLocalMediaUriReadable(rebased)) {
+      return current;
+    }
+  }
+
+  const dedicated = dedicatedBookCoverUriForBook(current.id);
+  const dedicatedReadable = dedicated ? await isLocalMediaUriReadable(dedicated) : false;
+
+  const printUri = resolveBookCoverPrintUri(current)?.trim() ?? '';
+  if (printUri && (await isLocalMediaUriReadable(printUri))) {
+    await persistBookCoverUri(current.id, printUri);
+    return current;
+  }
+
+  if (dedicatedReadable && dedicated) {
+    await persistBookCoverUri(current.id, dedicated);
+    return current;
+  }
+
+  const ref = direct;
+  if (!ref) return current;
+
+  const coverMem = findBookCoverMemory(current);
+  if (coverMem) {
+    const freshPrint = getBookPhotoPrintUri(coverMem, ref).trim();
+    if (freshPrint && (await isLocalMediaUriReadable(freshPrint))) {
+      await persistBookCoverUri(current.id, freshPrint);
+    }
+  }
+
+  return current;
+}
+
+export async function healAllBookCovers(books: readonly Book[]): Promise<Book[]> {
+  const out: Book[] = [];
+  for (const b of books) {
+    out.push(await healBookCoverIfNeeded(b));
+  }
+  return out;
+}
+
+/** URI couverture pour la liste Livres (recadrage = même fichier que l’éditeur). */
+export function resolveBookListRowCoverUri(book: Book): string {
+  if (book.photoCrops?.cover) return resolveBookCoverEditorUri(book) ?? '';
+  return resolveBookListCoverDisplayUri(book) ?? '';
+}
+
+/** Signature stable pour éviter `setBooks` / remontage des vignettes si rien n’a changé visuellement. */
+export function booksListVisualSignature(books: readonly Book[]): string {
+  return books
+    .map(b => {
+      const cover = resolveBookListRowCoverUri(b);
+      const crop = b.photoCrops?.cover;
+      const cropSig = crop ? `${crop.xPct},${crop.yPct},${crop.scale}` : '';
+      return [
+        b.id,
+        b.title,
+        b.createdAt,
+        b.memoryIds.join(','),
+        b.coverPhotoUrl ?? '',
+        cover,
+        cropSig,
+      ].join('|');
+    })
+    .join('\n');
 }
 
 export async function getBook(bookId: string): Promise<Book | null> {

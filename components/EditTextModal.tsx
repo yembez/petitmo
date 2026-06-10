@@ -21,11 +21,10 @@ import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
 import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import {
-  MAX_TEXT_CHARS,
-  MAX_VISUAL_LINES,
-  estimateVisualLines,
+  MAX_BOOK_LINES,
+  estimateBookLines,
   clampText,
-  clampTextCharBudget,
+  clampTextBookLineBudget,
   TEXT_TRUNCATION_ALERT_TITLE,
   TEXT_TRUNCATION_ALERT_MESSAGE,
   TEXT_TRUNCATION_MODIFY_LABEL,
@@ -181,7 +180,7 @@ export default function EditTextModal(props: EditTextModalProps) {
                   {...TEXT_INPUT_WEB_LANG}
                   style={styles.input}
                   value={text}
-                  onChangeText={t => setText(clampTextCharBudget(t))}
+                  onChangeText={t => setText(clampTextBookLineBudget(t))}
                   placeholder="Ajouter un texte..."
                   placeholderTextColor="#9CA3AF"
                   multiline
@@ -190,8 +189,7 @@ export default function EditTextModal(props: EditTextModalProps) {
                   autoFocus
                 />
                 <Text style={styles.charHint}>
-                  {text.length}/{MAX_TEXT_CHARS} · {estimateVisualLines(text)}/{MAX_VISUAL_LINES}{' '}
-                  lignes
+                  {estimateBookLines(text)}/{MAX_BOOK_LINES} lignes · livre
                 </Text>
               </>
             )}

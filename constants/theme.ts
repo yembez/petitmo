@@ -32,7 +32,7 @@ export const THEME = {
   splashScreenBackground: BRAND_SPLASH_BRICK,
   /** Orange CTA charte — disques Capturer, tab bar active, point âge / cœur titre… */
   brandCtaOrange: BRAND_CTA_ORANGE,
-  /** @deprecated — `brandCtaOrange` */
+  /** Accents disques Capturer — cœur titre, point pilule âge (orange charte). */
   captureDiscCtaBackground: BRAND_CTA_ORANGE,
   /** @deprecated — `brandPrimary` */
   brandTerracotta: BRAND_PRIMARY,
@@ -47,13 +47,13 @@ export const THEME = {
   /** @deprecated — `brandPrimarySoft` */
   captureCtaSoftTerracotta: '#F4A0A0',
 
-  /** Fond CTA rond « Importer » — écran Capturer (maquette V3). */
+  /** Fond CTA rond « Importer » — dérivé clair de l’orange charte. */
   captureImportCtaBackground: '#FBD1C1',
   /** Fond CTA rond « Enregistrer » — écran Capturer (maquette V3). */
   captureRecordCtaBackground: '#FFFFFF',
-  /** Liseré disque « Enregistrer » — écran Capturer. */
+  /** Liseré disque « Enregistrer » — écran Capturer (orange charte). */
   captureRecordCtaBorderColor: BRAND_CTA_ORANGE,
-  /** Fond CTA rond « Écrire » — écran Capturer (maquette V3). */
+  /** Fond CTA rond « Écrire » — écran Capturer (orange charte). */
   captureWriteCtaBackground: BRAND_CTA_ORANGE,
   /** Icônes dans les disques CTA Capturer — marron fondu bas hero. */
   captureCtaIconColor: '#3C3126',

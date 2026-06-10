@@ -29,6 +29,7 @@ import {
   upsertBook,
 } from '@/services/books';
 import { getLocalMemoryById } from '@/lib/localDb';
+import { canonicalBookCoverPhotoRef } from '@/utils/memoryPhotos';
 import { THEME } from '@/constants/theme';
 
 const INK = '#1C1C1E';
@@ -198,15 +199,7 @@ export function AddToBookModal({
     for (const id of selectionMemoryIds) {
       const m = getLocalMemoryById(id);
       if (!m || m.type !== 'photo') continue;
-      const src =
-        (m.local_print_path ??
-          m.local_original_path ??
-          m.local_media_path ??
-          m.print_url ??
-          m.display_url ??
-          m.edited_media_url ??
-          m.media_url ??
-          '')?.trim();
+      const src = canonicalBookCoverPhotoRef(m).trim();
       if (src) {
         // IMPORTANT: ne pas écraser memoryIds (utiliser la version déjà enrichie).
         await upsertBook({ ...(updated ?? created), coverPhotoUrl: src });

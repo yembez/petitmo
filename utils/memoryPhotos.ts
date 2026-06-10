@@ -97,29 +97,128 @@ function pickAlbumExtraSlotNormalized(
  * puis URLs dérivées (`display_url`, `thumb_url`), puis originaux distants.
  * Chaîne d’URI cohérente avec l’export PDF serveur : préférer fichiers locaux puis URLs dérivées, sans dépendre seulement de `media_url`.
  */
-export function getPrimaryPhotoUriForBookPreview(memory: Memory): string {
-  const boot = peekFeedBootstrapDisplayUrls(memory.id)?.[0]?.trim();
-  if (boot) return boot;
+/** Index du slot fil / favori correspondant à `photoRef` (-1 si inconnu). */
+export function indexOfPhotoUrlInFeed(memory: Memory, photoRef: string): number {
+  if (memory.type !== 'photo') return -1;
+  const ref = photoRef.trim();
+  if (!ref) return -1;
+  const slots = getAllPhotoUrlsForFeed(memory);
+  for (let i = 0; i < slots.length; i++) {
+    if (urlsInSamePhotoVariantGroup(memory, slots[i], ref)) return i;
+  }
+  return -1;
+}
 
-  // Livre = destination impression : préférer `print` (résolution plus haute) de façon cohérente.
-  // On garde quand même la logique "sandbox fantôme" (réinstall) : si le local est mort, basculer sur le remote.
-  const localPick = firstNonEmpty(
+/** Devine `print.jpg` à côté de `display.jpg` quand `local_print_path` n’est pas encore en base. */
+export function inferLocalPrintPathFromDisplay(displayPath: string): string {
+  const d = displayPath.trim();
+  if (!d) return '';
+  const guess = d.replace(/\/display\.(jpe?g|webp|png)$/i, '/print.$1');
+  return guess !== d ? guess : '';
+}
+
+function primarySlotPrintPathRaw(memory: Memory): string {
+  const fromDisplay = memory.local_display_path?.trim()
+    ? inferLocalPrintPathFromDisplay(memory.local_display_path)
+    : '';
+  return firstNonEmpty(
     memory.local_print_path,
-    memory.local_display_path,
-    memory.local_thumb_path,
+    fromDisplay,
     memory.local_original_path,
     memory.local_media_path,
-  );
-  const remotePick = firstNonEmpty(
     memory.print_url,
-    memory.display_url,
-    memory.thumb_url,
     memory.edited_media_url,
     memory.media_url,
     typeof memory.media_path === 'string' ? memory.media_path : '',
   );
-  const raw = localPick.trim() || remotePick.trim();
+}
+
+/** URIs à tester pour le badge DPI (print, original, voisin de display…). */
+export function collectBookPhotoDpiUriCandidates(args: {
+  memory: Memory | null;
+  photoRef?: string;
+  displayUri?: string;
+  bookPrintUri?: string | null;
+}): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (u: string | null | undefined) => {
+    const t = (u ?? '').trim();
+    if (!t || seen.has(t)) return;
+    seen.add(t);
+    out.push(t);
+  };
+
+  const { memory, photoRef, displayUri, bookPrintUri } = args;
+  if (memory) {
+    add(memory.local_original_path);
+    add(memory.local_print_path);
+    add(getBookPhotoPrintUri(memory, photoRef));
+    if (memory.local_display_path) {
+      add(inferLocalPrintPathFromDisplay(memory.local_display_path));
+    }
+    add(memory.print_url);
+    add(memory.local_media_path);
+  }
+  if (displayUri) {
+    add(inferLocalPrintPathFromDisplay(displayUri));
+  }
+  add(bookPrintUri ?? undefined);
+  return out;
+}
+
+/** Pixels effectifs du fichier print (pour badge DPI — évite de décoder un display 1400px). */
+export function getBookPhotoPrintPixelSize(
+  memory: Memory,
+  _photoRef?: string,
+): { w: number; h: number } | null {
+  if (memory.type !== 'photo') return null;
+  const pw = memory.print_px_w;
+  const ph = memory.print_px_h;
+  if (typeof pw === 'number' && typeof ph === 'number' && pw > 0 && ph > 0) {
+    return { w: pw, h: ph };
+  }
+  const ow = memory.original_px_w;
+  const oh = memory.original_px_h;
+  if (typeof ow === 'number' && typeof oh === 'number' && ow > 0 && oh > 0) {
+    return { w: ow, h: oh };
+  }
+  return null;
+}
+
+/**
+ * URI **print** pour l’éditeur livre / contrôle DPI — jamais thumb ni display fil.
+ * `photoRef` : URL favorite / couverture choisie (pour cibler une photo d’album).
+ */
+export function getBookPhotoPrintUri(memory: Memory, photoRef?: string): string {
+  if (memory.type !== 'photo') return '';
+
+  const ref = photoRef?.trim() ?? '';
+  let slotIndex = ref ? indexOfPhotoUrlInFeed(memory, ref) : 0;
+  if (slotIndex < 0) slotIndex = 0;
+
+  if (slotIndex === 0) {
+    const raw = primarySlotPrintPathRaw(memory);
+    return raw ? normalizeMemoryMediaUriForDisplay(raw) : '';
+  }
+
+  const extraIdx = slotIndex - 1;
+  const localExtras = asTrimmedStringArray(memory.extra_photo_paths);
+  const originals = asTrimmedStringArray(memory.extra_photo_urls);
+  const displays = asTrimmedStringArray(memory.extra_display_urls);
+  const paths = asTrimmedStringArray(memory.extra_photo_paths);
+  const raw = firstNonEmpty(
+    localExtras[extraIdx],
+    originals[extraIdx],
+    displays[extraIdx],
+    paths[extraIdx],
+  );
   return raw ? normalizeMemoryMediaUriForDisplay(raw) : '';
+}
+
+/** URI principale photo (slot 0) pour maquette livre / export — toujours variante print. */
+export function getPrimaryPhotoUriForBookPreview(memory: Memory): string {
+  return getBookPhotoPrintUri(memory);
 }
 
 /** Photo de fond d’un vocal : `voice_cover_path` puis `voice_cover_url`. */
@@ -270,6 +369,11 @@ export function getAllPhotoUrlsForDisplay(memory: Memory): string[] {
 function photoVariantGroups(memory: Memory): string[][] {
   const groups: string[][] = [];
   const g0 = [
+    memory.local_thumb_path,
+    memory.local_display_path,
+    memory.local_print_path,
+    memory.local_original_path,
+    memory.local_media_path,
     memory.display_url,
     memory.thumb_url,
     memory.print_url,
@@ -281,13 +385,14 @@ function photoVariantGroups(memory: Memory): string[][] {
     .map(u => u.trim());
   if (g0.length) groups.push(g0);
 
+  const localExtras = asTrimmedStringArray(memory.extra_photo_paths);
   const displays = asTrimmedStringArray(memory.extra_display_urls);
   const thumbs = asTrimmedStringArray(memory.extra_thumb_urls);
   const originals = asTrimmedStringArray(memory.extra_photo_urls);
   const paths = asTrimmedStringArray(memory.extra_photo_paths);
-  const n = Math.max(displays.length, thumbs.length, originals.length, paths.length);
+  const n = Math.max(localExtras.length, displays.length, thumbs.length, originals.length, paths.length);
   for (let i = 0; i < n; i++) {
-    const g = [displays[i], thumbs[i], originals[i], paths[i]].filter(
+    const g = [localExtras[i], displays[i], thumbs[i], originals[i], paths[i]].filter(
       (u): u is string => typeof u === 'string' && u.length > 0
     );
     if (g.length) groups.push(g);
@@ -342,6 +447,39 @@ export function mapPhotoUrlToThumb(memory: Memory, originalUrl: string): string 
   return o;
 }
 
+/** Vrai si `url` désigne une variante (locale ou distante) d’une photo du souvenir. */
+export function memoryPhotoMatchesUrl(memory: Memory, url: string): boolean {
+  const u = url.trim();
+  if (!u || memory.type !== 'photo') return false;
+
+  const candidates: string[] = [];
+  const push = (v: unknown) => {
+    const t = typeof v === 'string' ? v.trim() : '';
+    if (t) candidates.push(t);
+  };
+  push(memory.local_thumb_path);
+  push(memory.local_display_path);
+  push(memory.local_print_path);
+  push(memory.local_original_path);
+  push(memory.local_media_path);
+  push(memory.display_url);
+  push(memory.thumb_url);
+  push(memory.print_url);
+  push(memory.edited_media_url);
+  push(memory.media_url);
+  push(memory.media_path);
+  asTrimmedStringArray(memory.extra_photo_paths).forEach(push);
+  asTrimmedStringArray(memory.extra_display_urls).forEach(push);
+  asTrimmedStringArray(memory.extra_thumb_urls).forEach(push);
+  asTrimmedStringArray(memory.extra_photo_urls).forEach(push);
+  parseFavoritePhotoUrls(memory).forEach(push);
+
+  for (const c of candidates) {
+    if (urlsInSamePhotoVariantGroup(memory, c, u)) return true;
+  }
+  return false;
+}
+
 /** URLs des photos d’album marquées comme favoris (colonne `favorite_photo_urls`). */
 export function parseFavoritePhotoUrls(memory: Memory): string[] {
   const raw = memory.favorite_photo_urls;
@@ -349,6 +487,14 @@ export function parseFavoritePhotoUrls(memory: Memory): string[] {
   return arr
     .filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
     .map(u => u.trim());
+}
+
+/** Référence à stocker dans `book.coverPhotoUrl` (URL favorite / slot fil, pas le thumb). */
+export function canonicalBookCoverPhotoRef(memory: Memory): string {
+  if (memory.type !== 'photo') return '';
+  const favs = parseFavoritePhotoUrls(memory);
+  if (favs[0]?.trim()) return favs[0].trim();
+  return getAllPhotoUrlsForFeed(memory)[0]?.trim() || getBookPhotoPrintUri(memory);
 }
 
 export function normalizePhotoUrlForCompare(url: string): string {

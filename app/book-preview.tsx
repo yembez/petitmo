@@ -13,6 +13,7 @@ import {
   StyleSheet,
   FlatList,
   Pressable,
+  TouchableOpacity,
   useWindowDimensions,
   ActivityIndicator,
   BackHandler,
@@ -23,11 +24,12 @@ import {
   type ListRenderItem,
 } from 'react-native';
 import { useFonts, DMSans_400Regular, DMSans_500Medium, DMSans_600SemiBold, DMSans_700Bold } from '@expo-google-fonts/dm-sans';
-import { Pencil, Trash2, X } from 'lucide-react-native';
+import { Check, ImageIcon, Pencil, Trash2, X } from 'lucide-react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Image as ExpoImage } from 'expo-image';
@@ -40,12 +42,22 @@ import {
   splitVideoTitleBody,
 } from '@/src/book/bookTextParts';
 import EditTextModal from '@/components/EditTextModal';
-import { BookPhotoCropModal } from '@/components/BookPhotoCropModal';
 import { BookPreviewZoomWrap } from '@/components/BookPreviewZoomWrap';
+import { bookPrintFrameMmFor, type BookPhotoPageType } from '@/utils/bookPhotoPrintDpi';
 import { getChildren, getOrSelectFirstChild } from '@/services/children';
 import { getMemories } from '@/services/media';
 import { loadBookSelectionKeys, memoryIdFromBookSelectionKey } from '@/services/bookSelection';
-import { dedupeMemoryIds, getBook, upsertBook } from '@/services/books';
+import {
+  applyBookCoverFromUri,
+  dedupeMemoryIds,
+  findBookCoverMemory,
+  getBook,
+  healBookCoverIfNeeded,
+  resolveBookCoverEditorUri,
+  resolveBookCoverPrintUri,
+  upsertBook,
+  type Book,
+} from '@/services/books';
 import { shareBookPdf } from '@/services/bookPdf';
 import {
   generateBookPdfViaServer,
@@ -61,6 +73,8 @@ import {
   mapPhotoUrlToThumb,
   getAlbumCanonicalFavoriteUrls,
   normalizeMemoryMediaUriForDisplay,
+  collectBookPhotoDpiUriCandidates,
+  getBookPhotoPrintPixelSize,
   getPrimaryPhotoUriForBookPreview,
   getVoiceCoverUriForBookPreview,
   getVideoPosterUriForBookPreview,
@@ -68,7 +82,6 @@ import {
 import { runBookExportPrepInBackground } from '@/services/bookExportPrep';
 import { getBookExportPrepIssues } from '@/services/bookExportPrep';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
-import { isLocalMediaUriReadable, isProbablyStalePetitmoSandboxPath } from '@/utils/localMediaReadable';
 
 import type { Child, Memory } from '@/types/local';
 import { canExportBookPdfViaServer } from '@/lib/digitalExportPurchase';
@@ -81,12 +94,13 @@ const HEADER_H = 44;
 const BOTTOM_H = 82;
 /** Vue verticale (Phase 1) : marge latérale ; pages collées à la reliure (trait + ombres latérales). */
 const BROWSE_SIDE_PAD = 16;
+/** Éditeur plein écran : marges autour de la page A5 (effet feuillet posé sur le fond). */
+const EDITOR_PAGE_SIDE_PAD = 28;
+const EDITOR_PAGE_VERT_PAD = 24;
 const BROWSE_PAGE_GAP = 0;
 const BROWSE_ROW_GAP = 24;
 /** Largeur de la « reliure » (dégradé d’ombre) au centre d’un spread. */
 const BROWSE_SPINE_W = 16;
-/** Largeur de l’effet de tranche/reliure sur le bord gauche de la couverture (vue spread). */
-const COVER_SPINE_W = 7;
 /** Fond du viewer : gris neutre clair, identique au fond de la page fil (`THEME.bgScreen`). */
 const BROWSE_BG = THEME.bgScreen;
 const QR_BASE = 'https://petitmo.app/m';
@@ -311,11 +325,10 @@ export default function BookPreviewScreen() {
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
   /** Éditeur plein écran (Phase 1) : ouvert au tap sur une page de la vue verticale. */
   const [editorOpen, setEditorOpen] = useState(false);
-  /** Contenu lourd (FlatList) monté après le 1er frame du slide — évite de bloquer l’animation. */
-  const [editorBodyReady, setEditorBodyReady] = useState(false);
   const [editorPageIndex, setEditorPageIndex] = useState(0);
   /** Titre principal de la couverture (ligne complète, ex. « Journal de … »). */
   const [coverTitleLine, setCoverTitleLine] = useState<string | null>(null);
+  const [bookSnapshot, setBookSnapshot] = useState<Book | null>(null);
   const [coverPhotoUrl, setCoverPhotoUrl] = useState<string | null>(null);
   /** Texte des pages chapitre (éditable). */
   const [chapterTitleLine, setChapterTitleLine] = useState<string | null>(null);
@@ -326,21 +339,25 @@ export default function BookPreviewScreen() {
   const [guestExportSubmitting, setGuestExportSubmitting] = useState(false);
   const pendingGuestExportMode = useRef<'screen' | 'print'>('screen');
   const [coverPickerOpen, setCoverPickerOpen] = useState(false);
-  const [bookCropSession, setBookCropSession] = useState<{
-    storageKey: string;
-    uri: string;
-    frameW: number;
-    frameH: number;
-    pageType: 'cover' | 'photo-full' | 'photo-note' | 'audio';
-    imgPxW: number;
-    imgPxH: number;
-    printMmW: number;
-    printMmH: number;
-  } | null>(null);
+  const [cropDpiMetaByKey, setCropDpiMetaByKey] = useState<
+    Record<
+      string,
+      {
+        imgPxW: number;
+        imgPxH: number;
+        dpiPxW: number;
+        dpiPxH: number;
+        printMmW: number;
+        printMmH: number;
+        sourceUri?: string;
+      }
+    >
+  >({});
 
   const listRef = useRef<FlatList<any>>(null);
   const editorListRef = useRef<FlatList<any>>(null);
   const editorOpenRef = useRef(false);
+  const coverPickerOpenRef = useRef(false);
 
   const pages = useMemo(() => {
     if (!child) return [];
@@ -431,6 +448,20 @@ export default function BookPreviewScreen() {
   const availHLandscape = screenHeight - HEADER_H - insets.top - insets.bottom;
 
   /**
+   * Page éditeur au **ratio A5 (154:216)**, légèrement réduite avec marges latérales —
+   * même logique de fit que le spread, pour parité recadrage / bandeau couverture.
+   */
+  const editorPage = useMemo(() => {
+    const availW = screenWidth - EDITOR_PAGE_SIDE_PAD * 2;
+    const availH = availHPortrait - EDITOR_PAGE_VERT_PAD * 2;
+    const s = Math.min(availW / BOOK_PAGE_W_MM, availH / BOOK_PAGE_H_MM);
+    return {
+      w: Math.max(1, Math.floor(s * BOOK_PAGE_W_MM)),
+      h: Math.max(1, Math.floor(s * BOOK_PAGE_H_MM)),
+    };
+  }, [availHPortrait, screenWidth]);
+
+  /**
    * Vue verticale (Phase 1, style Google Photos) : couverture seule en tête,
    * puis doubles-pages côte à côte avec un petit espace. Pages au ratio A5 154:216.
    */
@@ -448,6 +479,20 @@ export default function BookPreviewScreen() {
   const coverPhotoDisplayUri = coverPhotoDisplayUriRaw
     ? normalizeMemoryMediaUriForDisplay(coverPhotoDisplayUriRaw)
     : null;
+
+  const coverPhotoPrintUri = useMemo(
+    () => (bookSnapshot ? resolveBookCoverPrintUri(bookSnapshot) : null),
+    [bookSnapshot]
+  );
+
+  /** Éditeur : display pour le recadrage ; on évite `book_covers/` (copie parfois basse résolution). */
+  const coverPhotoEditorRenderUri = useMemo(() => {
+    const print = coverPhotoPrintUri?.trim();
+    if (print && !print.includes('petitmo_memories/book_covers/')) {
+      return normalizeMemoryMediaUriForDisplay(print);
+    }
+    return coverPhotoDisplayUri;
+  }, [coverPhotoPrintUri, coverPhotoDisplayUri]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -474,26 +519,23 @@ export default function BookPreviewScreen() {
 
       let memoryIds: Set<string>;
       if (bookId) {
-        const b = await getBook(bookId);
+        let b = await getBook(bookId);
         if (!b) {
           setError('Livre introuvable');
           setBookMemories([]);
           setBookSelectionKeys([]);
           return;
         }
+        b = await healBookCoverIfNeeded(b);
+        setBookSnapshot(b);
+        setCropDpiMetaByKey(prev => {
+          if (!prev.cover) return prev;
+          const { cover: _c, ...rest } = prev;
+          return rest;
+        });
         // Le titre du livre sert de titre PDF/couverture dans l’aperçu.
         setCoverTitleLine(b.title);
-        const rawCover = typeof b.coverPhotoUrl === 'string' ? b.coverPhotoUrl.trim() : '';
-        if (!rawCover) {
-          setCoverPhotoUrl(null);
-        } else if (
-          isProbablyStalePetitmoSandboxPath(rawCover) &&
-          !(await isLocalMediaUriReadable(rawCover))
-        ) {
-          setCoverPhotoUrl(null);
-        } else {
-          setCoverPhotoUrl(rawCover);
-        }
+        setCoverPhotoUrl(resolveBookCoverEditorUri(b));
         if (b.rotations) setRotations(b.rotations);
         if (b.photoCrops) setPhotoCrops(b.photoCrops);
         if (b.textEdits) {
@@ -606,44 +648,161 @@ export default function BookPreviewScreen() {
     [imagePxCache]
   );
 
-  function printFrameMmFor(pageType: 'cover' | 'photo-full' | 'photo-note' | 'audio'): { w: number; h: number } {
-    const pageWmm = 154;
-    const pageHmm = 216;
-    if (pageType === 'cover') return { w: pageWmm, h: 142 };
-    // Marge visuelle 10mm autour de l’image (parité serveur `--visual-margin`) : le cadre est inséré.
-    const m = BOOK_VISUAL_MARGIN_MM;
-    const bandHmm = pageType === 'photo-note' || pageType === 'audio' ? pageHmm * 0.6 : pageHmm * 0.82;
-    return { w: pageWmm - 2 * m, h: bandHmm - 2 * m };
-  }
+  const resolveCropDpiMeta = useCallback(
+    async (payload: {
+      storageKey: string;
+      uri: string;
+      pageType: BookPhotoPageType;
+    }): Promise<{
+      imgPxW: number;
+      imgPxH: number;
+      dpiPxW: number;
+      dpiPxH: number;
+      printMmW: number;
+      printMmH: number;
+      sourceUri?: string;
+    }> => {
+      const mm = bookPrintFrameMmFor(payload.pageType);
+      const finish = (display: { w: number; h: number }, dpi: { w: number; h: number }) => ({
+        imgPxW: display.w,
+        imgPxH: display.h,
+        dpiPxW: dpi.w,
+        dpiPxH: dpi.h,
+        printMmW: mm.w,
+        printMmH: mm.h,
+        sourceUri: payload.uri,
+      });
 
-  const openBookCrop = useCallback(
+      const memoryForPayload = (): Memory | null => {
+        const id = payload.storageKey.trim();
+        if (id && id !== 'cover') {
+          return bookMemories.find(m => m.id === id) ?? null;
+        }
+        if (payload.pageType === 'cover' && bookSnapshot) {
+          return findBookCoverMemory(bookSnapshot);
+        }
+        return null;
+      };
+
+      let displayW = 0;
+      let displayH = 0;
+      try {
+        const px = await getImagePx(payload.uri);
+        displayW = px.w;
+        displayH = px.h;
+      } catch {
+        const mem = memoryForPayload();
+        const ow = mem?.original_px_w;
+        const oh = mem?.original_px_h;
+        if (typeof ow === 'number' && typeof oh === 'number' && ow > 0 && oh > 0) {
+          displayW = ow;
+          displayH = oh;
+        }
+      }
+
+      const coverRef =
+        payload.pageType === 'cover' && bookSnapshot
+          ? (bookSnapshot.coverPhotoUrl ?? '').trim()
+          : undefined;
+      const mem = memoryForPayload();
+
+      const bookPrintUri =
+        payload.pageType === 'cover' && bookSnapshot
+          ? resolveBookCoverPrintUri(bookSnapshot)
+          : null;
+      const dpiUriCandidates = collectBookPhotoDpiUriCandidates({
+        memory: mem,
+        photoRef: coverRef,
+        displayUri: payload.uri,
+        bookPrintUri,
+      });
+
+      let dpiW = 0;
+      let dpiH = 0;
+      let bestDpiArea = 0;
+      const considerDpiPx = (w: number, h: number) => {
+        if (!(w > 0 && h > 0)) return;
+        const area = w * h;
+        if (area > bestDpiArea) {
+          dpiW = w;
+          dpiH = h;
+          bestDpiArea = area;
+        }
+      };
+
+      if (mem) {
+        const printPx = getBookPhotoPrintPixelSize(mem, coverRef);
+        if (printPx) considerDpiPx(printPx.w, printPx.h);
+        if (typeof mem.print_px_w === 'number' && typeof mem.print_px_h === 'number') {
+          considerDpiPx(mem.print_px_w, mem.print_px_h);
+        }
+        if (typeof mem.original_px_w === 'number' && typeof mem.original_px_h === 'number') {
+          considerDpiPx(mem.original_px_w, mem.original_px_h);
+        }
+      }
+
+      for (const printUri of dpiUriCandidates) {
+        try {
+          const px = await getImagePx(printUri);
+          considerDpiPx(px.w, px.h);
+        } catch {
+          /* essai suivant */
+        }
+      }
+
+      if (!(dpiW > 0 && dpiH > 0)) {
+        dpiW = displayW;
+        dpiH = displayH;
+      }
+
+      return finish({ w: displayW, h: displayH }, { w: dpiW, h: dpiH });
+    },
+    [bookMemories, bookSnapshot, getImagePx]
+  );
+
+  const prefetchCropDpiMeta = useCallback(
     (payload: {
       storageKey: string;
       uri: string;
-      frameW: number;
-      frameH: number;
-      pageType: 'cover' | 'photo-full' | 'photo-note' | 'audio';
+      pageType: BookPhotoPageType;
     }) => {
       void (async () => {
-        const mm = printFrameMmFor(payload.pageType);
-        try {
-          const px = await getImagePx(payload.uri);
-          setBookCropSession({ ...payload, imgPxW: px.w, imgPxH: px.h, printMmW: mm.w, printMmH: mm.h });
-        } catch {
-          const id = payload.storageKey.trim();
-          const mem = id && id !== 'cover' ? bookMemories.find(m => m.id === id) : null;
-          const ow = mem?.original_px_w;
-          const oh = mem?.original_px_h;
-          if (typeof ow === 'number' && typeof oh === 'number' && ow > 0 && oh > 0) {
-            setBookCropSession({ ...payload, imgPxW: ow, imgPxH: oh, printMmW: mm.w, printMmH: mm.h });
-          } else {
-            setBookCropSession({ ...payload, imgPxW: 0, imgPxH: 0, printMmW: mm.w, printMmH: mm.h });
+        let alreadyCached = false;
+        setCropDpiMetaByKey(prev => {
+          const cur = prev[payload.storageKey];
+          if (cur?.imgPxW > 0 && cur?.sourceUri === payload.uri) {
+            const dpiLooksDisplayOnly =
+              cur.dpiPxW > 0 &&
+              cur.imgPxW > 0 &&
+              cur.dpiPxW <= cur.imgPxW;
+            if (!(payload.pageType === 'cover' && dpiLooksDisplayOnly)) alreadyCached = true;
           }
-        }
+          return prev;
+        });
+        if (alreadyCached) return;
+        const meta = await resolveCropDpiMeta(payload);
+        setCropDpiMetaByKey(prev => {
+          const cur = prev[payload.storageKey];
+          if (cur?.imgPxW > 0 && cur?.sourceUri === payload.uri) {
+            const dpiStale =
+              payload.pageType === 'cover' &&
+              meta.dpiPxW > 0 &&
+              cur.dpiPxW > 0 &&
+              meta.dpiPxW > cur.dpiPxW;
+            if (!dpiStale) return prev;
+          }
+          return { ...prev, [payload.storageKey]: meta };
+        });
       })();
     },
-    [bookMemories, getImagePx]
+    [resolveCropDpiMeta]
   );
+
+  useEffect(() => {
+    const uri = coverPhotoDisplayUri?.trim();
+    if (!uri) return;
+    prefetchCropDpiMeta({ storageKey: 'cover', uri, pageType: 'cover' });
+  }, [coverPhotoDisplayUri, coverPhotoPrintUri, prefetchCropDpiMeta]);
 
   const unlockOrientationPortrait = useCallback(() => {
     void (async () => {
@@ -673,34 +832,44 @@ export default function BookPreviewScreen() {
   }, [pageRows.length]);
 
   const closeEditor = useCallback(() => {
+    setCoverPickerOpen(false);
+    setTextEditTarget(null);
     setEditorOpen(false);
   }, []);
 
-  // Slide natif d’abord (coque légère), puis montage de la FlatList au frame suivant.
-  useEffect(() => {
-    if (!editorOpen) {
-      setEditorBodyReady(false);
-      return;
-    }
-    const raf = requestAnimationFrame(() => setEditorBodyReady(true));
-    return () => cancelAnimationFrame(raf);
-  }, [editorOpen]);
-
   useLayoutEffect(() => {
-    if (!editorOpen || !editorBodyReady || editorPageIndex <= 0) return;
+    if (!editorOpen) return;
     editorListRef.current?.scrollToOffset({
       offset: screenWidth * editorPageIndex,
       animated: false,
     });
-  }, [editorOpen, editorBodyReady, editorPageIndex, screenWidth]);
+  }, [editorOpen, editorPageIndex, screenWidth]);
 
   useEffect(() => {
     editorOpenRef.current = editorOpen;
   }, [editorOpen]);
 
   useEffect(() => {
+    coverPickerOpenRef.current = coverPickerOpen;
+  }, [coverPickerOpen]);
+
+  const openCoverPicker = useCallback(() => {
+    setCoverPickerOpen(true);
+  }, []);
+
+  const closeCoverPicker = useCallback(() => {
+    setCoverPickerOpen(false);
+  }, []);
+
+  useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
       if (editorOpenRef.current) {
+        if (coverPickerOpenRef.current) {
+          setCoverPickerOpen(false);
+          return true;
+        }
+        setCoverPickerOpen(false);
+        setTextEditTarget(null);
         setEditorOpen(false);
         return true;
       }
@@ -730,16 +899,56 @@ export default function BookPreviewScreen() {
    */
   const onBookPagerMomentumEnd = useCallback(
     (e: { nativeEvent: { contentOffset: { x: number } } }) => {
-      const slideCount = isLandscape ? spreadRows.length : pageRows.length;
+      const slideCount = editorOpenRef.current
+        ? pageRows.length
+        : isLandscape
+          ? spreadRows.length
+          : pageRows.length;
       if (slideCount <= 0) return;
       const x = e.nativeEvent.contentOffset.x;
       const ix = Math.max(0, Math.min(Math.round(x / screenWidth), slideCount - 1));
       setCurrentPageIndex(prev => (prev === ix ? prev : ix));
+      if (editorOpenRef.current) {
+        setEditorPageIndex(prev => (prev === ix ? prev : ix));
+      }
     },
     [isLandscape, pageRows.length, screenWidth, spreadRows.length]
   );
 
   const merge = useCallback((m: Memory) => mergeMemory(m, localEdits), [localEdits]);
+
+  const cropDpiPayloadForPageRow = useCallback(
+    (row: PageRow) => {
+      const { page } = row;
+      if (page.type === 'cover') {
+        const uri = (coverPhotoDisplayUri ?? '').trim();
+        if (!uri) return null;
+        return { storageKey: 'cover', uri, pageType: 'cover' as const };
+      }
+      const m = memoryForMaquette(page, merge);
+      if (!m) return null;
+      if (page.type === 'photo-full' || page.type === 'photo-note') {
+        const uri = getPrimaryPhotoUriForBookPreview(m).trim();
+        if (!uri) return null;
+        return { storageKey: m.id, uri, pageType: page.type };
+      }
+      if (page.type === 'audio') {
+        const uri = getVoiceCoverUriForBookPreview(m).trim();
+        if (!uri) return null;
+        return { storageKey: m.id, uri, pageType: 'audio' as const };
+      }
+      return null;
+    },
+    [coverPhotoDisplayUri, merge]
+  );
+
+  useEffect(() => {
+    if (!editorOpen) return;
+    const row = pageRows[editorPageIndex];
+    if (!row) return;
+    const payload = cropDpiPayloadForPageRow(row);
+    if (payload) prefetchCropDpiMeta(payload);
+  }, [cropDpiPayloadForPageRow, editorOpen, editorPageIndex, pageRows, prefetchCropDpiMeta]);
 
   const renderMaquettePage = useCallback(
     (row: PageRow): ReactElement => {
@@ -819,8 +1028,8 @@ export default function BookPreviewScreen() {
         <MaquetteBookPages
           page={page}
           pageNum={pageNum}
-          width={screenWidth}
-          height={availHPortrait}
+          width={editorPage.w}
+          height={editorPage.h}
           child={child!}
           memory={m}
           rotation={rot}
@@ -832,16 +1041,15 @@ export default function BookPreviewScreen() {
           truncated={false}
           coverYearLabel={coverYearLabel}
           coverDisplayTitle={page.type === 'cover' ? coverDisplayTitle : undefined}
-          coverPhotoUri={page.type === 'cover' ? coverPhotoDisplayUri : null}
+          coverPhotoUri={page.type === 'cover' ? coverPhotoEditorRenderUri : null}
           coverPhotoCrop={photoCrops.cover}
-          onRequestCoverPhoto={
-            page.type === 'cover'
-              ? () => {
-                  setCoverPickerOpen(true);
-                }
-              : undefined
-          }
-          onRequestBookCrop={openBookCrop}
+          coverPhotoImgPxW={page.type === 'cover' ? cropDpiMetaByKey.cover?.imgPxW : undefined}
+          coverPhotoImgPxH={page.type === 'cover' ? cropDpiMetaByKey.cover?.imgPxH : undefined}
+          onRequestCoverPhoto={page.type === 'cover' ? openCoverPicker : undefined}
+          inlineCropConfig={{
+            dpiMetaByKey: cropDpiMetaByKey,
+            onChange: (key, crop) => upsertPhotoCrop(key, crop),
+          }}
           chapterDisplayTitle={page.type === 'chapter' ? (chapterTitleLine ?? undefined) : undefined}
           onRotate={() => {
             if (m && (page.type === 'photo-full' || page.type === 'photo-note' || page.type === 'audio')) {
@@ -854,18 +1062,19 @@ export default function BookPreviewScreen() {
       );
     },
     [
-      availHPortrait,
+      editorPage,
       child,
-      coverPhotoDisplayUri,
+      coverPhotoEditorRenderUri,
       coverTitleLine,
       coverYearLabel,
-      openBookCrop,
       chapterTitleLine,
+      cropDpiMetaByKey,
       merge,
       onRotateMemory,
       photoCrops,
       rotations,
-      screenWidth,
+      openCoverPicker,
+      upsertPhotoCrop,
     ]
   );
 
@@ -878,13 +1087,14 @@ export default function BookPreviewScreen() {
       const allUrls =
         favUrls.length > 0 ? favUrls : m.is_favorite ? getAlbumCanonicalFavoriteUrls(m) : [];
       for (const u of allUrls) {
-        const source = normalizeMemoryMediaUriForDisplay(u.trim());
+        const source = u.trim();
         if (!source) continue;
-        const mapped = normalizeMemoryMediaUriForDisplay(mapPhotoUrlToThumb(m, u));
+        const mapped = normalizeMemoryMediaUriForDisplay(mapPhotoUrlToThumb(m, source));
         if (!mapped) continue;
-        // On déduplique par source réelle (pas par thumb), pour éviter de sauvegarder un thumbnail comme couverture.
-        if (seen.has(source)) continue;
-        seen.add(source);
+        // On déduplique par URL favorite canonique (pas par thumb affiché).
+        const dedupeKey = source;
+        if (seen.has(dedupeKey)) continue;
+        seen.add(dedupeKey);
         out.push({ thumb: mapped, source });
       }
     }
@@ -892,18 +1102,58 @@ export default function BookPreviewScreen() {
   }, [allMemories]);
 
   const pickCover = useCallback(
-    (uri: string) => {
-      const next = uri.trim() || null;
-      setCoverPhotoUrl(next);
+    async (uri: string) => {
+      const trimmed = uri.trim();
       setCoverPickerOpen(false);
-      if (!bookId || !next) return;
-      void (async () => {
+      if (!trimmed) {
+        setCoverPhotoUrl(null);
+        if (!bookId) return;
         const b = await getBook(bookId);
         if (!b) return;
-        await upsertBook({ ...b, coverPhotoUrl: next });
-      })();
+        await upsertBook({ ...b, coverPhotoUrl: null });
+        setBookSnapshot({ ...b, coverPhotoUrl: null });
+        return;
+      }
+      if (!bookId) {
+        const printOnly = normalizeMemoryMediaUriForDisplay(trimmed) || trimmed;
+        setCoverPhotoUrl(printOnly);
+        return;
+      }
+      if (!child?.id) {
+        Alert.alert('Petitmo', 'Profil enfant introuvable.');
+        return;
+      }
+      try {
+        await applyBookCoverFromUri({
+          bookId,
+          childId: child.id,
+          pickUri: trimmed,
+        });
+        setCropDpiMetaByKey(prev => {
+          if (!prev.cover) return prev;
+          const { cover: _c, ...rest } = prev;
+          return rest;
+        });
+        await load();
+        const fresh = await getBook(bookId);
+        if (fresh) {
+          const editorUri = resolveBookCoverEditorUri(fresh);
+          if (editorUri) {
+            prefetchCropDpiMeta({ storageKey: 'cover', uri: editorUri, pageType: 'cover' });
+          }
+        }
+      } catch (e) {
+        if (e instanceof Error && e.message === 'LIMIT_REACHED') {
+          Alert.alert(
+            'Limite atteinte',
+            'Vous avez atteint le nombre maximum de souvenirs gratuits. Passez à Petitmo+ pour continuer.',
+          );
+          return;
+        }
+        Alert.alert('Petitmo', e instanceof Error ? e.message : 'Impossible de changer la couverture.');
+      }
     },
-    [bookId]
+    [bookId, child?.id, load, prefetchCropDpiMeta]
   );
 
   const pickCoverFromGallery = useCallback(async () => {
@@ -922,34 +1172,34 @@ export default function BookPreviewScreen() {
         quality: 1,
       });
       if (result.canceled || !result.assets[0]?.uri?.trim()) return;
-      const uri = result.assets[0].uri.trim();
-      pickCover(uri);
-      const coverImgH = availHPortrait * (142 / 216);
-      openBookCrop({
-        storageKey: 'cover',
-        uri,
-        frameW: screenWidth,
-        frameH: coverImgH,
-        pageType: 'cover',
-      });
+      await pickCover(result.assets[0].uri.trim());
     } catch {
       Alert.alert('Erreur', 'Impossible d’ouvrir la galerie photos.');
     }
-  }, [availHPortrait, openBookCrop, pickCover, screenWidth]);
+  }, [pickCover]);
 
   const renderPageItem: ListRenderItem<PageRow> = useCallback(
     ({ item, index }) => (
-      <View style={[styles.pageSlide, { width: screenWidth, height: availHPortrait }]}>
-        <BookPreviewZoomWrap
-          width={screenWidth}
-          height={availHPortrait}
-          isPagerActive={index === currentPageIndex}
-        >
-          {renderMaquettePage(item)}
-        </BookPreviewZoomWrap>
+      <View
+        style={[
+          styles.pageSlide,
+          { width: screenWidth, height: availHPortrait, justifyContent: 'center' },
+        ]}
+      >
+        <View style={[styles.editorPageShadow, { width: editorPage.w, height: editorPage.h }]}>
+          <View style={[styles.editorPageCard, { width: editorPage.w, height: editorPage.h }]}>
+            <BookPreviewZoomWrap
+              width={editorPage.w}
+              height={editorPage.h}
+              isPagerActive={index === currentPageIndex}
+            >
+              {renderMaquettePage(item)}
+            </BookPreviewZoomWrap>
+          </View>
+        </View>
       </View>
     ),
-    [availHPortrait, currentPageIndex, renderMaquettePage, screenWidth]
+    [currentPageIndex, editorPage, renderMaquettePage, screenWidth, availHPortrait]
   );
 
   const renderSpreadItem: ListRenderItem<SpreadRow> = useCallback(
@@ -992,6 +1242,8 @@ export default function BookPreviewScreen() {
               coverDisplayTitle={row.page.type === 'cover' ? (coverTitleLine ?? `Journal de ${child!.name}`) : undefined}
               coverPhotoUri={row.page.type === 'cover' ? coverPhotoDisplayUri : null}
               coverPhotoCrop={photoCrops.cover}
+              coverPhotoImgPxW={row.page.type === 'cover' ? cropDpiMetaByKey.cover?.imgPxW : undefined}
+              coverPhotoImgPxH={row.page.type === 'cover' ? cropDpiMetaByKey.cover?.imgPxH : undefined}
               chapterDisplayTitle={row.page.type === 'chapter' ? (chapterTitleLine ?? undefined) : undefined}
               onRotate={() => {}}
               onRequestTextEdit={() => {}}
@@ -1008,7 +1260,7 @@ export default function BookPreviewScreen() {
           style={[
             styles.pageSlide,
             styles.pageSlideSpread,
-            { width: screenWidth, height: availHLandscape, backgroundColor: '#000000' },
+            { width: screenWidth, height: availHLandscape },
           ]}
         >
           <BookPreviewZoomWrap
@@ -1046,6 +1298,7 @@ export default function BookPreviewScreen() {
       coverPhotoDisplayUri,
       coverTitleLine,
       coverYearLabel,
+      cropDpiMetaByKey,
       currentPageIndex,
       merge,
       photoCrops,
@@ -1068,11 +1321,7 @@ export default function BookPreviewScreen() {
                 prefetchBookPageImage(bookPageMainImageUri(row, merge, coverPhotoDisplayUri))
               }
               onPress={() => openEditor(row.pageNum - 1)}
-              style={({ pressed }) => [
-                styles.browseLeafCard,
-                { width: w, height: h },
-                pressed && { opacity: 0.85 },
-              ]}
+              style={[styles.browseLeafCard, { width: w, height: h }]}
               accessibilityRole="button"
               accessibilityLabel={`Modifier la page ${row.pageNum}`}
             >
@@ -1097,22 +1346,13 @@ export default function BookPreviewScreen() {
               coverDisplayTitle={row.page.type === 'cover' ? (coverTitleLine ?? `Journal de ${child!.name}`) : undefined}
               coverPhotoUri={row.page.type === 'cover' ? coverPhotoDisplayUri : null}
               coverPhotoCrop={photoCrops.cover}
+              coverPhotoImgPxW={row.page.type === 'cover' ? cropDpiMetaByKey.cover?.imgPxW : undefined}
+              coverPhotoImgPxH={row.page.type === 'cover' ? cropDpiMetaByKey.cover?.imgPxH : undefined}
               chapterDisplayTitle={row.page.type === 'chapter' ? (chapterTitleLine ?? undefined) : undefined}
               onRotate={() => {}}
-              onRequestTextEdit={() => {}}
+              onRequestTextEdit={() => openEditor(row.pageNum - 1)}
               qrUrl={qrUrl}
             />
-            {row.page.type === 'cover' ? (
-              <LinearGradient
-                colors={['rgba(0,0,0,0.30)', 'rgba(0,0,0,0.12)', 'rgba(0,0,0,0)']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                pointerEvents="none"
-                style={[styles.coverSpineEdge, { width: COVER_SPINE_W }]}
-              >
-                <View style={styles.coverSpineLine} pointerEvents="none" />
-              </LinearGradient>
-            ) : null}
             </Pressable>
           </View>
           <Text style={[styles.browseFolio, dm400 && { fontFamily: dm400 }]}>
@@ -1127,6 +1367,7 @@ export default function BookPreviewScreen() {
       coverPhotoDisplayUri,
       coverTitleLine,
       coverYearLabel,
+      cropDpiMetaByKey,
       dm400,
       merge,
       openEditor,
@@ -1181,11 +1422,15 @@ export default function BookPreviewScreen() {
     [browseLeaf, renderBrowseLeaf]
   );
 
-  const currentPage = isLandscape
-    ? (spreadRows[currentPageIndex]?.right?.page ?? spreadRows[currentPageIndex]?.left?.page)
-    : pageRows[currentPageIndex]?.page;
+  const editorActivePageIndex = editorOpen ? editorPageIndex : currentPageIndex;
 
-  const actionsDisabled = isLandscape;
+  const currentPage = editorOpen
+    ? pageRows[editorActivePageIndex]?.page
+    : isLandscape
+      ? (spreadRows[currentPageIndex]?.right?.page ?? spreadRows[currentPageIndex]?.left?.page)
+      : pageRows[currentPageIndex]?.page;
+
+  const actionsDisabled = !editorOpen && isLandscape;
 
   const photoOk =
     !actionsDisabled && (currentPage?.type === 'photo-full' || currentPage?.type === 'photo-note');
@@ -1198,6 +1443,8 @@ export default function BookPreviewScreen() {
       currentPage?.type === 'quote' ||
       currentPage?.type === 'audio' ||
       currentPage?.type === 'video');
+
+  const coverPhotoOk = !actionsDisabled && currentPage?.type === 'cover';
 
   const canDeletePage =
     !actionsDisabled &&
@@ -1401,14 +1648,18 @@ export default function BookPreviewScreen() {
         const blocks: string[] = [];
         const warns: string[] = [];
 
-        // Cover: photo du child (ou coverPhotoUrl du livre)
-        const coverUri = (coverPhotoUrl?.trim() || child.photo_url?.trim() || '').trim();
+        // Cover: variante print (pas le display de l’éditeur).
+        const coverUri = (coverPhotoPrintUri?.trim() || child.photo_url?.trim() || '').trim();
         if (coverUri) {
           try {
-            const { w, h } = await getImagePx(coverUri);
+            const coverMem = bookSnapshot ? findBookCoverMemory(bookSnapshot) : null;
+            const printPx = coverMem
+              ? getBookPhotoPrintPixelSize(coverMem, bookSnapshot?.coverPhotoUrl ?? undefined)
+              : null;
             const cropScale = Math.max(1, photoCrops.cover?.scale ?? 1);
             const { w: mmW, h: mmH } = frameMmFor('cover');
-            const dpi = effDpi(w, h, mmW, mmH, cropScale);
+            const px = printPx ?? (await getImagePx(coverUri));
+            const dpi = effDpi(px.w, px.h, mmW, mmH, cropScale);
             if (dpi > 0 && dpi < 200) blocks.push(`Couverture (${dpi} DPI)`);
             else if (dpi > 0 && dpi < 240) warns.push(`Couverture (${dpi} DPI)`);
           } catch {
@@ -1475,7 +1726,7 @@ export default function BookPreviewScreen() {
             bookId: bookId ?? `draft-${child.id}`,
             childId: child.id,
             child,
-            coverPhotoUrl,
+            coverPhotoUrl: coverPhotoPrintUri,
             coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
             coverYearLabel,
             chapterTitle: chapterTitleLine ?? 'Notre histoire',
@@ -1517,7 +1768,8 @@ export default function BookPreviewScreen() {
       rotations,
       router,
       bookId,
-      coverPhotoUrl,
+      bookSnapshot,
+      coverPhotoPrintUri,
     ]
   );
 
@@ -1540,7 +1792,7 @@ export default function BookPreviewScreen() {
       bookId: bookId ?? `draft-${child.id}`,
       childId: child.id,
       child,
-      coverPhotoUrl,
+      coverPhotoUrl: coverPhotoPrintUri,
       coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
       coverYearLabel,
       chapterTitle: chapterTitleLine ?? 'Notre histoire',
@@ -1564,7 +1816,7 @@ export default function BookPreviewScreen() {
     bookId,
     child,
     chapterTitleLine,
-    coverPhotoUrl,
+    coverPhotoPrintUri,
     coverTitleLine,
     coverYearLabel,
     exporting,
@@ -1595,7 +1847,7 @@ export default function BookPreviewScreen() {
       bookId: bookId ?? `draft-${child.id}`,
       childId: child.id,
       child,
-      coverPhotoUrl,
+      coverPhotoUrl: coverPhotoPrintUri,
       coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
       coverYearLabel,
       chapterTitle: chapterTitleLine ?? 'Notre histoire',
@@ -1619,7 +1871,7 @@ export default function BookPreviewScreen() {
     bookId,
     child,
     chapterTitleLine,
-    coverPhotoUrl,
+    coverPhotoPrintUri,
     coverTitleLine,
     coverYearLabel,
     exporting,
@@ -1655,7 +1907,7 @@ export default function BookPreviewScreen() {
           bookId: bookId ?? `draft-${child.id}`,
           childId: child.id,
           child,
-          coverPhotoUrl,
+          coverPhotoUrl: coverPhotoPrintUri,
           coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
           coverYearLabel,
           chapterTitle: chapterTitleLine ?? 'Notre histoire',
@@ -1690,7 +1942,7 @@ export default function BookPreviewScreen() {
       bookId,
       child,
       chapterTitleLine,
-      coverPhotoUrl,
+      coverPhotoPrintUri,
       coverTitleLine,
       coverYearLabel,
       localEdits,
@@ -1705,7 +1957,7 @@ export default function BookPreviewScreen() {
   if (loading && !child) {
     return (
       <View style={[styles.loadingRoot, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
-        <ActivityIndicator size="large" color="#FFFFFF" />
+        <ActivityIndicator size="large" color={THEME.textMuted} />
       </View>
     );
   }
@@ -1792,7 +2044,7 @@ export default function BookPreviewScreen() {
 
       {loading ? (
         <View style={styles.loadingMid}>
-          <ActivityIndicator color="#FFFFFF" />
+          <ActivityIndicator color={THEME.textMuted} />
         </View>
       ) : null}
 
@@ -1846,20 +2098,25 @@ export default function BookPreviewScreen() {
       <Modal
         visible={editorOpen}
         animationType="slide"
+        presentationStyle="fullScreen"
         onRequestClose={closeEditor}
       >
-        <View style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
-          <View style={styles.header}>
-            <Pressable onPress={closeEditor} hitSlop={12} accessibilityRole="button">
-              <Text style={[styles.headerBack, dm500 && { fontFamily: dm500 }]}>Terminé</Text>
-            </Pressable>
-            <Text style={[styles.headerTitle, dm600 && { fontFamily: dm600 }]} numberOfLines={1}>
-              Page {Math.min(currentPageIndex + 1, Math.max(1, pages.length))} · {pages.length}
-            </Text>
-            <View style={styles.headerRightSpacer} accessibilityElementsHidden />
-          </View>
+        <GestureHandlerRootView style={styles.editorGhRoot}>
+          <View style={styles.editorShell}>
+          <View style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+            <View style={styles.header}>
+              <Pressable onPress={closeEditor} hitSlop={12} accessibilityRole="button">
+                <View style={styles.headerDoneRow}>
+                  <Text style={[styles.headerBack, dm500 && { fontFamily: dm500 }]}>Terminé</Text>
+                  <Check size={16} color={THEME.brandCtaOrange} strokeWidth={2.5} />
+                </View>
+              </Pressable>
+              <Text style={[styles.headerTitle, dm600 && { fontFamily: dm600 }]} numberOfLines={1}>
+                Page {Math.min(editorActivePageIndex + 1, Math.max(1, pages.length))} · {pages.length}
+              </Text>
+              <View style={styles.headerRightSpacer} accessibilityElementsHidden />
+            </View>
 
-          {editorBodyReady ? (
             <FlatList
               ref={editorListRef}
               key="editor"
@@ -1872,7 +2129,7 @@ export default function BookPreviewScreen() {
               disableIntervalMomentum
               showsHorizontalScrollIndicator={false}
               onMomentumScrollEnd={onBookPagerMomentumEnd}
-              style={styles.list}
+              style={styles.editorList}
               getItemLayout={(_, index) => ({
                 length: screenWidth,
                 offset: screenWidth * index,
@@ -1884,165 +2141,156 @@ export default function BookPreviewScreen() {
               updateCellsBatchingPeriod={50}
               removeClippedSubviews={false}
             />
-          ) : (
-            <View style={styles.editorBodyPlaceholder} />
-          )}
 
-          <View style={styles.bottomBar}>
-            <View style={styles.bottomIndicatorRow}>
-              {showManyDots ? (
-                <Text style={[styles.pageFraction, dm400 && { fontFamily: dm400 }]}>
-                  {currentPageIndex + 1} / {Math.max(1, pages.length)}
-                </Text>
-              ) : (
-                <View style={styles.dotsRow}>
-                  {pageRows.map((_, i) => (
-                    <View
-                      key={i.toString()}
-                      style={i === currentPageIndex ? styles.dotActive : styles.dotIdle}
-                    />
-                  ))}
-                </View>
-              )}
-              <Text style={[styles.bottomPageLabel, dm400 && { fontFamily: dm400 }]}>
-                {pages.length > 0 ? pageLabel(currentPageIndex + 1, pages.length) : ''}
-              </Text>
-            </View>
-            <View style={styles.bottomButtonsRow}>
-              {canDeletePage ? (
-                <Pressable style={styles.pill} onPress={handleDeleteCurrentPage} accessibilityRole="button">
-                  <View style={styles.pillInner}>
-                    <Trash2 size={14} color="rgba(255,255,255,0.7)" strokeWidth={2} />
-                    <Text style={[styles.pillText, dm400 && { fontFamily: dm400 }]}>Supprimer</Text>
-                  </View>
-                </Pressable>
-              ) : null}
-              <Pressable
-                style={[styles.pill, !editOk && styles.pillDisabled]}
-                onPress={handleToolbarEdit}
-                disabled={!editOk}
-                accessibilityRole="button"
-              >
-                <View style={styles.pillInner}>
-                  <Pencil size={14} color="rgba(255,255,255,0.7)" strokeWidth={2} />
-                  <Text style={[styles.pillText, dm400 && { fontFamily: dm400 }]}>Modifier</Text>
-                </View>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {isTitleBodyModal ? (
-        <EditTextModal
-          key={editModalKey}
-          variant="title-body"
-          visible={textEditTarget != null}
-          title={textEditTarget?.modalTitle ?? ''}
-          titleFieldLabel="Titre"
-          bodyFieldLabel={
-            textEditTarget?.kind === 'memory' && textEditTarget.textMode === 'video'
-              ? 'Description'
-              : 'Texte'
-          }
-          initialTitle={editModalTitleBodyInitial.title}
-          initialBody={editModalTitleBodyInitial.body}
-          onClose={() => setTextEditTarget(null)}
-          onSave={saveTitleBodyEdit}
-        />
-      ) : (
-        <EditTextModal
-          key={editModalKey}
-          visible={textEditTarget != null}
-          initialText={editModalSingleInitial}
-          title={textEditTarget?.modalTitle ?? ''}
-          onClose={() => setTextEditTarget(null)}
-          onSave={saveSingleEdit}
-        />
-      )}
-
-      <Modal visible={coverPickerOpen} animationType="slide" onRequestClose={() => setCoverPickerOpen(false)}>
-        <View style={[styles.coverPickerRoot, { paddingTop: insets.top + 10, paddingBottom: insets.bottom + 10 }]}>
-          <View style={styles.coverPickerHeader}>
-            <Text style={styles.coverPickerTitle}>Choisir la couverture</Text>
-            <Pressable onPress={() => setCoverPickerOpen(false)} hitSlop={12} accessibilityRole="button">
-              <X size={20} color="#FFFFFF" strokeWidth={2.2} />
-            </Pressable>
-          </View>
-          <FlatList
-            data={favoriteCoverThumbs}
-            keyExtractor={(it) => it.source}
-            numColumns={3}
-            columnWrapperStyle={{ gap: 2 }}
-            contentContainerStyle={{ paddingHorizontal: 2, gap: 2, paddingBottom: 8 }}
-            ListHeaderComponent={
-              <View style={styles.coverPickerListHeader}>
-                <Pressable
-                  onPress={() => void pickCoverFromGallery()}
-                  style={({ pressed }) => [
-                    styles.coverPickerGalleryBtn,
-                    pressed && { opacity: 0.9 },
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel="Choisir une photo depuis la galerie"
-                >
-                  <Text style={styles.coverPickerGalleryBtnText}>Choisir depuis la galerie</Text>
-                </Pressable>
-                {favoriteCoverThumbs.length > 0 ? (
-                  <Text style={styles.coverPickerSectionLabel}>Photos des favoris du livre</Text>
-                ) : (
-                  <Text style={styles.coverPickerSectionHint}>
-                    Aucune photo favorite pour ce livre — utilise la galerie ou ajoute des favoris.
+            <View style={styles.bottomBar}>
+              <View style={styles.bottomIndicatorRow}>
+                {showManyDots ? (
+                  <Text style={[styles.pageFraction, dm400 && { fontFamily: dm400 }]}>
+                    {editorActivePageIndex + 1} / {Math.max(1, pages.length)}
                   </Text>
+                ) : (
+                  <View style={styles.dotsRow}>
+                    {pageRows.map((_, i) => (
+                      <View
+                        key={i.toString()}
+                        style={i === editorActivePageIndex ? styles.dotActive : styles.dotIdle}
+                      />
+                    ))}
+                  </View>
                 )}
+                <Text style={[styles.bottomPageLabel, dm400 && { fontFamily: dm400 }]}>
+                  {pages.length > 0 ? pageLabel(editorActivePageIndex + 1, pages.length) : ''}
+                </Text>
               </View>
-            }
-            renderItem={({ item }) => (
-              <Pressable
-                onPress={() => pickCover(item.source)}
-                style={({ pressed }) => [{ flex: 1 / 3, aspectRatio: 1, opacity: pressed ? 0.9 : 1 }]}
-                accessibilityRole="button"
-              >
-                <Image source={{ uri: item.thumb }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-              </Pressable>
-            )}
-            refreshControl={
-              <RefreshControl refreshing={loading} onRefresh={() => void load()} tintColor="#FFFFFF" />
-            }
-            showsVerticalScrollIndicator={false}
-          />
-        </View>
-      </Modal>
+              <View style={styles.bottomButtonsRow}>
+                {canDeletePage ? (
+                  <TouchableOpacity
+                    style={styles.pill}
+                    onPress={handleDeleteCurrentPage}
+                    activeOpacity={0.75}
+                    accessibilityRole="button"
+                  >
+                    <View style={styles.pillInner}>
+                      <Trash2 size={14} color={THEME.textSecondary} strokeWidth={2} />
+                      <Text style={[styles.pillText, dm400 && { fontFamily: dm400 }]}>Supprimer</Text>
+                    </View>
+                  </TouchableOpacity>
+                ) : null}
+                {coverPhotoOk ? (
+                  <TouchableOpacity
+                    style={styles.pill}
+                    onPress={openCoverPicker}
+                    activeOpacity={0.75}
+                    hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Changer la photo de couverture"
+                  >
+                    <View style={styles.pillInner}>
+                      <ImageIcon size={14} color={THEME.textSecondary} strokeWidth={2} />
+                      <Text style={[styles.pillText, dm400 && { fontFamily: dm400 }]}>Photo</Text>
+                    </View>
+                  </TouchableOpacity>
+                ) : null}
+                <TouchableOpacity
+                  style={[styles.pill, !editOk && styles.pillDisabled]}
+                  onPress={handleToolbarEdit}
+                  disabled={!editOk}
+                  activeOpacity={0.75}
+                  accessibilityRole="button"
+                >
+                  <View style={styles.pillInner}>
+                    <Pencil size={14} color={THEME.textSecondary} strokeWidth={2} />
+                    <Text style={[styles.pillText, dm400 && { fontFamily: dm400 }]}>Modifier</Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
 
-      {bookCropSession ? (
-        <BookPhotoCropModal
-          key={`${bookCropSession.storageKey}-${bookCropSession.uri}`}
-          visible
-          uri={bookCropSession.uri}
-          frameW={bookCropSession.frameW}
-          frameH={bookCropSession.frameH}
-          imgPxW={bookCropSession.imgPxW}
-          imgPxH={bookCropSession.imgPxH}
-          printMmW={bookCropSession.printMmW}
-          printMmH={bookCropSession.printMmH}
-          onChangePhoto={
-            bookCropSession.pageType === 'cover'
-              ? () => {
-                  setBookCropSession(null);
-                  void pickCoverFromGallery();
+          {coverPickerOpen ? (
+            <View style={[styles.coverPickerOverlay, { paddingTop: insets.top + 10, paddingBottom: insets.bottom + 10 }]}>
+              <View style={styles.coverPickerHeader}>
+                <Text style={styles.coverPickerTitle}>Choisir la couverture</Text>
+                <Pressable onPress={closeCoverPicker} hitSlop={12} accessibilityRole="button">
+                  <X size={20} color={THEME.textPrimary} strokeWidth={2.2} />
+                </Pressable>
+              </View>
+              <FlatList
+                data={favoriteCoverThumbs}
+                keyExtractor={it => it.source}
+                numColumns={3}
+                columnWrapperStyle={{ gap: 2 }}
+                contentContainerStyle={{ paddingHorizontal: 2, gap: 2, paddingBottom: 8 }}
+                ListHeaderComponent={
+                  <View style={styles.coverPickerListHeader}>
+                    <Pressable
+                      onPress={() => void pickCoverFromGallery()}
+                      style={({ pressed }) => [
+                        styles.coverPickerGalleryBtn,
+                        pressed && { opacity: 0.9 },
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Choisir une photo depuis la galerie"
+                    >
+                      <Text style={styles.coverPickerGalleryBtnText}>Choisir depuis la galerie</Text>
+                    </Pressable>
+                    {favoriteCoverThumbs.length > 0 ? (
+                      <Text style={styles.coverPickerSectionLabel}>Photos des favoris</Text>
+                    ) : (
+                      <Text style={styles.coverPickerSectionHint}>
+                        Aucune photo favorite pour ce livre — utilise la galerie ou ajoute des favoris.
+                      </Text>
+                    )}
+                  </View>
                 }
-              : undefined
-          }
-          initialCrop={photoCrops[bookCropSession.storageKey]}
-          onCancel={() => setBookCropSession(null)}
-          onConfirm={crop => {
-            setBookCropSession(prev => {
-              if (prev) upsertPhotoCrop(prev.storageKey, crop);
-              return null;
-            });
-          }}
-        />
-      ) : null}
+                renderItem={({ item }) => (
+                  <Pressable
+                    onPress={() => void pickCover(item.source)}
+                    style={({ pressed }) => [{ flex: 1 / 3, aspectRatio: 1, opacity: pressed ? 0.9 : 1 }]}
+                    accessibilityRole="button"
+                  >
+                    <Image source={{ uri: item.thumb }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                  </Pressable>
+                )}
+                refreshControl={
+                  <RefreshControl refreshing={loading} onRefresh={() => void load()} tintColor={THEME.textMuted} />
+                }
+                showsVerticalScrollIndicator={false}
+              />
+            </View>
+          ) : null}
+
+          </View>
+
+          {isTitleBodyModal ? (
+            <EditTextModal
+              key={editModalKey}
+              variant="title-body"
+              visible={textEditTarget != null}
+              title={textEditTarget?.modalTitle ?? ''}
+              titleFieldLabel="Titre"
+              bodyFieldLabel={
+                textEditTarget?.kind === 'memory' && textEditTarget.textMode === 'video'
+                  ? 'Description'
+                  : 'Texte'
+              }
+              initialTitle={editModalTitleBodyInitial.title}
+              initialBody={editModalTitleBodyInitial.body}
+              onClose={() => setTextEditTarget(null)}
+              onSave={saveTitleBodyEdit}
+            />
+          ) : (
+            <EditTextModal
+              key={editModalKey}
+              visible={textEditTarget != null}
+              initialText={editModalSingleInitial}
+              title={textEditTarget?.modalTitle ?? ''}
+              onClose={() => setTextEditTarget(null)}
+              onSave={saveSingleEdit}
+            />
+          )}
+        </GestureHandlerRootView>
+      </Modal>
 
       <GuestPdfExportModal
         visible={guestExportModalVisible}
@@ -2061,11 +2309,11 @@ export default function BookPreviewScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#1C1C1E',
+    backgroundColor: BROWSE_BG,
   },
   loadingRoot: {
     flex: 1,
-    backgroundColor: '#1C1C1E',
+    backgroundColor: BROWSE_BG,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
@@ -2081,12 +2329,12 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   errorText: {
-    color: '#FFFFFF',
+    color: THEME.textPrimary,
     textAlign: 'center',
     marginBottom: 16,
   },
   guardText: {
-    color: 'rgba(255,255,255,0.85)',
+    color: THEME.textSecondary,
     textAlign: 'center',
     marginBottom: 20,
     paddingHorizontal: 24,
@@ -2097,7 +2345,7 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   retryBtnText: {
-    color: '#C4784A',
+    color: THEME.textPrimary,
     fontWeight: '500',
     fontSize: 16,
   },
@@ -2107,23 +2355,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 12,
-    backgroundColor: 'rgba(17,17,17,0.95)',
+    backgroundColor: BROWSE_BG,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: THEME.familyFlowLine,
+  },
+  headerDoneRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
   },
   headerBack: {
-    color: '#C4784A',
+    color: THEME.textPrimary,
     fontSize: 15,
     fontWeight: '500',
   },
   headerTitle: {
     flex: 1,
-    color: '#FFFFFF',
+    color: THEME.textPrimary,
     fontSize: 14,
     fontWeight: '600',
     textAlign: 'center',
     marginHorizontal: 8,
   },
   headerCta: {
-    backgroundColor: '#C4784A',
+    backgroundColor: THEME.textPrimary,
     borderRadius: 20,
     paddingVertical: 7,
     paddingHorizontal: 16,
@@ -2141,9 +2396,22 @@ const styles = StyleSheet.create({
   list: {
     flex: 1,
   },
-  editorBodyPlaceholder: {
+  editorGhRoot: {
     flex: 1,
-    backgroundColor: '#1C1C1E',
+  },
+  editorShell: {
+    flex: 1,
+    position: 'relative',
+  },
+  coverPickerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 40,
+    elevation: 40,
+    backgroundColor: BROWSE_BG,
+  },
+  editorList: {
+    flex: 1,
+    minHeight: 0,
   },
   browseList: {
     backgroundColor: BROWSE_BG,
@@ -2183,22 +2451,6 @@ const styles = StyleSheet.create({
     height: '100%',
     backgroundColor: 'rgba(0,0,0,0.22)',
   },
-  /** Effet de tranche sur le bord gauche de la couverture : bande d’ombre fine depuis l’arête. */
-  coverSpineEdge: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-  },
-  /** Trait léger marquant l’arête intérieure de la tranche (ombre fine à sa gauche). */
-  coverSpineLine: {
-    position: 'absolute',
-    right: 0,
-    top: 0,
-    bottom: 0,
-    width: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(255,255,255,0.18)',
-  },
   browseLeafCol: {
     alignItems: 'center',
   },
@@ -2224,13 +2476,26 @@ const styles = StyleSheet.create({
   },
   pageSlide: {
     alignItems: 'center',
-    justifyContent: 'flex-start',
-    backgroundColor: '#1C1C1E',
+    justifyContent: 'center',
+    backgroundColor: BROWSE_BG,
+  },
+  /** Halo / relief de la page en éditeur (pas d’overflow:hidden — iOS coupe l’ombre sinon). */
+  editorPageShadow: {
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000000',
+    shadowOpacity: 0.22,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+  editorPageCard: {
+    overflow: 'hidden',
+    backgroundColor: '#FFFFFF',
   },
   pageSlideSpread: {
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#000000',
+    backgroundColor: BROWSE_BG,
   },
   /** Contenu du spread (pages + dos) zoomé ensemble, centré dans la slide paysage. */
   spreadZoomInner: {
@@ -2259,15 +2524,18 @@ const styles = StyleSheet.create({
   spreadSpineHairline: {
     width: Math.max(StyleSheet.hairlineWidth, 1),
     height: '100%',
-    backgroundColor: 'rgba(255,255,255,0.28)',
+    backgroundColor: 'rgba(0,0,0,0.22)',
   },
   bottomBar: {
-    backgroundColor: 'rgba(10,10,14,0.96)',
-    borderTopWidth: 0.5,
-    borderTopColor: 'rgba(255,255,255,0.07)',
+    flexShrink: 0,
+    backgroundColor: BROWSE_BG,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: THEME.familyFlowLine,
     paddingHorizontal: 20,
     paddingTop: 8,
     paddingBottom: 10,
+    zIndex: 20,
+    elevation: 20,
   },
   bottomIndicatorRow: {
     alignItems: 'center',
@@ -2276,7 +2544,7 @@ const styles = StyleSheet.create({
   },
   bottomPageLabel: {
     fontSize: 11,
-    color: 'rgba(255,255,255,0.3)',
+    color: THEME.textSecondary,
     marginTop: 4,
   },
   bottomButtonsRow: {
@@ -2287,7 +2555,7 @@ const styles = StyleSheet.create({
   },
   pageFraction: {
     fontSize: 11,
-    color: 'rgba(255,255,255,0.45)',
+    color: THEME.textSecondary,
   },
   dotsRow: {
     flexDirection: 'row',
@@ -2301,18 +2569,18 @@ const styles = StyleSheet.create({
     width: 14,
     height: 5,
     borderRadius: 3,
-    backgroundColor: '#C4784A',
+    backgroundColor: THEME.textPrimary,
   },
   dotIdle: {
     width: 5,
     height: 5,
     borderRadius: 50,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(0,0,0,0.15)',
   },
   pill: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: THEME.bg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: THEME.familyFlowLine,
     borderRadius: 16,
     paddingVertical: 5,
     paddingHorizontal: 10,
@@ -2327,11 +2595,11 @@ const styles = StyleSheet.create({
   },
   pillText: {
     fontSize: 11,
-    color: 'rgba(255,255,255,0.7)',
+    color: THEME.textPrimary,
   },
   coverPickerRoot: {
     flex: 1,
-    backgroundColor: '#1C1C1E',
+    backgroundColor: BROWSE_BG,
   },
   coverPickerHeader: {
     paddingHorizontal: 14,
@@ -2341,7 +2609,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   coverPickerTitle: {
-    color: '#FFFFFF',
+    color: THEME.textPrimary,
     fontSize: 16,
     fontWeight: '700',
   },
@@ -2349,7 +2617,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   coverPickerGalleryBtn: {
-    backgroundColor: '#C4784A',
+    backgroundColor: THEME.brandCtaOrange,
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
@@ -2362,14 +2630,14 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   coverPickerSectionLabel: {
-    color: 'rgba(255,255,255,0.55)',
+    color: THEME.textMuted,
     fontSize: 12,
     fontWeight: '600',
     marginBottom: 8,
     paddingHorizontal: 2,
   },
   coverPickerSectionHint: {
-    color: 'rgba(255,255,255,0.45)',
+    color: THEME.textSecondary,
     fontSize: 13,
     lineHeight: 18,
     marginBottom: 8,

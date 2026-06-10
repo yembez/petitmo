@@ -41,8 +41,9 @@ import {
 } from '@/services/feedScrollRestore';
 import { useFocusEffect } from '@react-navigation/native';
 import { getTimingNudge, markNudgeSeen, recordInstallDate } from '@/lib/paywallTiming';
+import TabSceneTransition from '@/components/TabSceneTransition';
 
-export default function FilScreen() {
+function FilScreen() {
   const router = useRouter();
   const { pending: pendingUploads } = usePendingMediaUploads();
   const insets = useSafeAreaInsets();
@@ -187,8 +188,9 @@ export default function FilScreen() {
       return () => {
         cancelAnimationFrame(viewabilityFrame);
         scrollTask?.cancel();
+        suspendFeedInlineVideo();
       };
-    }, [router, applyPendingFeedScrollIntent, refreshFeedVideoAutoplay]),
+    }, [router, applyPendingFeedScrollIntent, refreshFeedVideoAutoplay, suspendFeedInlineVideo]),
   );
 
   useEffect(() => {
@@ -273,6 +275,7 @@ export default function FilScreen() {
             { paddingBottom: verticalScale(28) + tabBarFloatingOverlapPad(insets.bottom) },
           ]}
           showsVerticalScrollIndicator={false}
+          nestedScrollEnabled
           refreshControl={
             <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor={THEME.brandPrimary} />
           }
@@ -340,6 +343,14 @@ export default function FilScreen() {
         onSave={handleSaveLocation}
       />
     </View>
+  );
+}
+
+export default function FilScreenTab() {
+  return (
+    <TabSceneTransition>
+      <FilScreen />
+    </TabSceneTransition>
   );
 }
 

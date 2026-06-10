@@ -2,7 +2,6 @@ import { Platform, StyleSheet } from 'react-native';
 import { scale, verticalScale } from '@/utils/responsive';
 import { THEME } from '@/constants/theme';
 import { PETITMO_CTA_BORDER_WIDTH } from '@/constants/petitmoCtaStyles';
-import { MEMORY_TEXT_FONT } from '@/constants/memoryTextFont';
 import { FONT_SIZES } from '@/constants/sizes';
 import {
   MEDIA_CARD_INSET,
@@ -17,8 +16,8 @@ const HEADER_AVATAR_RING_WIDTH = scale(2);
 const HEADER_AVATAR_RING_PADDING = scale(2);
 /** Marge horizontale (ex. audio sans visuel) — référencé par `styles` */
 const FEED_GUTTER = scale(20);
-/** Posts texte : colonne étroite façon livre */
-const TEXT_POST_GUTTER = scale(32);
+/** Posts texte : padding interne carte (réduit pour élargir la colonne de lecture). */
+const TEXT_POST_GUTTER = scale(22);
 /** Contours des blocs — très discrets */
 const POST_BORDER_SUBTLE = 'rgba(0,0,0,0.08)';
 /** Liseré fin fil (cartes média, etc.) */
@@ -526,17 +525,16 @@ const styles = StyleSheet.create({
   },
   /** Espace entre paragraphes (double saut de ligne à la saisie) — mise en page type roman */
   textBookParagraphSpacing: {
-    marginTop: verticalScale(20),
+    marginTop: verticalScale(16),
   },
   /** `width: '100%'` : sans largeur explicite, le `Text` peut se comporter en shrink-wrap et la justification ne s’applique pas à chaque ligne après un `\n`. */
   textContent: {
     width: '100%',
     alignSelf: 'stretch',
-    fontSize: scale(17),
+    fontSize: scale(16),
     fontWeight: '400',
-    fontFamily: MEMORY_TEXT_FONT,
     color: '#1C1C1E',
-    lineHeight: scale(28),
+    lineHeight: scale(25),
     textAlign: 'justify',
     ...Platform.select({
       android: {
@@ -560,7 +558,6 @@ const styles = StyleSheet.create({
   captionAnnotation: {
     fontSize: scale(15),
     fontWeight: '400',
-    fontFamily: MEMORY_TEXT_FONT,
     color: '#1C1C1E',
     lineHeight: scale(24),
   },
@@ -604,18 +601,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(0, 0, 0, 0.28)',
   },
   feedFavoriteDiscCtaActive: {
-    backgroundColor: 'rgba(252, 87, 87, 0.1)',
-  },
-  actionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: scale(4),
-    paddingVertical: verticalScale(7),
-    paddingHorizontal: scale(12),
-    borderRadius: scale(100),
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: FEED_BLACK_HAIRLINE,
-    backgroundColor: 'rgba(255,255,255,0.5)',
+    backgroundColor: 'rgba(255, 127, 79, 0.1)',
   },
   swipeDeleteContainer: {
     justifyContent: 'center',

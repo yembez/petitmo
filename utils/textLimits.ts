@@ -1,25 +1,34 @@
 /**
- * Limites de texte pour les souvenirs texte, calibrées pour tenir
- * sur une page de livre A5 dans la preview ET dans le PDF.
+ * Limites de texte pour les souvenirs texte — calibrées sur **une page citation A5** du livre
+ * (typo Garamond, alinéas, retours à la ligne et lignes vides inclus).
  *
- * Le preview est le facteur limitant (~17 lignes visuelles disponibles
- * avec fontSize 16, lineHeight 26 et ~40 car/ligne sur iPhone).
+ * Le fil affiche un extrait scrollable ; la contrainte à l’enregistrement est en lignes livre.
  */
 
-export const MAX_TEXT_CHARS = 600;
+/** Plafond de lignes sur la page « Petits mots » (fit level 2 inclus). Lignes vides comptées. */
+export const MAX_BOOK_LINES = 28;
 
 /**
- * Nombre max de lignes visuelles estimées.
- * 16 lignes laissent 1 ligne de marge sous les 17 disponibles.
+ * Largeur moyenne en caractères d’une ligne sur la page citation livre.
+ * Aligné sur `quoteFitLevel.ts` / `server/src/pdf/maquetteAlign.ts` (≈ 42 car/ligne).
  */
-export const MAX_VISUAL_LINES = 16;
+export const BOOK_CHARS_PER_LINE = 42;
+
+/** Filet de sécurité caractères (secondaire, ne remplace pas le plafond lignes). */
+export const MAX_TEXT_CHARS_SAFETY = MAX_BOOK_LINES * BOOK_CHARS_PER_LINE;
+
+/** @deprecated — utiliser `MAX_BOOK_LINES` */
+export const MAX_VISUAL_LINES = MAX_BOOK_LINES;
+
+/** @deprecated — utiliser `MAX_TEXT_CHARS_SAFETY` */
+export const MAX_TEXT_CHARS = MAX_TEXT_CHARS_SAFETY;
 
 /** Avant enregistrement si `clampText` raccourcit le texte (contrainte page livre A5). */
 export const TEXT_TRUNCATION_ALERT_TITLE =
   'Ton texte complet ne tient pas sur une page du livre';
 
 export const TEXT_TRUNCATION_ALERT_MESSAGE =
-  'Petitmo limite la longueur des souvenirs texte pour qu’ils s’affichent bien dans le livre (nombre de caractères et de lignes). La fin de ton message serait donc coupée à l’enregistrement — ce n’est pas un bug.\n\nTu peux revenir au texte pour le raccourcir toi-même, ou enregistrer seulement ce qui tiendra dans le livre.';
+  'Petitmo limite la longueur des souvenirs texte pour qu’ils tiennent sur une page du livre (28 lignes maximum, retours à la ligne et lignes vides inclus). La fin de ton message serait coupée à l’enregistrement.\n\nTu peux revenir au texte pour le raccourcir, ou enregistrer seulement ce qui tiendra dans le livre.';
 
 export const TEXT_TRUNCATION_MODIFY_LABEL = 'Modifier le texte';
 export const TEXT_TRUNCATION_SAVE_LABEL = 'Enregistrer la version courte';
@@ -30,70 +39,60 @@ export const TEXT_SAVE_FAILED_ALERT_MESSAGE =
   'Ton texte n’a pas été sauvegardé. Réessaie dans un instant. Si ça bloque encore, copie ton texte dans les Notes du téléphone pour ne rien perdre.';
 
 /**
- * Pendant la saisie (clavier / dictée système iOS) : limite uniquement le nombre de caractères.
- * Ne pas appeler `clampText` à chaque `onChangeText` : la dictée envoie des remplacements successifs du
- * champ contrôlé ; tronquer aussi sur les « lignes livre » provoque des sauts et des pertes apparentes.
- * Utiliser `clampText` au moment de valider (enregistrer / fermer le modal).
+ * Compte les lignes « livre » : chaque `\n` (y compris ligne vide) + wrapping des lignes longues.
  */
-export function clampTextCharBudget(text: string): string {
-  return text.length > MAX_TEXT_CHARS ? text.slice(0, MAX_TEXT_CHARS) : text;
-}
+export function estimateBookLines(text: string): number {
+  if (!text) return 0;
 
-/**
- * Largeur moyenne en caractères d'une ligne dans MaquetteQuote.
- * Basé sur fontSize 16, EB Garamond Italic, ~335pt de large.
- */
-const CHARS_PER_LINE = 40;
-
-/**
- * Estime le nombre de lignes visuelles qu'occupera le texte
- * après application de romanParagraphs (alinéas EM_QUAD).
- *
- * - Double saut de ligne → paragraphe séparé par une ligne vide.
- * - Simple saut de ligne → retour à la ligne avec alinéa.
- * - Chaque segment de texte est arrondi au nombre de lignes occupées par wrapping.
- */
-export function estimateVisualLines(text: string): number {
-  if (!text.trim()) return 0;
-
-  const paragraphs = text.split(/\n{2,}/);
+  const physicalLines = text.split('\n');
   let total = 0;
 
-  for (let i = 0; i < paragraphs.length; i++) {
-    if (i > 0) total += 1; // blank line between paragraphs
-
-    const lines = paragraphs[i].split('\n');
-    for (const line of lines) {
-      // +1 for EM_QUAD indent character
-      total += Math.max(1, Math.ceil((line.length + 1) / CHARS_PER_LINE));
+  for (const line of physicalLines) {
+    if (line.length === 0) {
+      total += 1;
+      continue;
     }
+    // +1 pour l’alinéa (EM_QUAD) appliqué à chaque segment dans la maquette livre.
+    total += Math.max(1, Math.ceil((line.length + 1) / BOOK_CHARS_PER_LINE));
   }
 
   return total;
 }
 
-/**
- * Applique la double contrainte (caractères + lignes visuelles).
- * Retourne le texte accepté (éventuellement tronqué).
- * Préférer `clampTextCharBudget` pendant la frappe ; appeler ceci à l'enregistrement.
- */
-export function clampText(text: string): string {
-  let clamped = text.length > MAX_TEXT_CHARS
-    ? text.slice(0, MAX_TEXT_CHARS)
-    : text;
+/** @deprecated — utiliser `estimateBookLines` */
+export function estimateVisualLines(text: string): number {
+  return estimateBookLines(text);
+}
 
-  if (estimateVisualLines(clamped) <= MAX_VISUAL_LINES) return clamped;
-
-  // Trop de lignes visuelles — on retire du texte par la fin
-  // jusqu'à ce que ça tienne.
-  while (clamped.length > 0 && estimateVisualLines(clamped) > MAX_VISUAL_LINES) {
+function trimToBookLineBudget(text: string): string {
+  let clamped = text;
+  while (clamped.length > 0 && estimateBookLines(clamped) > MAX_BOOK_LINES) {
     const lastNewline = clamped.lastIndexOf('\n');
-    if (lastNewline > 0) {
+    if (lastNewline >= 0) {
       clamped = clamped.slice(0, lastNewline);
     } else {
       clamped = clamped.slice(0, clamped.length - 1);
     }
   }
-
   return clamped;
+}
+
+/**
+ * Pendant la saisie : plafond lignes livre uniquement (pas de troncature agressive caractère par caractère).
+ */
+export function clampTextBookLineBudget(text: string): string {
+  let t = text.length > MAX_TEXT_CHARS_SAFETY ? text.slice(0, MAX_TEXT_CHARS_SAFETY) : text;
+  return trimToBookLineBudget(t);
+}
+
+/** @deprecated — utiliser `clampTextBookLineBudget` */
+export function clampTextCharBudget(text: string): string {
+  return clampTextBookLineBudget(text);
+}
+
+/**
+ * Applique la contrainte lignes livre (+ filet caractères) à l’enregistrement.
+ */
+export function clampText(text: string): string {
+  return clampTextBookLineBudget(text);
 }

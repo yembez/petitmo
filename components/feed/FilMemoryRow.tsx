@@ -9,7 +9,17 @@ import {
   Animated,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { Pencil, Heart, Play, Trash2, ImagePlus, Volume2, VolumeX } from 'lucide-react-native';
+import {
+  Pencil,
+  Heart,
+  Play,
+  Trash2,
+  ImagePlus,
+  Volume2,
+  VolumeX,
+  MapPin,
+  Maximize2,
+} from 'lucide-react-native';
 import {
   memo,
   useCallback,
@@ -24,12 +34,18 @@ import {
 import { THEME } from "@/constants/theme";
 import { scale, verticalScale } from "@/utils/responsive";
 import { ICON_SIZES } from "@/constants/sizes";
-import { TEXT_POST_CARD_INSET } from '@/constants/feedLayout';
-import { APP_ICON_PX } from '@/constants/iconSizes';
+import {
+  FEED_CAPTION_SCROLL_MAX_H,
+  FEED_TEXT_POST_SCROLL_MAX_H,
+  TEXT_POST_CARD_INSET,
+} from '@/constants/feedLayout';
+import { ScrollableTextBlock } from '@/components/ScrollableTextBlock';
 import PhotoMosaic from "@/components/PhotoMosaic";
 import {
+  getVoiceCoverUriForFeedAndViewer,
   isAlbumFullyFavorited,
   isFeedMultiPhotoAlbum,
+  normalizeMemoryMediaUriForDisplay,
   parseFavoritePhotoUrls,
 } from '@/utils/memoryPhotos';
 import { useFeedPhotoDisplayUrls } from "@/hooks/useFeedPhotoDisplayUrls";
@@ -42,7 +58,6 @@ import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { Video, ResizeMode, type AVPlaybackStatus } from 'expo-av';
 import { Swipeable, RectButton } from "react-native-gesture-handler";
 import { CapturedAtOverlay } from '@/components/feed/FeedMediaOverlays';
-import PenIcon from '@/components/PenIcon';
 import type { PendingUpload } from "@/contexts/PendingMediaUploadsContext";
 import {
   formatDuration,
@@ -61,6 +76,7 @@ import {
   type Child,
 } from "@/utils/feedHelpers";
 import { styles, TEXT_POST_GUTTER } from "@/components/feed/feedStyles";
+import { useMemoryTextFont } from '@/contexts/MemoryTextFontContext';
 import { ensurePlaybackAudioForListening } from '@/lib/playbackAudioMode';
 
 /** Icônes d’action (hors favori couleur charte) */
@@ -68,11 +84,16 @@ const ACTION_ICON_INK = '#0A0A0A';
 
 const EM_QUAD = '\u2003';
 
+/** Laisse le scroll vertical interne (texte) au Swipeable horizontal « supprimer ». */
+const FEED_SWIPEABLE_AXIS_LOCK = {
+  activeOffsetX: [-14, 14] as [number, number],
+  failOffsetY: [-12, 12] as [number, number],
+};
+
 /** Taille unique des icônes dans le fil (actions + overlays). */
-const FEED_ICON_PX = APP_ICON_PX;
-const FEED_PEN_ICON_PX = scale(20);
-/** Cœur favori sous le post (à côté du crayon). */
-const FEED_FAVORITE_HEART_PX = scale(20);
+/** Icônes d’action sous le post — taille et trait unifiés (crayon, photo, cœur). */
+const FEED_POST_ACTION_ICON_PX = scale(20);
+const FEED_POST_ACTION_STROKE = 2.05;
 
 /** Une ligne « envoi en cours » (même liste que les souvenirs → pas de saut de header FlatList). */
 export type FeedListItem =
@@ -201,6 +222,7 @@ function FilMemoryRow({
   isOptimisticFeedPending = false,
   isFeedVideoAutoplay = false,
 }: FilMemoryRowProps) {
+  const memoryTextFont = useMemoryTextFont();
   const photoUrls = useFeedPhotoDisplayUrls(memory);
   const contentTextRaw = memory.content?.trim() || '';
   const contentText =
@@ -217,8 +239,12 @@ function FilMemoryRow({
   const videoPosterRaw = getVideoPosterUriForFeedAndViewer(memory);
   const videoPosterSigned = useSignedMediaUrl(videoPosterRaw || null) ?? '';
   const videoPosterUri = normalizeVideoPlaybackUri((videoPosterSigned || videoPosterRaw).trim());
-  const voiceCoverDisplayUri =
-    useSignedMediaUrl((memory.voice_cover_path ?? memory.voice_cover_url) ?? null) ?? '';
+  const voiceCoverRaw = getVoiceCoverUriForFeedAndViewer(memory);
+  const voiceCoverSigned = useSignedMediaUrl(voiceCoverRaw || null) ?? '';
+  const voiceCoverDisplayUri = normalizeMemoryMediaUriForDisplay(
+    (voiceCoverSigned || voiceCoverRaw).trim(),
+  );
+  const hasVoiceCover = !!voiceCoverDisplayUri.trim();
   const voicePlaybackSigned =
     useSignedMediaUrl(memory.type === 'voice' ? (memory.media_url ?? null) : null) ?? '';
   const videoPlaybackUri = useFeedVideoPlaybackUri(memory);
@@ -338,10 +364,10 @@ function FilMemoryRow({
                   </Text>
                 ) : (
                   <Text style={[styles.daySepLocation, { color: '#6B7280' }]} numberOfLines={1}>
-                    Ajouter un lieu
+                    Lieu
                   </Text>
                 )}
-                <Pencil size={APP_ICON_PX * 0.72} color="#4B5563" strokeWidth={2} />
+                <MapPin size={scale(16)} color="#4B5563" strokeWidth={2} />
               </Pressable>
             ) : null}
           </View>
@@ -356,6 +382,7 @@ function FilMemoryRow({
           enabled={!isOptimisticFeedPending}
           friction={2}
           overshootRight={false}
+          {...FEED_SWIPEABLE_AXIS_LOCK}
           renderRightActions={
             isOptimisticFeedPending
               ? undefined
@@ -549,10 +576,10 @@ function FilMemoryRow({
             <View
               style={[
                 styles.audioBody,
-                (memory.voice_cover_path ?? memory.voice_cover_url) ? styles.audioBodyWithCover : null,
+                hasVoiceCover ? styles.audioBodyWithCover : null,
               ]}
             >
-              {!!(memory.voice_cover_path ?? memory.voice_cover_url) && (
+              {hasVoiceCover && (
                 <>
                   <Image
                     source={{ uri: voiceCoverDisplayUri }}
@@ -567,22 +594,22 @@ function FilMemoryRow({
               <View
                 style={[
                   styles.audioForeground,
-                  (memory.voice_cover_path ?? memory.voice_cover_url) ? styles.audioForegroundCover : null,
+                  hasVoiceCover ? styles.audioForegroundCover : null,
                 ]}
               >
                 <View
                   style={[
                     styles.audioPlayerWrap,
-                    (memory.voice_cover_path ?? memory.voice_cover_url) ? styles.audioPlayerWrapCover : null,
+                    hasVoiceCover ? styles.audioPlayerWrapCover : null,
                   ]}
                 >
                   <AudioPlayer
                     uri={voicePlaybackSigned || (memory.media_url ?? '')}
                     duration={memory.duration || 0}
                     playbackStartSec={memory.voice_playback_start_sec ?? null}
-                    variant={(memory.voice_cover_path ?? memory.voice_cover_url) ? 'coverBottom' : 'default'}
+                    variant={hasVoiceCover ? 'coverBottom' : 'default'}
                     controlIconColor={ACTION_ICON_INK}
-                    coverFlushBottom={!!(memory.voice_cover_path ?? memory.voice_cover_url)}
+                    coverFlushBottom={hasVoiceCover}
                     feedPlayDiscOutline
                   />
                 </View>
@@ -592,46 +619,39 @@ function FilMemoryRow({
           )}
 
           {memory.type === 'text' && (
-            <Pressable
-              onPress={launchImmersive}
-              disabled={skipImmersive}
-              style={({ pressed }) => [pressed && { opacity: 0.92 }]}
-              accessibilityRole="button"
-              accessibilityLabel="Ouvrir en plein écran"
-            >
-              <View style={styles.textBody}>
+            <View style={styles.textBody}>
+              <ScrollableTextBlock maxHeight={FEED_TEXT_POST_SCROLL_MAX_H}>
                 {bookParagraphs.map((para, idx) => (
                   <Text
                     key={idx}
-                    style={[styles.textContent, idx > 0 && styles.textBookParagraphSpacing]}
+                    style={[
+                      styles.textContent,
+                      { fontFamily: memoryTextFont },
+                      idx > 0 && styles.textBookParagraphSpacing,
+                    ]}
                     {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
                   >
                     {EM_QUAD}
                     {para.replace(/\n/g, `\n${EM_QUAD}`)}
                   </Text>
                 ))}
-              </View>
-            </Pressable>
+              </ScrollableTextBlock>
+            </View>
           )}
           </View>
         </Swipeable>
 
         {memory.type !== 'text' && !!contentText && (
-          <>
-            <Pressable
-              style={({ pressed }) => [styles.postCaption, pressed && { opacity: 0.92 }]}
-              onPress={() => handleEditMemory(memory)}
-              accessibilityRole="button"
-              accessibilityLabel="Modifier l’annotation"
-            >
+          <View style={styles.postCaption}>
+            <ScrollableTextBlock maxHeight={FEED_CAPTION_SCROLL_MAX_H}>
               <Text
-                style={styles.captionAnnotation}
-                numberOfLines={memory.type === 'voice' ? 2 : 4}
+                style={[styles.captionAnnotation, { fontFamily: memoryTextFont }]}
+                {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
               >
                 {contentText}
               </Text>
-            </Pressable>
-          </>
+            </ScrollableTextBlock>
+          </View>
         )}
 
         <View
@@ -642,7 +662,10 @@ function FilMemoryRow({
           ]}
         >
           <View style={styles.postActionsLeft}>
-            {memory.type === 'text' || !contentText ? (
+            {memory.type === 'text' ||
+            memory.type === 'photo' ||
+            memory.type === 'video' ||
+            memory.type === 'voice' ? (
               <TouchableOpacity
                 style={styles.feedPencilDiscCta}
                 onPress={() => handleEditMemory(memory)}
@@ -656,13 +679,33 @@ function FilMemoryRow({
                       : 'Annoter'
                 }
               >
-                <PenIcon size={FEED_PEN_ICON_PX} color={THEME.feedPencilDiscCtaForeground} />
+                <Pencil
+                  size={FEED_POST_ACTION_ICON_PX}
+                  color={ACTION_ICON_INK}
+                  strokeWidth={FEED_POST_ACTION_STROKE}
+                />
+              </TouchableOpacity>
+            ) : null}
+
+            {memory.type === 'text' && !skipImmersive ? (
+              <TouchableOpacity
+                style={styles.feedPencilDiscCta}
+                onPress={launchImmersive}
+                activeOpacity={0.75}
+                accessibilityRole="button"
+                accessibilityLabel="Ouvrir en plein écran"
+              >
+                <Maximize2
+                  size={FEED_POST_ACTION_ICON_PX}
+                  color={ACTION_ICON_INK}
+                  strokeWidth={FEED_POST_ACTION_STROKE}
+                />
               </TouchableOpacity>
             ) : null}
 
             {memory.type === 'voice' && (!!memory.media_url || !!voicePlaybackSigned) && (
               <TouchableOpacity
-                style={styles.actionButton}
+                style={styles.feedPencilDiscCta}
                 onPress={() => void handlePickVoiceCover(memory)}
                 activeOpacity={0.75}
                 disabled={uploadingVoiceCoverId === memory.id}
@@ -674,7 +717,11 @@ function FilMemoryRow({
                 {uploadingVoiceCoverId === memory.id ? (
                   <ActivityIndicator size="small" color={ACTION_ICON_INK} />
                 ) : (
-                  <ImagePlus size={FEED_ICON_PX} color={ACTION_ICON_INK} strokeWidth={2.2} />
+                  <ImagePlus
+                    size={FEED_POST_ACTION_ICON_PX}
+                    color={ACTION_ICON_INK}
+                    strokeWidth={FEED_POST_ACTION_STROKE}
+                  />
                 )}
               </TouchableOpacity>
             )}
@@ -692,16 +739,16 @@ function FilMemoryRow({
             accessibilityLabel="Favori"
           >
             <Heart
-              size={FEED_FAVORITE_HEART_PX}
+              size={FEED_POST_ACTION_ICON_PX}
               color={
                 (memory.type === 'photo' ? feedPhotoFavorited : !!memory.is_favorite)
-                  ? THEME.brandPrimary
+                  ? THEME.brandCtaOrange
                   : ACTION_ICON_INK
               }
-              strokeWidth={2.05}
+              strokeWidth={FEED_POST_ACTION_STROKE}
               fill={
                 (memory.type === 'photo' ? feedPhotoFavorited : !!memory.is_favorite)
-                  ? THEME.brandPrimary
+                  ? THEME.brandCtaOrange
                   : 'none'
               }
             />
@@ -722,6 +769,7 @@ function FilMemoryRow({
         enabled={!isOptimisticFeedPending}
         friction={2}
         overshootRight={false}
+        {...FEED_SWIPEABLE_AXIS_LOCK}
         /** Par défaut RNGH met `overflow: 'hidden'` — coupe l’ombre du `postShell`. */
         containerStyle={{ overflow: 'visible' }}
         renderRightActions={

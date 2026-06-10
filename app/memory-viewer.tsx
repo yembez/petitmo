@@ -5,6 +5,8 @@ import {
   StyleSheet,
   FlatList,
   Pressable,
+  PanResponder,
+  Animated,
   useWindowDimensions,
   type ViewToken,
   Platform,
@@ -12,12 +14,12 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Image } from 'expo-image';
-import { Video, ResizeMode } from 'expo-av';
-import { Volume2, VolumeX, X } from 'lucide-react-native';
+import { Video, ResizeMode, type AVPlaybackStatus } from 'expo-av';
+import { ChevronDown, ChevronUp, Volume2, VolumeX, X } from 'lucide-react-native';
 import { scale, verticalScale } from '@/utils/responsive';
 import {
   clearMemoryViewerSession,
@@ -38,7 +40,7 @@ import { formatAgeAtMemory, formatDateLong } from '@/utils/date';
 import { childDisplayGivenName } from '@/utils/childDisplayName';
 import { useFeedVideoPlaybackUri } from '@/hooks/useFeedVideoPlaybackUri';
 import { useExpoAvShouldPlay } from '@/hooks/useExpoAvShouldPlay';
-import { getVideoPosterUriForFeedAndViewer } from '@/utils/memoryPhotos';
+import { getVideoPosterUriForFeedAndViewer, getVoiceCoverUriForFeedAndViewer, normalizeMemoryMediaUriForDisplay } from '@/utils/memoryPhotos';
 import { normalizeVideoPlaybackUri } from '@/utils/videoMediaUri';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { ensurePlaybackAudioForListening } from '@/lib/playbackAudioMode';
@@ -50,12 +52,14 @@ import {
   CapturedAtOverlay,
   FeedPhotoFavoriteOverlay,
 } from '@/components/feed/FeedMediaOverlays';
+import { ScrollableTextBlock } from '@/components/ScrollableTextBlock';
+import { IMMERSIVE_CAPTION_SCROLL_MAX_H } from '@/constants/feedLayout';
 import {
   capturedMediaDateLabel,
   shouldShowCapturedMediaDateOverlay,
 } from '@/utils/feedCaptureOverlay';
 import { THEME } from '@/constants/theme';
-import { MEMORY_TEXT_FONT } from '@/constants/memoryTextFont';
+import { useMemoryTextFont } from '@/contexts/MemoryTextFontContext';
 import {
   buildImmersiveViewerItems,
   immersiveViewerItemKey,
@@ -76,6 +80,13 @@ const IMMERSIVE_TOP_BLACK_FADE = [
   'rgba(0, 0, 0, 0)',
 ] as const;
 const EM_QUAD = '\u2003';
+/** Marges latérales « page de livre » — zone de swipe entre posts texte. */
+const TEXT_IMMERSIVE_MARGIN_W = scale(48);
+const TEXT_MARGIN_SWIPE_DY = verticalScale(40);
+/** Relevé bas des pastilles date / cœur dans le viewer immersif (safe area + marge). */
+function immersiveOverlayBottomInset(safeBottom: number): number {
+  return safeBottom + verticalScale(10);
+}
 
 function immersiveTopFadeHeight(pageHeight: number): number {
   return Math.max(verticalScale(96), Math.round(pageHeight * 0.24));
@@ -88,6 +99,7 @@ function isImmersiveMediaType(type: Memory['type']): boolean {
 export default function MemoryViewerScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const isFocused = useIsFocused();
   const { height: windowH, width: windowW } = useWindowDimensions();
   const rawIdx = useLocalSearchParams<{ initialIndex?: string | string[] }>().initialIndex;
   const initialIndexParam = Array.isArray(rawIdx) ? rawIdx[0] : rawIdx;
@@ -100,7 +112,19 @@ export default function MemoryViewerScreen() {
   const [editingTextMemory, setEditingTextMemory] = useState<Memory | null>(null);
   const listRef = useRef<FlatList<ImmersiveViewerItem>>(null);
   const didHydrateRef = useRef(false);
+  const innerScrollLockCountRef = useRef(0);
+  const [pagerScrollEnabled, setPagerScrollEnabled] = useState(true);
   const toggleFavorite = useToggleFavorite(setMemories);
+
+  const lockPagerScroll = useCallback(() => {
+    innerScrollLockCountRef.current += 1;
+    setPagerScrollEnabled(false);
+  }, []);
+
+  const unlockPagerScroll = useCallback(() => {
+    innerScrollLockCountRef.current = Math.max(0, innerScrollLockCountRef.current - 1);
+    if (innerScrollLockCountRef.current === 0) setPagerScrollEnabled(true);
+  }, []);
 
   const viewerItems = useMemo(() => buildImmersiveViewerItems(memories), [memories]);
 
@@ -139,6 +163,22 @@ export default function MemoryViewerScreen() {
     return item ? memoryFromImmersiveViewerItem(item) : memories[0] ?? null;
   }, [visibleItemKey, viewerItems, memories]);
   const closeOnMediaChrome = visibleMemory ? isImmersiveMediaType(visibleMemory.type) : true;
+  const isTextViewerPage = visibleMemory?.type === 'text';
+
+  const goToViewerIndex = useCallback(
+    (index: number) => {
+      if (viewerItems.length === 0) return;
+      const next = Math.max(0, Math.min(viewerItems.length - 1, index));
+      const item = viewerItems[next];
+      if (!item) return;
+      setVisibleItemKey(immersiveViewerItemKey(item));
+      listRef.current?.scrollToIndex({ index: next, animated: true });
+    },
+    [viewerItems],
+  );
+
+  /** Posts texte : pager vertical coupé — navigation via flèches uniquement. */
+  const flatListScrollEnabled = !isTextViewerPage && pagerScrollEnabled;
 
   useFocusEffect(
     useCallback(() => {
@@ -197,7 +237,7 @@ export default function MemoryViewerScreen() {
   );
 
   const renderItem = useCallback(
-    ({ item }: { item: ImmersiveViewerItem }) => {
+    ({ item, index }: { item: ImmersiveViewerItem; index: number }) => {
       const memory = memoryFromImmersiveViewerItem(item);
       const albumSlot =
         item.kind === 'albumPhoto'
@@ -207,10 +247,11 @@ export default function MemoryViewerScreen() {
               total: item.albumPhotoCount,
             }
           : undefined;
+      const showTextMarginNav = memory.type === 'text' && viewerItems.length > 1;
       return (
         <ImmersivePage
           memory={memory}
-          isActive={visibleItemKey === immersiveViewerItemKey(item)}
+          isActive={isFocused && visibleItemKey === immersiveViewerItemKey(item)}
           height={itemHeight}
           width={windowW}
           albumPhotoSlot={albumSlot}
@@ -219,6 +260,13 @@ export default function MemoryViewerScreen() {
           onRequestEditText={m => setEditingTextMemory(m)}
           toggleFavorite={toggleFavorite}
           onFavoritePhotoUrlsUpdated={urls => handleFavoritePhotoUrlsUpdated(memory.id, urls)}
+          onInnerScrollLock={lockPagerScroll}
+          onInnerScrollUnlock={unlockPagerScroll}
+          showTextMarginNav={showTextMarginNav}
+          canTextNavPrev={index > 0}
+          canTextNavNext={index < viewerItems.length - 1}
+          onTextNavPrev={() => goToViewerIndex(index - 1)}
+          onTextNavNext={() => goToViewerIndex(index + 1)}
         />
       );
     },
@@ -228,9 +276,14 @@ export default function MemoryViewerScreen() {
       windowW,
       child?.name,
       child?.birthdate,
+      viewerItems.length,
       toggleFavorite,
       handleFavoritePhotoUrlsUpdated,
-    ]
+      lockPagerScroll,
+      unlockPagerScroll,
+      goToViewerIndex,
+      isFocused,
+    ],
   );
 
   const handleSaveTextEdit = useCallback(
@@ -262,11 +315,11 @@ export default function MemoryViewerScreen() {
   const keyExtractor = useCallback((item: ImmersiveViewerItem) => immersiveViewerItemKey(item), []);
 
   if (viewerItems.length === 0) {
-    return <View style={[styles.root, { height: windowH, backgroundColor: BG }]} />;
+    return <View style={[styles.root, styles.viewerShell, { minHeight: windowH }]} />;
   }
 
   return (
-    <View style={[styles.root, { height: windowH, backgroundColor: BG }]}>
+    <View style={[styles.root, styles.viewerShell, { minHeight: windowH }]}>
       <StatusBar style={closeOnMediaChrome ? 'light' : 'dark'} />
       <EditTextModal
         key={editingTextMemory?.id ?? 'closed'}
@@ -299,19 +352,22 @@ export default function MemoryViewerScreen() {
 
       <FlatList
         ref={listRef}
+        style={styles.viewerList}
         data={viewerItems}
         keyExtractor={keyExtractor}
         renderItem={renderItem}
         pagingEnabled
+        scrollEnabled={flatListScrollEnabled}
+        nestedScrollEnabled
         showsVerticalScrollIndicator={false}
         decelerationRate="fast"
         initialScrollIndex={initialIndex}
         getItemLayout={getItemLayout}
         viewabilityConfigCallbackPairs={immersiveViewabilityPairs}
-        removeClippedSubviews={Platform.OS === 'android'}
-        windowSize={5}
-        maxToRenderPerBatch={3}
-        initialNumToRender={2}
+        removeClippedSubviews
+        windowSize={3}
+        maxToRenderPerBatch={2}
+        initialNumToRender={1}
         onScrollToIndexFailed={({ index }) => {
           listRef.current?.scrollToOffset({
             offset: index * itemHeight,
@@ -340,6 +396,13 @@ function ImmersivePage({
   onRequestEditText,
   toggleFavorite,
   onFavoritePhotoUrlsUpdated,
+  onInnerScrollLock,
+  onInnerScrollUnlock,
+  showTextMarginNav,
+  canTextNavPrev,
+  canTextNavNext,
+  onTextNavPrev,
+  onTextNavNext,
 }: {
   memory: Memory;
   isActive: boolean;
@@ -351,6 +414,13 @@ function ImmersivePage({
   onRequestEditText: (m: Memory) => void;
   toggleFavorite: (id: string) => void | Promise<void>;
   onFavoritePhotoUrlsUpdated: (urls: string[]) => void;
+  onInnerScrollLock?: () => void;
+  onInnerScrollUnlock?: () => void;
+  showTextMarginNav?: boolean;
+  canTextNavPrev?: boolean;
+  canTextNavNext?: boolean;
+  onTextNavPrev?: () => void;
+  onTextNavNext?: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const addedLabel = formatDateLong(memory.inserted_at || memory.created_at);
@@ -368,7 +438,19 @@ function ImmersivePage({
   const mediaChrome = isImmersiveMediaType(memory.type);
   const topChromePadTop = insets.top + verticalScale(8);
   const topFadeHeight = useMemo(() => immersiveTopFadeHeight(height), [height]);
+  const captionScrollMaxH = useMemo(
+    () => Math.min(IMMERSIVE_CAPTION_SCROLL_MAX_H, Math.round(height * 0.32)),
+    [height],
+  );
+  const textTopInset = insets.top + verticalScale(52);
+  const textBottomReserve = insets.bottom + verticalScale(20);
+  const textViewportH = useMemo(
+    () => Math.max(verticalScale(220), height - textTopInset - textBottomReserve),
+    [height, textTopInset, textBottomReserve],
+  );
+  const overlayBottomInset = immersiveOverlayBottomInset(insets.bottom);
   const [videoSoundOn, setVideoSoundOn] = useState(true);
+  const memoryTextFont = useMemoryTextFont();
 
   useEffect(() => {
     setVideoSoundOn(true);
@@ -405,6 +487,7 @@ function ImmersivePage({
               capturedOverlayLabel={capturedLabelOnMedia}
               onToggleMemoryFavorite={toggleFavorite}
               onFavoritePhotoUrlsUpdated={onFavoritePhotoUrlsUpdated}
+              overlayBottomInset={overlayBottomInset}
             />
           )}
           {memory.type === 'video' && (
@@ -415,16 +498,30 @@ function ImmersivePage({
               showCapturedOverlay={showCapturedOnMedia}
               capturedOverlayLabel={capturedLabelOnMedia}
               onToggleFavorite={toggleFavorite}
+              overlayBottomInset={overlayBottomInset}
             />
           )}
           {memory.type === 'voice' && (
-            <ImmersiveVoice memory={memory} width={width} onToggleFavorite={toggleFavorite} />
+            <ImmersiveVoice
+              memory={memory}
+              width={width}
+              onToggleFavorite={toggleFavorite}
+              overlayBottomInset={overlayBottomInset}
+            />
           )}
           {memory.type === 'text' && (
             <ImmersiveText
               memory={memory}
+              topInset={textTopInset}
+              viewportHeight={textViewportH}
               onTapEdit={() => onRequestEditText(memory)}
               onToggleFavorite={toggleFavorite}
+              overlayBottomInset={overlayBottomInset}
+              showMarginNav={!!showTextMarginNav}
+              canGoPrev={!!canTextNavPrev}
+              canGoNext={!!canTextNavNext}
+              onGoPrev={onTextNavPrev ?? (() => {})}
+              onGoNext={onTextNavNext ?? (() => {})}
             />
           )}
         </View>
@@ -477,9 +574,18 @@ function ImmersivePage({
 
       {memory.type !== 'text' && !!memory.content?.trim() && (
         <View style={styles.footer}>
-          <Text style={styles.caption} numberOfLines={5}>
-            {memory.content.trim()}
-          </Text>
+          <ScrollableTextBlock
+            maxHeight={captionScrollMaxH}
+            onInnerScrollLock={onInnerScrollLock}
+            onInnerScrollUnlock={onInnerScrollUnlock}
+          >
+            <Text
+              style={[styles.caption, { fontFamily: memoryTextFont }]}
+              {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
+            >
+              {memory.content.trim()}
+            </Text>
+          </ScrollableTextBlock>
         </View>
       )}
     </View>
@@ -493,6 +599,7 @@ function ImmersivePhotoSlide({
   showCapturedOverlay,
   capturedOverlayLabel,
   inkOverride,
+  overlayBottomInset,
 }: {
   uri: string;
   memoryId: string;
@@ -500,6 +607,7 @@ function ImmersivePhotoSlide({
   showCapturedOverlay: boolean;
   capturedOverlayLabel: string;
   inkOverride: Memory['captured_overlay_ink'];
+  overlayBottomInset: number;
 }) {
   const raw = uri.trim();
   const isDeviceLocal =
@@ -532,6 +640,7 @@ function ImmersivePhotoSlide({
           uriForAnalysis={paletteUri || displayUri}
           label={capturedOverlayLabel}
           inkOverride={inkOverride}
+          bottomInset={overlayBottomInset}
         />
       ) : null}
     </>
@@ -545,6 +654,7 @@ function ImmersivePhoto({
   capturedOverlayLabel,
   onToggleMemoryFavorite,
   onFavoritePhotoUrlsUpdated,
+  overlayBottomInset,
 }: {
   memory: Memory;
   albumPhotoSlot?: AlbumPhotoSlot;
@@ -552,6 +662,7 @@ function ImmersivePhoto({
   capturedOverlayLabel: string;
   onToggleMemoryFavorite: (id: string) => void | Promise<void>;
   onFavoritePhotoUrlsUpdated: (urls: string[]) => void;
+  overlayBottomInset: number;
 }) {
   const favoritePhotoUrls = useMemo(() => parseFavoritePhotoUrls(memory), [memory]);
 
@@ -575,6 +686,7 @@ function ImmersivePhoto({
           isFavorite={!!memory.is_favorite}
           inkOverride={memory.captured_overlay_ink}
           onPress={() => void onToggleMemoryFavorite(memory.id)}
+          bottomInset={overlayBottomInset}
         />
       </View>
     );
@@ -593,6 +705,7 @@ function ImmersivePhoto({
         showCapturedOverlay={showCapturedOverlay && (!albumPhotoSlot || albumPhotoSlot.index === 0)}
         capturedOverlayLabel={capturedOverlayLabel}
         inkOverride={memory.captured_overlay_ink}
+        overlayBottomInset={overlayBottomInset}
       />
       <FeedPhotoFavoriteOverlay
         isFavorite={photoFavorited}
@@ -602,6 +715,7 @@ function ImmersivePhoto({
             ? handleTogglePhotoFavorite(raw)
             : onToggleMemoryFavorite(memory.id))
         }
+        bottomInset={overlayBottomInset}
       />
     </View>
   );
@@ -614,6 +728,7 @@ function ImmersiveVideo({
   showCapturedOverlay,
   capturedOverlayLabel,
   onToggleFavorite,
+  overlayBottomInset,
 }: {
   memory: Memory;
   isActive: boolean;
@@ -621,6 +736,7 @@ function ImmersiveVideo({
   showCapturedOverlay: boolean;
   capturedOverlayLabel: string;
   onToggleFavorite: (id: string) => void | Promise<void>;
+  overlayBottomInset: number;
 }) {
   const uri = useFeedVideoPlaybackUri(memory);
   const posterRaw = getVideoPosterUriForFeedAndViewer(memory);
@@ -636,16 +752,34 @@ function ImmersiveVideo({
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(seedNatural);
   const [videoReady, setVideoReady] = useState(false);
   const immersiveVideoRef = useRef<Video | null>(null);
+  const posterFade = useRef(new Animated.Value(1)).current;
 
   const trimmedUri = uri?.trim() ?? '';
   useExpoAvShouldPlay(immersiveVideoRef, isActive, trimmedUri);
 
   useEffect(() => {
+    if (isActive) return;
+    posterFade.setValue(1);
+    setVideoReady(false);
+    void immersiveVideoRef.current?.pauseAsync().catch(() => {});
+  }, [isActive, posterFade]);
+
+  useEffect(() => {
     const w = memory.original_px_w ?? 0;
     const h = memory.original_px_h ?? 0;
     setNatural(w > 0 && h > 0 ? { w, h } : null);
+    posterFade.setValue(1);
     setVideoReady(false);
-  }, [memory.id, memory.original_px_w, memory.original_px_h, trimmedUri]);
+  }, [memory.id, memory.original_px_w, memory.original_px_h, trimmedUri, posterFade]);
+
+  useEffect(() => {
+    if (!videoReady || !isActive || !posterUri.trim()) return;
+    Animated.timing(posterFade, {
+      toValue: 0,
+      duration: 220,
+      useNativeDriver: true,
+    }).start();
+  }, [videoReady, isActive, posterUri, posterFade]);
 
   const markVideoReady = useCallback(() => {
     setVideoReady(prev => (prev ? prev : true));
@@ -667,8 +801,14 @@ function ImmersiveVideo({
   );
 
   const onPlaybackStatusUpdate = useCallback(
-    (status: { isLoaded?: boolean }) => {
-      if (status.isLoaded) markVideoReady();
+    (status: AVPlaybackStatus) => {
+      if (!status.isLoaded) return;
+      if (
+        status.isPlaying ||
+        (typeof status.positionMillis === 'number' && status.positionMillis > 40)
+      ) {
+        markVideoReady();
+      }
     },
     [markVideoReady],
   );
@@ -692,6 +832,7 @@ function ImmersiveVideo({
       isFavorite={!!memory.is_favorite}
       inkOverride={memory.captured_overlay_ink}
       onPress={() => void onToggleFavorite(memory.id)}
+      bottomInset={overlayBottomInset}
     />
   );
 
@@ -701,6 +842,7 @@ function ImmersiveVideo({
         uriForAnalysis={videoUriForOverlay}
         label={capturedOverlayLabel}
         inkOverride={memory.captured_overlay_ink}
+        bottomInset={overlayBottomInset}
       />
     ) : null;
 
@@ -719,11 +861,15 @@ function ImmersiveVideo({
     );
   }
 
-  const showPosterPlaceholder = !!posterUri && !videoReady;
+  const showPosterLayer = !!posterUri.trim();
 
   return (
     <View style={styles.videoImmersiveWrap}>
-      {trimmedUri ? (
+      <View
+        style={[StyleSheet.absoluteFillObject, styles.immersiveVideoBackdrop]}
+        pointerEvents="none"
+      />
+      {trimmedUri && isActive ? (
         <View style={[StyleSheet.absoluteFillObject, styles.immersiveVideoLayer]} pointerEvents="none">
           <Video
             ref={immersiveVideoRef}
@@ -731,8 +877,8 @@ function ImmersiveVideo({
             style={StyleSheet.absoluteFillObject}
             resizeMode={resizeMode}
             shouldPlay={isActive}
-            isLooping
-            isMuted={!isActive || !soundOn}
+            isLooping={isActive}
+            isMuted={!soundOn}
             useNativeControls={false}
             onReadyForDisplay={e => {
               onReadyForDisplay(e);
@@ -743,19 +889,26 @@ function ImmersiveVideo({
             onPlaybackStatusUpdate={onPlaybackStatusUpdate}
           />
         </View>
-      ) : (
-        <View style={[StyleSheet.absoluteFillObject, styles.immersiveVideoBackdrop]} />
-      )}
+      ) : null}
 
-      {showPosterPlaceholder ? (
-        <Image
-          source={{ uri: posterUri }}
-          style={[StyleSheet.absoluteFillObject, styles.immersiveVideoPosterOverlay]}
-          contentFit={posterFit}
-          cachePolicy="disk"
-          recyclingKey={`${memory.id}-poster`}
-          onLoad={onPosterLoad}
-        />
+      {showPosterLayer ? (
+        <Animated.View
+          style={[
+            StyleSheet.absoluteFillObject,
+            styles.immersiveVideoPosterOverlay,
+            { opacity: isActive ? posterFade : 1 },
+          ]}
+          pointerEvents="none"
+        >
+          <Image
+            source={{ uri: posterUri }}
+            style={StyleSheet.absoluteFillObject}
+            contentFit={posterFit}
+            cachePolicy="disk"
+            recyclingKey={`${memory.id}-poster`}
+            onLoad={onPosterLoad}
+          />
+        </Animated.View>
       ) : null}
 
       {mediaOverlays}
@@ -767,34 +920,41 @@ function ImmersiveVoice({
   memory,
   width,
   onToggleFavorite,
+  overlayBottomInset,
 }: {
   memory: Memory;
   width: number;
   onToggleFavorite: (id: string) => void | Promise<void>;
+  overlayBottomInset: number;
 }) {
-  const signed =
+  const voiceCoverRaw = getVoiceCoverUriForFeedAndViewer(memory);
+  const voiceCoverSigned = useSignedMediaUrl(voiceCoverRaw || null) ?? '';
+  const voiceCoverDisplayUri = normalizeMemoryMediaUriForDisplay(
+    (voiceCoverSigned || voiceCoverRaw).trim(),
+  );
+  const hasCover = !!voiceCoverDisplayUri.trim();
+
+  const voicePlaybackSigned =
     useSignedMediaUrl(memory.type === 'voice' ? (memory.media_url ?? null) : null) ?? '';
-  const uri = signed.trim() || (memory.media_url ?? '').trim();
-  const coverRaw = (memory.voice_cover_path ?? memory.voice_cover_url) ?? null;
-  const coverUri = useSignedMediaUrl(coverRaw) ?? '';
-  const hasCover = !!coverUri.trim();
+  const playbackUri = (voicePlaybackSigned || (memory.media_url ?? '')).trim();
 
   return (
     <View style={[styles.voiceWrapImmersive, { width }, styles.immersiveMediaOverlaysHost]}>
       {hasCover ? (
         <Image
-          source={{ uri: coverUri.trim() }}
+          source={{ uri: voiceCoverDisplayUri }}
           style={StyleSheet.absoluteFillObject}
           contentFit="cover"
           cachePolicy="disk"
+          recyclingKey={memory.id}
         />
       ) : (
         <View style={[StyleSheet.absoluteFillObject, { backgroundColor: THEME.bgScreen }]} />
       )}
       <View style={[styles.voicePlayerImmersive, hasCover && styles.voicePlayerImmersiveCoverScrim]}>
-        {uri ? (
+        {playbackUri ? (
           <AudioPlayer
-            uri={uri}
+            uri={playbackUri}
             duration={memory.duration || 0}
             playbackStartSec={memory.voice_playback_start_sec ?? null}
             variant={hasCover ? 'coverBottom' : 'default'}
@@ -807,34 +967,90 @@ function ImmersiveVoice({
         isFavorite={!!memory.is_favorite}
         inkOverride={memory.captured_overlay_ink}
         onPress={() => void onToggleFavorite(memory.id)}
+        bottomInset={overlayBottomInset}
       />
+    </View>
+  );
+}
+
+function TextImmersiveMarginRail({
+  canGoPrev,
+  canGoNext,
+  onGoPrev,
+  onGoNext,
+}: {
+  canGoPrev: boolean;
+  canGoNext: boolean;
+  onGoPrev: () => void;
+  onGoNext: () => void;
+}) {
+  const hintActive = 'rgba(28, 28, 30, 0.22)';
+  const hintDisabled = 'rgba(28, 28, 30, 0.08)';
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, g) =>
+          Math.abs(g.dy) > verticalScale(10) && Math.abs(g.dy) > Math.abs(g.dx) * 1.2,
+        onPanResponderRelease: (_, g) => {
+          if (g.dy <= -TEXT_MARGIN_SWIPE_DY && canGoNext) onGoNext();
+          else if (g.dy >= TEXT_MARGIN_SWIPE_DY && canGoPrev) onGoPrev();
+        },
+      }),
+    [canGoPrev, canGoNext, onGoPrev, onGoNext],
+  );
+
+  return (
+    <View
+      style={styles.textMarginRail}
+      {...panResponder.panHandlers}
+      accessibilityRole="adjustable"
+      accessibilityLabel="Glisser vers le haut ou le bas pour changer de souvenir"
+    >
+      <View pointerEvents="none" style={styles.textMarginHint}>
+        <ChevronUp
+          color={canGoPrev ? hintActive : hintDisabled}
+          size={scale(13)}
+          strokeWidth={1.6}
+        />
+        <View style={styles.textMarginLine} />
+        <ChevronDown
+          color={canGoNext ? hintActive : hintDisabled}
+          size={scale(13)}
+          strokeWidth={1.6}
+        />
+      </View>
     </View>
   );
 }
 
 function ImmersiveText({
   memory,
+  topInset,
+  viewportHeight,
   onTapEdit,
   onToggleFavorite,
+  showMarginNav,
+  canGoPrev,
+  canGoNext,
+  onGoPrev,
+  onGoNext,
+  overlayBottomInset,
 }: {
   memory: Memory;
+  topInset: number;
+  viewportHeight: number;
   onTapEdit: () => void;
   onToggleFavorite: (id: string) => void | Promise<void>;
+  showMarginNav: boolean;
+  canGoPrev: boolean;
+  canGoNext: boolean;
+  onGoPrev: () => void;
+  onGoNext: () => void;
+  overlayBottomInset: number;
 }) {
+  const memoryTextFont = useMemoryTextFont();
   const raw = memory.content?.trim() || '';
-  const fitLevel = useMemo<0 | 1 | 2 | 3>(() => {
-    const t = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
-    if (!t) return 0;
-    const paragraphCount = t.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean).length;
-    // Heuristique simple “sans mesure” pour garantir la visibilité sans scroll.
-    // On combine longueur + “coût” des paragraphes (sauts de ligne plus chers visuellement).
-    const approxLines = Math.ceil(t.length / 23) + Math.max(0, paragraphCount - 1) * 2;
-    // Compromis: réduction visible mais pas extrême.
-    if (approxLines >= 24 || t.length >= 720 || paragraphCount >= 7) return 3;
-    if (approxLines >= 20 || t.length >= 600 || paragraphCount >= 5) return 2;
-    if (approxLines >= 16 || t.length >= 480 || paragraphCount >= 4) return 1;
-    return 0;
-  }, [raw]);
   const paragraphs = useMemo(() => {
     const t = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
     if (!t) return ['Un joli mot du cœur'];
@@ -842,54 +1058,52 @@ function ImmersiveText({
     return parts.length ? parts : [t];
   }, [raw]);
 
-  const wrapStyle =
-    fitLevel === 3
-      ? styles.textWrapFit3
-      : fitLevel === 2
-        ? styles.textWrapFit2
-        : fitLevel === 1
-          ? styles.textWrapFit1
-          : null;
-  const bodyStyle =
-    fitLevel === 3
-      ? styles.textBodyFit3
-      : fitLevel === 2
-        ? styles.textBodyFit2
-        : fitLevel === 1
-          ? styles.textBodyFit1
-          : styles.textBody;
-  const paraGapStyle =
-    fitLevel === 3
-      ? styles.textParaGapFit3
-      : fitLevel === 2
-        ? styles.textParaGapFit2
-        : fitLevel === 1
-          ? styles.textParaGapFit1
-          : styles.textParaGap;
-
   return (
-    <View style={styles.textImmersiveOuter}>
-      <Pressable
-        onPress={onTapEdit}
-        style={[styles.textWrap, wrapStyle]}
-        accessibilityRole="button"
-        accessibilityLabel="Modifier le texte"
-      >
-        {paragraphs.map((para, idx) => (
-          <Text
-            key={idx}
-            style={[bodyStyle, idx > 0 && paraGapStyle]}
-            {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
-          >
-            {EM_QUAD}
-            {para.replace(/\n/g, `\n${EM_QUAD}`)}
-          </Text>
-        ))}
-      </Pressable>
+    <View style={[styles.textImmersiveOuter, { top: topInset, height: viewportHeight }]}>
+      <View style={styles.textImmersiveRow}>
+        {showMarginNav ? (
+          <TextImmersiveMarginRail
+            canGoPrev={canGoPrev}
+            canGoNext={canGoNext}
+            onGoPrev={onGoPrev}
+            onGoNext={onGoNext}
+          />
+        ) : (
+          <View style={styles.textMarginSpacer} />
+        )}
+        <View style={styles.textImmersiveCenter}>
+          <ScrollableTextBlock maxHeight={viewportHeight} contentContainerStyle={styles.textWrap}>
+            {paragraphs.map((para, idx) => (
+              <Text
+                key={idx}
+                style={[styles.textBody, { fontFamily: memoryTextFont }, idx > 0 && styles.textParaGap]}
+                onPress={onTapEdit}
+                accessibilityRole="button"
+                accessibilityLabel="Modifier le texte"
+                {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
+              >
+                {EM_QUAD}
+                {para.replace(/\n/g, `\n${EM_QUAD}`)}
+              </Text>
+            ))}
+          </ScrollableTextBlock>
+        </View>
+        {showMarginNav ? (
+          <TextImmersiveMarginRail
+            canGoPrev={canGoPrev}
+            canGoNext={canGoNext}
+            onGoPrev={onGoPrev}
+            onGoNext={onGoNext}
+          />
+        ) : (
+          <View style={styles.textMarginSpacer} />
+        )}
+      </View>
       <FeedPhotoFavoriteOverlay
         isFavorite={!!memory.is_favorite}
         inkOverride={memory.captured_overlay_ink}
         onPress={() => void onToggleFavorite(memory.id)}
+        bottomInset={overlayBottomInset}
       />
     </View>
   );
@@ -899,6 +1113,12 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: BG,
+  },
+  viewerShell: {
+    width: '100%',
+  },
+  viewerList: {
+    flex: 1,
   },
   closeBtn: {
     position: 'absolute',
@@ -914,6 +1134,34 @@ const styles = StyleSheet.create({
   },
   closeBtnOnText: {
     backgroundColor: 'rgba(0, 0, 0, 0.06)',
+  },
+  textImmersiveRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    minHeight: 0,
+  },
+  textMarginRail: {
+    width: TEXT_IMMERSIVE_MARGIN_W,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  textMarginSpacer: {
+    width: TEXT_IMMERSIVE_MARGIN_W,
+  },
+  textImmersiveCenter: {
+    flex: 1,
+    minWidth: 0,
+  },
+  textMarginHint: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: verticalScale(4),
+  },
+  textMarginLine: {
+    width: StyleSheet.hairlineWidth,
+    height: verticalScale(36),
+    backgroundColor: 'rgba(28, 28, 30, 0.18)',
   },
   pageBody: {
     flex: 1,
@@ -1015,10 +1263,10 @@ const styles = StyleSheet.create({
   },
   /** Texte immersif : fond blanc + cœur favori comme ligne d’actions fil. */
   textImmersiveOuter: {
-    flex: 1,
+    position: 'absolute',
+    left: 0,
+    right: 0,
     width: '100%',
-    minHeight: 0,
-    position: 'relative',
     backgroundColor: BG,
   },
   /** Vidéo immersive : même extension que photo / vocal dans le bloc média. */
@@ -1032,7 +1280,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   immersiveVideoBackdrop: {
-    backgroundColor: BG,
+    backgroundColor: '#000000',
   },
   immersiveVideoPosterOverlay: {
     zIndex: 2,
@@ -1060,7 +1308,6 @@ const styles = StyleSheet.create({
     color: THEME.textPrimary,
     fontSize: scale(15),
     fontWeight: '400',
-    fontFamily: MEMORY_TEXT_FONT,
     lineHeight: scale(22),
   },
   /** Vocal immersif : même zone que la photo (flex dans mediaBlock), cover en plein écran. */
@@ -1081,65 +1328,20 @@ const styles = StyleSheet.create({
   voicePlayerImmersiveCoverScrim: {
     backgroundColor: 'rgba(0,0,0,0.42)',
   },
-  /** Marges latérales type page de livre (texte immersif). */
+  /** Colonne centrale : scroll vertical du corps de texte uniquement. */
   textWrap: {
-    flex: 1,
-    paddingHorizontal: scale(48),
-    justifyContent: 'center',
-    minHeight: verticalScale(280),
-  },
-  textWrapFit1: {
-    paddingHorizontal: scale(44),
-  },
-  textWrapFit2: {
-    paddingHorizontal: scale(42),
-  },
-  textWrapFit3: {
-    paddingHorizontal: scale(40),
+    paddingTop: verticalScale(12),
+    paddingBottom: verticalScale(56),
   },
   textBody: {
     color: THEME.textPrimary,
-    fontSize: scale(26),
-    lineHeight: scale(34),
-    width: '100%',
-    textAlign: 'justify',
-    textAlignVertical: 'top',
-    fontFamily: MEMORY_TEXT_FONT,
-  },
-  textBodyFit1: {
-    color: THEME.textPrimary,
-    fontSize: scale(24),
-    lineHeight: scale(32),
-    width: '100%',
-    textAlign: 'justify',
-    fontFamily: MEMORY_TEXT_FONT,
-  },
-  textBodyFit2: {
-    color: THEME.textPrimary,
-    fontSize: scale(21),
-    lineHeight: scale(28),
-    width: '100%',
-    textAlign: 'justify',
-    fontFamily: MEMORY_TEXT_FONT,
-  },
-  textBodyFit3: {
-    color: THEME.textPrimary,
-    fontSize: scale(18),
+    fontSize: scale(16),
     lineHeight: scale(25),
     width: '100%',
     textAlign: 'justify',
-    fontFamily: MEMORY_TEXT_FONT,
+    textAlignVertical: 'top',
   },
   textParaGap: {
-    marginTop: verticalScale(18),
-  },
-  textParaGapFit1: {
     marginTop: verticalScale(16),
-  },
-  textParaGapFit2: {
-    marginTop: verticalScale(14),
-  },
-  textParaGapFit3: {
-    marginTop: verticalScale(12),
   },
 });

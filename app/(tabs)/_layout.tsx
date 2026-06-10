@@ -2,6 +2,7 @@ import type { ComponentProps } from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
 import { useFonts, DMSans_400Regular, DMSans_500Medium } from '@expo-google-fonts/dm-sans';
 import { Tabs } from 'expo-router';
+import { TabTransitionProvider, useTabTransition } from '@/contexts/TabTransitionContext';
 import type { LucideIcon } from 'lucide-react-native';
 import { BookOpenText, Heart, List, Plus } from 'lucide-react-native';
 import { PlatformPressable } from '@react-navigation/elements';
@@ -86,6 +87,15 @@ function TabBarGlyph({
 }
 
 export default function TabLayout() {
+  return (
+    <TabTransitionProvider>
+      <TabLayoutInner />
+    </TabTransitionProvider>
+  );
+}
+
+function TabLayoutInner() {
+  const { setTabIndex } = useTabTransition();
   const insets = useSafeAreaInsets();
   const safeFillHeight = tabBarSafeFillHeight(insets.bottom);
   const tabBarTotalHeight = getTabBarTotalHeight(insets.bottom);
@@ -100,6 +110,12 @@ export default function TabLayout() {
 
   return (
     <Tabs
+      screenListeners={{
+        state: e => {
+          const index = e.data.state?.index;
+          if (typeof index === 'number') setTabIndex(index);
+        },
+      }}
       screenOptions={{
         headerShown: false,
         /** Garder Fil / Favoris montés : évite remontage + rechargement images après long séjour sur Capturer. */
@@ -110,7 +126,7 @@ export default function TabLayout() {
          * au retour sur Fil / Favoris, zoom diaporama et autoplay vidéo ne repartaient plus.
          */
         freezeOnBlur: false,
-        sceneStyle: { backgroundColor: 'transparent' },
+        sceneStyle: { backgroundColor: '#FFFFFF' },
         tabBarActiveTintColor: THEME.tabBarActiveTint,
         tabBarInactiveTintColor: THEME.tabBarInactiveTint,
         tabBarActiveBackgroundColor: 'transparent',
@@ -214,7 +230,6 @@ export default function TabLayout() {
         name="livres"
         options={{
           title: 'Livres',
-          sceneStyle: { backgroundColor: THEME.bgScreen },
           tabBarIcon: ({ focused, color }) => (
             <TabBarGlyph
               Icon={BookOpenText}

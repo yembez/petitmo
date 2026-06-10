@@ -2,12 +2,13 @@ import { memo } from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
 import { Image } from 'expo-image';
 import { BookOpen } from 'lucide-react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useFonts, EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
+import BookPagePhotoFrame from '@/components/BookPagePhotoFrame';
+import { useImagePixelSize } from '@/hooks/useImagePixelSize';
+import type { PhotoCrop } from '@/src/book/photoCrop';
 import { scale, verticalScale } from '@/utils/responsive';
+import CoverPageSpineOverlay from '@/components/CoverPageSpineOverlay';
 import {
   BOOK_COVER_PHOTO_HEIGHT_RATIO,
-  BOOK_COVER_SPINE_WIDTH,
   BOOK_COVER_THEME_DEFAULT,
   BOOK_COVER_THEME_WARM,
   BOOK_COVER_THUMB_HEIGHT,
@@ -18,9 +19,14 @@ import {
 export type BookCoverThumbnailProps = {
   title: string;
   coverImageUri: string | null;
+  /** Recadrage couverture (parité éditeur ↔ liste Livres). */
+  coverPhotoCrop?: PhotoCrop;
   dateLabel?: string;
   colorTheme?: 'default' | 'warm' | BookCoverColorTheme;
   imageHeaders?: Record<string, string>;
+  /** Clé stable expo-image (ex. id livre) — évite re-décodage au retour sur l’onglet. */
+  imageRecyclingKey?: string;
+  titleFontFamily?: string;
 };
 
 function resolveTheme(colorTheme: BookCoverThumbnailProps['colorTheme']): BookCoverColorTheme {
@@ -32,13 +38,15 @@ function resolveTheme(colorTheme: BookCoverThumbnailProps['colorTheme']): BookCo
 function BookCoverThumbnail({
   title,
   coverImageUri,
+  coverPhotoCrop,
   dateLabel = '',
   colorTheme = 'default',
   imageHeaders,
+  imageRecyclingKey,
+  titleFontFamily,
 }: BookCoverThumbnailProps) {
   const theme = resolveTheme(colorTheme);
-  const [fontsLoaded] = useFonts({ EBGaramond_400Regular_Italic });
-  const garamondIt = fontsLoaded ? 'EBGaramond_400Regular_Italic' : undefined;
+  const garamondIt = titleFontFamily;
 
   const faceW = BOOK_COVER_THUMB_WIDTH;
   const faceH = BOOK_COVER_THUMB_HEIGHT;
@@ -46,6 +54,8 @@ function BookCoverThumbnail({
   const textH = faceH - photoH;
 
   const uri = coverImageUri?.trim() || null;
+  const imgSize = useImagePixelSize(coverPhotoCrop ? uri : null);
+  const useCoverCrop = !!coverPhotoCrop && !!uri && !!imgSize;
   const imageSource =
     uri != null
       ? imageHeaders
@@ -57,14 +67,6 @@ function BookCoverThumbnail({
 
   return (
     <View style={styles.outer} pointerEvents="none">
-      <View style={[styles.spine, { width: BOOK_COVER_SPINE_WIDTH, height: faceH }]}>
-        <LinearGradient
-          colors={[theme.spineStart, theme.spineEnd]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={StyleSheet.absoluteFill}
-        />
-      </View>
       <View
         style={[
           styles.face,
@@ -77,12 +79,24 @@ function BookCoverThumbnail({
         ]}
       >
         <View style={[styles.photoZone, { height: photoH }]}>
-          {imageSource ? (
+          {useCoverCrop ? (
+            <BookPagePhotoFrame
+              uri={uri!}
+              frameW={faceW}
+              frameH={photoH}
+              crop={coverPhotoCrop}
+              coverMode
+              imgPxW={imgSize.w}
+              imgPxH={imgSize.h}
+            />
+          ) : imageSource ? (
             <Image
               source={imageSource}
               style={StyleSheet.absoluteFillObject}
               contentFit="cover"
-              cachePolicy="disk"
+              cachePolicy="memory-disk"
+              recyclingKey={imageRecyclingKey ?? uri}
+              transition={0}
             />
           ) : (
             <View style={[styles.placeholder, { backgroundColor: theme.placeholder }]}>
@@ -108,6 +122,7 @@ function BookCoverThumbnail({
           ) : null}
           <View style={[styles.hairline, { backgroundColor: theme.line }]} />
         </View>
+        <CoverPageSpineOverlay />
       </View>
     </View>
   );
@@ -130,16 +145,15 @@ const styles = StyleSheet.create({
       default: {},
     }),
   },
-  spine: {
-    overflow: 'hidden',
-  },
   face: {
+    position: 'relative',
     overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
   },
   photoZone: {
     width: '100%',
     overflow: 'hidden',
+    position: 'relative',
   },
   placeholder: {
     flex: 1,

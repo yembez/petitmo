@@ -3,6 +3,7 @@ import type { Child, Memory } from '@/types/local';
 import { collectMemoriesFromPagesForPdf } from '@/services/bookPdfServer';
 import { requestMissingMediaDerivatives } from '@/services/media';
 import { ensureMemoryUploadedForCloud } from '@/services/migration';
+import { getCachedUserMode } from '@/lib/userMode';
 import { supabase } from '@/lib/supabase';
 
 export type BookExportPrepIssue =
@@ -122,12 +123,16 @@ export function getBookExportPrepIssues(params: {
  * - déclenche `process-memory` pour générer les dérivés (print/poster/thumb) manquants
  *
  * Best-effort: ne jette pas d’erreur (UX: on garde la preview locale).
+ *
+ * Mode gratuit : no-op (export PDF guest = payload local + upload raw, pas sync mémoires cloud).
  */
 export async function runBookExportPrepInBackground(params: {
   pages: BookPage[];
   localEdits: Record<string, Partial<Memory>>;
 }): Promise<void> {
   try {
+    if ((await getCachedUserMode()) === 'local') return;
+
     const { data } = await supabase.auth.getSession();
     const hasSession = !!data.session?.access_token;
     if (!hasSession) return;
