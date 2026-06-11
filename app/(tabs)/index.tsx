@@ -60,6 +60,8 @@ import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { resolveChildProfileImageDisplayUri } from '@/utils/childPhotoUri';
 import { childDisplayGivenName, childDisplayInitial } from '@/utils/childDisplayName';
 import { formatCaptureChildAge, formatCaptureHeaderDate } from '@/utils/date';
+import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
+import { CaptureFamilyMosaic } from '@/components/CaptureFamilyMosaic';
 import { CAPTURE_HERO_COLOR_MATRIX } from '@/utils/captureHeroColorMatrix';
 import {
   CAPTURE_HERO_IMAGE_CONTENT_POSITION,
@@ -271,6 +273,9 @@ function CapturerScreen() {
     hydrateTabScreensFromSqliteSync();
     return getCaptureTabChildSnapshot();
   });
+  const [familyChildren, setFamilyChildren] = useState<Child[]>(() =>
+    sortChildrenByBirthdateAsc(listLocalChildren()),
+  );
   const [isLoading, setIsLoading] = useState(() => child === null);
   const childRef = useRef<Child | null>(null);
   childRef.current = child;
@@ -313,13 +318,20 @@ function CapturerScreen() {
     const sub = DeviceEventEmitter.addListener(
       PETITMO_CHILD_PROFILE_UPDATED_EVENT,
       (payload: ChildProfileUpdatedPayload) => {
+        const sorted = sortChildrenByBirthdateAsc(listLocalChildren());
+        setFamilyChildren(sorted);
         const id = payload?.childId?.trim();
-        if (!id || childRef.current?.id !== id) return;
-        const next =
-          payload.child?.id === id ? payload.child : getLocalChild(id);
-        if (!next) return;
-        setCaptureTabChildSnapshot(next);
-        setChild(prev => (captureChildDisplayEqual(prev, next) ? prev : next));
+        const active =
+          (id ? sorted.find(c => c.id === id) : null) ??
+          sorted.find(c => c.id === childRef.current?.id) ??
+          sorted[0] ??
+          null;
+        if (!active) {
+          setChild(null);
+          return;
+        }
+        setCaptureTabChildSnapshot(active);
+        setChild(prev => (captureChildDisplayEqual(prev, active) ? prev : active));
       }
     );
     return () => sub.remove();
@@ -358,6 +370,13 @@ function CapturerScreen() {
     if (child?.id) router.push(`/edit-child?childId=${child.id}`);
   }, [child?.id, router]);
 
+  const openEditChildProfile = useCallback(
+    (target: Child) => {
+      router.push(`/edit-child?childId=${target.id}`);
+    },
+    [router],
+  );
+
   useEffect(() => {
     activeOpacity.setValue(0.92);
     activeTranslateY.setValue(4);
@@ -382,6 +401,8 @@ function CapturerScreen() {
 
           /** Retour onglet : lecture SQLite légère (pas de ML / sanitize en boucle). */
           if (silent && storedSelectedId) {
+            const sorted = sortChildrenByBirthdateAsc(listLocalChildren());
+            if (!cancelled) setFamilyChildren(sorted);
             const row = getLocalChild(storedSelectedId);
             if (row && !cancelled) {
               setCaptureTabChildSnapshot(row);
@@ -391,18 +412,21 @@ function CapturerScreen() {
           }
 
           /** SQLite uniquement — pas `getChildren()` (évite ML face bounds + sanitize async). */
-          const allChildren = listLocalChildren();
+          const allChildren = sortChildrenByBirthdateAsc(listLocalChildren());
           if (cancelled) return;
+          setFamilyChildren(allChildren);
 
           if (storedSelectedId && allChildren.length > 0) {
             const selected = allChildren.find(c => c.id === storedSelectedId) ?? allChildren[0];
             if (!cancelled) {
+              setCaptureTabChildSnapshot(selected);
               setChild(prev => (captureChildDisplayEqual(prev, selected) ? prev : selected));
             }
           } else if (allChildren.length === 0) {
             setChild(null);
             router.push('/create-child');
           } else if (!cancelled) {
+            setCaptureTabChildSnapshot(allChildren[0]);
             setChild(prev => (captureChildDisplayEqual(prev, allChildren[0]) ? prev : allChildren[0]));
           }
         } catch (error) {
@@ -430,7 +454,7 @@ function CapturerScreen() {
     );
   }
 
-  if (!child) {
+  if (!child || familyChildren.length === 0) {
     return (
       <View style={[styles.root, styles.loadingContainer]}>
         <StatusBar style="dark" />
@@ -448,6 +472,7 @@ function CapturerScreen() {
   const captureBottomReserve = tabBarFloatingOverlapPad(insets.bottom);
   const childGivenName = childDisplayGivenName(child.name);
   const childAgeLabel = child.birthdate ? formatCaptureChildAge(child.birthdate) : '';
+  const isFamilyMosaic = familyChildren.length > 1;
 
   return (
     <View style={styles.root}>
@@ -510,69 +535,87 @@ function CapturerScreen() {
               compact && styles.capturePhotoBleedCompact,
             ]}
           >
-          <TouchableOpacity
-            activeOpacity={0.92}
-            onPress={openEditChild}
+          <View
             style={[
               styles.capturePhotoCard,
               compact && styles.capturePhotoCardCompact,
             ]}
-            accessibilityRole="button"
-            accessibilityLabel="Modifier le profil de l'enfant"
           >
-            {photoUri ? (
-              <CaptureHeroImageStack
-                photoUri={photoUri}
-                reactKey={`capture-hero-${child.id}`}
-                imageRevision={heroPhotoCacheKey}
-                isTabFocused={isTabFocused}
-                instantReveal={heroIsLocalAsset}
+            {isFamilyMosaic ? (
+              <CaptureFamilyMosaic
+                familyChildren={familyChildren}
+                onPressChild={openEditChildProfile}
+                nameFontFamily={capturePhotoPillNameFont ?? captureSubtitleFont}
+                ageFontFamily={captureSubtitleFont}
+                style={StyleSheet.absoluteFillObject}
               />
             ) : (
-              <View style={[StyleSheet.absoluteFillObject, styles.heroPlaceholder]}>
-                <Text style={styles.heroPlaceholderText}>{childDisplayInitial(child.name)}</Text>
-              </View>
-            )}
-            <View style={styles.capturePhotoPillsBar} pointerEvents="none">
-              <CapturePhotoGlassPill
-                label={childGivenName || 'Enfant'}
-                labelFontFamily={capturePhotoPillNameFont ?? captureSubtitleFont}
-                emphasized
-                align="left"
-              />
-              {childAgeLabel ? (
-                <CapturePhotoGlassPill
-                  label={childAgeLabel}
-                  labelFontFamily={captureSubtitleFont}
-                  align="right"
-                  accentDot
-                />
-              ) : null}
-            </View>
-            <LinearGradient
-              colors={['rgba(0, 0, 0, 0)', 'rgba(28, 28, 30, 0.18)', 'rgba(28, 28, 30, 0.55)']}
-              locations={[0, 0.42, 1]}
-              start={{ x: 0.5, y: 0 }}
-              end={{ x: 0.5, y: 1 }}
-              pointerEvents="none"
-              style={styles.capturePhotoBottomScrim}
-            />
-            <View style={styles.capturePhotoTagline} pointerEvents="none">
-              <Text
-                style={[
-                  styles.capturePhotoTaglineText,
-                  captureTaglineFont
-                    ? { fontFamily: captureTaglineFont }
-                    : { fontWeight: '300', fontStyle: 'italic' },
-                ]}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.85}
+              <TouchableOpacity
+                activeOpacity={0.92}
+                onPress={openEditChild}
+                style={StyleSheet.absoluteFillObject}
+                accessibilityRole="button"
+                accessibilityLabel="Modifier le profil de l'enfant"
               >
-                {CAPTURE_HERO_TAGLINE}
-              </Text>
-            </View>
-          </TouchableOpacity>
+                {photoUri ? (
+                  <CaptureHeroImageStack
+                    photoUri={photoUri}
+                    reactKey={`capture-hero-${child.id}`}
+                    imageRevision={heroPhotoCacheKey}
+                    isTabFocused={isTabFocused}
+                    instantReveal={heroIsLocalAsset}
+                  />
+                ) : (
+                  <View style={[StyleSheet.absoluteFillObject, styles.heroPlaceholder]}>
+                    <Text style={styles.heroPlaceholderText}>{childDisplayInitial(child.name)}</Text>
+                  </View>
+                )}
+                <View style={styles.capturePhotoPillsBar} pointerEvents="none">
+                  <CapturePhotoGlassPill
+                    label={childGivenName || 'Enfant'}
+                    labelFontFamily={capturePhotoPillNameFont ?? captureSubtitleFont}
+                    emphasized
+                    align="left"
+                  />
+                  {childAgeLabel ? (
+                    <CapturePhotoGlassPill
+                      label={childAgeLabel}
+                      labelFontFamily={captureSubtitleFont}
+                      align="right"
+                      accentDot
+                    />
+                  ) : null}
+                </View>
+              </TouchableOpacity>
+            )}
+            {!isFamilyMosaic ? (
+              <>
+                <LinearGradient
+                  colors={['rgba(0, 0, 0, 0)', 'rgba(28, 28, 30, 0.18)', 'rgba(28, 28, 30, 0.55)']}
+                  locations={[0, 0.42, 1]}
+                  start={{ x: 0.5, y: 0 }}
+                  end={{ x: 0.5, y: 1 }}
+                  pointerEvents="none"
+                  style={styles.capturePhotoBottomScrim}
+                />
+                <View style={styles.capturePhotoTagline} pointerEvents="none">
+                  <Text
+                    style={[
+                      styles.capturePhotoTaglineText,
+                      captureTaglineFont
+                        ? { fontFamily: captureTaglineFont }
+                        : { fontWeight: '300', fontStyle: 'italic' },
+                    ]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.85}
+                  >
+                    {CAPTURE_HERO_TAGLINE}
+                  </Text>
+                </View>
+              </>
+            ) : null}
+          </View>
           </View>
 
           <View
@@ -589,7 +632,8 @@ function CapturerScreen() {
                     captureTitleFont ? { fontFamily: captureTitleFont } : { fontWeight: '500' },
                   ]}
                 >
-                  Quel souvenir pour {childGivenName || "l'enfant"}{' '}
+                  Quel souvenir pour{' '}
+                  {isFamilyMosaic ? 'votre famille' : childGivenName || "l'enfant"}{' '}
                 </Text>
                 <Heart
                   size={CAPTURE_TITLE_HEART_SIZE}

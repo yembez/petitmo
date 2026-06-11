@@ -1,9 +1,11 @@
 import { Text, StyleSheet, type StyleProp, type TextStyle } from 'react-native';
-import { formatDateLong, formatAgeAtMemory, parseLocationForHeader } from '@/utils/date';
+import { formatDateLong, parseLocationForHeader } from '@/utils/date';
+import type { Child } from '@/types/local';
+import { formatFamilyAgesLine } from '@/utils/childrenAge';
 
 type Props = {
   createdAt: string;
-  childBirthdate: string | undefined;
+  familyChildren: Child[];
   location: string | null | undefined;
   /** Style du conteneur : taille, couleur, interligne (les parties gras / léger héritent). */
   containerStyle: StyleProp<TextStyle>;
@@ -11,16 +13,16 @@ type Props = {
 };
 
 /**
- * En-tête fil / favoris : date en gras, âge léger, ville en gras, (région) léger.
+ * En-tête fil / favoris : date en gras, âges famille légers, ville en gras, (région) léger.
  */
 export default function MemoryContextHeaderText({
   createdAt,
-  childBirthdate,
+  familyChildren,
   location,
   containerStyle,
   numberOfLines,
 }: Props) {
-  const age = formatAgeAtMemory(childBirthdate, createdAt);
+  const age = formatFamilyAgesLine(familyChildren, createdAt);
   const { placeBold, regionNormal } = parseLocationForHeader(location);
 
   return (

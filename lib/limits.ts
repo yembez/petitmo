@@ -1,7 +1,7 @@
 import { getUserTier } from '@/lib/userTier'
 import { getCachedUserMode } from '@/lib/userMode'
-import { getLocalMemories } from '@/lib/localDb'
-import { pullMemoriesFromRemoteToLocal } from '@/services/memoriesLocalSync'
+import { getAllLocalMemories } from '@/lib/localDb'
+import { pullFamilyMemoriesFromRemoteToLocal } from '@/services/memoriesLocalSync'
 
 /** TEST ONLY — prod : 50. Valeur réduite à 20 pour faciliter les tests en développement. Ne pas changer sans décision produit explicite. */
 export const FREE_TIER_LIMIT = 20
@@ -27,14 +27,13 @@ export type LimitCheck = {
   isAtLimit: boolean
 }
 
+const FAMILY_LIMIT_CACHE_KEY = '__family__'
 let memoryLimitCache: { childId: string; at: number; result: LimitCheck } | null = null
 const MEMORY_LIMIT_CACHE_MS = 400
 
 /** À appeler après insertion locale d’un souvenir (le décompte a changé). */
-export function invalidateMemoryLimitCache(childId?: string): void {
-  if (!childId || memoryLimitCache?.childId === childId) {
-    memoryLimitCache = null
-  }
+export function invalidateMemoryLimitCache(_childId?: string): void {
+  memoryLimitCache = null
 }
 
 /**
@@ -51,7 +50,7 @@ export async function checkMemoryLimit(
   if (
     !opts?.force &&
     memoryLimitCache &&
-    memoryLimitCache.childId === id &&
+    memoryLimitCache.childId === FAMILY_LIMIT_CACHE_KEY &&
     now - memoryLimitCache.at < MEMORY_LIMIT_CACHE_MS
   ) {
     return memoryLimitCache.result
@@ -66,20 +65,19 @@ export async function checkMemoryLimit(
       limit: Infinity,
       isAtLimit: false,
     }
-    memoryLimitCache = { childId: id, at: now, result: paid }
+    memoryLimitCache = { childId: FAMILY_LIMIT_CACHE_KEY, at: now, result: paid }
     return paid
   }
 
   try {
     if ((await getCachedUserMode()) === 'cloud') {
-      await pullMemoriesFromRemoteToLocal(childId)
+      await pullFamilyMemoriesFromRemoteToLocal()
     }
   } catch {
     // hors ligne : on garde le décompte local actuel
   }
 
-  const memories = getLocalMemories(childId)
-  const current = memories.length
+  const current = getAllLocalMemories().length
 
   const result: LimitCheck = {
     canCreate: current < FREE_TIER_LIMIT,
@@ -87,7 +85,7 @@ export async function checkMemoryLimit(
     limit: FREE_TIER_LIMIT,
     isAtLimit: current >= FREE_TIER_LIMIT,
   }
-  memoryLimitCache = { childId: id, at: now, result }
+  memoryLimitCache = { childId: FAMILY_LIMIT_CACHE_KEY, at: now, result }
   return result
 }
 
@@ -112,14 +110,13 @@ export async function checkVideoLimit(
 
   try {
     if ((await getCachedUserMode()) === 'cloud') {
-      await pullMemoriesFromRemoteToLocal(childId)
+      await pullFamilyMemoriesFromRemoteToLocal()
     }
   } catch {
     // hors ligne
   }
 
-  const memories = getLocalMemories(childId)
-  const videoCount = memories.filter(m => m.type === 'video').length
+  const videoCount = getAllLocalMemories().filter(m => m.type === 'video').length
 
   return {
     canCreate: videoCount < FREE_TIER_VIDEO_LIMIT,

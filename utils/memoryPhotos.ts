@@ -229,9 +229,38 @@ export function getVoiceCoverUriForBookPreview(memory: Memory): string {
   return raw ? normalizeMemoryMediaUriForDisplay(raw) : '';
 }
 
+/**
+ * Variante d’URL quand un fichier local est écrasé au même chemin (`voice_cover.jpg`) :
+ * fait varier l’URI affichée quand `updated_at` change (cache expo-image / SDWebImage).
+ */
+export function appendLocalMediaCacheBuster(
+  uri: string,
+  updatedAt?: string | null,
+): string {
+  const base = uri.trim();
+  if (!base) return '';
+  const rev = (updatedAt ?? '').trim();
+  if (!rev) return base;
+  if (
+    base.startsWith('file:') ||
+    base.startsWith('content:') ||
+    base.startsWith('ph://')
+  ) {
+    const sep = base.includes('?') ? '&' : '?';
+    return `${base}${sep}petitmo_v=${encodeURIComponent(rev)}`;
+  }
+  return base;
+}
+
 /** Fil, favoris, viewer — alias vocal aligné sur la maquette livre. */
 export function getVoiceCoverUriForFeedAndViewer(memory: Memory): string {
   return getVoiceCoverUriForBookPreview(memory);
+}
+
+/** URI affichage cover vocal fil / viewer (cache-buster local sur `updated_at`). */
+export function getVoiceCoverDisplayUriForFeedAndViewer(memory: Memory): string {
+  const raw = getVoiceCoverUriForFeedAndViewer(memory);
+  return appendLocalMediaCacheBuster(raw, memory.updated_at);
 }
 
 /** Vignette / poster vidéo : fil, favoris, viewer immersif, maquette livre. */

@@ -45,7 +45,7 @@ import EditTextModal from '@/components/EditTextModal';
 import { BookPreviewZoomWrap } from '@/components/BookPreviewZoomWrap';
 import { bookPrintFrameMmFor, type BookPhotoPageType } from '@/utils/bookPhotoPrintDpi';
 import { getChildren, getOrSelectFirstChild } from '@/services/children';
-import { getMemories } from '@/services/media';
+import { getFamilyMemories, getMemoryById } from '@/services/media';
 import { loadBookSelectionKeys, memoryIdFromBookSelectionKey } from '@/services/bookSelection';
 import {
   applyBookCoverFromUri,
@@ -53,6 +53,7 @@ import {
   findBookCoverMemory,
   getBook,
   healBookCoverIfNeeded,
+  healBookMemoryIdsIfWiped,
   resolveBookCoverEditorUri,
   resolveBookCoverPrintUri,
   upsertBook,
@@ -84,6 +85,7 @@ import { getBookExportPrepIssues } from '@/services/bookExportPrep';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 
 import type { Child, Memory } from '@/types/local';
+import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 import { canExportBookPdfViaServer } from '@/lib/digitalExportPurchase';
 import { setLastGuestExportEmail } from '@/lib/guestExportPrefs';
 import { setPendingBookOrderPdfPayload } from '@/lib/pendingBookOrderPdf';
@@ -314,6 +316,7 @@ export default function BookPreviewScreen() {
   const dm700 = fontsLoaded ? 'DMSans_700Bold' : undefined;
 
   const [child, setChild] = useState<Child | null>(null);
+  const [familyChildren, setFamilyChildren] = useState<Child[]>([]);
   const [bookMemories, setBookMemories] = useState<Memory[]>([]);
   const [bookSelectionKeys, setBookSelectionKeys] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -502,15 +505,18 @@ export default function BookPreviewScreen() {
       if (!childId) {
         setError('Aucun enfant sélectionné');
         setChild(null);
+        setFamilyChildren([]);
         setBookMemories([]);
         setBookSelectionKeys([]);
         return;
       }
       const children = await getChildren();
+      setFamilyChildren(sortChildrenByBirthdateAsc(children));
       const ch = children.find(c => c.id === childId) ?? null;
       if (!ch) {
         setError('Profil enfant introuvable');
         setChild(null);
+        setFamilyChildren([]);
         setBookMemories([]);
         setBookSelectionKeys([]);
         return;
@@ -526,6 +532,7 @@ export default function BookPreviewScreen() {
           setBookSelectionKeys([]);
           return;
         }
+        b = await healBookMemoryIdsIfWiped(b);
         b = await healBookCoverIfNeeded(b);
         setBookSnapshot(b);
         setCropDpiMetaByKey(prev => {
@@ -554,13 +561,16 @@ export default function BookPreviewScreen() {
         memoryIds = new Set(keys.map(memoryIdFromBookSelectionKey));
       }
 
-      const all = await getMemories(childId);
+      const all = (await getFamilyMemories()) as Memory[];
       setAllMemories(all);
-      const picked = all
-        .filter(m => memoryIds.has(m.id))
-        .sort(
-          (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-        );
+      const picked: Memory[] = [];
+      for (const id of memoryIds) {
+        const row = await getMemoryById(id);
+        if (row) picked.push(row as Memory);
+      }
+      picked.sort(
+        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+      );
       setBookMemories(picked);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Chargement impossible');
@@ -589,9 +599,11 @@ export default function BookPreviewScreen() {
         const hasRotations = Object.keys(rotations).some(k => rotations[k] !== 0);
         const hasEdits = Object.keys(textEditsForSave).length > 0;
         const hasCrops = Object.keys(photoCrops).length > 0;
+        const persistedIds = dedupeMemoryIds(b.memoryIds ?? []);
+        const resolvedIds = dedupeMemoryIds(bookMemories.map(m => m.id));
         await upsertBook({
           ...b,
-          memoryIds: dedupeMemoryIds(bookMemories.map(m => m.id)),
+          memoryIds: resolvedIds.length > 0 ? resolvedIds : persistedIds,
           rotations: hasRotations ? rotations : undefined,
           photoCrops: hasCrops ? photoCrops : undefined,
           textEdits: hasEdits ? textEditsForSave : undefined,
@@ -816,6 +828,11 @@ export default function BookPreviewScreen() {
 
   const unlockAndBack = useCallback(() => {
     unlockOrientationPortrait();
+    /** `back()` = pop stack : l’écran précédent (ex. Livres) glisse depuis la gauche. */
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
     router.replace('/(tabs)/livres');
   }, [router, unlockOrientationPortrait]);
 
@@ -1031,6 +1048,7 @@ export default function BookPreviewScreen() {
           width={editorPage.w}
           height={editorPage.h}
           child={child!}
+          familyChildren={familyChildren}
           memory={m}
           rotation={rot}
           photoCrop={
@@ -1227,6 +1245,7 @@ export default function BookPreviewScreen() {
               width={dims.width}
               height={dims.height}
               child={child!}
+              familyChildren={familyChildren}
               memory={mem}
               rotation={mem ? rotations[mem.id] ?? 0 : 0}
               photoCrop={
@@ -1331,6 +1350,7 @@ export default function BookPreviewScreen() {
               width={w}
               height={h}
               child={child!}
+              familyChildren={familyChildren}
               memory={mem}
               rotation={mem ? rotations[mem.id] ?? 0 : 0}
               photoCrop={
@@ -2023,7 +2043,7 @@ export default function BookPreviewScreen() {
           <Text style={[styles.headerBack, dm500 && { fontFamily: dm500 }]}>← Retour</Text>
         </Pressable>
         <Text style={[styles.headerTitle, dm600 && { fontFamily: dm600 }]} numberOfLines={1}>
-          {child.name} · {pages.length} pages
+          {pages.length} {pages.length <= 1 ? 'page' : 'pages'}
         </Text>
         {isLandscape ? (
           <View style={styles.headerRightSpacer} accessibilityElementsHidden />

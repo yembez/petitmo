@@ -1,11 +1,11 @@
-import { getLocalMemories, listLocalChildren } from '@/lib/localDb';
+import { getAllLocalMemories, listLocalChildren } from '@/lib/localDb';
 import {
   getOrSelectFirstChild,
   getChildren,
   peekSelectedChildIdLastKnown,
   setCaptureTabChildSnapshot,
 } from '@/services/children';
-import { getMemories } from '@/services/media';
+import { getFamilyMemories } from '@/services/media';
 import { listBooks, listBooksFromSqliteSync } from '@/services/books';
 import { setFeedHydrationSnapshots } from '@/services/tabScreensCache';
 
@@ -29,7 +29,7 @@ export function hydrateTabScreensFromSqliteSync(): boolean {
         ? localChildren.find(c => c.id === stored)!
         : localChildren[0];
 
-    const memories = getLocalMemories(activeChild.id);
+    const memories = getAllLocalMemories();
     const books = listBooksFromSqliteSync();
     setFeedHydrationSnapshots(activeChild, memories, books);
     setCaptureTabChildSnapshot(activeChild);
@@ -68,7 +68,7 @@ export function hydrateTabScreensFromLocal(): Promise<void> {
       }
 
       const [memories, books] = await Promise.all([
-        getMemories(activeChild.id),
+        getFamilyMemories(),
         listBooks(),
       ]);
 

@@ -24,7 +24,10 @@ import {
   withLocalFields,
   type MemoryRowDb,
 } from '@/services/memoryRowMapping';
-import { pullMemoriesFromRemoteToLocal } from '@/services/memoriesLocalSync';
+import {
+  pullFamilyMemoriesFromRemoteToLocal,
+  pullMemoriesFromRemoteToLocal,
+} from '@/services/memoriesLocalSync';
 import {
   checkMemoryLimit,
   checkVideoLimit,
@@ -46,6 +49,7 @@ import {
   findMemoryIdByImportAssetId,
   findMemoryIdByImportFingerprint,
   getLocalChild,
+  getAllLocalMemories,
   getLocalMemories,
   getLocalMemoryById,
   updateLocalMemoryContent,
@@ -1999,6 +2003,20 @@ export async function getMemories(childId: string): Promise<MemoryRow[]> {
   return getLocalMemories(childId) as unknown as MemoryRow[];
 }
 
+/** Fil / favoris famille : tous les souvenirs locaux (sync cloud multi-enfants si besoin). */
+export async function getFamilyMemories(): Promise<MemoryRow[]> {
+  if ((await getCachedUserMode()) === 'local') {
+    return getAllLocalMemories() as unknown as MemoryRow[];
+  }
+
+  try {
+    await pullFamilyMemoriesFromRemoteToLocal();
+  } catch {
+    /* hors ligne */
+  }
+  return getAllLocalMemories() as unknown as MemoryRow[];
+}
+
 export async function getMemoryById(memoryId: string) {
   const id = memoryId?.trim();
   if (!id) return null;
@@ -2345,43 +2363,52 @@ export async function updateVoiceMemoryCover(
   localCoverUri: string
 ): Promise<string | null> {
   try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
+    const trimmed = localCoverUri.trim();
+    if (!trimmed) return null;
 
     if ((await getCachedUserMode()) === 'local') {
+      const updatedAt = new Date().toISOString();
       if (Platform.OS === 'web') {
-        const trimmed = localCoverUri.trim();
-        if (!trimmed) return null;
         const existing = getLocalMemoryById(memoryId);
         if (!existing) return null;
         const next: Memory = {
           ...existing,
           voice_cover_url: trimmed,
           voice_cover_path: trimmed,
-          updated_at: new Date().toISOString(),
+          updated_at: updatedAt,
         };
         upsertLocalMemory(next);
+        DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId });
         return trimmed;
       }
       if (!documentDirectory) return null;
       const dir = `${documentDirectory}petitmo_memories/${memoryId}/`;
       await makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
-      const ext = localCoverUri.split('.').pop()?.split('?')[0]?.toLowerCase() || 'jpg';
-      const dest = `${dir}voice_cover.${ext}`;
-      await copyAsync({ from: localCoverUri.trim(), to: dest }).catch(() => null);
+      const ext = trimmed.split('.').pop()?.split('?')[0]?.toLowerCase() || 'jpg';
+      const dest = `${dir}voice_cover_${Date.now()}.${ext}`;
+      try {
+        await copyAsync({ from: trimmed, to: dest });
+      } catch (copyErr) {
+        console.error('updateVoiceMemoryCover copyAsync:', copyErr);
+        return null;
+      }
       const existing = getLocalMemoryById(memoryId);
       if (!existing) return null;
       const next: Memory = {
         ...existing,
         voice_cover_url: dest,
         voice_cover_path: dest,
-        updated_at: new Date().toISOString(),
+        updated_at: updatedAt,
       };
       upsertLocalMemory(next);
+      DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId });
       return dest;
     }
 
-    const up = await uploadVoiceCoverToStorage(user.id, childId, localCoverUri);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
+
+    const up = await uploadVoiceCoverToStorage(user.id, childId, trimmed);
     if (!up) return null;
 
     const { error } = await supabase
@@ -2402,6 +2429,7 @@ export async function updateVoiceMemoryCover(
         updated_at: new Date().toISOString(),
       });
     }
+    DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId });
     void triggerProcessMemory(memoryId);
     return up.publicUrl;
   } catch (error) {

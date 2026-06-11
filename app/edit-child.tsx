@@ -14,7 +14,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowLeft, Camera, Menu } from 'lucide-react-native';
+import { ArrowLeft, Camera, Menu, Trash2 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { scale, verticalScale } from '@/utils/responsive';
@@ -23,6 +23,7 @@ import { THEME } from '@/constants/theme';
 import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import { getLocalChild } from '@/lib/localDb';
 import {
+  deleteChild,
   getChildren,
   setSelectedChild,
   updateChild,
@@ -57,6 +58,8 @@ export default function EditChildScreen() {
   const [photoUrl, setPhotoUrl] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [childrenCount, setChildrenCount] = useState(1);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [isPreparingCrop, setIsPreparingCrop] = useState(false);
   const [cropVisible, setCropVisible] = useState(false);
@@ -99,6 +102,7 @@ export default function EditChildScreen() {
     try {
       setIsLoading(true);
       const children = await getChildren();
+      setChildrenCount(children.length);
       const currentChild = children.find(c => c.id === params.childId);
 
       if (currentChild) {
@@ -234,6 +238,45 @@ export default function EditChildScreen() {
     }
   };
 
+  const handleDelete = () => {
+    if (!child || isDeleting) return;
+
+    const isLastChild = childrenCount <= 1;
+    const childName = normalizeChildGivenName(name) || child.name;
+
+    Alert.alert(
+      isLastChild ? 'Supprimer ce profil et tous vos souvenirs ?' : 'Supprimer ce profil ?',
+      isLastChild
+        ? "C'est votre dernier profil enfant. Tous vos souvenirs et livres seront définitivement supprimés de cet appareil."
+        : `Le profil de ${childName} sera supprimé. Vos souvenirs restent dans le fil famille.`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Supprimer',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              try {
+                setIsDeleting(true);
+                const result = await deleteChild(child.id);
+                if (result.wasLastChild) {
+                  router.replace('/create-child');
+                } else {
+                  router.back();
+                }
+              } catch (error) {
+                console.error('Error deleting child:', error);
+                Alert.alert('Erreur', 'Impossible de supprimer ce profil');
+              } finally {
+                setIsDeleting(false);
+              }
+            })();
+          },
+        },
+      ],
+    );
+  };
+
   if (!fontsLoaded) {
     return (
       <View style={[styles.container, styles.loadingContainer]}>
@@ -354,10 +397,10 @@ export default function EditChildScreen() {
             petitmoCtaStyles.primary,
             petitmoCtaStyles.primaryFullWidth,
             styles.saveButton,
-            isSaving && petitmoCtaStyles.primaryDisabled,
+            (isSaving || isDeleting) && petitmoCtaStyles.primaryDisabled,
           ]}
           onPress={handleSave}
-          disabled={isSaving}
+          disabled={isSaving || isDeleting}
         >
           {isSaving ? (
             <ActivityIndicator size="small" color={PETITMO_CTA_SPINNER_COLOR} />
@@ -365,6 +408,26 @@ export default function EditChildScreen() {
             <Text style={[petitmoCtaStyles.primaryText, dm600 ? { fontFamily: dm600 } : null]}>
               Enregistrer
             </Text>
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.deleteButton, (isSaving || isDeleting) && styles.deleteButtonDisabled]}
+          onPress={handleDelete}
+          disabled={isSaving || isDeleting}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Supprimer ce profil enfant"
+        >
+          {isDeleting ? (
+            <ActivityIndicator size="small" color="#FF3B30" />
+          ) : (
+            <>
+              <Trash2 size={scale(18)} color="#FF3B30" strokeWidth={2} />
+              <Text style={[styles.deleteButtonText, dm500 ? { fontFamily: dm500 } : null]}>
+                Supprimer ce profil
+              </Text>
+            </>
           )}
         </TouchableOpacity>
       </ScrollView>
@@ -506,6 +569,22 @@ const styles = StyleSheet.create({
     marginTop: SPACING.xs,
   },
   saveButton: {
+    marginBottom: SPACING.lg,
+  },
+  deleteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACING.sm,
+    paddingVertical: SPACING.md,
     marginBottom: SPACING.xl,
+  },
+  deleteButtonDisabled: {
+    opacity: 0.5,
+  },
+  deleteButtonText: {
+    fontSize: FONT_SIZES.base,
+    color: '#FF3B30',
+    fontWeight: '500',
   },
 });

@@ -11,6 +11,14 @@ export function filChildLiteKey(c: Child | null): string {
   return `${c.id}|${c.birthdate ?? ''}|${localPh}|${remotePh}|${c.name.trim()}`;
 }
 
+/** Clé stable pour memo fil quand la liste famille change (birthdate, prénom…). */
+export function filFamilyChildrenLiteKey(children: Child[]): string {
+  return [...children]
+    .sort((a, b) => (a.birthdate ?? '').localeCompare(b.birthdate ?? '') || a.id.localeCompare(b.id))
+    .map(c => filChildLiteKey(c))
+    .join('|');
+}
+
 export function filMemoryLiteKey(m: Memory): string {
   return JSON.stringify({
     id: m.id,
@@ -34,11 +42,13 @@ export function filMemoryLiteKey(m: Memory): string {
     c: m.content,
     favp: m.favorite_photo_urls,
     vc: m.voice_cover_url,
+    vcp: m.voice_cover_path,
     mu: m.media_url,
     emu: m.edited_media_url,
     dur: m.duration,
     ca: m.created_at,
     ins: m.inserted_at,
+    ua: m.updated_at,
     coi: m.captured_overlay_ink,
     loc: (m.location ?? '').trim(),
   });

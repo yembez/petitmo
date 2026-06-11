@@ -272,19 +272,21 @@ const styles = StyleSheet.create({
   },
   daySepDate: {
     fontSize: scale(12.5),
-    fontWeight: '600',
-    color: '#4B5563',
+    color: THEME.textPrimary,
   },
   daySepAge: {
     fontSize: scale(12.5),
-    fontWeight: '400',
-    color: '#4B5563',
+    color: THEME.textSecondary,
   },
   daySepLocation: {
     fontSize: scale(12.5),
-    fontWeight: '500',
-    color: '#4B5563',
     textAlign: 'right',
+  },
+  daySepLocationFilled: {
+    color: '#4B5563',
+  },
+  daySepLocationPlaceholder: {
+    color: THEME.textSecondary,
   },
   postMain: {
     width: '100%',

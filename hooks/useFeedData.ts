@@ -9,11 +9,11 @@ import {
   type SetStateAction,
 } from 'react';
 import { DeviceEventEmitter, InteractionManager } from 'react-native';
-import { getLocalMemoryById } from '@/lib/localDb';
+import { getLocalMemoryById, listLocalChildren } from '@/lib/localDb';
 import { useFocusEffect } from '@react-navigation/native';
 import { setStatusBarStyle } from 'expo-status-bar';
 import {
-  getMemories,
+  getFamilyMemories,
   fetchMemoriesByIds,
   requestMissingMediaDerivatives,
 } from '@/services/media';
@@ -45,11 +45,18 @@ import {
   type Memory,
   type Child,
 } from '@/utils/feedHelpers';
+import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
+
+function readFamilyChildrenFromLocal(): Child[] {
+  return sortChildrenByBirthdateAsc(listLocalChildren());
+}
 
 export type UseFeedDataResult = {
   memories: Memory[];
   setMemories: Dispatch<SetStateAction<Memory[]>>;
   child: Child | null;
+  /** Tous les enfants famille (SQLite local) — âges sur les cartes souvenir. */
+  familyChildren: Child[];
   books: Book[];
   isLoading: boolean;
   isRefreshing: boolean;
@@ -63,6 +70,7 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
   memoriesRef.current = memories;
 
   const [child, setChild] = useState<Child | null>(() => feedChildHydrationSnapshot);
+  const [familyChildren, setFamilyChildren] = useState<Child[]>(() => readFamilyChildrenFromLocal());
   const [books, setBooks] = useState<Book[]>(() => [...feedBooksHydrationSnapshot]);
   const childRef = useRef<Child | null>(child);
   childRef.current = child;
@@ -93,6 +101,8 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
       if (!silent) {
         setIsLoading(true);
       }
+
+      setFamilyChildren(readFamilyChildrenFromLocal());
 
       const selectedChildId = await getOrSelectFirstChild();
       if (seq !== loadDataSeqRef.current) return;
@@ -157,7 +167,7 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
       }
 
       const [memoriesData, loadedBooks] = await Promise.all([
-        getMemories(activeChild.id),
+        getFamilyMemories(),
         listBooks(),
       ]);
       if (seq !== loadDataSeqRef.current) return;
@@ -232,19 +242,34 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
       PETITMO_CHILD_PROFILE_UPDATED_EVENT,
       (payload: ChildProfileUpdatedPayload) => {
         void (async () => {
+          setFamilyChildren(readFamilyChildrenFromLocal());
           const id = payload?.childId?.trim();
-          if (!id || childRef.current?.id !== id) return;
+          if (!id) {
+            scheduleSilentReload();
+            return;
+          }
           try {
-            let row = payload.child?.id === id ? payload.child : null;
-            if (!row) {
-              const all = await getChildren();
-              row = all.find(c => c.id === id) ?? null;
+            const all = await getChildren();
+            const selectedId = childRef.current?.id;
+            const activeRow =
+              selectedId != null
+                ? all.find(c => c.id === selectedId) ?? all[0] ?? null
+                : all[0] ?? null;
+            if (activeRow) {
+              const cleaned =
+                activeRow.id === id
+                  ? (await refreshChildProfileFromLocal(id)) ??
+                    (await ensureChildFaceBounds(
+                      payload.child?.id === id ? payload.child : activeRow,
+                    ))
+                  : await ensureChildFaceBounds(activeRow);
+              setChild(cleaned);
+            } else {
+              setChild(null);
             }
-            if (!row) return;
-            const cleaned =
-              (await refreshChildProfileFromLocal(id)) ??
-              (await ensureChildFaceBounds(row));
-            setChild(cleaned);
+            if (id !== selectedId) {
+              scheduleSilentReload();
+            }
           } catch (e) {
             console.error('Fil: refresh profil enfant', e);
           }
@@ -308,6 +333,7 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
   useFocusEffect(
     useCallback(() => {
       setStatusBarStyle('dark');
+      setFamilyChildren(readFamilyChildrenFromLocal());
       const childId = childRef.current?.id;
       if (childId) {
         void refreshChildProfileFromLocal(childId).then(refreshed => {
@@ -419,6 +445,7 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
     memories,
     setMemories,
     child,
+    familyChildren,
     books,
     isLoading,
     isRefreshing,

@@ -19,7 +19,8 @@ import { EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
 import { Video, ResizeMode } from 'expo-av';
 import type { BookPage } from '@/src/book/BookEngine';
 import type { Child, Memory } from '@/types/local';
-import { formatDuration, formatBookLocationShort, formatAgeAtMemory } from '@/utils/date';
+import { formatDuration, formatBookLocationShort } from '@/utils/date';
+import { formatFamilyAgesLine } from '@/utils/childrenAge';
 import { splitPhotoNoteTitleBody, splitVideoTitleBody } from '@/src/book/bookTextParts';
 import type { PhotoCrop } from '@/src/book/photoCrop';
 import { bookPhotoCropImageRect } from '@/utils/bookPhotoCropLayout';
@@ -116,14 +117,13 @@ function dateFrCaps(iso: string): string {
 }
 
 /**
- * Libellé date + âge de l'enfant à la date du souvenir (`memories.created_at` :
- * prise de vue pour photo/vidéo, création pour texte/audio). Ex. « 12 Mars 2026 · 2 ans 3 mois ».
- * DOIT rester identique au PDF serveur (`dateWithAgeCaps` dans `htmlBook.ts`).
+ * Libellé date + âges famille à la date du souvenir (`memories.created_at`).
+ * Parité PDF serveur : Phase 2 (`htmlBook.ts` utilise encore un seul `birthdate`).
  */
-function dateWithAgeCaps(memory: Memory, childBirthdate?: string): string {
+function dateWithAgeCaps(memory: Memory, familyChildren: Child[]): string {
   const iso = memoryBookDisplayDateIso(memory);
   const date = dateFrCaps(iso);
-  const age = formatAgeAtMemory(childBirthdate, iso);
+  const age = formatFamilyAgesLine(familyChildren, iso);
   return age ? `${date} · ${age}` : date;
 }
 
@@ -318,6 +318,8 @@ type Props = {
   width: number;
   height: number;
   child: Child;
+  /** Tous les enfants famille (SQLite) — âges à la date du souvenir. Défaut : `[child]`. */
+  familyChildren?: Child[];
   memory: Memory | null;
   rotation: number;
   /** Recadrage photo (pan + zoom). */
@@ -368,7 +370,10 @@ export default function MaquetteBookPages(props: Props) {
     onRequestTextEdit,
     qrUrl,
     coverYearLabel,
+    familyChildren: familyChildrenProp,
   } = props;
+
+  const familyChildren = familyChildrenProp ?? [child];
 
   const [fontsLoaded] = useFonts({
     DMSans_400Regular,
@@ -455,7 +460,7 @@ export default function MaquetteBookPages(props: Props) {
       return (
         <MaquettePhotoSimple
           memory={memory}
-          childBirthdate={child?.birthdate ?? undefined}
+          familyChildren={familyChildren}
           width={width}
           height={height}
           pad={pad}
@@ -475,7 +480,7 @@ export default function MaquetteBookPages(props: Props) {
       return (
         <MaquettePhotoNote
           memory={memory}
-          childBirthdate={child?.birthdate ?? undefined}
+          familyChildren={familyChildren}
           width={width}
           height={height}
           pad={pad}
@@ -496,7 +501,7 @@ export default function MaquetteBookPages(props: Props) {
       return (
         <MaquetteQuote
           memory={memory}
-          childBirthdate={child?.birthdate ?? undefined}
+          familyChildren={familyChildren}
           width={width}
           height={height}
           pad={pad}
@@ -515,7 +520,7 @@ export default function MaquetteBookPages(props: Props) {
       return (
         <MaquetteAudio
           memory={memory}
-          childBirthdate={child?.birthdate ?? undefined}
+          familyChildren={familyChildren}
           width={width}
           height={height}
           pad={pad}
@@ -537,7 +542,7 @@ export default function MaquetteBookPages(props: Props) {
       return (
         <MaquetteVideo
           memory={memory}
-          childBirthdate={child?.birthdate ?? undefined}
+          familyChildren={familyChildren}
           width={width}
           height={height}
           pad={pad}
@@ -702,7 +707,7 @@ function MaquetteCover({
 
 function MaquettePhotoSimple({
   memory,
-  childBirthdate,
+  familyChildren,
   width,
   height,
   pad,
@@ -717,7 +722,7 @@ function MaquettePhotoSimple({
   garamondIt,
 }: {
   memory: Memory;
-  childBirthdate?: string;
+  familyChildren: Child[];
   width: number;
   height: number;
   pad: number;
@@ -771,7 +776,7 @@ function MaquettePhotoSimple({
       >
         <View style={[styles.photoDateLocRow, { gap: pdfMmToPreviewPxW(3, width) }]}>
           <Text style={[styles.photoDate, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
-            {dateWithAgeCaps(memory, childBirthdate)}
+            {dateWithAgeCaps(memory, familyChildren)}
           </Text>
           {bookLoc ? (
             <Text
@@ -803,7 +808,7 @@ function MaquettePhotoSimple({
 
 function MaquettePhotoNote({
   memory,
-  childBirthdate,
+  familyChildren,
   width,
   height,
   pad,
@@ -819,7 +824,7 @@ function MaquettePhotoNote({
   garamondIt,
 }: {
   memory: Memory;
-  childBirthdate?: string;
+  familyChildren: Child[];
   width: number;
   height: number;
   pad: number;
@@ -876,7 +881,7 @@ function MaquettePhotoNote({
               ]}
             >
               <Text style={[styles.page4Meta, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
-                {dateWithAgeCaps(memory, childBirthdate)}
+                {dateWithAgeCaps(memory, familyChildren)}
               </Text>
               {bookLoc ? (
                 <Text
@@ -910,7 +915,7 @@ function MaquettePhotoNote({
 
 function MaquetteQuote({
   memory,
-  childBirthdate,
+  familyChildren,
   width,
   height,
   pad,
@@ -924,7 +929,7 @@ function MaquetteQuote({
   garamondIt,
 }: {
   memory: Memory;
-  childBirthdate?: string;
+  familyChildren: Child[];
   width: number;
   height: number;
   pad: number;
@@ -1029,7 +1034,7 @@ function MaquetteQuote({
             </View>
             <View style={styles.photoDateLocRow}>
               <Text style={[styles.photoDate, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
-                {dateWithAgeCaps(memory, childBirthdate)}
+                {dateWithAgeCaps(memory, familyChildren)}
               </Text>
               {bookLoc ? (
                 <Text
@@ -1050,7 +1055,7 @@ function MaquetteQuote({
 
 function MaquetteAudio({
   memory,
-  childBirthdate,
+  familyChildren,
   width,
   height,
   pad,
@@ -1067,7 +1072,7 @@ function MaquetteAudio({
   garamondIt,
 }: {
   memory: Memory;
-  childBirthdate?: string;
+  familyChildren: Child[];
   width: number;
   height: number;
   pad: number;
@@ -1146,7 +1151,7 @@ function MaquetteAudio({
           </View>
           <View style={[styles.page4MetaRow, { flex: 1, minWidth: 0 }]}>
             <Text style={[styles.page4Meta, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
-              {dateWithAgeCaps(memory, childBirthdate)}
+              {dateWithAgeCaps(memory, familyChildren)}
             </Text>
             {bookLoc ? (
               <Text
@@ -1260,7 +1265,7 @@ function MaquetteAudio({
 
 function MaquetteVideo({
   memory,
-  childBirthdate,
+  familyChildren,
   width,
   height,
   pad,
@@ -1273,7 +1278,7 @@ function MaquetteVideo({
   garamondIt,
 }: {
   memory: Memory;
-  childBirthdate?: string;
+  familyChildren: Child[];
   width: number;
   height: number;
   pad: number;
@@ -1316,7 +1321,7 @@ function MaquetteVideo({
           <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
             <View style={[styles.noteMetaRow, { marginBottom: Math.round(8 * typoScale) }]}>
               <Text style={[styles.noteMeta, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
-                {dateWithAgeCaps(memory, childBirthdate)}
+                {dateWithAgeCaps(memory, familyChildren)}
               </Text>
               {bookLoc ? (
                 <Text

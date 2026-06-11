@@ -10,7 +10,7 @@ import {
   type LocalBookRow,
 } from '@/lib/localDb';
 import { awaitPhotoPrintDerivativesForMemory } from '@/services/memoryLocalStore';
-import { getMemories, toggleFavorite, uploadMedia } from '@/services/media';
+import { getFamilyMemories, toggleFavorite, uploadMedia } from '@/services/media';
 import { getUserTier } from '@/lib/userTier';
 import { supabase } from '@/lib/supabase';
 import { FREE_TIER_BOOK_AUDIO_MAX_COUNT, FREE_TIER_BOOK_VOICE_MAX_DURATION } from '@/lib/limits';
@@ -581,7 +581,7 @@ export async function applyBookCoverFromUri(params: {
   } else {
     let owner = findPhotoMemoryByCoverRef(coverRef, book.memoryIds);
     if (!owner) {
-      const all = await getMemories(params.childId);
+      const all = await getFamilyMemories();
       owner = findPhotoMemoryByCoverRef(
         coverRef,
         all.map(m => m.id),
@@ -615,6 +615,36 @@ export async function applyBookCoverFromUri(params: {
     editorUri: resolveBookCoverEditorUri(book),
     importedMemoryId,
   };
+}
+
+/**
+ * Si `memoryIds` a été vidé par erreur (ex. viewer livre + auto-save), tente une restauration
+ * depuis le backup cloud Petitmo+ (dernière version distante encore peuplée).
+ */
+export async function healBookMemoryIdsIfWiped(book: Book): Promise<Book> {
+  if ((book.memoryIds ?? []).length > 0) return book;
+
+  const tier = await getUserTier();
+  if (tier !== 'paid') return book;
+
+  const { data: u } = await supabase.auth.getUser();
+  const user = u.user;
+  if (!user) return book;
+
+  const { data, error } = await booksTable()
+    .select('memory_ids')
+    .eq('id', book.id)
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  if (error || !data) return book;
+
+  const remoteIds = safeStringArray((data as { memory_ids?: unknown }).memory_ids);
+  if (remoteIds.length === 0) return book;
+
+  const healed: Book = { ...(normalizeBook(book) ?? book), memoryIds: remoteIds };
+  await upsertBook(healed);
+  return healed;
 }
 
 /**
@@ -658,6 +688,14 @@ export async function healBookCoverIfNeeded(book: Book): Promise<Book> {
   }
 
   return current;
+}
+
+export async function healAllBookMemoryIdsIfWiped(books: readonly Book[]): Promise<Book[]> {
+  const out: Book[] = [];
+  for (const b of books) {
+    out.push(await healBookMemoryIdsIfWiped(b));
+  }
+  return out;
 }
 
 export async function healAllBookCovers(books: readonly Book[]): Promise<Book[]> {

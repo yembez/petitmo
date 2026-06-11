@@ -109,8 +109,8 @@ export const THEME = {
   captureMaquetteViolet: '#5B47D6',
   /** Icône + libellé onglet actif tab bar. */
   tabBarActiveTint: BRAND_CTA_ORANGE,
-  /** Icône + libellé onglets inactifs. */
-  tabBarInactiveTint: '#8E8E93',
+  /** Icône + libellé onglets inactifs (assombris vs `textSecondary`). */
+  tabBarInactiveTint: '#636366',
   /** Fond tab bar — aligné fond d’écran charte. */
   tabBarBackground: APP_SCREEN_BG,
   /** @deprecated — `tabBarBackground` */

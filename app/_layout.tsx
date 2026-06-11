@@ -255,7 +255,14 @@ export default function RootLayout() {
           }}
         />
         <Stack.Screen name="memory-view" />
-        <Stack.Screen name="book-preview" />
+        <Stack.Screen
+          name="book-preview"
+          options={{
+            animation: 'slide_from_right',
+            gestureEnabled: true,
+            fullScreenGestureEnabled: true,
+          }}
+        />
         <Stack.Screen name="book-order" />
         <Stack.Screen name="book-finalize-media" />
         <Stack.Screen name="book-order-confirmation" />

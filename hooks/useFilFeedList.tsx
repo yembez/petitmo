@@ -25,6 +25,11 @@ export function useFilFeedList(
   memories: Memory[],
   setMemories: Dispatch<SetStateAction<Memory[]>>,
   child: Child | null,
+  familyChildren: Child[],
+  feedDateFontFamily: string | undefined,
+  feedAgeFontFamily: string | undefined,
+  feedLocationFilledFontFamily: string | undefined,
+  feedLocationPlaceholderFontFamily: string | undefined,
   pendingUploads: PendingUpload[],
   uploadingVoiceCoverId: string | null,
   setPostHeights: Dispatch<SetStateAction<number[]>>,
@@ -69,6 +74,11 @@ export function useFilFeedList(
         memories={memories}
         setPostHeights={setPostHeights}
         child={child}
+        familyChildren={familyChildren}
+        feedDateFontFamily={feedDateFontFamily}
+        feedAgeFontFamily={feedAgeFontFamily}
+        feedLocationFilledFontFamily={feedLocationFilledFontFamily}
+        feedLocationPlaceholderFontFamily={feedLocationPlaceholderFontFamily}
         uploadingVoiceCoverId={uploadingVoiceCoverId}
         setMemories={setMemories}
         toggleFavorite={toggleFavorite}
@@ -86,6 +96,11 @@ export function useFilFeedList(
     [
       memories,
       child,
+      familyChildren,
+      feedDateFontFamily,
+      feedAgeFontFamily,
+      feedLocationFilledFontFamily,
+      feedLocationPlaceholderFontFamily,
       uploadingVoiceCoverId,
       setMemories,
       setPostHeights,
@@ -109,7 +124,12 @@ export function useFilFeedList(
           return renderMemory(committed, memoryIndex);
         }
         if (item.row.status === 'error') {
-          return <PendingFeedUploadCard p={item.row} />;
+          return (
+            <PendingFeedUploadCard
+              p={item.row}
+              feedLocationFilledFontFamily={feedLocationFilledFontFamily}
+            />
+          );
         }
         if (canRenderOptimisticPendingRow(item.row)) {
           const optimistic = buildOptimisticMemoryForPending(item.row, child);
@@ -118,12 +138,17 @@ export function useFilFeedList(
             isOptimisticFeedPending: true,
           });
         }
-        return <PendingFeedUploadCard p={item.row} />;
+        return (
+          <PendingFeedUploadCard
+            p={item.row}
+            feedLocationFilledFontFamily={feedLocationFilledFontFamily}
+          />
+        );
       }
       const memoryIndex = memoryIndexById.get(item.memory.id) ?? 0;
       return renderMemory(item.memory, memoryIndex);
     },
-    [memoryIndexById, child, renderMemory]
+    [memoryIndexById, child, renderMemory, feedLocationFilledFontFamily]
   );
 
   return { feedData, renderItem };

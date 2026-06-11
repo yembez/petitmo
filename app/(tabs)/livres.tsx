@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { BookOpen, Plus } from 'lucide-react-native';
 import { useFonts, EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
+import { Inter_500Medium, Inter_700Bold } from '@expo-google-fonts/inter';
 import { Swipeable } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { scale, verticalScale } from '@/utils/responsive';
@@ -29,6 +30,7 @@ import {
   booksListVisualSignature,
   deleteBook,
   healAllBookCovers,
+  healAllBookMemoryIdsIfWiped,
   listBooks,
   listBooksFromSqliteSync,
   resolveBookListRowCoverUri,
@@ -47,6 +49,8 @@ const BOOK_ROW_PRESS_SPRING = { damping: 18, stiffness: 320 };
 type BookListRowProps = {
   book: Book;
   coverTitleFontFamily?: string;
+  listTitleFontFamily?: string;
+  listMetaFontFamily?: string;
   onOpen: (bookId: string) => void;
   onDelete: (book: Book) => void;
 };
@@ -64,6 +68,8 @@ function coverCropsEqual(
 
 function bookListRowPropsEqual(prev: BookListRowProps, next: BookListRowProps): boolean {
   if (prev.coverTitleFontFamily !== next.coverTitleFontFamily) return false;
+  if (prev.listTitleFontFamily !== next.listTitleFontFamily) return false;
+  if (prev.listMetaFontFamily !== next.listMetaFontFamily) return false;
   if (prev.onOpen !== next.onOpen || prev.onDelete !== next.onDelete) return false;
   const a = prev.book;
   const b = next.book;
@@ -80,6 +86,8 @@ function bookListRowPropsEqual(prev: BookListRowProps, next: BookListRowProps): 
 const BookListRow = memo(function BookListRow({
   book,
   coverTitleFontFamily,
+  listTitleFontFamily,
+  listMetaFontFamily,
   onOpen,
   onDelete,
 }: BookListRowProps) {
@@ -137,10 +145,25 @@ const BookListRow = memo(function BookListRow({
           titleFontFamily={coverTitleFontFamily}
         />
         <View style={styles.rowText}>
-          <Text style={styles.rowTitle} numberOfLines={2}>
+          <Text
+            style={[
+              styles.rowTitle,
+              listTitleFontFamily
+                ? { fontFamily: listTitleFontFamily }
+                : { fontWeight: '700' },
+            ]}
+            numberOfLines={2}
+          >
             {book.title}
           </Text>
-          <Text style={styles.rowMeta}>
+          <Text
+            style={[
+              styles.rowMeta,
+              listMetaFontFamily
+                ? { fontFamily: listMetaFontFamily }
+                : { fontWeight: '500' },
+            ]}
+          >
             {count === 0
               ? 'Aucun souvenir'
               : count === 1
@@ -164,8 +187,14 @@ function LivresScreen() {
   const booksRef = useRef(books);
   const booksSigRef = useRef(booksListVisualSignature(books));
 
-  const [coverFontsLoaded] = useFonts({ EBGaramond_400Regular_Italic });
-  const coverTitleFontFamily = coverFontsLoaded ? 'EBGaramond_400Regular_Italic' : undefined;
+  const [listFontsLoaded] = useFonts({
+    EBGaramond_400Regular_Italic,
+    Inter_500Medium,
+    Inter_700Bold,
+  });
+  const coverTitleFontFamily = listFontsLoaded ? 'EBGaramond_400Regular_Italic' : undefined;
+  const listTitleFontFamily = listFontsLoaded ? 'Inter_700Bold' : undefined;
+  const listMetaFontFamily = listFontsLoaded ? 'Inter_500Medium' : undefined;
 
   booksRef.current = books;
 
@@ -180,7 +209,7 @@ function LivresScreen() {
   const load = useCallback(async (opts?: { pull?: boolean; force?: boolean }) => {
     if (opts?.pull) setRefreshing(true);
     try {
-      const bks = await healAllBookCovers(await listBooks());
+      const bks = await healAllBookCovers(await healAllBookMemoryIdsIfWiped(await listBooks()));
       if (opts?.force) {
         booksSigRef.current = booksListVisualSignature(bks);
         setBooks(bks);
@@ -199,7 +228,9 @@ function LivresScreen() {
       if (booksRef.current.length > 0) {
         applyBooksList(listBooksFromSqliteSync());
         void (async () => {
-          const healed = await healAllBookCovers(listBooksFromSqliteSync());
+          const healed = await healAllBookCovers(
+            await healAllBookMemoryIdsIfWiped(listBooksFromSqliteSync()),
+          );
           applyBooksList(healed);
         })();
         return;
@@ -261,11 +292,13 @@ function LivresScreen() {
       <BookListRow
         book={item}
         coverTitleFontFamily={coverTitleFontFamily}
+        listTitleFontFamily={listTitleFontFamily}
+        listMetaFontFamily={listMetaFontFamily}
         onOpen={openBook}
         onDelete={confirmDelete}
       />
     ),
-    [coverTitleFontFamily, openBook, confirmDelete]
+    [coverTitleFontFamily, listTitleFontFamily, listMetaFontFamily, openBook, confirmDelete]
   );
 
   const startCreateFlowToFavoris = useCallback(() => {
@@ -282,7 +315,16 @@ function LivresScreen() {
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + verticalScale(12) }]}>
-        <Text style={styles.title}>Livres</Text>
+        <Text
+          style={[
+            styles.title,
+            listTitleFontFamily
+              ? { fontFamily: listTitleFontFamily }
+              : { fontWeight: '700' },
+          ]}
+        >
+          Livres
+        </Text>
         <TouchableOpacity
           style={styles.headerCta}
           onPress={openCreateFlow}
@@ -470,7 +512,6 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: scale(26),
-    fontWeight: '800',
     color: THEME.textPrimary,
     letterSpacing: scale(-0.4),
   },
@@ -532,13 +573,11 @@ const styles = StyleSheet.create({
   },
   rowTitle: {
     fontSize: scale(16),
-    fontWeight: '800',
     color: THEME.textPrimary,
   },
   rowMeta: {
     marginTop: verticalScale(4),
     fontSize: scale(13),
-    fontWeight: '600',
     color: THEME.textMuted,
   },
   chevron: {

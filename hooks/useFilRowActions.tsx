@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, type Dispatch, type SetStateAction } from 'react';
 import { Alert } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { getLocalMemoryById } from '@/lib/localDb';
 import {
   updateMemoryContent,
   updateMemoryLocation,
@@ -67,7 +68,9 @@ export function useFilRowActions(setMemories: Dispatch<SetStateAction<Memory[]>>
 
   const handlePickVoiceCover = useCallback(
     async (memory: Memory) => {
-      if (memory.type !== 'voice' || !memory.media_url) return;
+      if (memory.type !== 'voice') return;
+      const hasAudio = !!(memory.media_url?.trim() || memory.local_media_path?.trim());
+      if (!hasAudio) return;
       try {
         const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (!perm.granted) {
@@ -85,7 +88,19 @@ export function useFilRowActions(setMemories: Dispatch<SetStateAction<Memory[]>>
         const url = await updateVoiceMemoryCover(memory.id, memory.child_id, result.assets[0].uri);
         setUploadingVoiceCoverId(null);
         if (url) {
-          setMemories(prev => prev.map(m => (m.id === memory.id ? { ...m, voice_cover_url: url } : m)));
+          const fresh = getLocalMemoryById(memory.id);
+          setMemories(prev =>
+            prev.map(m => {
+              if (m.id !== memory.id) return m;
+              if (fresh) return fresh;
+              return {
+                ...m,
+                voice_cover_url: url,
+                voice_cover_path: url,
+                updated_at: new Date().toISOString(),
+              };
+            }),
+          );
         } else {
           Alert.alert('Erreur', 'Impossible d’enregistrer la photo de fond.');
         }

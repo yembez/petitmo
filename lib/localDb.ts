@@ -155,6 +155,16 @@ export function getLocalMemories(childId: string): Memory[] {
   return rows.map(deserializeMemory)
 }
 
+/** Tous les souvenirs famille — ordre fil (`inserted_at` prioritaire). */
+export function getAllLocalMemories(): Memory[] {
+  const rows = db.getAllSync(
+    `SELECT * FROM memories
+     ORDER BY COALESCE(inserted_at, created_at) DESC`,
+    [],
+  ) as Record<string, unknown>[]
+  return rows.map(deserializeMemory)
+}
+
 export type LocalBookRow = {
   id: string
   title: string
@@ -505,6 +515,19 @@ export function getFirstLocalChild(): Child | null {
     []
   ) as Record<string, unknown> | undefined
   return row ? deserializeChild(row) : null
+}
+
+export function deleteLocalChild(childId: string): void {
+  db.runSync('DELETE FROM children WHERE id = ?', [childId.trim()])
+}
+
+/** Réassigne les souvenirs locaux d’un enfant supprimé (fil familial). */
+export function reassignLocalMemoriesChildId(fromChildId: string, toChildId: string): void {
+  const from = fromChildId.trim()
+  const to = toChildId.trim()
+  if (!from || !to || from === to) return
+  const now = new Date().toISOString()
+  db.runSync('UPDATE memories SET child_id = ?, updated_at = ? WHERE child_id = ?', [to, now, from])
 }
 
 function deserializeMemory(row: Record<string, unknown>): Memory {

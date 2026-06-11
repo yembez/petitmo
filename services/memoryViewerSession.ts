@@ -1,10 +1,12 @@
-import type { Memory } from '@/types/local';
+import type { Child, Memory } from '@/types/local';
 
 export type MemoryViewerSessionPayload = {
   memories: Memory[];
   initialIndex: number;
   /** Index dans l’album (souvenir photo multi-images) à l’ouverture depuis le fil. */
   initialAlbumPhotoIndex?: number;
+  /** Profils famille pour les âges (évite un chargement async vide dans le viewer). */
+  familyChildren?: Child[];
 };
 
 let session: MemoryViewerSessionPayload | null = null;

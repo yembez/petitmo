@@ -1,6 +1,12 @@
 import { supabase } from '@/lib/supabase'
 import { getCachedUserMode } from '@/lib/userMode'
-import { getLocalMemories, getLocalMemoryById, upsertLocalMemories } from '@/lib/localDb'
+import {
+  getAllLocalMemories,
+  getLocalMemories,
+  getLocalMemoryById,
+  listLocalChildren,
+  upsertLocalMemories,
+} from '@/lib/localDb'
 import type { Memory } from '@/types/local'
 import { mergeServerMemoryRowWithExistingLocal } from '@/services/memoryRowMapping'
 
@@ -34,4 +40,15 @@ export async function pullMemoriesFromRemoteToLocal(childId: string): Promise<Me
   } catch {
     return getLocalMemories(childId)
   }
+}
+
+/** Aligne SQLite sur le cloud pour **tous** les enfants locaux, puis renvoie le fil famille. */
+export async function pullFamilyMemoriesFromRemoteToLocal(): Promise<Memory[]> {
+  if ((await getCachedUserMode()) === 'local') {
+    return getAllLocalMemories()
+  }
+
+  const children = listLocalChildren()
+  await Promise.all(children.map(c => pullMemoriesFromRemoteToLocal(c.id)))
+  return getAllLocalMemories()
 }

@@ -1,12 +1,32 @@
 import { supabase } from '@/lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
-import { copyAsync, documentDirectory, downloadAsync, getInfoAsync, makeDirectoryAsync } from 'expo-file-system/legacy';
+import {
+  copyAsync,
+  deleteAsync,
+  documentDirectory,
+  downloadAsync,
+  getInfoAsync,
+  makeDirectoryAsync,
+} from 'expo-file-system/legacy';
 import { DeviceEventEmitter, Platform } from 'react-native';
 import type { Database } from '@/types/database';
 import type { Child as LocalChild } from '@/types/local';
 import { getCachedUserMode } from '@/lib/userMode';
-import { getLocalChild, listLocalChildren, upsertLocalChild } from '@/lib/localDb';
+import {
+  deleteLocalBook,
+  deleteLocalChild,
+  deleteLocalMemory,
+  getAllLocalMemories,
+  getLocalChild,
+  listLocalBooks,
+  listLocalChildren,
+  reassignLocalMemoriesChildId,
+  upsertLocalChild,
+} from '@/lib/localDb';
+import { deleteLocalMediaFiles } from '@/lib/localCleanup';
+import { invalidateMemoryLimitCache } from '@/lib/limits';
+import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 import { getSignedMediaDisplayUrl } from '@/lib/mediaSignedUrl';
 import { resolveChildProfileImageUri } from '@/utils/childPhotoUri';
 import { ensureLocalImageForPalette } from '@/hooks/ensureLocalImageForPalette';
@@ -797,6 +817,136 @@ export async function getOrSelectFirstChild(): Promise<string | null> {
     console.error('Get or select first child error:', error);
     return null;
   }
+}
+
+const CHILD_ORIGINAL_PHOTO_KEY_PREFIX = '@petitmo_child_original_photo_v1:';
+
+export type DeleteChildResult = {
+  deletedChildId: string;
+  wasLastChild: boolean;
+  memoriesPurged: boolean;
+  reassignedToChildId?: string;
+};
+
+function pickReassignTargetChildId(remaining: LocalChild[]): string | null {
+  const sorted = sortChildrenByBirthdateAsc(remaining);
+  return sorted[0]?.id ?? null;
+}
+
+async function deleteChildAvatarFiles(child: LocalChild): Promise<void> {
+  if (Platform.OS !== 'web') {
+    const lp = (child.local_photo_path ?? '').trim();
+    if (lp) {
+      try {
+        await deleteAsync(lp, { idempotent: true });
+      } catch {
+        /* fichier déjà absent */
+      }
+    }
+    if (documentDirectory) {
+      const root = `${documentDirectory}petitmo_children/`;
+      for (const ext of ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif']) {
+        try {
+          await deleteAsync(`${root}${child.id}.${ext}`, { idempotent: true });
+        } catch {
+          /* */
+        }
+      }
+    }
+  }
+  try {
+    await AsyncStorage.removeItem(`${CHILD_ORIGINAL_PHOTO_KEY_PREFIX}${child.id}`);
+  } catch {
+    /* */
+  }
+}
+
+async function purgeAllLocalMemoriesAndBooks(): Promise<void> {
+  const memories = getAllLocalMemories();
+  for (const memory of memories) {
+    await deleteLocalMediaFiles(memory);
+    deleteLocalMemory(memory.id);
+  }
+  for (const book of listLocalBooks()) {
+    deleteLocalBook(book.id);
+  }
+}
+
+/**
+ * Supprime un profil enfant.
+ * — Plusieurs enfants : profil retiré, souvenirs conservés (réassignés pour la FK technique).
+ * — Dernier enfant : profil + tous les souvenirs (+ livres locaux) supprimés.
+ */
+export async function deleteChild(childId: string): Promise<DeleteChildResult> {
+  const id = childId.trim();
+  if (!id) throw new Error('Identifiant enfant invalide');
+
+  const child = getLocalChild(id);
+  if (!child) throw new Error('Profil introuvable');
+
+  const allChildren = listLocalChildren();
+  const remaining = allChildren.filter(c => c.id !== id);
+  const wasLastChild = remaining.length === 0;
+  const reassignTargetId = wasLastChild ? null : pickReassignTargetChildId(remaining);
+
+  if (!wasLastChild && !reassignTargetId) {
+    throw new Error('Impossible de réassigner les souvenirs');
+  }
+
+  if (wasLastChild) {
+    await purgeAllLocalMemoriesAndBooks();
+  } else {
+    reassignLocalMemoriesChildId(id, reassignTargetId!);
+  }
+
+  const isCloud = (await getCachedUserMode()) === 'cloud';
+  if (isCloud) {
+    const { data: auth } = await supabase.auth.getUser();
+    const user = auth.user;
+    if (!user) throw new Error('User not authenticated');
+
+    if (!wasLastChild) {
+      const { error: reassignErr } = await supabase
+        .from('memories')
+        .update({ child_id: reassignTargetId! })
+        .eq('child_id', id);
+      if (reassignErr) throw reassignErr;
+    }
+
+    const { error: delChildErr } = await supabase.from('children').delete().eq('id', id);
+    if (delChildErr) throw delChildErr;
+  }
+
+  await deleteChildAvatarFiles(child);
+  deleteLocalChild(id);
+
+  const selected = await getSelectedChild();
+  if (selected === id) {
+    if (wasLastChild) {
+      selectedChildIdLastKnown = null;
+      setCaptureTabChildSnapshot(null);
+      try {
+        await AsyncStorage.removeItem(SELECTED_CHILD_KEY);
+      } catch {
+        /* */
+      }
+    } else if (reassignTargetId) {
+      await setSelectedChild(reassignTargetId);
+    }
+  }
+
+  invalidateMemoryLimitCache();
+  DeviceEventEmitter.emit('petitmo:memories-invalidate');
+  for (const c of remaining) {
+    notifyChildProfileUpdated(c.id, c);
+  }
+
+  return {
+    deletedChildId: id,
+    wasLastChild,
+    memoriesPurged: wasLastChild,
+    reassignedToChildId: reassignTargetId ?? undefined,
+  };
 }
 
 export async function updateChild(

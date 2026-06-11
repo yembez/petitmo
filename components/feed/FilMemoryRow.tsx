@@ -42,6 +42,7 @@ import {
 import { ScrollableTextBlock } from '@/components/ScrollableTextBlock';
 import PhotoMosaic from "@/components/PhotoMosaic";
 import {
+  appendLocalMediaCacheBuster,
   getVoiceCoverUriForFeedAndViewer,
   isAlbumFullyFavorited,
   isFeedMultiPhotoAlbum,
@@ -62,8 +63,8 @@ import type { PendingUpload } from "@/contexts/PendingMediaUploadsContext";
 import {
   formatDuration,
   formatDateLong,
-  formatAgeAtMemory,
 } from '@/utils/date';
+import { formatFamilyAgesLine } from '@/utils/childrenAge';
 import {
   capturedMediaDateLabel,
   shouldShowCapturedMediaDateOverlay,
@@ -71,6 +72,7 @@ import {
 import AudioPlayer from "@/components/AudioPlayer";
 import {
   filChildLiteKey,
+  filFamilyChildrenLiteKey,
   filMemoryLiteKey,
   type Memory,
   type Child,
@@ -107,6 +109,11 @@ type FilMemoryRowProps = {
   memories: Memory[];
   setPostHeights: Dispatch<SetStateAction<number[]>>;
   child: Child | null;
+  familyChildren: Child[];
+  feedDateFontFamily?: string;
+  feedAgeFontFamily?: string;
+  feedLocationFilledFontFamily?: string;
+  feedLocationPlaceholderFontFamily?: string;
   uploadingVoiceCoverId: string | null;
   setMemories: Dispatch<SetStateAction<Memory[]>>;
   toggleFavorite: (id: string) => void | Promise<void>;
@@ -130,10 +137,19 @@ function filMemoryRowDataPropsEqual(prev: FilMemoryRowProps, next: FilMemoryRowP
   if (!!prev.isOptimisticFeedPending !== !!next.isOptimisticFeedPending) return false;
   if (!!prev.isFeedVideoAutoplay !== !!next.isFeedVideoAutoplay) return false;
   if (filChildLiteKey(prev.child) !== filChildLiteKey(next.child)) return false;
+  if (filFamilyChildrenLiteKey(prev.familyChildren) !== filFamilyChildrenLiteKey(next.familyChildren)) {
+    return false;
+  }
   if (filMemoryLiteKey(prev.memory) !== filMemoryLiteKey(next.memory)) return false;
   return true;
 }
-const PendingFeedUploadCard = memo(function PendingFeedUploadCard({ p }: { p: PendingUpload }) {
+const PendingFeedUploadCard = memo(function PendingFeedUploadCard({
+  p,
+  feedLocationFilledFontFamily,
+}: {
+  p: PendingUpload;
+  feedLocationFilledFontFamily?: string;
+}) {
   const isVideo = p.kind === 'video';
   const preview0 = p.previewUris[0];
   return (
@@ -148,7 +164,16 @@ const PendingFeedUploadCard = memo(function PendingFeedUploadCard({ p }: { p: Pe
           </View>
           <View style={styles.dayHeaderRight}>
             {!!p.locationPreview?.trim() ? (
-              <Text style={styles.daySepLocation} numberOfLines={1}>
+              <Text
+                style={[
+                  styles.daySepLocation,
+                  styles.daySepLocationFilled,
+                  feedLocationFilledFontFamily
+                    ? { fontFamily: feedLocationFilledFontFamily }
+                    : null,
+                ]}
+                numberOfLines={1}
+              >
                 {`à ${p.locationPreview.trim().replace(/\s*\([^)]*\)\s*$/, '').trim()}`}
               </Text>
             ) : null}
@@ -209,6 +234,11 @@ function FilMemoryRow({
   memories,
   setPostHeights,
   child,
+  familyChildren,
+  feedDateFontFamily,
+  feedAgeFontFamily,
+  feedLocationFilledFontFamily,
+  feedLocationPlaceholderFontFamily,
   uploadingVoiceCoverId,
   setMemories,
   toggleFavorite,
@@ -241,14 +271,15 @@ function FilMemoryRow({
   const videoPosterUri = normalizeVideoPlaybackUri((videoPosterSigned || videoPosterRaw).trim());
   const voiceCoverRaw = getVoiceCoverUriForFeedAndViewer(memory);
   const voiceCoverSigned = useSignedMediaUrl(voiceCoverRaw || null) ?? '';
-  const voiceCoverDisplayUri = normalizeMemoryMediaUriForDisplay(
-    (voiceCoverSigned || voiceCoverRaw).trim(),
+  const voiceCoverDisplayUri = appendLocalMediaCacheBuster(
+    normalizeMemoryMediaUriForDisplay((voiceCoverSigned || voiceCoverRaw).trim()),
+    memory.updated_at,
   );
   const hasVoiceCover = !!voiceCoverDisplayUri.trim();
   const voicePlaybackSigned =
     useSignedMediaUrl(memory.type === 'voice' ? (memory.media_url ?? null) : null) ?? '';
   const videoPlaybackUri = useFeedVideoPlaybackUri(memory);
-  const ageAtMemory = formatAgeAtMemory(child?.birthdate, memory.created_at);
+  const ageAtMemory = formatFamilyAgesLine(familyChildren, memory.created_at);
   const addedAtIso = memory.inserted_at || memory.created_at;
   const addedAtLabel = formatDateLong(addedAtIso);
   const locationLabelRaw = memory.location?.trim() || '';
@@ -338,11 +369,17 @@ function FilMemoryRow({
       <View style={styles.daySeparatorBlock}>
         <View style={styles.dayHeaderRow}>
           <View style={styles.dayHeaderLeft}>
-            <Text style={styles.daySepDate} numberOfLines={1}>
+            <Text
+              style={[styles.daySepDate, feedDateFontFamily ? { fontFamily: feedDateFontFamily } : null]}
+              numberOfLines={1}
+            >
               {addedAtLabel}
             </Text>
             {!!ageAtMemory && (
-              <Text style={styles.daySepAge} numberOfLines={1}>
+              <Text
+                style={[styles.daySepAge, feedAgeFontFamily ? { fontFamily: feedAgeFontFamily } : null]}
+                numberOfLines={1}
+              >
                 {ageAtMemory}
               </Text>
             )}
@@ -359,15 +396,37 @@ function FilMemoryRow({
                 ]}
               >
                 {locationLabel ? (
-                  <Text style={styles.daySepLocation} numberOfLines={1}>
+                  <Text
+                    style={[
+                      styles.daySepLocation,
+                      styles.daySepLocationFilled,
+                      feedLocationFilledFontFamily
+                        ? { fontFamily: feedLocationFilledFontFamily }
+                        : null,
+                    ]}
+                    numberOfLines={1}
+                  >
                     {locationLabel}
                   </Text>
                 ) : (
-                  <Text style={[styles.daySepLocation, { color: '#6B7280' }]} numberOfLines={1}>
+                  <Text
+                    style={[
+                      styles.daySepLocation,
+                      styles.daySepLocationPlaceholder,
+                      feedLocationPlaceholderFontFamily
+                        ? { fontFamily: feedLocationPlaceholderFontFamily }
+                        : null,
+                    ]}
+                    numberOfLines={1}
+                  >
                     Lieu
                   </Text>
                 )}
-                <MapPin size={scale(16)} color="#4B5563" strokeWidth={2} />
+                <MapPin
+                  size={scale(16)}
+                  color={locationLabel ? '#4B5563' : THEME.textSecondary}
+                  strokeWidth={2}
+                />
               </Pressable>
             ) : null}
           </View>
@@ -582,11 +641,12 @@ function FilMemoryRow({
               {hasVoiceCover && (
                 <>
                   <Image
+                    key={`voice-cover-${memory.id}-${memory.updated_at ?? ''}`}
                     source={{ uri: voiceCoverDisplayUri }}
                     style={styles.voiceCoverBg}
                     contentFit="cover"
-                    cachePolicy="disk"
-                    recyclingKey={memory.id}
+                    cachePolicy="memory-disk"
+                    recyclingKey={`${memory.id}-voice-cover-${memory.updated_at ?? ''}`}
                   />
                   <View style={styles.voiceCoverScrim} />
                 </>

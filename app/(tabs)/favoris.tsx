@@ -42,7 +42,7 @@ import {
 } from '@/constants/tabBarLayout';
 import { SPACING, FONT_SIZES } from '@/constants/sizes';
 import { useMemoryTextFont } from '@/contexts/MemoryTextFontContext';
-import { getMemories, requestMissingMediaDerivatives } from '@/services/media';
+import { getFamilyMemories, requestMissingMediaDerivatives } from '@/services/media';
 import { getOrSelectFirstChild } from '@/services/children';
 import {
   feedChildHydrationSnapshot,
@@ -940,7 +940,7 @@ function FavorisScreen() {
     }
     setHasChild(true);
 
-    const list = await getMemories(childId);
+    const list = await getFamilyMemories();
     setMemories(prev => {
       if (
         prev.length === list.length &&

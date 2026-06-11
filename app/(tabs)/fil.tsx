@@ -24,6 +24,7 @@ import { usePendingMediaUploads } from '@/contexts/PendingMediaUploadsContext';
 import { useFeedData } from '@/hooks/useFeedData';
 import { useToggleFavorite } from '@/hooks/useToggleFavorite';
 import { useFilFeedList } from '@/hooks/useFilFeedList';
+import { useFeedMetaFonts } from '@/hooks/useFeedMetaFonts';
 import { useFilLayout } from '@/hooks/useFilLayout';
 import { useFilRowActions } from '@/hooks/useFilRowActions';
 import { styles } from '@/components/feed/feedStyles';
@@ -52,6 +53,7 @@ function FilScreen() {
     memories,
     setMemories,
     child,
+    familyChildren,
     isLoading,
     isRefreshing,
     onRefresh,
@@ -109,6 +111,7 @@ function FilScreen() {
       memories,
       initialIndex: memoryIndex,
       initialAlbumPhotoIndex: albumPhotoIndex,
+      familyChildren,
     });
     router.push({
       pathname: '/memory-viewer',
@@ -116,6 +119,12 @@ function FilScreen() {
     });
   };
   const toggleFavorite = useToggleFavorite(setMemories);
+  const {
+    feedDateFontFamily,
+    feedAgeFontFamily,
+    feedLocationFilledFontFamily,
+    feedLocationPlaceholderFontFamily,
+  } = useFeedMetaFonts();
 
   const renderFilListCell = useCallback(
     (props: { style?: StyleProp<ViewStyle>; children: ReactNode; onLayout?: ViewProps['onLayout'] }) => (
@@ -130,6 +139,11 @@ function FilScreen() {
     memories,
     setMemories,
     child,
+    familyChildren,
+    feedDateFontFamily,
+    feedAgeFontFamily,
+    feedLocationFilledFontFamily,
+    feedLocationPlaceholderFontFamily,
     pendingUploads,
     uploadingVoiceCoverId,
     setPostHeights,
@@ -225,7 +239,7 @@ function FilScreen() {
     );
   }
 
-  if (!child && pendingUploads.length === 0) {
+  if (familyChildren.length === 0 && pendingUploads.length === 0) {
     return (
       <View style={[styles.container, styles.centered]}>
         <StatusBar style="dark" />
@@ -245,7 +259,7 @@ function FilScreen() {
       <StatusBar style="dark" />
       <View style={styles.headerShell}>
         <FeedHeader
-          child={child}
+          familyChildren={familyChildren}
           paddingTop={insets.top + verticalScale(6)}
           onMenuPress={onFeedHeaderMenuPress}
         />

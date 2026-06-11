@@ -35,11 +35,11 @@ import { getSignedMediaDisplayUrl, useSignedMediaUrl } from '@/lib/mediaSignedUr
 import {
   formatDateLong,
   formatDuration,
-  formatAgeAtMemory,
   formatBookLocationShort,
 } from '@/utils/date';
 import { addMemoryToBook, BookUpgradeRequiredError, createBook, listBooks, removeMemoryFromBook, type Book } from '@/services/books';
 import type { Child, Memory } from '@/types/local';
+import { formatFamilyAgesLine, sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 
 const INK = THEME.textPrimary;
 const FEED_GUTTER = scale(20);
@@ -58,6 +58,7 @@ export default function MemoryViewScreen() {
 
   const [memory, setMemory] = useState<Memory | null>(null);
   const [child, setChild] = useState<Child | null>(null);
+  const [familyChildren, setFamilyChildren] = useState<Child[]>([]);
   const [loading, setLoading] = useState(true);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [isPlayingVideo, setIsPlayingVideo] = useState(false);
@@ -81,10 +82,13 @@ export default function MemoryViewScreen() {
     setIsPlayingVideo(false);
     if (m) {
       const [children, b] = await Promise.all([getChildren(), listBooks()]);
-      setChild(children.find(c => c.id === m.child_id) ?? null);
+      const sorted = sortChildrenByBirthdateAsc(children);
+      setFamilyChildren(sorted);
+      setChild(sorted.find(c => c.id === m.child_id) ?? sorted[0] ?? null);
       setBooks(b);
     } else {
       setChild(null);
+      setFamilyChildren([]);
     }
     setLoading(false);
   }, [memoryId]);
@@ -261,7 +265,7 @@ export default function MemoryViewScreen() {
   const mediaUri = displayMediaUri;
   const videoPosterUri = displayVideoPoster;
   const photoUrls = displayPhotoUrls;
-  const ageAtMemory = memory ? formatAgeAtMemory(child?.birthdate, memory.created_at) : '';
+  const ageAtMemory = memory ? formatFamilyAgesLine(familyChildren, memory.created_at) : '';
   const locationLineShort = memory ? formatBookLocationShort(memory.location) : '';
   const locationMeta = locationLineShort ? `à ${locationLineShort}` : '';
 

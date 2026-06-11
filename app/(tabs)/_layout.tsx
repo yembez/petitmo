@@ -26,6 +26,7 @@ import {
 
 const TAB_ICON_SIZE = APP_ICON_PX;
 const TAB_ICON_SIZE_FOCUSED = scale(22);
+const CAPTURE_TAB_DISC_SIZE = scale(34);
 
 function TabBarBackgroundFill() {
   return (
@@ -80,8 +81,36 @@ function TabBarGlyph({
         size={size}
         color={color}
         fill={focused && fillWhenFocused ? color : 'none'}
-        strokeWidth={focused ? 2.35 : 2}
+        strokeWidth={focused ? 2.35 : 2.15}
       />
+    </View>
+  );
+}
+
+/** « + » Capturer : disque orange plein hors onglet ; icône orange seule une fois actif. */
+function CaptureTabIcon({ focused, color }: { focused: boolean; color: string }) {
+  if (focused) {
+    return <TabBarGlyph Icon={Plus} focused color={color} />;
+  }
+
+  return (
+    <View style={[styles.iconWrap, styles.captureDiscWrap]}>
+      <View
+        style={[
+          styles.captureTabDisc,
+          {
+            width: CAPTURE_TAB_DISC_SIZE,
+            height: CAPTURE_TAB_DISC_SIZE,
+            borderRadius: CAPTURE_TAB_DISC_SIZE / 2,
+          },
+        ]}
+      >
+        <Plus
+          size={TAB_ICON_SIZE}
+          color={THEME.captureScreenCtaForeground}
+          strokeWidth={2.35}
+        />
+      </View>
     </View>
   );
 }
@@ -190,12 +219,27 @@ function TabLayoutInner() {
         options={{
           title: 'Capturer',
           tabBarIcon: ({ focused, color }) => (
-            <TabBarGlyph
-              Icon={Plus}
+            <CaptureTabIcon
               focused={focused}
               color={color ?? THEME.tabBarInactiveTint}
             />
           ),
+          tabBarLabel: ({ focused, children, color }) => {
+            if (!focused) return null;
+            return (
+              <Text
+                style={[
+                  styles.tabLabel,
+                  tabLabelFontRegular ? { fontFamily: tabLabelFontRegular } : null,
+                  tabLabelFontMedium ? { fontFamily: tabLabelFontMedium } : null,
+                  { color: color ?? THEME.tabBarActiveTint },
+                ]}
+                numberOfLines={1}
+              >
+                {children}
+              </Text>
+            );
+          },
         }}
       />
       <Tabs.Screen
@@ -262,6 +306,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: verticalScale(0.5),
+  },
+  /** Compense l’absence du libellé « Capturer » — aligne le disque sur les autres onglets. */
+  captureDiscWrap: {
+    marginTop: verticalScale(7),
+    marginBottom: 0,
+  },
+  captureTabDisc: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: THEME.brandCtaOrange,
+    ...Platform.select({
+      ios: {
+        shadowColor: THEME.brandCtaOrange,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.28,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 3,
+      },
+      default: {},
+    }),
   },
   tabLabel: {
     marginTop: 0,

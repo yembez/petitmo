@@ -26,6 +26,7 @@ import {
   peekMemoryViewerSession,
 } from '@/services/memoryViewerSession';
 import type { Memory, Child } from '@/types/local';
+import { listLocalChildren } from '@/lib/localDb';
 import { getChildren } from '@/services/children';
 import {
   getPrimaryPhotoUriForImmersiveViewer,
@@ -36,8 +37,9 @@ import {
 } from '@/utils/memoryPhotos';
 import { toggleFavoritePhotoUrl } from '@/services/media';
 import { extractMediaBucketPath } from '@/lib/mediaSignedUrl';
-import { formatAgeAtMemory, formatDateLong } from '@/utils/date';
-import { childDisplayGivenName } from '@/utils/childDisplayName';
+import { formatDateLong } from '@/utils/date';
+import { formatFamilyAgesLine, sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
+import { useFeedMetaFonts } from '@/hooks/useFeedMetaFonts';
 import { useFeedVideoPlaybackUri } from '@/hooks/useFeedVideoPlaybackUri';
 import { useExpoAvShouldPlay } from '@/hooks/useExpoAvShouldPlay';
 import { getVideoPosterUriForFeedAndViewer, getVoiceCoverUriForFeedAndViewer, normalizeMemoryMediaUriForDisplay } from '@/utils/memoryPhotos';
@@ -108,6 +110,9 @@ export default function MemoryViewerScreen() {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [initialIndex, setInitialIndex] = useState(0);
   const [child, setChild] = useState<Child | null>(null);
+  const [familyChildren, setFamilyChildren] = useState<Child[]>(() =>
+    sortChildrenByBirthdateAsc(listLocalChildren()),
+  );
   const [visibleItemKey, setVisibleItemKey] = useState<string | null>(null);
   const [editingTextMemory, setEditingTextMemory] = useState<Memory | null>(null);
   const listRef = useRef<FlatList<ImmersiveViewerItem>>(null);
@@ -149,9 +154,18 @@ export default function MemoryViewerScreen() {
     const items = buildImmersiveViewerItems(payload.memories);
     const opened = items[flatIdx];
     setVisibleItemKey(opened ? immersiveViewerItemKey(opened) : null);
+    const sessionFamily =
+      payload.familyChildren?.length
+        ? sortChildrenByBirthdateAsc(payload.familyChildren)
+        : sortChildrenByBirthdateAsc(listLocalChildren());
+    setFamilyChildren(sessionFamily);
+    const cid = payload.memories[0]?.child_id;
+    setChild(sessionFamily.find(c => c.id === cid) ?? sessionFamily[0] ?? null);
     void getChildren().then(list => {
-      const cid = payload.memories[0]?.child_id;
-      setChild(list.find(c => c.id === cid) ?? null);
+      const sorted = sortChildrenByBirthdateAsc(list);
+      setFamilyChildren(sorted);
+      const memCid = payload.memories[0]?.child_id;
+      setChild(sorted.find(c => c.id === memCid) ?? sorted[0] ?? null);
     });
   }, [parsedInitial, router]);
 
@@ -255,8 +269,7 @@ export default function MemoryViewerScreen() {
           height={itemHeight}
           width={windowW}
           albumPhotoSlot={albumSlot}
-          childFirstName={childDisplayGivenName(child?.name)}
-          childBirthdate={child?.birthdate ?? null}
+          familyChildren={familyChildren}
           onRequestEditText={m => setEditingTextMemory(m)}
           toggleFavorite={toggleFavorite}
           onFavoritePhotoUrlsUpdated={urls => handleFavoritePhotoUrlsUpdated(memory.id, urls)}
@@ -274,8 +287,7 @@ export default function MemoryViewerScreen() {
       visibleItemKey,
       itemHeight,
       windowW,
-      child?.name,
-      child?.birthdate,
+      familyChildren,
       viewerItems.length,
       toggleFavorite,
       handleFavoritePhotoUrlsUpdated,
@@ -354,6 +366,7 @@ export default function MemoryViewerScreen() {
         ref={listRef}
         style={styles.viewerList}
         data={viewerItems}
+        extraData={familyChildren}
         keyExtractor={keyExtractor}
         renderItem={renderItem}
         pagingEnabled
@@ -391,8 +404,7 @@ function ImmersivePage({
   height,
   width,
   albumPhotoSlot,
-  childFirstName,
-  childBirthdate,
+  familyChildren,
   onRequestEditText,
   toggleFavorite,
   onFavoritePhotoUrlsUpdated,
@@ -409,8 +421,7 @@ function ImmersivePage({
   height: number;
   width: number;
   albumPhotoSlot?: AlbumPhotoSlot;
-  childFirstName: string;
-  childBirthdate: string | null;
+  familyChildren: Child[];
   onRequestEditText: (m: Memory) => void;
   toggleFavorite: (id: string) => void | Promise<void>;
   onFavoritePhotoUrlsUpdated: (urls: string[]) => void;
@@ -423,10 +434,9 @@ function ImmersivePage({
   onTextNavNext?: () => void;
 }) {
   const insets = useSafeAreaInsets();
-  const addedLabel = formatDateLong(memory.inserted_at || memory.created_at);
-  const ageAt = childBirthdate
-    ? formatAgeAtMemory(childBirthdate, memory.created_at)
-    : '';
+  const { feedDateFontFamily, feedAgeFontFamily } = useFeedMetaFonts();
+  const postDateLabel = formatDateLong(memory.inserted_at || memory.created_at);
+  const ageAt = formatFamilyAgesLine(familyChildren, memory.created_at);
   const loc = memory.location?.trim()
     ? memory.location.replace(/\s*\([^)]*\)\s*$/, '').trim()
     : '';
@@ -456,23 +466,30 @@ function ImmersivePage({
     setVideoSoundOn(true);
   }, [memory.id]);
 
-  const immersiveMetaLine = useMemo(() => {
-    const parts: string[] = [];
-    if (childFirstName) {
-      parts.push(ageAt ? `${childFirstName} · ${ageAt}` : childFirstName);
-    }
-    parts.push(addedLabel);
-    if (loc) parts.push(loc);
-    return parts.join(' · ');
-  }, [childFirstName, ageAt, addedLabel, loc]);
-
   const metaBlock = (
-    <Text
-      style={mediaChrome ? styles.metaLineOnMedia : styles.metaLineOnText}
-      numberOfLines={1}
-    >
-      {immersiveMetaLine}
-    </Text>
+    <View style={styles.metaStack}>
+      <Text
+        style={[
+          mediaChrome ? styles.metaDateOnMedia : styles.metaDateOnText,
+          feedDateFontFamily ? { fontFamily: feedDateFontFamily } : null,
+        ]}
+        numberOfLines={1}
+      >
+        {postDateLabel}
+        {loc ? ` · ${loc}` : ''}
+      </Text>
+      {!!ageAt && (
+        <Text
+          style={[
+            mediaChrome ? styles.metaAgeOnMedia : styles.metaAgeOnText,
+            feedAgeFontFamily ? { fontFamily: feedAgeFontFamily } : null,
+          ]}
+          numberOfLines={2}
+        >
+          {ageAt}
+        </Text>
+      )}
+    </View>
   );
 
   return (
@@ -1189,12 +1206,19 @@ const styles = StyleSheet.create({
     paddingRight: scale(56),
     gap: verticalScale(8),
   },
-  metaLineOnMedia: {
-    color: TOP_CHROME_TEXT,
-    fontSize: scale(14),
-    fontWeight: '600',
-    letterSpacing: -0.2,
+  metaStack: {
+    gap: verticalScale(2),
     maxWidth: '100%',
+  },
+  metaDateOnMedia: {
+    color: TOP_CHROME_TEXT,
+    fontSize: scale(12.5),
+    letterSpacing: -0.15,
+  },
+  metaAgeOnMedia: {
+    color: 'rgba(255, 255, 255, 0.88)',
+    fontSize: scale(12.5),
+    letterSpacing: -0.1,
   },
   chromePill: {
     backgroundColor: CHROME_PILL_BG,
@@ -1223,12 +1247,15 @@ const styles = StyleSheet.create({
     paddingBottom: verticalScale(10),
     backgroundColor: BG,
   },
-  metaLineOnText: {
+  metaDateOnText: {
     color: THEME.textPrimary,
-    fontSize: scale(14),
-    fontWeight: '600',
-    letterSpacing: -0.2,
-    maxWidth: '100%',
+    fontSize: scale(12.5),
+    letterSpacing: -0.15,
+  },
+  metaAgeOnText: {
+    color: THEME.textSecondary,
+    fontSize: scale(12.5),
+    letterSpacing: -0.1,
   },
   /** Photo immersive : conteneur pour overlays (favori + date) comme dans le fil. */
   photoImmersiveWrap: {
