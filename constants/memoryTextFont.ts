@@ -20,3 +20,6 @@ export const MEMORY_TEXT_FONT_FALLBACK = Platform.select({
   android: 'sans-serif',
   default: 'System',
 }) as string;
+
+/** Famille CSS pour le serveur PDF (`htmlBook.ts`) — alignée sur le fil. */
+export const MEMORY_TEXT_FONT_PDF_FAMILY = "'Roboto Flex', sans-serif";

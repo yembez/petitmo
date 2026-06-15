@@ -52,7 +52,7 @@ export function pdfPhotoCaptionStyle(pageWidthPx: number): { fontSize: number; l
 
 export type QuotePdfFitLevel = 0 | 1 | 2;
 
-/** `.quote-body` + variantes quote-fit-1 / quote-fit-2 (htmlBook). */
+/** `.quote-body` + variantes quote-fit-1 / quote-fit-2 — police Roboto Flex via `.memory-text` (PDF). */
 export function pdfQuoteBodyStyle(fit: QuotePdfFitLevel, pageWidthPx: number): { fontSize: number; lineHeight: number } {
   if (fit === 2) {
     return {

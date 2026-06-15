@@ -261,7 +261,7 @@ function pageQuote(
     </div>
     <div class="quote-mid">
       <div class="quote-mark">\u201C</div>
-      <div class="body quote-body">${romanHtml(body)}</div>
+      <div class="body quote-body memory-text">${romanHtml(body)}</div>
     </div>
     <div class="quote-footer-block">
       <div class="quote-rule">
@@ -457,7 +457,7 @@ function buildHtmlDocument(
 <title>${esc(title)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500&amp;family=EB+Garamond:ital,wght@0,400;1,400&amp;display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500&amp;family=EB+Garamond:ital,wght@0,400;1,400&amp;family=Roboto+Flex:opsz,wght@8..144,400&amp;display=swap" rel="stylesheet" />
 <style>
 
 * { margin:0; padding:0; box-sizing:border-box;
@@ -527,6 +527,12 @@ body.print-bleed .inner {
   font-size:11pt; line-height:1.65; color:#1C1C1E; text-align:justify;
 }
 .body p { margin:0 0 6pt; }
+.memory-text {
+  font-family:'Roboto Flex',sans-serif;
+  font-style:normal;
+  font-weight:400;
+  text-align:justify;
+}
 .folio {
   position:absolute; bottom:8mm; left:0; right:0;
   text-align:center; font-family:'DM Sans',sans-serif; font-size:7pt; color:#C7C7CC;
@@ -674,10 +680,10 @@ body.print-bleed .bleed-x {
   text-align:right; flex:1; min-width:0;
 }
 .quote-mark {
-  font-family:'EB Garamond',serif; font-style:italic;
+  font-family:'Roboto Flex',sans-serif; font-style:normal; font-weight:400;
   font-size:42pt; color:rgba(0,0,0,.06); line-height:1; margin-bottom:1.5mm; margin-left:5mm;
 }
-.quote-body { overflow:hidden; text-align:left; }
+.quote-body { overflow:hidden; text-align:justify; }
 .quote-fit-1 .quote-body { font-size:10.4pt; line-height:1.48; }
 .quote-fit-1 .quote-body p { margin:0 0 4pt; }
 .quote-fit-2 .quote-body { font-size:9.8pt; line-height:1.42; }

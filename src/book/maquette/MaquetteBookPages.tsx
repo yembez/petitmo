@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   Pressable,
+  Platform,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import Svg, { Rect } from 'react-native-svg';
@@ -16,6 +17,7 @@ import {
   DMSans_600SemiBold,
 } from '@expo-google-fonts/dm-sans';
 import { EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
+import { useMemoryTextFont } from '@/contexts/MemoryTextFontContext';
 import { Video, ResizeMode } from 'expo-av';
 import type { BookPage } from '@/src/book/BookEngine';
 import type { Child, Memory } from '@/types/local';
@@ -387,6 +389,7 @@ export default function MaquetteBookPages(props: Props) {
   const dm600 = fontsLoaded ? 'DMSans_600SemiBold' : undefined;
   const dmItalic = fontsLoaded ? 'DMSans_400Regular_Italic' : undefined;
   const garamondIt = fontsLoaded ? 'EBGaramond_400Regular_Italic' : undefined;
+  const memoryTextFont = useMemoryTextFont();
 
   const pad = Math.min(28, width * 0.06);
   const typoScale = typographyScaleForMaquette(page.type, height);
@@ -511,8 +514,7 @@ export default function MaquetteBookPages(props: Props) {
           onRequestTextEdit={onRequestTextEdit}
           dm400={dm400}
           dm600={dm600}
-          dmItalic={dmItalic}
-          garamondIt={garamondIt}
+          memoryTextFont={memoryTextFont}
         />
       );
     case 'audio':
@@ -925,8 +927,7 @@ function MaquetteQuote({
   onRequestTextEdit,
   dm400,
   dm600,
-  dmItalic,
-  garamondIt,
+  memoryTextFont,
 }: {
   memory: Memory;
   familyChildren: Child[];
@@ -939,8 +940,7 @@ function MaquetteQuote({
   onRequestTextEdit: () => void;
   dm400?: string;
   dm600?: string;
-  dmItalic?: string;
-  garamondIt?: string;
+  memoryTextFont: string;
 }) {
   const raw = memory.content ?? '';
   const body = useMemo(() => normalizeQuoteBodyLikeMaquette(raw), [raw]);
@@ -995,8 +995,8 @@ function MaquetteQuote({
                   {
                     marginLeft: pdfMmToPreviewPxW(5, width),
                     marginTop: pdfMmToPreviewPxH(1.5, height),
+                    fontFamily: memoryTextFont,
                   },
-                  garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
                 ]}
               >
                 {'\u201C'}
@@ -1006,8 +1006,9 @@ function MaquetteQuote({
                   style={[
                     styles.quoteBody,
                     bodyScaled,
-                    garamondIt ? { fontFamily: garamondIt } : dmItalic ? { fontFamily: dmItalic } : { fontStyle: 'italic' },
+                    { fontFamily: memoryTextFont },
                   ]}
+                  {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
                 >
                   {romanParagraphs(body)}
                 </Text>
