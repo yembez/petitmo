@@ -1,45 +1,25 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import { Audio } from 'expo-av';
+import { BlurView } from 'expo-blur';
 import { ensurePlaybackAudioForListening } from '@/lib/playbackAudioMode';
 import { Play, Pause } from 'lucide-react-native';
-import Svg, { ClipPath, Defs, Path, Rect } from 'react-native-svg';
+import Svg, { Rect } from 'react-native-svg';
 import { scale } from '@/utils/responsive';
 import { formatDuration } from '@/utils/date';
+import { THEME } from '@/constants/theme';
 
 const PLAY = scale(50);
 const STACK = scale(104);
 const BAR_COUNT = 42;
-/** Points interpolés pour une courbe SVG continue (moins « barres ») */
-const WAVE_SAMPLES = 80;
-/** Demi-hauteur de l’onde (miroir haut / bas autour de l’axe central) */
+/** Demi-hauteur de l’onde (barres centrées sur l’axe) */
 const WAVE_HALF = scale(18);
-const WAVE_ACTIVE = '#6B9FB8';
-const WAVE_INACTIVE = '#C5D9E5';
-const RING = 'rgba(92, 143, 166, 0.28)';
-
-/** Enveloppe symétrique fermée : courbe haute puis basse (remplissage fluide). */
-function buildSymmetricWavePath(width: number, height: number, amps: number[]): string {
-  const padY = Math.max(1, scale(1));
-  const mid = height / 2;
-  const maxAmp = Math.max(2, mid - padY);
-  const n = amps.length;
-  if (width <= 1 || n < 2) return '';
-
-  let d = '';
-  for (let i = 0; i < n; i++) {
-    const x = (i / (n - 1)) * width;
-    const y = mid - maxAmp * amps[i];
-    d += i === 0 ? `M ${x.toFixed(2)} ${y.toFixed(2)}` : ` L ${x.toFixed(2)} ${y.toFixed(2)}`;
-  }
-  for (let i = n - 1; i >= 0; i--) {
-    const x = (i / (n - 1)) * width;
-    const y = mid + maxAmp * amps[i];
-    d += ` L ${x.toFixed(2)} ${y.toFixed(2)}`;
-  }
-  d += ' Z';
-  return d;
-}
+/** Onde au repos / non lue — orange charte plein */
+const WAVE_ORANGE = THEME.brandCtaOrange;
+/** Onde en lecture — rouge charte */
+const WAVE_PLAYING = THEME.brandPrimary;
+const RING = 'rgba(255, 127, 79, 0.28)';
+const BAR_GAP = scale(2);
 
 interface AudioPlayerProps {
   uri: string;
@@ -57,6 +37,54 @@ interface AudioPlayerProps {
   coverFlushBottom?: boolean;
   /** Fil : liseré noir fin autour du disque play / pause. */
   feedPlayDiscOutline?: boolean;
+}
+
+function GlassPlayDisc({
+  size,
+  iconSize,
+  isPlaying,
+  controlIconColor,
+  onPress,
+  outline,
+}: {
+  size: number;
+  iconSize: number;
+  isPlaying: boolean;
+  controlIconColor: string;
+  onPress: () => void;
+  outline?: boolean;
+}) {
+  const icon = isPlaying ? (
+    <Pause size={iconSize} color={controlIconColor} fill={controlIconColor} strokeWidth={0} />
+  ) : (
+    <View style={{ marginLeft: scale(size >= PLAY ? 4 : 3) }}>
+      <Play size={iconSize} color={controlIconColor} fill={controlIconColor} strokeWidth={0} />
+    </View>
+  );
+
+  return (
+    <TouchableOpacity
+      style={[
+        styles.glassPlayOuter,
+        outline && styles.glassPlayOuterOutline,
+        { width: size, height: size, borderRadius: size / 2 },
+      ]}
+      onPress={onPress}
+      activeOpacity={0.88}
+    >
+      {Platform.OS === 'ios' ? (
+        <BlurView intensity={72} tint="light" style={StyleSheet.absoluteFillObject}>
+          <View style={styles.glassPlaySheen} />
+          <View style={styles.glassPlayContent}>{icon}</View>
+        </BlurView>
+      ) : (
+        <View style={[StyleSheet.absoluteFillObject, styles.glassPlayFallback]}>
+          <View style={styles.glassPlaySheen} />
+          <View style={styles.glassPlayContent}>{icon}</View>
+        </View>
+      )}
+    </TouchableOpacity>
+  );
 }
 
 export default function AudioPlayer({
@@ -108,28 +136,11 @@ export default function AudioPlayer({
     []
   );
 
-  /** Interpolation linéaire entre les ancres « barres » → silhouette douce */
-  const smoothAmps = useMemo(() => {
-    const raw = barHeights;
-    const n = raw.length;
-    return Array.from({ length: WAVE_SAMPLES }, (_, j) => {
-      const t = (j / (WAVE_SAMPLES - 1)) * (n - 1);
-      const i = Math.floor(t);
-      const f = t - i;
-      const a = raw[i]!;
-      const b = raw[Math.min(i + 1, n - 1)]!;
-      return a * (1 - f) + b * f;
-    });
-  }, [barHeights]);
-
-  const clipPathId = useMemo(() => `waveClip_${Math.random().toString(36).slice(2, 11)}`, []);
-
   const [waveW, setWaveW] = useState(0);
   const waveH = WAVE_HALF * 2;
-  const wavePath = useMemo(() => {
-    if (waveW <= 1) return '';
-    return buildSymmetricWavePath(waveW, waveH, smoothAmps);
-  }, [waveW, waveH, smoothAmps]);
+  const barW =
+    waveW > 1 ? Math.max(scale(2), (waveW - BAR_GAP * (BAR_COUNT - 1)) / BAR_COUNT) : 0;
+  const maxBarH = Math.max(scale(4), waveH - scale(2));
 
   useEffect(() => {
     anchorPosRef.current = positionDisplay;
@@ -295,27 +306,14 @@ export default function AudioPlayer({
   /** Bas du bouton aligné sur le bas de l’onde (fil avec photo), sans grande pile décorative. */
   const PLAY_FLUSH = scale(54);
   const playFlushEl = (
-    <TouchableOpacity
-      style={[
-        styles.playButtonCoverFlush,
-        feedPlayDiscOutline && styles.playButtonCoverFlushFeedOutline,
-        {
-          width: PLAY_FLUSH,
-          height: PLAY_FLUSH,
-          borderRadius: PLAY_FLUSH / 2,
-        },
-      ]}
+    <GlassPlayDisc
+      size={PLAY_FLUSH}
+      iconSize={scale(26)}
+      isPlaying={isPlaying}
+      controlIconColor={controlIconColor}
       onPress={togglePlayPause}
-      activeOpacity={0.88}
-    >
-      {isPlaying ? (
-        <Pause size={scale(26)} color={controlIconColor} fill={controlIconColor} strokeWidth={0} />
-      ) : (
-        <View style={{ marginLeft: scale(4) }}>
-          <Play size={scale(26)} color={controlIconColor} fill={controlIconColor} strokeWidth={0} />
-        </View>
-      )}
-    </TouchableOpacity>
+      outline={feedPlayDiscOutline}
+    />
   );
 
   const playStackEl = (
@@ -335,26 +333,22 @@ export default function AudioPlayer({
           ]}
         />
       ))}
-      <TouchableOpacity
-        style={[
-          styles.playButton,
-          feedPlayDiscOutline && styles.playButtonFeedOutline,
-          {
-            top: (stack - PLAY) / 2,
-            left: (stack - PLAY) / 2,
-          },
-        ]}
-        onPress={togglePlayPause}
-        activeOpacity={0.85}
+      <View
+        style={{
+          position: 'absolute',
+          top: (stack - PLAY) / 2,
+          left: (stack - PLAY) / 2,
+        }}
       >
-        {isPlaying ? (
-          <Pause size={scale(22)} color={controlIconColor} fill={controlIconColor} strokeWidth={0} />
-        ) : (
-          <View style={{ marginLeft: scale(3) }}>
-            <Play size={scale(22)} color={controlIconColor} fill={controlIconColor} strokeWidth={0} />
-          </View>
-        )}
-      </TouchableOpacity>
+        <GlassPlayDisc
+          size={PLAY}
+          iconSize={scale(22)}
+          isPlaying={isPlaying}
+          controlIconColor={controlIconColor}
+          onPress={togglePlayPause}
+          outline={feedPlayDiscOutline}
+        />
+      </View>
     </View>
   );
 
@@ -363,15 +357,25 @@ export default function AudioPlayer({
       style={[styles.waveform, variant === 'coverBottom' && styles.waveformCover]}
       onLayout={e => setWaveW(Math.max(0, Math.floor(e.nativeEvent.layout.width)))}
     >
-      {waveW > 1 && wavePath ? (
+      {waveW > 1 && barW > 0 ? (
         <Svg width={waveW} height={waveH} viewBox={`0 0 ${waveW} ${waveH}`}>
-          <Defs>
-            <ClipPath id={clipPathId}>
-              <Rect x={0} y={0} width={waveW * displayFrac} height={waveH} />
-            </ClipPath>
-          </Defs>
-          <Path d={wavePath} fill={WAVE_INACTIVE} fillOpacity={0.88} />
-          <Path d={wavePath} fill={WAVE_ACTIVE} fillOpacity={0.92} clipPath={`url(#${clipPathId})`} />
+          {barHeights.map((amp, i) => {
+            const h = Math.max(scale(3), amp * maxBarH);
+            const x = i * (barW + BAR_GAP);
+            const y = (waveH - h) / 2;
+            const isPlayed = isPlaying && displayFrac > 0 && (i + 1) / BAR_COUNT <= displayFrac;
+            return (
+              <Rect
+                key={i}
+                x={x}
+                y={y}
+                width={barW}
+                height={h}
+                rx={Math.min(barW / 2, scale(1.5))}
+                fill={isPlayed ? WAVE_PLAYING : WAVE_ORANGE}
+              />
+            );
+          })}
         </Svg>
       ) : (
         <View style={{ height: waveH }} />
@@ -456,46 +460,37 @@ const styles = StyleSheet.create({
     borderColor: RING,
     backgroundColor: 'transparent',
   },
-  playButton: {
-    position: 'absolute',
-    width: PLAY,
-    height: PLAY,
-    borderRadius: PLAY / 2,
-    backgroundColor: 'rgba(255,255,255,0.35)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: scale(4) },
-    shadowOpacity: 0.16,
-    shadowRadius: scale(8),
-    elevation: 4,
-  },
-  playButtonFeedOutline: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#000000',
-  },
-  /** Fil vocal + photo : play bien visible, bas aligné avec l’onde */
-  playButtonCoverFlush: {
+  glassPlayOuter: {
     flexShrink: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.96)',
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: 'rgba(255, 255, 255, 0.78)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: scale(4) },
-    shadowOpacity: 0.38,
+    shadowOpacity: 0.2,
     shadowRadius: scale(10),
-    elevation: 10,
+    elevation: 8,
   },
-  playButtonCoverFlushFeedOutline: {
-    borderWidth: StyleSheet.hairlineWidth,
+  glassPlayOuterOutline: {
     borderColor: '#000000',
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  glassPlayFallback: {
+    backgroundColor: 'rgba(255, 255, 255, 0.82)',
+  },
+  glassPlaySheen: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(255, 255, 255, 0.38)',
+  },
+  glassPlayContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   waveform: {
     flexDirection: 'row',
-    alignItems: 'stretch',
-    justifyContent: 'space-between',
+    alignItems: 'center',
+    justifyContent: 'center',
     height: WAVE_HALF * 2,
     width: '100%',
     marginBottom: scale(12),

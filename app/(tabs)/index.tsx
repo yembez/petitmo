@@ -43,6 +43,12 @@ const CAPTURE_HEADER_ROW_H = scale(40);
 
 import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
 import { scale, verticalScale } from '@/utils/responsive';
+import {
+  CAPTURE_SCREEN_ACCENT,
+  CAPTURE_SCREEN_BG,
+  CAPTURE_SCREEN_IMPORT_DISC,
+  CAPTURE_SCREEN_RECORD_ACCENT,
+} from '@/constants/captureScreenPalette';
 import { THEME } from '@/constants/theme';
 import {
   getOrSelectFirstChild,
@@ -94,6 +100,22 @@ const CAPTURE_CTA_MIC_ICON_SIZE_COMPACT = scale(32);
 const CAPTURE_HERO_TAGLINE = '“Avec toi, l’ordinaire devient extraordinaire.”';
 
 type CaptureRoute = '/write' | '/record-voice' | '/import-media';
+
+function captureCtaHaloStyle(color: string) {
+  return Platform.select({
+    ios: {
+      shadowColor: color,
+      shadowOffset: { width: 0, height: 0 },
+      shadowOpacity: 0.13,
+      shadowRadius: 10,
+    },
+    android: {
+      elevation: 3,
+      shadowColor: color,
+    },
+    default: {},
+  });
+}
 
 /** Révision photo (chemins + date) — `updated_at` change à chaque upload même si le chemin fichier est identique. */
 function captureHeroPhotoRevision(child: Child): string {
@@ -157,6 +179,7 @@ function CaptureDiscCta({
   discColor,
   discBorderColor,
   discBorderWidth = 0,
+  haloColor,
   onPress,
   labelFontFamily,
   compact = false,
@@ -168,6 +191,8 @@ function CaptureDiscCta({
   discColor: string;
   discBorderColor?: string;
   discBorderWidth?: number;
+  /** Teinte du halo — par défaut la couleur du disque (ou du contour si fond clair). */
+  haloColor?: string;
   onPress: () => void;
   labelFontFamily?: string;
   compact?: boolean;
@@ -176,6 +201,7 @@ function CaptureDiscCta({
 }) {
   const pressScale = useRef(new Animated.Value(1)).current;
   const ctaSize = compact ? CAPTURE_CTA_SIZE_COMPACT : CAPTURE_CTA_SIZE;
+  const glowColor = haloColor ?? discBorderColor ?? discColor;
 
   const runPressIn = useCallback(() => {
     if (Platform.OS === 'ios' || Platform.OS === 'android') {
@@ -223,6 +249,7 @@ function CaptureDiscCta({
             borderWidth: discBorderWidth,
             borderColor: discBorderColor ?? 'transparent',
             transform: [{ scale: pressScale }],
+            ...captureCtaHaloStyle(glowColor),
           },
         ]}
       >
@@ -637,8 +664,8 @@ function CapturerScreen() {
                 </Text>
                 <Heart
                   size={CAPTURE_TITLE_HEART_SIZE}
-                  color={THEME.captureDiscCtaBackground}
-                  fill={THEME.captureDiscCtaBackground}
+                  color={CAPTURE_SCREEN_ACCENT}
+                  fill={CAPTURE_SCREEN_ACCENT}
                   style={styles.captureTitleHeart}
                 />
                 <Text
@@ -669,12 +696,13 @@ function CapturerScreen() {
               labelFontFamily={captureCtaLabelFont}
               accessibilityLabel="Enregistrer un audio"
               discColor={THEME.captureRecordCtaBackground}
-              discBorderColor={THEME.captureRecordCtaBorderColor}
+              discBorderColor={CAPTURE_SCREEN_RECORD_ACCENT}
               discBorderWidth={StyleSheet.hairlineWidth}
+              haloColor={CAPTURE_SCREEN_RECORD_ACCENT}
               icon={
                 <MicIcon
                   size={compact ? CAPTURE_CTA_MIC_ICON_SIZE_COMPACT : CAPTURE_CTA_MIC_ICON_SIZE}
-                  color={THEME.captureRecordCtaBorderColor}
+                  color={CAPTURE_SCREEN_RECORD_ACCENT}
                 />
               }
               onPress={() => handleCaptureCtaPress('/record-voice')}
@@ -684,7 +712,8 @@ function CapturerScreen() {
             <CaptureDiscCta
               label="Écrire"
               labelFontFamily={captureCtaLabelFont}
-              discColor={THEME.captureWriteCtaBackground}
+              discColor={CAPTURE_SCREEN_ACCENT}
+              haloColor={CAPTURE_SCREEN_ACCENT}
               icon={
                 <PenIcon
                   size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
@@ -698,11 +727,14 @@ function CapturerScreen() {
               label="Importer"
               labelFontFamily={captureCtaLabelFont}
               accessibilityLabel="Importer des photos ou vidéos"
-              discColor={THEME.captureWriteCtaBackground}
+              discColor={CAPTURE_SCREEN_IMPORT_DISC}
+              discBorderColor={CAPTURE_SCREEN_RECORD_ACCENT}
+              discBorderWidth={StyleSheet.hairlineWidth}
+              haloColor={CAPTURE_SCREEN_ACCENT}
               icon={
                 <ImageImportIcon
                   size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
-                  color="#FFFFFF"
+                  color={THEME.accent}
                 />
               }
               onPress={() => handleCaptureCtaPress('/import-media')}
@@ -720,22 +752,22 @@ function CapturerScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: THEME.bg,
+    backgroundColor: CAPTURE_SCREEN_BG,
   },
   loadingContainer: {
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: THEME.bg,
+    backgroundColor: CAPTURE_SCREEN_BG,
   },
   mainColumn: {
     flex: 1,
     width: SCREEN_W,
     minHeight: 0,
-    backgroundColor: THEME.bg,
+    backgroundColor: CAPTURE_SCREEN_BG,
   },
   captureScroll: {
     flex: 1,
-    backgroundColor: THEME.bg,
+    backgroundColor: CAPTURE_SCREEN_BG,
   },
   captureScrollContent: {
     flexGrow: 1,
@@ -795,7 +827,7 @@ const styles = StyleSheet.create({
     aspectRatio: CAPTURE_PHOTO_CARD_ASPECT,
     borderRadius: CAPTURE_PHOTO_CARD_RADIUS,
     overflow: 'hidden',
-    backgroundColor: THEME.bg,
+    backgroundColor: CAPTURE_SCREEN_BG,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -845,7 +877,7 @@ const styles = StyleSheet.create({
     width: scale(6),
     height: scale(6),
     borderRadius: scale(3),
-    backgroundColor: THEME.captureDiscCtaBackground,
+    backgroundColor: CAPTURE_SCREEN_ACCENT,
   },
   capturePhotoPillText: {
     fontSize: scale(12),
@@ -966,7 +998,7 @@ const styles = StyleSheet.create({
     lineHeight: scale(15),
   },
   heroImageMatrixWrap: {
-    backgroundColor: THEME.bg,
+    backgroundColor: CAPTURE_SCREEN_BG,
   },
   heroImageCover: {
     width: '100%',

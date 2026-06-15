@@ -55,6 +55,9 @@ export type GenerateBookPdfPayload = {
   childId: string;
   /** Photo de couverture (URL HTTPS). Sinon `children.photo_url`. */
   coverPhotoUrl?: string | null;
+  /** Pixels source couverture — recadrage `coverMode` (parité aperçu ↔ PDF). */
+  coverPhotoImgPxW?: number;
+  coverPhotoImgPxH?: number;
   coverTitle: string;
   coverYearLabel: string;
   chapterTitle: string;

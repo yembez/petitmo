@@ -7,6 +7,7 @@ import type { LucideIcon } from 'lucide-react-native';
 import { BookOpenText, Heart, List, Plus } from 'lucide-react-native';
 import { PlatformPressable } from '@react-navigation/elements';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { CAPTURE_SCREEN_ACCENT } from '@/constants/captureScreenPalette';
 import { THEME } from '@/constants/theme';
 import { scale, verticalScale } from '@/utils/responsive';
 import { APP_ICON_PX } from '@/constants/iconSizes';
@@ -26,7 +27,9 @@ import {
 
 const TAB_ICON_SIZE = APP_ICON_PX;
 const TAB_ICON_SIZE_FOCUSED = scale(22);
-const CAPTURE_TAB_DISC_SIZE = scale(34);
+/** Disque « + » Capturer (onglet inactif) — légèrement plus grand que les icônes voisines. */
+const CAPTURE_TAB_DISC_SIZE = scale(40);
+const CAPTURE_TAB_DISC_ICON_SIZE = scale(24);
 
 function TabBarBackgroundFill() {
   return (
@@ -46,7 +49,7 @@ function TabBarBackgroundFill() {
   );
 }
 
-/** Bouton onglet : pas de pastille — actif = orange CTA via `tabBarActiveTintColor`. */
+/** Bouton onglet : pas de pastille — actif = accent capture via `tabBarActiveTintColor`. */
 function PetitmoTabBarButton(props: ComponentProps<typeof PlatformPressable>) {
   const { style, 'aria-selected': isActive, ...rest } = props;
   const flatStyle = StyleSheet.flatten(style) ?? {};
@@ -87,10 +90,11 @@ function TabBarGlyph({
   );
 }
 
-/** « + » Capturer : disque orange plein hors onglet ; icône orange seule une fois actif. */
+/** « + » Capturer : disque accent plein hors onglet ; icône accent seule une fois actif. */
 function CaptureTabIcon({ focused, color }: { focused: boolean; color: string }) {
+  const accent = CAPTURE_SCREEN_ACCENT;
   if (focused) {
-    return <TabBarGlyph Icon={Plus} focused color={color} />;
+    return <TabBarGlyph Icon={Plus} focused color={accent} />;
   }
 
   return (
@@ -106,7 +110,7 @@ function CaptureTabIcon({ focused, color }: { focused: boolean; color: string })
         ]}
       >
         <Plus
-          size={TAB_ICON_SIZE}
+          size={CAPTURE_TAB_DISC_ICON_SIZE}
           color={THEME.captureScreenCtaForeground}
           strokeWidth={2.35}
         />
@@ -156,7 +160,7 @@ function TabLayoutInner() {
          */
         freezeOnBlur: false,
         sceneStyle: { backgroundColor: THEME.bg },
-        tabBarActiveTintColor: THEME.tabBarActiveTint,
+        tabBarActiveTintColor: CAPTURE_SCREEN_ACCENT,
         tabBarInactiveTintColor: THEME.tabBarInactiveTint,
         tabBarActiveBackgroundColor: 'transparent',
         tabBarInactiveBackgroundColor: 'transparent',
@@ -206,7 +210,7 @@ function TabLayoutInner() {
               styles.tabLabel,
               tabLabelFontRegular ? { fontFamily: tabLabelFontRegular } : null,
               focused && tabLabelFontMedium ? { fontFamily: tabLabelFontMedium } : null,
-              { color: color ?? (focused ? THEME.tabBarActiveTint : THEME.tabBarInactiveTint) },
+              { color: color ?? (focused ? CAPTURE_SCREEN_ACCENT : THEME.tabBarInactiveTint) },
             ]}
             numberOfLines={1}
           >
@@ -232,7 +236,7 @@ function TabLayoutInner() {
                   styles.tabLabel,
                   tabLabelFontRegular ? { fontFamily: tabLabelFontRegular } : null,
                   tabLabelFontMedium ? { fontFamily: tabLabelFontMedium } : null,
-                  { color: color ?? THEME.tabBarActiveTint },
+                  { color: color ?? CAPTURE_SCREEN_ACCENT },
                 ]}
                 numberOfLines={1}
               >
@@ -240,6 +244,7 @@ function TabLayoutInner() {
               </Text>
             );
           },
+          tabBarActiveTintColor: CAPTURE_SCREEN_ACCENT,
         }}
       />
       <Tabs.Screen
@@ -307,18 +312,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: verticalScale(0.5),
   },
-  /** Compense l’absence du libellé « Capturer » — aligne le disque sur les autres onglets. */
+  /** Compense l’absence du libellé « Capturer » — disque un peu plus bas que les autres icônes. */
   captureDiscWrap: {
-    marginTop: verticalScale(7),
+    marginTop: verticalScale(11),
     marginBottom: 0,
   },
   captureTabDisc: {
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: THEME.brandCtaOrange,
+    backgroundColor: CAPTURE_SCREEN_ACCENT,
     ...Platform.select({
       ios: {
-        shadowColor: THEME.brandCtaOrange,
+        shadowColor: CAPTURE_SCREEN_ACCENT,
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.28,
         shadowRadius: 4,

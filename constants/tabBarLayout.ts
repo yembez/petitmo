@@ -13,7 +13,7 @@ export const TAB_BAR_PADDING_TOP = verticalScale(2);
 /** Espace sous les libellés dans la zone onglets (au-dessus du bandeau safe). */
 export const TAB_BAR_PADDING_BOTTOM_GAP = verticalScale(4);
 
-/** Fond tab bar — blanc cassé beige chaleureux (`THEME.tabBarBackground`). */
+/** Fond tab bar — beige écran Capturer (`THEME.tabBarBackground`). */
 export const TAB_BAR_BACKGROUND = THEME.tabBarBackground;
 
 /** Contour discret du bandeau flottant. */

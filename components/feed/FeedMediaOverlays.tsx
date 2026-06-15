@@ -1,5 +1,14 @@
-import { View, Text, TouchableOpacity } from 'react-native';
-import { Heart } from 'lucide-react-native';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  Pressable,
+  Platform,
+  StyleSheet,
+  type ReactNode,
+} from 'react-native';
+import { BlurView } from 'expo-blur';
+import { Heart, MapPin } from 'lucide-react-native';
 import { THEME } from '@/constants/theme';
 import { scale } from '@/utils/responsive';
 import { styles } from '@/components/feed/feedStyles';
@@ -14,6 +23,144 @@ export function feedPhotoOverlayInk(inkOverride?: string | null): '#FFFFFF' | '#
 const FEED_FAVORITE_HEART_PX = scale(20);
 
 const FEED_MEDIA_OVERLAY_BOTTOM = scale(12);
+
+const FEED_META_PILL_INK = '#FFFFFF';
+
+function FeedMetaGlassPill({
+  children,
+  onPress,
+  accessibilityLabel,
+  align = 'left',
+}: {
+  children: ReactNode;
+  onPress?: () => void;
+  accessibilityLabel?: string;
+  align?: 'left' | 'right';
+}) {
+  const pill = (
+    <View
+      style={[
+        styles.feedMetaPill,
+        align === 'right' ? styles.feedMetaPillAlignRight : styles.feedMetaPillAlignLeft,
+      ]}
+    >
+      {Platform.OS === 'ios' ? (
+        <BlurView intensity={40} tint="light" style={StyleSheet.absoluteFillObject} />
+      ) : null}
+      <View style={styles.feedMetaPillScrim} pointerEvents="none" />
+      <View style={styles.feedMetaPillContent}>{children}</View>
+    </View>
+  );
+
+  if (onPress) {
+    return (
+      <Pressable
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel}
+        style={({ pressed }) => [
+          align === 'right' ? styles.feedMetaPillWrapRight : styles.feedMetaPillWrapLeft,
+          pressed && { opacity: 0.88 },
+        ]}
+      >
+        {pill}
+      </Pressable>
+    );
+  }
+
+  return (
+    <View style={align === 'right' ? styles.feedMetaPillWrapRight : styles.feedMetaPillWrapLeft}>
+      {pill}
+    </View>
+  );
+}
+
+/** Date + âge (gauche) et lieu (droite) — pilules verre avec contraste fort. */
+export function FeedPostMetaOverlay({
+  dateLabel,
+  ageLabel,
+  locationLabel,
+  onEditLocation,
+  showLocationEdit = true,
+  feedDateFontFamily,
+  feedAgeFontFamily,
+  feedLocationFilledFontFamily,
+  feedLocationPlaceholderFontFamily,
+}: {
+  dateLabel: string;
+  ageLabel?: string;
+  locationLabel?: string;
+  onEditLocation?: () => void;
+  showLocationEdit?: boolean;
+  feedDateFontFamily?: string;
+  feedAgeFontFamily?: string;
+  feedLocationFilledFontFamily?: string;
+  feedLocationPlaceholderFontFamily?: string;
+}) {
+  const hasLocation = !!locationLabel?.trim();
+  const showLocationPill = showLocationEdit || hasLocation;
+
+  return (
+    <View style={styles.feedMetaPillBar} pointerEvents="box-none">
+      <FeedMetaGlassPill align="left">
+        <View style={styles.feedMetaPillInnerColumn}>
+          <Text
+            style={[styles.feedMetaPillDate, feedDateFontFamily ? { fontFamily: feedDateFontFamily } : null]}
+            numberOfLines={1}
+          >
+            {dateLabel}
+          </Text>
+          {!!ageLabel?.trim() ? (
+            <Text
+              style={[styles.feedMetaPillAge, feedAgeFontFamily ? { fontFamily: feedAgeFontFamily } : null]}
+              numberOfLines={1}
+            >
+              {ageLabel}
+            </Text>
+          ) : null}
+        </View>
+      </FeedMetaGlassPill>
+
+      {showLocationPill ? (
+        <FeedMetaGlassPill
+          align="right"
+          onPress={showLocationEdit && onEditLocation ? onEditLocation : undefined}
+          accessibilityLabel={hasLocation ? 'Modifier le lieu' : 'Ajouter un lieu'}
+        >
+          <View style={styles.feedMetaPillInnerRow}>
+            {hasLocation ? (
+              <Text
+                style={[
+                  styles.feedMetaPillLocationText,
+                  feedLocationFilledFontFamily ? { fontFamily: feedLocationFilledFontFamily } : null,
+                ]}
+                numberOfLines={2}
+              >
+                {locationLabel}
+              </Text>
+            ) : (
+              <Text
+                style={[
+                  styles.feedMetaPillLocationText,
+                  styles.feedMetaPillLocationPlaceholder,
+                  feedLocationPlaceholderFontFamily
+                    ? { fontFamily: feedLocationPlaceholderFontFamily }
+                    : null,
+                ]}
+                numberOfLines={1}
+              >
+                Lieu
+              </Text>
+            )}
+            {showLocationEdit ? (
+              <MapPin size={scale(14)} color={FEED_META_PILL_INK} strokeWidth={2} />
+            ) : null}
+          </View>
+        </FeedMetaGlassPill>
+      ) : null}
+    </View>
+  );
+}
 
 /** Pastille bas-gauche : date de prise (ou import vs prise selon règle fil). */
 export function CapturedAtOverlay({

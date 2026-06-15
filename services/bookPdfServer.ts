@@ -29,7 +29,12 @@ import {
 } from '@/services/children';
 import { ensureVoiceMemoryCloudForBookExport } from '@/services/migration';
 import { persistVoiceCoverToCloudForPdfExport } from '@/services/media';
-import { getVoiceCoverUriForBookPreview } from '@/utils/memoryPhotos';
+import {
+  collectPhotoLocalUploadUriCandidates,
+  getVoiceCoverUriForBookPreview,
+  inferLocalDisplayPathFromPrint,
+} from '@/utils/memoryPhotos';
+import { pickFirstReadableLocalMediaUri } from '@/utils/localMediaReadable';
 import { resolveServerPdfEntitlements } from '@/lib/digitalExportPurchase';
 import { MEDIA_BOOK_PRINT_MAX_WIDTH } from '@/lib/limits';
 import { isInitExportConfigured, postInitExport, postGuestUploadUrls } from '@/services/initExportApi';
@@ -236,6 +241,20 @@ function isHttps(u: string | null | undefined): boolean {
   return typeof u === 'string' && /^https:\/\//i.test(u.trim());
 }
 
+async function compressLocalJpegForGuestUpload(localUri: string): Promise<string> {
+  if (Platform.OS === 'web') return localUri;
+  try {
+    const manipulated = await ImageManipulator.manipulateAsync(
+      localUri,
+      [{ resize: { width: MEDIA_BOOK_PRINT_MAX_WIDTH } }],
+      { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG }
+    );
+    return manipulated?.uri || localUri;
+  } catch {
+    return localUri;
+  }
+}
+
 /** Même règle que le bucket `media` côté serveur : ce n’est pas un fichier local à ré-uploader. */
 const BARE_MEDIA_PATH_RE =
   /^(guest\/exports\/|exports\/|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/)/i;
@@ -250,20 +269,9 @@ async function uploadGuestPhotoToPdfServer(params: {
   memoryId: string;
   localJpegUri: string;
 }): Promise<{ url: string; path: string }> {
-  let src = params.localJpegUri;
-  // Pour éviter les payloads énormes en base64 (413), on downscale/compresse avant upload guest.
-  if (Platform.OS !== 'web') {
-    try {
-      const manipulated = await ImageManipulator.manipulateAsync(
-        params.localJpegUri,
-        [{ resize: { width: MEDIA_BOOK_PRINT_MAX_WIDTH } }],
-        { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG }
-      );
-      if (manipulated?.uri) src = manipulated.uri;
-    } catch {
-      // fallback: on tente l'original
-    }
-  }
+  const readable = await pickFirstReadableLocalMediaUri([params.localJpegUri]);
+  if (!readable) throw new Error('GUEST_PHOTO_NOT_READABLE');
+  const src = await compressLocalJpegForGuestUpload(readable);
   const b64 = await readAsStringAsync(src, { encoding: EncodingType.Base64 });
   const res = await fetch(`${params.base}/v1/books/upload-guest-photo`, {
     method: 'POST',
@@ -644,6 +652,8 @@ export type GenerateBookPdfServerInput = {
   childId: string;
   child: Child;
   coverPhotoUrl?: string | null;
+  coverPhotoImgPxW?: number;
+  coverPhotoImgPxH?: number;
   coverTitle: string;
   coverYearLabel: string;
   chapterTitle: string;
@@ -710,6 +720,8 @@ export async function generateBookPdfViaServer(input: GenerateBookPdfServerInput
     bookId: input.bookId,
     childId: input.childId,
     coverPhotoUrl: input.coverPhotoUrl ?? null,
+    coverPhotoImgPxW: input.coverPhotoImgPxW,
+    coverPhotoImgPxH: input.coverPhotoImgPxH,
     coverTitle: input.coverTitle,
     coverYearLabel: input.coverYearLabel,
     chapterTitle: input.chapterTitle,
@@ -849,15 +861,17 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
   const coverLocal = (coverPhotoUrlOut ?? '').trim();
   if (coverLocal && !isHttps(coverLocal) && Platform.OS !== 'web') {
     try {
-      const manipulated = await ImageManipulator.manipulateAsync(
-        coverLocal,
-        [{ resize: { width: MEDIA_BOOK_PRINT_MAX_WIDTH } }],
-        { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG }
-      );
+      const coverCandidates = [coverLocal, inferLocalDisplayPathFromPrint(coverLocal)];
+      for (const m of memories) {
+        if (m.type === 'photo') coverCandidates.push(...collectPhotoLocalUploadUriCandidates(m));
+      }
+      const readableCover = await pickFirstReadableLocalMediaUri(coverCandidates);
+      if (!readableCover) throw new Error('COVER_NOT_READABLE');
+      const compressedCover = await compressLocalJpegForGuestUpload(readableCover);
       const { readUrl } = await guestUploadMediaImageThenReadUrl({
         pdfTicket,
         asset: { kind: 'cover' },
-        localUri: manipulated?.uri || coverLocal,
+        localUri: compressedCover,
         mimeType: 'image/jpeg',
       });
       coverPhotoUrlOut = readUrl;
@@ -886,15 +900,13 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
           Platform.OS !== 'web'
         ) {
           try {
-            const manipulated = await ImageManipulator.manipulateAsync(
-              coverUri,
-              [{ resize: { width: MEDIA_BOOK_PRINT_MAX_WIDTH } }],
-              { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG }
-            );
+            const readableCover = await pickFirstReadableLocalMediaUri([coverUri]);
+            if (!readableCover) throw new Error('VOICE_COVER_NOT_READABLE');
+            const compressed = await compressLocalJpegForGuestUpload(readableCover);
             const { readUrl } = await guestUploadMediaImageThenReadUrl({
               pdfTicket,
               asset: { kind: 'voice_cover', memoryId: m.id },
-              localUri: manipulated?.uri || coverUri,
+              localUri: compressed,
               mimeType: 'image/jpeg',
             });
             voiceCoverUrl = readUrl;
@@ -923,15 +935,13 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
         let thumbPublicUrl: string | null = isHttps(thumbLocal) ? thumbLocal : null;
         try {
           if (thumbLocal && !isHttps(thumbLocal)) {
-            const manipulated = await ImageManipulator.manipulateAsync(
-              thumbLocal,
-              [{ resize: { width: 1200 } }],
-              { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG }
-            );
+            const readableThumb = await pickFirstReadableLocalMediaUri([thumbLocal]);
+            if (!readableThumb) throw new Error('VIDEO_THUMB_NOT_READABLE');
+            const compressed = await compressLocalJpegForGuestUpload(readableThumb);
             const { readUrl } = await guestUploadMediaImageThenReadUrl({
               pdfTicket,
               asset: { kind: 'video_thumb', memoryId: m.id },
-              localUri: manipulated?.uri || thumbLocal,
+              localUri: compressed,
               mimeType: 'image/jpeg',
             });
             thumbPublicUrl = readUrl;
@@ -950,19 +960,14 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
       const main = (m.print_url ?? m.display_url ?? m.edited_media_url ?? m.media_url ?? '').trim();
       if (!main || isHttps(main)) return g;
 
-      const local =
-        (m.local_print_path ?? m.local_original_path ?? m.local_media_path ?? '').trim();
+      const local = await pickFirstReadableLocalMediaUri(collectPhotoLocalUploadUriCandidates(m));
       if (!local) throw new Error('PREP_NOT_READY');
 
-      const manipulated = await ImageManipulator.manipulateAsync(
-        local,
-        [{ resize: { width: MEDIA_BOOK_PRINT_MAX_WIDTH } }],
-        { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG }
-      );
+      const compressed = await compressLocalJpegForGuestUpload(local);
       const { readUrl, path } = await guestUploadMediaImageThenReadUrl({
         pdfTicket,
         asset: { kind: 'photo', memoryId: m.id },
-        localUri: manipulated?.uri || local,
+        localUri: compressed,
         mimeType: 'image/jpeg',
       });
       return { ...g, print_url: readUrl, display_url: readUrl, media_url: readUrl, media_path: path };
@@ -972,6 +977,8 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
     bookId: input.bookId,
     childId: input.childId,
     coverPhotoUrl: coverPhotoUrlOut,
+    coverPhotoImgPxW: input.coverPhotoImgPxW,
+    coverPhotoImgPxH: input.coverPhotoImgPxH,
     coverTitle: input.coverTitle,
     coverYearLabel: input.coverYearLabel,
     chapterTitle: input.chapterTitle,

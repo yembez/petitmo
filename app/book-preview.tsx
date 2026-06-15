@@ -497,6 +497,17 @@ export default function BookPreviewScreen() {
     return coverPhotoDisplayUri;
   }, [coverPhotoPrintUri, coverPhotoDisplayUri]);
 
+  /** Dimensions fichier couverture pour recadrage PDF (`coverMode` = parité aperçu). */
+  const coverPhotoImgPxForPdf = useMemo(() => {
+    const meta = cropDpiMetaByKey.cover;
+    if (meta?.imgPxW && meta?.imgPxH) {
+      return { w: meta.imgPxW, h: meta.imgPxH };
+    }
+    const coverMem = bookSnapshot ? findBookCoverMemory(bookSnapshot) : null;
+    if (!coverMem) return undefined;
+    return getBookPhotoPrintPixelSize(coverMem, bookSnapshot?.coverPhotoUrl ?? undefined) ?? undefined;
+  }, [cropDpiMetaByKey.cover, bookSnapshot]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -840,6 +851,18 @@ export default function BookPreviewScreen() {
     unlockOrientationPortrait();
     router.replace('/(tabs)/favoris');
   }, [router, unlockOrientationPortrait]);
+
+  const unlockAndGoToFavorisForAdd = useCallback(() => {
+    unlockOrientationPortrait();
+    if (bookId) {
+      router.replace({
+        pathname: '/(tabs)/favoris',
+        params: { addToBookId: bookId },
+      });
+      return;
+    }
+    unlockAndGoToFavoris();
+  }, [bookId, router, unlockAndGoToFavoris, unlockOrientationPortrait]);
 
   const openEditor = useCallback((pageIndex: number) => {
     const safe = Math.max(0, Math.min(pageIndex, Math.max(0, pageRows.length - 1)));
@@ -1747,6 +1770,8 @@ export default function BookPreviewScreen() {
             childId: child.id,
             child,
             coverPhotoUrl: coverPhotoPrintUri,
+            coverPhotoImgPxW: coverPhotoImgPxForPdf?.w,
+            coverPhotoImgPxH: coverPhotoImgPxForPdf?.h,
             coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
             coverYearLabel,
             chapterTitle: chapterTitleLine ?? 'Notre histoire',
@@ -1790,6 +1815,7 @@ export default function BookPreviewScreen() {
       bookId,
       bookSnapshot,
       coverPhotoPrintUri,
+      coverPhotoImgPxForPdf,
     ]
   );
 
@@ -1813,6 +1839,8 @@ export default function BookPreviewScreen() {
       childId: child.id,
       child,
       coverPhotoUrl: coverPhotoPrintUri,
+      coverPhotoImgPxW: coverPhotoImgPxForPdf?.w,
+      coverPhotoImgPxH: coverPhotoImgPxForPdf?.h,
       coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
       coverYearLabel,
       chapterTitle: chapterTitleLine ?? 'Notre histoire',
@@ -1837,6 +1865,7 @@ export default function BookPreviewScreen() {
     child,
     chapterTitleLine,
     coverPhotoPrintUri,
+    coverPhotoImgPxForPdf,
     coverTitleLine,
     coverYearLabel,
     exporting,
@@ -1868,6 +1897,8 @@ export default function BookPreviewScreen() {
       childId: child.id,
       child,
       coverPhotoUrl: coverPhotoPrintUri,
+      coverPhotoImgPxW: coverPhotoImgPxForPdf?.w,
+      coverPhotoImgPxH: coverPhotoImgPxForPdf?.h,
       coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
       coverYearLabel,
       chapterTitle: chapterTitleLine ?? 'Notre histoire',
@@ -1892,6 +1923,7 @@ export default function BookPreviewScreen() {
     child,
     chapterTitleLine,
     coverPhotoPrintUri,
+    coverPhotoImgPxForPdf,
     coverTitleLine,
     coverYearLabel,
     exporting,
@@ -1928,6 +1960,8 @@ export default function BookPreviewScreen() {
           childId: child.id,
           child,
           coverPhotoUrl: coverPhotoPrintUri,
+          coverPhotoImgPxW: coverPhotoImgPxForPdf?.w,
+          coverPhotoImgPxH: coverPhotoImgPxForPdf?.h,
           coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
           coverYearLabel,
           chapterTitle: chapterTitleLine ?? 'Notre histoire',
@@ -1963,6 +1997,7 @@ export default function BookPreviewScreen() {
       child,
       chapterTitleLine,
       coverPhotoPrintUri,
+      coverPhotoImgPxForPdf,
       coverTitleLine,
       coverYearLabel,
       localEdits,
@@ -2046,12 +2081,27 @@ export default function BookPreviewScreen() {
           {pages.length} {pages.length <= 1 ? 'page' : 'pages'}
         </Text>
         {isLandscape ? (
-          <View style={styles.headerRightSpacer} accessibilityElementsHidden />
+          bookId ? (
+            <Pressable
+              onPress={unlockAndGoToFavorisForAdd}
+              hitSlop={12}
+              style={styles.headerCtaOutline}
+              accessibilityRole="button"
+              accessibilityLabel="Ajouter des souvenirs depuis les favoris"
+            >
+              <Text style={[styles.headerCtaTextDark, dm700 && { fontFamily: dm700 }]}>Ajouter</Text>
+            </Pressable>
+          ) : (
+            <View style={styles.headerRightSpacer} accessibilityElementsHidden />
+          )
         ) : (
           <Pressable
             onPress={() => void handleExportBook()}
             hitSlop={12}
-            style={[styles.headerCta, (exporting || guestExportSubmitting) && { opacity: 0.5 }]}
+            style={[
+              styles.headerCtaOrange,
+              (exporting || guestExportSubmitting) && { opacity: 0.5 },
+            ]}
             disabled={exporting || guestExportSubmitting}
             accessibilityRole="button"
           >
@@ -2107,13 +2157,29 @@ export default function BookPreviewScreen() {
           renderItem={renderVerticalSpreadItem as any}
           showsVerticalScrollIndicator={false}
           style={[styles.list, styles.browseList]}
-          contentContainerStyle={styles.browseContent}
+          contentContainerStyle={[
+            styles.browseContent,
+            bookId ? styles.browseContentWithAddBar : null,
+          ]}
           initialNumToRender={6}
           maxToRenderPerBatch={6}
           windowSize={9}
           removeClippedSubviews={false}
         />
       )}
+
+      {!isLandscape && bookId ? (
+        <View style={styles.browseAddBar}>
+          <Pressable
+            onPress={unlockAndGoToFavorisForAdd}
+            style={styles.headerCtaOutline}
+            accessibilityRole="button"
+            accessibilityLabel="Ajouter des souvenirs depuis les favoris"
+          >
+            <Text style={[styles.headerCtaTextDark, dm700 && { fontFamily: dm700 }]}>Ajouter</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <Modal
         visible={editorOpen}
@@ -2403,8 +2469,27 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     paddingHorizontal: 16,
   },
+  headerCtaOrange: {
+    backgroundColor: THEME.brandCtaOrange,
+    borderRadius: 20,
+    paddingVertical: 7,
+    paddingHorizontal: 16,
+  },
+  headerCtaOutline: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: THEME.textPrimary,
+    paddingVertical: 7,
+    paddingHorizontal: 16,
+  },
   headerCtaText: {
     color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  headerCtaTextDark: {
+    color: THEME.textPrimary,
     fontSize: 14,
     fontWeight: '700',
   },
@@ -2441,6 +2526,21 @@ const styles = StyleSheet.create({
     paddingTop: BROWSE_ROW_GAP,
     paddingBottom: BROWSE_ROW_GAP * 2,
     backgroundColor: BROWSE_BG,
+  },
+  browseContentWithAddBar: {
+    paddingBottom: BROWSE_ROW_GAP + BOTTOM_H,
+  },
+  browseAddBar: {
+    flexShrink: 0,
+    alignItems: 'center',
+    backgroundColor: BROWSE_BG,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: THEME.familyFlowLine,
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 8,
+    zIndex: 20,
+    elevation: 20,
   },
   browseRow: {
     flexDirection: 'row',

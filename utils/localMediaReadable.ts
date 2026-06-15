@@ -116,3 +116,20 @@ export async function isLocalMediaUriReadable(uri: string): Promise<boolean> {
   }
   return false;
 }
+
+/** Premier fichier local réellement lisible (rebase container + variantes `file://`). */
+export async function pickFirstReadableLocalMediaUri(
+  candidates: (string | null | undefined)[],
+): Promise<string | null> {
+  if (Platform.OS === 'web') return null;
+  const seen = new Set<string>();
+  for (const raw of candidates) {
+    const t = (raw ?? '').trim();
+    if (!t || seen.has(t) || isCloudMediaReference(t)) continue;
+    seen.add(t);
+    if (await isLocalMediaUriReadable(t)) {
+      return rebaseSandboxUriToCurrentContainer(t);
+    }
+  }
+  return null;
+}

@@ -469,6 +469,14 @@ export default function BookOrderScreen() {
         setFieldErrors({ submit: 'Achat requis (export PDF) ou compte non éligible.' });
       } else if (e instanceof Error && (e.message === 'PREP_NOT_READY' || e.message.startsWith('PREP_NOT_READY:'))) {
         setFieldErrors({ submit: 'Préparation des médias en cours. Attends quelques secondes puis réessaie.' });
+      } else if (
+        e instanceof Error &&
+        (e.message.includes('not readable') || e.message.includes('renderAsync'))
+      ) {
+        setFieldErrors({
+          submit:
+            'Une photo du livre est introuvable sur cet appareil. Rouvre l’aperçu du livre, attends quelques secondes, puis réessaie.',
+        });
       } else {
         setFieldErrors({ submit: e instanceof Error ? e.message : 'Export impossible.' });
       }

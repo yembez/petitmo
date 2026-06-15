@@ -58,7 +58,7 @@ import { clampAudioBookAnnotation } from '@/lib/audioBookAnnotation';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { Video, ResizeMode, type AVPlaybackStatus } from 'expo-av';
 import { Swipeable, RectButton } from "react-native-gesture-handler";
-import { CapturedAtOverlay } from '@/components/feed/FeedMediaOverlays';
+import { CapturedAtOverlay, FeedPostMetaOverlay } from '@/components/feed/FeedMediaOverlays';
 import type { PendingUpload } from "@/contexts/PendingMediaUploadsContext";
 import {
   formatDuration,
@@ -152,37 +152,25 @@ const PendingFeedUploadCard = memo(function PendingFeedUploadCard({
 }) {
   const isVideo = p.kind === 'video';
   const preview0 = p.previewUris[0];
+  const dateLabel = p.capturedAtPreviewIso
+    ? formatDateLong(p.capturedAtPreviewIso)
+    : p.status === 'uploading'
+      ? 'Envoi en cours…'
+      : 'Envoi';
+  const locationCore = (p.locationPreview?.trim() || '').replace(/\s*\([^)]*\)\s*$/, '').trim();
+  const locationLabel = locationCore ? `à ${locationCore}` : '';
   return (
     <View style={styles.postShell}>
       <View style={styles.post}>
-      <View style={styles.daySeparatorBlock}>
-        <View style={styles.dayHeaderRow}>
-          <View style={styles.dayHeaderLeft}>
-            <Text style={styles.daySepDate} numberOfLines={1}>
-              {p.status === 'uploading' ? 'Envoi en cours…' : 'Envoi'}
-            </Text>
-          </View>
-          <View style={styles.dayHeaderRight}>
-            {!!p.locationPreview?.trim() ? (
-              <Text
-                style={[
-                  styles.daySepLocation,
-                  styles.daySepLocationFilled,
-                  feedLocationFilledFontFamily
-                    ? { fontFamily: feedLocationFilledFontFamily }
-                    : null,
-                ]}
-                numberOfLines={1}
-              >
-                {`à ${p.locationPreview.trim().replace(/\s*\([^)]*\)\s*$/, '').trim()}`}
-              </Text>
-            ) : null}
-          </View>
-        </View>
-      </View>
       <View style={styles.postMain}>
         <View style={styles.postBody}>
           <View style={{ position: 'relative' }}>
+            <FeedPostMetaOverlay
+              dateLabel={dateLabel}
+              locationLabel={locationLabel || undefined}
+              showLocationEdit={false}
+              feedLocationFilledFontFamily={feedLocationFilledFontFamily}
+            />
             {isVideo ? (
               preview0 ? (
                 <View style={[styles.mediaCard, styles.videoBody, styles.videoMediaCard]}>
@@ -265,6 +253,12 @@ function FilMemoryRow({
     if (!raw) return ['Un joli mot du cœur'];
     const parts = raw.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
     return parts.length > 0 ? parts : ['Un joli mot du cœur'];
+  })();
+  const captionParagraphs = (() => {
+    const raw = contentText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+    if (!raw) return [];
+    const parts = raw.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
+    return parts.length > 0 ? parts : [raw];
   })();
   const videoPosterRaw = getVideoPosterUriForFeedAndViewer(memory);
   const videoPosterSigned = useSignedMediaUrl(videoPosterRaw || null) ?? '';
@@ -350,6 +344,23 @@ function FilMemoryRow({
       ? !!memory.is_favorite || isAlbumFullyFavorited(memory)
       : !!memory.is_favorite;
 
+  const isMediaPost =
+    memory.type === 'photo' || memory.type === 'video' || memory.type === 'voice';
+
+  const mediaMetaOverlay = isMediaPost ? (
+    <FeedPostMetaOverlay
+      dateLabel={addedAtLabel}
+      ageLabel={ageAtMemory || undefined}
+      locationLabel={locationLabel || undefined}
+      onEditLocation={() => handleEditLocation(memory)}
+      showLocationEdit={!isOptimisticFeedPending}
+      feedDateFontFamily={feedDateFontFamily}
+      feedAgeFontFamily={feedAgeFontFamily}
+      feedLocationFilledFontFamily={feedLocationFilledFontFamily}
+      feedLocationPlaceholderFontFamily={feedLocationPlaceholderFontFamily}
+    />
+  ) : null;
+
   const postCard = (
     <View
       style={styles.postShell}
@@ -366,6 +377,7 @@ function FilMemoryRow({
       }}
     >
       <View style={styles.post}>
+      {memory.type === 'text' ? (
       <View style={styles.daySeparatorBlock}>
         <View style={styles.dayHeaderRow}>
           <View style={styles.dayHeaderLeft}>
@@ -432,6 +444,7 @@ function FilMemoryRow({
           </View>
         </View>
       </View>
+      ) : null}
       <View style={styles.postMain}>
         <Swipeable
           ref={(r) => {
@@ -458,6 +471,7 @@ function FilMemoryRow({
           <View style={styles.postBody}>
           {memory.type === 'photo' && photoUrls.length > 0 && (
             <View style={{ position: 'relative' }}>
+              {mediaMetaOverlay}
               <PhotoMosaic
                 urls={photoUrls}
                 memoryId={isOptimisticFeedPending ? undefined : memory.id}
@@ -484,11 +498,15 @@ function FilMemoryRow({
             </View>
           )}
           {memory.type === 'photo' && photoUrls.length === 0 && (
-            <View style={[styles.mediaCard, styles.photoPlaceholder]} />
+            <View style={{ position: 'relative' }}>
+              {mediaMetaOverlay}
+              <View style={[styles.mediaCard, styles.photoPlaceholder]} />
+            </View>
           )}
 
           {memory.type === 'video' && (!!videoPlaybackUri || !!videoPosterUri) && (
             <View style={{ position: 'relative' }}>
+              {mediaMetaOverlay}
               <Pressable
                 onPress={launchImmersive}
                 disabled={skipImmersive}
@@ -591,7 +609,7 @@ function FilMemoryRow({
                     </View>
                   ) : null}
                   {memory.duration ? (
-                    <View style={styles.videoDurationBadgeTopRight} pointerEvents="none">
+                    <View style={styles.videoDurationBadgeBottomRight} pointerEvents="none">
                       <Text style={styles.durationText}>{formatDuration(memory.duration)}</Text>
                     </View>
                   ) : null}
@@ -626,6 +644,8 @@ function FilMemoryRow({
           )}
 
           {memory.type === 'voice' && (!!memory.media_url || !!voicePlaybackSigned) && (
+            <View style={{ position: 'relative' }}>
+              {mediaMetaOverlay}
             <Pressable
               onPress={launchImmersive}
               disabled={skipImmersive}
@@ -676,6 +696,7 @@ function FilMemoryRow({
               </View>
             </View>
             </Pressable>
+            </View>
           )}
 
           {memory.type === 'text' && (
@@ -704,12 +725,20 @@ function FilMemoryRow({
         {memory.type !== 'text' && !!contentText && (
           <View style={styles.postCaption}>
             <ScrollableTextBlock maxHeight={FEED_CAPTION_SCROLL_MAX_H}>
-              <Text
-                style={[styles.captionAnnotation, { fontFamily: memoryTextFont }]}
-                {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
-              >
-                {contentText}
-              </Text>
+              {captionParagraphs.map((para, idx) => (
+                <Text
+                  key={idx}
+                  style={[
+                    styles.captionAnnotation,
+                    { fontFamily: memoryTextFont },
+                    idx > 0 && styles.textBookParagraphSpacing,
+                  ]}
+                  {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
+                >
+                  {EM_QUAD}
+                  {para.replace(/\n/g, `\n${EM_QUAD}`)}
+                </Text>
+              ))}
             </ScrollableTextBlock>
           </View>
         )}

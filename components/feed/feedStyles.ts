@@ -368,22 +368,113 @@ const styles = StyleSheet.create({
     paddingVertical: verticalScale(3),
     borderRadius: scale(6),
   },
-  /** Vidéo fil : coin haut droit (évite le chevauchement avec le cœur favori en bas à droite). */
-  videoDurationBadgeTopRight: {
+  /** Vidéo fil : durée en bas à droite (pilule meta en haut). */
+  videoDurationBadgeBottomRight: {
     position: 'absolute',
     right: scale(12),
-    top: verticalScale(12),
+    bottom: verticalScale(12),
     zIndex: 4,
     backgroundColor: 'rgba(0,0,0,0.7)',
     paddingHorizontal: scale(7),
     paddingVertical: verticalScale(3),
     borderRadius: scale(6),
   },
-  /** Vidéo autoplay fil : activer / couper le son (sibling au-dessus du Pressable plein écran). */
+  /** Barre overlay : date + âge à gauche, lieu à droite. */
+  feedMetaPillBar: {
+    position: 'absolute',
+    top: scale(12),
+    left: scale(12),
+    right: scale(12),
+    zIndex: 6,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: scale(8),
+  },
+  feedMetaPillWrapLeft: {
+    flexShrink: 1,
+    maxWidth: '52%',
+    alignSelf: 'flex-start',
+  },
+  feedMetaPillWrapRight: {
+    flexShrink: 1,
+    maxWidth: '52%',
+    alignSelf: 'flex-start',
+    marginLeft: 'auto',
+  },
+  feedMetaPill: {
+    position: 'relative',
+    borderRadius: scale(999),
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255, 255, 255, 0.28)',
+  },
+  feedMetaPillAlignLeft: {
+    alignSelf: 'flex-start',
+  },
+  feedMetaPillAlignRight: {
+    alignSelf: 'flex-end',
+  },
+  feedMetaPillScrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.26)',
+  },
+  feedMetaPillContent: {
+    paddingHorizontal: scale(14),
+    paddingVertical: verticalScale(7),
+    zIndex: 1,
+  },
+  feedMetaPillInnerColumn: {
+    alignItems: 'flex-start',
+    gap: verticalScale(1),
+    minWidth: 0,
+  },
+  feedMetaPillInnerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: scale(6),
+    minWidth: 0,
+  },
+  feedMetaPillDate: {
+    fontSize: scale(12),
+    lineHeight: scale(16),
+    color: '#FFFFFF',
+    fontWeight: '600',
+    textAlign: 'left',
+    textShadowColor: 'rgba(0, 0, 0, 0.42)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  feedMetaPillAge: {
+    fontSize: scale(12),
+    lineHeight: scale(16),
+    color: 'rgba(255, 255, 255, 0.92)',
+    fontWeight: '500',
+    textAlign: 'left',
+    textShadowColor: 'rgba(0, 0, 0, 0.42)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  feedMetaPillLocationText: {
+    fontSize: scale(12),
+    lineHeight: scale(16),
+    color: '#FFFFFF',
+    fontWeight: '500',
+    flexShrink: 1,
+    textAlign: 'right',
+    textShadowColor: 'rgba(0, 0, 0, 0.42)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  feedMetaPillLocationPlaceholder: {
+    color: 'rgba(255, 255, 255, 0.78)',
+  },
+  /** Vidéo autoplay fil : activer / couper le son (sous la pilule meta). */
   videoSoundToggleTopLeft: {
     position: 'absolute',
     left: scale(12),
-    top: verticalScale(12),
+    top: verticalScale(58),
     zIndex: 8,
     width: scale(36),
     height: scale(36),
@@ -533,10 +624,10 @@ const styles = StyleSheet.create({
   textContent: {
     width: '100%',
     alignSelf: 'stretch',
-    fontSize: scale(16),
+    fontSize: scale(17),
     fontWeight: '400',
     color: '#1C1C1E',
-    lineHeight: scale(25),
+    lineHeight: scale(27),
     textAlign: 'justify',
     ...Platform.select({
       android: {
@@ -558,10 +649,19 @@ const styles = StyleSheet.create({
   },
   /** Annotations sous photo / vidéo / vocal */
   captionAnnotation: {
-    fontSize: scale(15),
+    width: '100%',
+    alignSelf: 'stretch',
+    fontSize: scale(16),
     fontWeight: '400',
     color: '#1C1C1E',
-    lineHeight: scale(24),
+    lineHeight: scale(25),
+    textAlign: 'justify',
+    ...Platform.select({
+      android: {
+        textBreakStrategy: 'highQuality' as const,
+      },
+      default: {},
+    }),
   },
   postActions: {
     marginHorizontal: 0,

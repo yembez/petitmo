@@ -117,6 +117,39 @@ export function inferLocalPrintPathFromDisplay(displayPath: string): string {
   return guess !== d ? guess : '';
 }
 
+/** Repli quand `print.jpg` est référencé en base mais pas encore généré sur disque. */
+export function inferLocalDisplayPathFromPrint(printPath: string): string {
+  const p = printPath.trim();
+  if (!p) return '';
+  const guess = p.replace(/\/print\.(jpe?g|webp|png)$/i, '/display.$1');
+  return guess !== p ? guess : '';
+}
+
+/** Candidats locaux pour upload guest PDF — ordre qualité décroissante, sans doublons. */
+export function collectPhotoLocalUploadUriCandidates(memory: Memory): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (u: string | null | undefined) => {
+    const t = (u ?? '').trim();
+    if (!t || seen.has(t)) return;
+    seen.add(t);
+    out.push(t);
+  };
+
+  add(memory.local_print_path);
+  if (memory.local_display_path) {
+    add(inferLocalPrintPathFromDisplay(memory.local_display_path));
+    add(memory.local_display_path);
+  }
+  if (memory.local_print_path) {
+    add(inferLocalDisplayPathFromPrint(memory.local_print_path));
+  }
+  add(memory.local_original_path);
+  add(memory.local_media_path);
+  add(memory.local_thumb_path);
+  return out;
+}
+
 function primarySlotPrintPathRaw(memory: Memory): string {
   const fromDisplay = memory.local_display_path?.trim()
     ? inferLocalPrintPathFromDisplay(memory.local_display_path)

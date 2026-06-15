@@ -258,6 +258,8 @@ export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient,
         pages: body.pages,
         child: childForHtml,
         coverPhotoUrl: coverForHtml,
+        coverPhotoImgPxW: body.coverPhotoImgPxW,
+        coverPhotoImgPxH: body.coverPhotoImgPxH,
         memoriesById: memoriesForHtml,
         qrTokensByMemoryId: qrResult.tokensByMemoryId,
       });
@@ -447,6 +449,8 @@ async function handleTicketPdf(
       pages: body.pages,
       child: childForHtml,
       coverPhotoUrl: coverForHtmlTicket,
+      coverPhotoImgPxW: body.coverPhotoImgPxW,
+      coverPhotoImgPxH: body.coverPhotoImgPxH,
       memoriesById: memoriesForHtml,
       qrTokensByMemoryId: qrResult.tokensByMemoryId,
     });
@@ -638,6 +642,8 @@ async function handleTicketPrintPdf(
       pages: body.pages,
       child: childForHtmlPrint,
       coverPhotoUrl: coverForHtmlPrint,
+      coverPhotoImgPxW: body.coverPhotoImgPxW,
+      coverPhotoImgPxH: body.coverPhotoImgPxH,
       memoriesById: memoriesForHtmlPrint,
       qrTokensByMemoryId: qrResult.tokensByMemoryId,
     });

@@ -154,9 +154,9 @@ const PAYWALL_MESSAGES: Record<
 type Plan = 'yearly' | 'monthly'
 
 const PAYWALL_BG = THEME.bg
-/** Gris CTA charte — paywall (`THEME.brandArdoise`). */
-const ACCENT = THEME.brandArdoise
-const ACCENT_SOFT = THEME.paywallAccentSoft
+/** Orange CTA charte plein — paywall (CTA, badges, sélection plan). */
+const ACCENT = THEME.brandCtaOrange
+const ACCENT_SOFT = THEME.tabBarActivePill
 /** Cœur hero paywall uniquement — rosé charte. */
 const PAYWALL_HEART = THEME.brandPrimary
 const CARD = '#FFFFFF'
@@ -483,9 +483,9 @@ export default function PaywallScreen() {
           <BenefitRow
             icon={
               <View style={styles.cloudLock}>
-                <Cloud size={13} color="#5C5C5C" strokeWidth={1.75} />
+                <Cloud size={13} color={ACCENT} strokeWidth={1.75} />
                 <View style={styles.miniLock}>
-                  <Lock size={6} color="#5C5C5C" strokeWidth={2} />
+                  <Lock size={6} color={ACCENT} strokeWidth={2} />
                 </View>
               </View>
             }
@@ -496,7 +496,7 @@ export default function PaywallScreen() {
           />
           <View style={styles.benefitRule} />
           <BenefitRow
-            icon={<BookOpen size={13} color="#5C5C5C" strokeWidth={1.75} />}
+            icon={<BookOpen size={13} color={ACCENT} strokeWidth={1.75} />}
             title="–20 % de réduction"
             desc="Sur vos livres de souvenirs"
             dm600={dm600}
@@ -723,7 +723,7 @@ const styles = StyleSheet.create({
   benefitInfinityGlyph: {
     fontSize: 17,
     fontWeight: '600',
-    color: '#5C5C5C',
+    color: ACCENT,
     lineHeight: 20,
     marginTop: -1,
   },

@@ -16,7 +16,7 @@ export function MemoryTextFontProvider({ children }: PropsWithChildren) {
   );
 }
 
-/** Police Garamond des souvenirs texte (EB Garamond ou GLC si configuré). */
+/** Police des textes de souvenirs (Roboto Flex Regular). */
 export function useMemoryTextFont(): string {
   return useContext(MemoryTextFontContext);
 }

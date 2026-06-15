@@ -1100,9 +1100,9 @@ function MaquetteAudio({
   const imgH = height * 0.6;
   const bookLoc = bookMaquetteLocationLabel(memory);
   const photoInline = buildInlineCropProps(inlineCropConfig, memory.id);
-  // Proportions réelles PDF : anneau lecteur = 19mm (`.audio-ring`).
-  const ringSize = Math.max(12, Math.round(pdfMmToPreviewPxW(19, width)));
-  const playerGap = Math.max(4, Math.round(pdfMmToPreviewPxW(4, width)));
+  // Proportions réelles PDF : anneau lecteur = 14mm (`.audio-ring`).
+  const ringSize = Math.max(10, Math.round(pdfMmToPreviewPxW(14, width)));
+  const playerGap = Math.max(2, Math.round(pdfMmToPreviewPxW(2, width)));
   const waveSvgH = Math.max(8, Math.round(18 * typoScale));
   const waveSvgW = Math.max(56, width - 2 * pad - ringSize - playerGap);
   const dotSize = Math.max(6, Math.round(8 * typoScale));
@@ -1134,7 +1134,7 @@ function MaquetteAudio({
               paddingHorizontal: pad,
               paddingTop: pdfMmToPreviewPxH(3, height),
               paddingBottom: pdfMmToPreviewPxH(3, height),
-              gap: pdfMmToPreviewPxW(4, width),
+              gap: pdfMmToPreviewPxH(2, height),
             },
           ]}
         >
@@ -1146,10 +1146,15 @@ function MaquetteAudio({
               ]}
             />
             <Text style={[styles.vocalLabel, pdfLabelStyle(width), dm600 && { fontFamily: dm600 }]}>
-              Vocal
+              Audio
             </Text>
           </View>
-          <View style={[styles.page4MetaRow, { flex: 1, minWidth: 0 }]}>
+          <View
+            style={[
+              styles.page4MetaRow,
+              { marginBottom: 0, gap: pdfMmToPreviewPxW(3, width), width: '100%' },
+            ]}
+          >
             <Text style={[styles.page4Meta, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
               {dateWithAgeCaps(memory, familyChildren)}
             </Text>
@@ -1227,7 +1232,7 @@ function MaquetteAudio({
                 },
               ]}
             >
-              <Text style={[styles.playGlyphInline, { fontSize: pdfPtToPreviewPx(11, width) }]}>▶</Text>
+              <Text style={[styles.playGlyphInline, { fontSize: pdfPtToPreviewPx(9, width) }]}>▶</Text>
             </View>
             <View style={styles.audioWaveCol}>
               <Svg
@@ -1653,15 +1658,13 @@ const styles = StyleSheet.create({
     flexDirection: 'column',
   },
   audioMetaRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
     flexShrink: 0,
     paddingTop: 10,
     paddingBottom: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: LINE,
-    gap: 14,
   },
   audioLower: {
     flex: 1,
@@ -1689,7 +1692,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     flexShrink: 0,
-    gap: 10,
+    gap: 6,
     paddingTop: 6,
   },
   audioRingInline: {
@@ -1702,9 +1705,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   playGlyphInline: {
-    fontSize: 14,
+    fontSize: 12,
     color: VOCAL_BLUE,
-    marginLeft: 2,
+    marginLeft: 1,
   },
   audioWaveCol: {
     flex: 1,

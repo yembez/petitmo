@@ -1,3 +1,5 @@
+import { CAPTURE_SCREEN_ACCENT, CAPTURE_SCREEN_BG } from '@/constants/captureScreenPalette';
+
 /** Rosé charte — couleur d’accent / CTA / marque (remplace ardoise + terracotta). */
 const BRAND_PRIMARY = '#FC5757';
 const BRAND_PRIMARY_RGB = '252, 87, 87';
@@ -107,14 +109,14 @@ export const THEME = {
   captureCtaBorderColor: `rgba(${BRAND_CTA_ORANGE_RGB}, 0.32)`,
   /** @deprecated violet maquette initiale — conservé si besoin legacy. */
   captureMaquetteViolet: '#5B47D6',
-  /** Icône + libellé onglet actif tab bar. */
-  tabBarActiveTint: BRAND_CTA_ORANGE,
+  /** Icône + libellé onglet actif tab bar — orange charte (aligné écran Capturer). */
+  tabBarActiveTint: CAPTURE_SCREEN_ACCENT,
   /** Icône + libellé onglets inactifs (assombris vs `textSecondary`). */
   tabBarInactiveTint: '#636366',
-  /** Fond tab bar — aligné fond d’écran charte. */
-  tabBarBackground: APP_SCREEN_BG,
+  /** Fond tab bar — beige écran Capturer (`#FEFBF7`). */
+  tabBarBackground: CAPTURE_SCREEN_BG,
   /** @deprecated — `tabBarBackground` */
-  tabBarSurface: APP_SCREEN_BG,
+  tabBarSurface: CAPTURE_SCREEN_BG,
   /** Surfaces élevées (cartes souvenir, CTA disque blanc, pages livre à l’écran). */
   surfaceCard: '#FFFFFF',
   /** @deprecated pastille onglet actif supprimée — teinte via `tabBarActiveTint` uniquement. */

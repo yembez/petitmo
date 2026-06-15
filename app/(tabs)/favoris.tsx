@@ -912,7 +912,11 @@ const GalleryTile = memo(function GalleryTile({
 function FavorisScreen() {
   const router = useRouter();
   const isTabFocused = useIsFocused();
-  const params = useLocalSearchParams<{ bookId?: string; createBookTitle?: string }>();
+  const params = useLocalSearchParams<{
+    bookId?: string;
+    createBookTitle?: string;
+    addToBookId?: string;
+  }>();
   const insets = useSafeAreaInsets();
   /** Prérempli après `hydrateTabScreensFromLocal` : pas de roue si les données locales sont déjà connues. */
   const [loading, setLoading] = useState(() => feedChildHydrationSnapshot === null);
@@ -929,6 +933,7 @@ function FavorisScreen() {
   const galleryScrollY = useSharedValue(0);
   const [bookModalVisible, setBookModalVisible] = useState(false);
   const [createBookFlowTitle, setCreateBookFlowTitle] = useState<string | null>(null);
+  const [addToBookTargetId, setAddToBookTargetId] = useState<string | null>(null);
 
   const load = useCallback(async (opts?: { background?: boolean }) => {
     const childId = await getOrSelectFirstChild();
@@ -957,7 +962,16 @@ function FavorisScreen() {
   const exitSelection = useCallback(() => {
     setSelectionMode(false);
     setSelectedIds(new Set());
+    setAddToBookTargetId(null);
   }, []);
+
+  const handleExitSelection = useCallback(() => {
+    const returnBookId = addToBookTargetId;
+    exitSelection();
+    if (returnBookId) {
+      router.replace({ pathname: '/book-preview', params: { bookId: returnBookId } });
+    }
+  }, [addToBookTargetId, exitSelection, router]);
 
   const toggleSelection = useCallback((key: string) => {
     setSelectedIds(prev => {
@@ -1005,6 +1019,7 @@ function FavorisScreen() {
         galleryScrollY.value = 0;
         setSelectionMode(false);
         setSelectedIds(new Set());
+        setAddToBookTargetId(null);
       };
     }, [load])
   );
@@ -1029,11 +1044,21 @@ function FavorisScreen() {
     const t = typeof params.createBookTitle === 'string' ? params.createBookTitle.trim() : '';
     if (!t) return;
     setCreateBookFlowTitle(t);
+    setAddToBookTargetId(null);
     // Auto: passer en mode sélection.
     setSelectionMode(true);
     setSelectedIds(new Set());
     // Nettoyage params non critique (on évite des loops en restant minimaliste).
   }, [params.createBookTitle]);
+
+  useEffect(() => {
+    const id = typeof params.addToBookId === 'string' ? params.addToBookId.trim() : '';
+    if (!id) return;
+    setAddToBookTargetId(id);
+    setCreateBookFlowTitle(null);
+    setSelectionMode(true);
+    setSelectedIds(new Set());
+  }, [params.addToBookId]);
 
   const favoriteItems = useMemo(() => buildFavoriteItems(memories), [memories]);
 
@@ -1182,7 +1207,7 @@ function FavorisScreen() {
                 gradientHeight={heroGradientHeight}
                 selectionMode={selectionMode}
                 selectionHeaderTitle={selectionHeaderTitle}
-                onExitSelection={exitSelection}
+                onExitSelection={handleExitSelection}
                 onEnterSelection={enterSelectionMode}
               />
             </View>
@@ -1258,13 +1283,59 @@ function FavorisScreen() {
                     router.push({ pathname: '/book-preview', params: { bookId: created.id } });
                     return;
                   }
+                  if (addToBookTargetId) {
+                    const { addMemoriesToBook } = await import('@/services/books');
+                    const targetId = addToBookTargetId;
+                    try {
+                      await addMemoriesToBook(targetId, selectedMemoryIds);
+                    } catch (e) {
+                      if (e instanceof Error && e.name === 'BookUpgradeRequiredError') {
+                        Alert.alert(
+                          'Petitmo+',
+                          'Pour pouvoir ajouter une vidéo dans le livre et la revoir à tout moment grâce au QR Code, passer à Petitmo+.',
+                          [
+                            {
+                              text: 'Annuler',
+                              style: 'cancel',
+                              onPress: () => {
+                                setSelectedIds(prev => {
+                                  const next = new Set(prev);
+                                  for (const it of galleryItems) {
+                                    if (!next.has(it.key)) continue;
+                                    if (it.memory.type === 'video') next.delete(it.key);
+                                  }
+                                  return next;
+                                });
+                              },
+                            },
+                            {
+                              text: 'Passer à Petitmo+',
+                              style: 'default',
+                              onPress: () => router.push({ pathname: '/paywall', params: { context: 'BOOK_VIDEO' } }),
+                            },
+                          ]
+                        );
+                        return;
+                      }
+                      Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
+                      return;
+                    }
+                    setAddToBookTargetId(null);
+                    exitSelection();
+                    router.replace({ pathname: '/book-preview', params: { bookId: targetId } });
+                    return;
+                  }
                   setBookModalVisible(true);
                 }}
                 accessibilityRole="button"
                 accessibilityLabel="Ajouter au livre"
               >
                 <Text style={styles.selectionActionBtnText}>
-                  {createBookFlowTitle ? `Créer « ${createBookFlowTitle} » →` : 'Ajouter au livre →'}
+                  {createBookFlowTitle
+                    ? `Créer « ${createBookFlowTitle} » →`
+                    : addToBookTargetId
+                      ? 'Ajouter →'
+                      : 'Ajouter au livre →'}
                 </Text>
               </TouchableOpacity>
             </Reanimated.View>

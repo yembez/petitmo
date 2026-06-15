@@ -1,14 +1,17 @@
-import { APP_SCREEN_BG, APP_SCREEN_BG_RGB } from '@/constants/theme';
+import {
+  CAPTURE_SCREEN_BG,
+  CAPTURE_SCREEN_BG_RGB,
+} from '@/constants/captureScreenPalette';
 
 /**
  * Dégradés bas Capturer — fondu beige sur la photo, au-dessus du bandeau CTA.
  */
 
-/** Blanc cassé — aligné `THEME.bg`. */
-export const CAPTURE_FADE_BASE_RGB = APP_SCREEN_BG_RGB;
+/** Beige test — aligné fond écran Capturer. */
+export const CAPTURE_FADE_BASE_RGB = CAPTURE_SCREEN_BG_RGB;
 
 /** Fond bandeau CTA + bas du dégradé photo. */
-export const CAPTURE_FADE_BASE_HEX = APP_SCREEN_BG;
+export const CAPTURE_FADE_BASE_HEX = CAPTURE_SCREEN_BG;
 
 function fadeColor(a: number): string {
   const { r, g, b } = CAPTURE_FADE_BASE_RGB;

@@ -49,6 +49,8 @@ export type GenerateBookPdfPayload = {
   bookId: string;
   childId: string;
   coverPhotoUrl?: string | null;
+  coverPhotoImgPxW?: number;
+  coverPhotoImgPxH?: number;
   coverTitle: string;
   coverYearLabel: string;
   chapterTitle: string;

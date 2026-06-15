@@ -85,7 +85,7 @@ export default function AudioPage({
               dm600 ? { fontFamily: dm600 } : { fontWeight: '600' },
             ]}
           >
-            Vocal
+            Audio
           </Text>
         </View>
         <Text style={[styles.bannerDuration, dm400 && { fontFamily: dm400 }]}>
