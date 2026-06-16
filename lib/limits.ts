@@ -15,10 +15,12 @@ export const FREE_TIER_BOOK_VOICE_MAX_DURATION = 60 // secondes (livres : QR aud
 export const FREE_TIER_BOOK_AUDIO_MAX_COUNT = 5
 
 /**
- * Largeur max (px) côté client pour le dérivé photo « print » (`print_*`) et pour les covers vocales
- * envoyées au livre / PDF — même cible A5 que `stratifiedUpload` (photo).
+ * Largeur max (px) pour upload cloud / compression guest PDF (équilibre poids ↔ qualité A5).
  */
 export const MEDIA_BOOK_PRINT_MAX_WIDTH = 1600
+
+/** Largeur du dérivé local `print.jpg` / `voice_cover_print.jpg` (impression livre, badge DPI). */
+export const MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH = 2600
 
 export type LimitCheck = {
   canCreate: boolean

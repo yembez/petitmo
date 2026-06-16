@@ -48,6 +48,7 @@ import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { ensurePlaybackAudioForListening } from '@/lib/playbackAudioMode';
 import AudioPlayer from '@/components/AudioPlayer';
 import EditTextModal from '@/components/EditTextModal';
+import { feedMemoryTextEditPreviewVariant } from '@/utils/memoryTextEditStyles';
 import { updateMemoryContent } from '@/services/media';
 import { useToggleFavorite } from '@/hooks/useToggleFavorite';
 import {
@@ -61,7 +62,7 @@ import {
   shouldShowCapturedMediaDateOverlay,
 } from '@/utils/feedCaptureOverlay';
 import { THEME } from '@/constants/theme';
-import { useMemoryTextFont } from '@/contexts/MemoryTextFontContext';
+import { useMemoryTextFontScreen } from '@/hooks/useMemoryTextFontScreen';
 import {
   buildImmersiveViewerItems,
   immersiveViewerItemKey,
@@ -337,6 +338,7 @@ export default function MemoryViewerScreen() {
         key={editingTextMemory?.id ?? 'closed'}
         visible={editingTextMemory !== null}
         initialText={editingTextMemory?.content ?? ''}
+        previewVariant={feedMemoryTextEditPreviewVariant(editingTextMemory?.type)}
         title="Modifier le texte"
         onClose={() => setEditingTextMemory(null)}
         onSave={handleSaveTextEdit}
@@ -460,7 +462,7 @@ function ImmersivePage({
   );
   const overlayBottomInset = immersiveOverlayBottomInset(insets.bottom);
   const [videoSoundOn, setVideoSoundOn] = useState(true);
-  const memoryTextFont = useMemoryTextFont();
+  const memoryTextFont = useMemoryTextFontScreen();
 
   useEffect(() => {
     setVideoSoundOn(true);
@@ -1066,7 +1068,7 @@ function ImmersiveText({
   onGoNext: () => void;
   overlayBottomInset: number;
 }) {
-  const memoryTextFont = useMemoryTextFont();
+  const memoryTextFont = useMemoryTextFontScreen();
   const raw = memory.content?.trim() || '';
   const paragraphs = useMemo(() => {
     const t = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();

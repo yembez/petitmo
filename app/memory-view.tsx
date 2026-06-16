@@ -22,11 +22,12 @@ import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
 import { useFocusEffect } from '@react-navigation/native';
 import { scale, verticalScale } from '@/utils/responsive';
 import { THEME } from '@/constants/theme';
-import { useMemoryTextFont } from '@/contexts/MemoryTextFontContext';
+import { useMemoryTextFontScreen } from '@/hooks/useMemoryTextFontScreen';
 import { MEDIA_CARD_INSET, MEDIA_CARD_RADIUS } from '@/constants/feedLayout';
 import PhotoMosaic from '@/components/PhotoMosaic';
 import AudioPlayer from '@/components/AudioPlayer';
 import EditTextModal from '@/components/EditTextModal';
+import { feedMemoryTextEditPreviewVariant } from '@/utils/memoryTextEditStyles';
 import { getMemoryById, updateMemoryContent } from '@/services/media';
 import { resolveChildProfileImageDisplayUri } from '@/utils/childPhotoUri';
 import { getChildren } from '@/services/children';
@@ -68,7 +69,7 @@ export default function MemoryViewScreen() {
   const [newBookTitle, setNewBookTitle] = useState('');
   const [booksLoading, setBooksLoading] = useState(false);
   const [dockH, setDockH] = useState(0);
-  const memoryTextFont = useMemoryTextFont();
+  const memoryTextFont = useMemoryTextFontScreen();
 
   const load = useCallback(async () => {
     if (!memoryId) {
@@ -541,6 +542,7 @@ export default function MemoryViewScreen() {
         key={memory.id}
         visible={editModalVisible}
         initialText={memory.content?.trim() ?? ''}
+        previewVariant={feedMemoryTextEditPreviewVariant(memory.type)}
         title={
           memory.type === 'text'
             ? 'Modifier le texte'

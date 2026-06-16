@@ -5,8 +5,8 @@ import {
   Pressable,
   Platform,
   StyleSheet,
-  type ReactNode,
 } from 'react-native';
+import type { ReactNode } from 'react';
 import { BlurView } from 'expo-blur';
 import { Heart, MapPin } from 'lucide-react-native';
 import { THEME } from '@/constants/theme';

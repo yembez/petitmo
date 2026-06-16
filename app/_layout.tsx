@@ -16,7 +16,6 @@ import { THEME } from '@/constants/theme';
 import { ensurePlaybackAudioForListening } from '@/lib/playbackAudioMode';
 import { supabase, supabaseAnonKey, supabaseUrl } from '@/lib/supabase';
 import { PendingMediaUploadsProvider } from '@/contexts/PendingMediaUploadsContext';
-import { MemoryTextFontProvider } from '@/contexts/MemoryTextFontContext';
 import { initLocalDb } from '@/lib/localDb';
 import { resetUserTierForTesting } from '@/lib/userTier';
 import { cleanOrphanedLocalFiles } from '@/lib/localCleanup';
@@ -232,9 +231,13 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <MemoryTextFontProvider>
       <PendingMediaUploadsProvider>
-      <Stack screenOptions={{ headerShown: false }}>
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { flex: 1, backgroundColor: THEME.bgScreen },
+        }}
+      >
         <Stack.Screen name="index" />
         <Stack.Screen name="onboarding" />
         <Stack.Screen name="create-child" />
@@ -261,6 +264,7 @@ export default function RootLayout() {
             animation: 'slide_from_right',
             gestureEnabled: true,
             fullScreenGestureEnabled: true,
+            contentStyle: { flex: 1, backgroundColor: THEME.bg },
           }}
         />
         <Stack.Screen name="book-order" />
@@ -273,7 +277,6 @@ export default function RootLayout() {
       {/** Défaut fond clair : icônes statut foncées. `auto` suivait le thème OS (icônes claires en mode sombre) alors que l’UI reste claire. */}
       <StatusBar style="dark" />
       </PendingMediaUploadsProvider>
-      </MemoryTextFontProvider>
     </GestureHandlerRootView>
   );
 }

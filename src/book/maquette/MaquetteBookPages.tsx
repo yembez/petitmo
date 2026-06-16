@@ -17,13 +17,16 @@ import {
   DMSans_600SemiBold,
 } from '@expo-google-fonts/dm-sans';
 import { EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
-import { useMemoryTextFont } from '@/contexts/MemoryTextFontContext';
+import {
+  MEMORY_TEXT_FONT_FAMILY,
+  MEMORY_TEXT_FONT_FALLBACK,
+  MEMORY_TEXT_FONT_SOURCES,
+} from '@/constants/memoryTextFont';
 import { Video, ResizeMode } from 'expo-av';
 import type { BookPage } from '@/src/book/BookEngine';
 import type { Child, Memory } from '@/types/local';
 import { formatDuration, formatBookLocationShort } from '@/utils/date';
 import { formatFamilyAgesLine } from '@/utils/childrenAge';
-import { splitPhotoNoteTitleBody, splitVideoTitleBody } from '@/src/book/bookTextParts';
 import type { PhotoCrop } from '@/src/book/photoCrop';
 import { bookPhotoCropImageRect } from '@/utils/bookPhotoCropLayout';
 import BookPagePhotoFrame from '@/components/BookPagePhotoFrame';
@@ -37,7 +40,6 @@ import {
 import { memoryBookDisplayDateIso } from '@/utils/memoryBookDisplayDate';
 import { normalizeQuoteBodyLikeMaquette, quoteFitLevelFromBody } from '@/src/book/quoteFitLevel';
 import {
-  pdfBodyStyle,
   pdfChapterMonthStyle,
   pdfChapterSubStyle,
   pdfChapterTitleStyle,
@@ -45,9 +47,11 @@ import {
   pdfCoverTitleStyle,
   pdfFolioStyle,
   pdfLabelStyle,
+  pdfMemoryTextBodyStyle,
   pdfMmToPreviewPxH,
   pdfMmToPreviewPxW,
   pdfPhotoCaptionStyle,
+  pdfPhotoNoteBodyStyle,
   pdfPtToPreviewPx,
   pdfQuoteBodyStyle,
   pdfQuoteMarkStyle,
@@ -57,6 +61,15 @@ import {
 
 /** Alinéa (cadratin) en début de paragraphe — typographie roman. */
 const EM_QUAD = '\u2003';
+
+/** Style corps souvenir — Roboto, pas d’italique hérité (parité fil). */
+function memoryTextStyle(fontFamily: string) {
+  return {
+    fontFamily,
+    fontStyle: 'normal' as const,
+    fontWeight: '400' as const,
+  };
+}
 
 /**
  * Découpe un texte en paragraphes (double saut de ligne = nouveau paragraphe)
@@ -383,13 +396,14 @@ export default function MaquetteBookPages(props: Props) {
     DMSans_500Medium,
     DMSans_600SemiBold,
     EBGaramond_400Regular_Italic,
+    ...MEMORY_TEXT_FONT_SOURCES,
   });
 
   const dm400 = fontsLoaded ? 'DMSans_400Regular' : undefined;
   const dm600 = fontsLoaded ? 'DMSans_600SemiBold' : undefined;
   const dmItalic = fontsLoaded ? 'DMSans_400Regular_Italic' : undefined;
   const garamondIt = fontsLoaded ? 'EBGaramond_400Regular_Italic' : undefined;
-  const memoryTextFont = useMemoryTextFont();
+  const memoryTextFont = fontsLoaded ? MEMORY_TEXT_FONT_FAMILY : MEMORY_TEXT_FONT_FALLBACK;
 
   const pad = Math.min(28, width * 0.06);
   const typoScale = typographyScaleForMaquette(page.type, height);
@@ -475,7 +489,7 @@ export default function MaquetteBookPages(props: Props) {
           inlineCropConfig={inlineCropConfig}
           onRequestTextEdit={onRequestTextEdit}
           dm400={dm400}
-          garamondIt={garamondIt}
+          memoryTextFont={memoryTextFont}
         />
       );
     case 'photo-note':
@@ -496,7 +510,7 @@ export default function MaquetteBookPages(props: Props) {
           onRequestTextEdit={onRequestTextEdit}
           dm400={dm400}
           dm600={dm600}
-          garamondIt={garamondIt}
+          memoryTextFont={memoryTextFont}
         />
       );
     case 'quote':
@@ -536,7 +550,7 @@ export default function MaquetteBookPages(props: Props) {
           onRequestTextEdit={onRequestTextEdit}
           dm400={dm400}
           dm600={dm600}
-          garamondIt={garamondIt}
+          memoryTextFont={memoryTextFont}
         />
       );
     case 'video':
@@ -555,6 +569,7 @@ export default function MaquetteBookPages(props: Props) {
           dm400={dm400}
           dm600={dm600}
           garamondIt={garamondIt}
+          memoryTextFont={memoryTextFont}
         />
       );
     case 'back-cover':
@@ -721,7 +736,7 @@ function MaquettePhotoSimple({
   inlineCropConfig,
   onRequestTextEdit,
   dm400,
-  garamondIt,
+  memoryTextFont,
 }: {
   memory: Memory;
   familyChildren: Child[];
@@ -736,7 +751,7 @@ function MaquettePhotoSimple({
   inlineCropConfig?: InlineCropConfig;
   onRequestTextEdit: () => void;
   dm400?: string;
-  garamondIt?: string;
+  memoryTextFont: string;
 }) {
   const uri = getPrimaryPhotoUriForBookPreview(memory);
   const caption = (memory.content ?? '').trim();
@@ -795,7 +810,7 @@ function MaquettePhotoSimple({
               styles.photoCaption,
               pdfPhotoCaptionStyle(width),
               { marginTop: pdfMmToPreviewPxH(2.1, height) },
-              garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
+              memoryTextStyle(memoryTextFont),
             ]}
             numberOfLines={3}
           >
@@ -823,7 +838,7 @@ function MaquettePhotoNote({
   onRequestTextEdit,
   dm400,
   dm600,
-  garamondIt,
+  memoryTextFont,
 }: {
   memory: Memory;
   familyChildren: Child[];
@@ -839,7 +854,7 @@ function MaquettePhotoNote({
   onRequestTextEdit: () => void;
   dm400?: string;
   dm600?: string;
-  garamondIt?: string;
+  memoryTextFont: string;
 }) {
   const uri = getPrimaryPhotoUriForBookPreview(memory);
   const legend = (memory.content ?? '').trim();
@@ -898,10 +913,11 @@ function MaquettePhotoNote({
               <Text
                 style={[
                   styles.page4Body,
-                  pdfBodyStyle(width),
+                  pdfPhotoNoteBodyStyle(width),
                   { marginTop: pdfMmToPreviewPxH(4, height) },
-                  garamondIt ? { fontFamily: garamondIt } : dm400 ? { fontFamily: dm400 } : null,
+                  memoryTextStyle(memoryTextFont),
                 ]}
+                {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
               >
                 {romanParagraphs(legend)}
               </Text>
@@ -996,6 +1012,8 @@ function MaquetteQuote({
                     marginLeft: pdfMmToPreviewPxW(5, width),
                     marginTop: pdfMmToPreviewPxH(1.5, height),
                     fontFamily: memoryTextFont,
+                    fontStyle: 'normal',
+                    fontWeight: '400',
                   },
                 ]}
               >
@@ -1006,7 +1024,7 @@ function MaquetteQuote({
                   style={[
                     styles.quoteBody,
                     bodyScaled,
-                    { fontFamily: memoryTextFont },
+                    memoryTextStyle(memoryTextFont),
                   ]}
                   {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
                 >
@@ -1070,7 +1088,7 @@ function MaquetteAudio({
   onRequestTextEdit,
   dm400,
   dm600,
-  garamondIt,
+  memoryTextFont,
 }: {
   memory: Memory;
   familyChildren: Child[];
@@ -1087,7 +1105,7 @@ function MaquetteAudio({
   onRequestTextEdit: () => void;
   dm400?: string;
   dm600?: string;
-  garamondIt?: string;
+  memoryTextFont: string;
 }) {
   const heights = useMemo(() => barHeightsFromId(memory.id), [memory.id]);
   const totalSec = memory.duration ?? 0;
@@ -1183,9 +1201,10 @@ function MaquetteAudio({
                 <Text
                   style={[
                     styles.audioCaption,
-                    pdfBodyStyle(width),
-                    garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
+                    pdfMemoryTextBodyStyle(width),
+                    memoryTextStyle(memoryTextFont),
                   ]}
+                  {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
                 >
                   {romanParagraphs(titleRaw)}
                 </Text>
@@ -1282,6 +1301,7 @@ function MaquetteVideo({
   dm400,
   dm600,
   garamondIt,
+  memoryTextFont,
 }: {
   memory: Memory;
   familyChildren: Child[];
@@ -1295,12 +1315,13 @@ function MaquetteVideo({
   dm400?: string;
   dm600?: string;
   garamondIt?: string;
+  memoryTextFont: string;
 }) {
   const posterImageUri = getVideoPosterUriForBookPreview(memory);
   const imgH = height * 0.42;
-  const { title: videoTitleRaw, body: videoBodyRaw } = splitVideoTitleBody(memory.content ?? '');
-  const title = videoTitleRaw || 'Vidéo';
-  const sub = videoBodyRaw.trim() ? videoBodyRaw : 'Regarde ce moment en vidéo.';
+  const raw = (memory.content ?? '').trim();
+  const title = 'Vidéo';
+  const sub = raw || 'Regarde ce moment en vidéo.';
   const bookLoc = bookMaquetteLocationLabel(memory);
   // Proportions réelles PDF : QR vidéo = 22mm (`.qr`).
   const videoQrSize = Math.max(14, Math.round(pdfMmToPreviewPxW(22, width)));
@@ -1354,8 +1375,9 @@ function MaquetteVideo({
                 styles.videoSub,
                 pdfVideoSubStyle(width),
                 { marginTop: Math.round(10 * typoScale) },
-                garamondIt ? { fontFamily: garamondIt } : dm400 ? { fontFamily: dm400 } : null,
+                memoryTextStyle(memoryTextFont),
               ]}
+              {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
             >
               {romanParagraphs(sub)}
             </Text>
@@ -1509,7 +1531,6 @@ const styles = StyleSheet.create({
   page4Body: {
     marginTop: 12,
     fontSize: 15,
-    lineHeight: 24,
     color: INK,
     textAlign: 'justify' as const,
   },

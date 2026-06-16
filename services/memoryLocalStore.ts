@@ -2,6 +2,7 @@ import { DeviceEventEmitter, Platform, Image } from 'react-native';
 import { copyAsync, documentDirectory, makeDirectoryAsync } from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { getLocalMemoryById, upsertLocalMemory } from '@/lib/localDb';
+import { MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH } from '@/lib/limits';
 import type { Memory } from '@/types/local';
 import {
   feedBooksHydrationSnapshot,
@@ -133,7 +134,7 @@ export async function ensureLocalPhotoDisplayPrintDerivatives(params: {
   );
   const print = await ImageManipulator.manipulateAsync(
     localOriginalUri,
-    [{ resize: { width: 2600 } }],
+    [{ resize: { width: MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH } }],
     { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
   );
 
@@ -254,6 +255,123 @@ export async function awaitPhotoPrintDerivativesForMemory(memoryId: string): Pro
     return next;
   } catch (e) {
     console.warn('[memoryLocalStore] awaitPhotoPrintDerivativesForMemory', id, e);
+    return cur;
+  }
+}
+
+/** Dérivé print cover vocal (`voice_cover_print.jpg`) — parité `print.jpg` photo. */
+export async function ensureLocalVoiceCoverPrintDerivative(params: {
+  memoryId: string;
+  sourceCoverUri: string;
+}): Promise<{ localPrintUri: string | null; printPx: { w: number; h: number } | null }> {
+  const { memoryId, sourceCoverUri } = params;
+  const src = sourceCoverUri.trim();
+  if (!src || Platform.OS === 'web') {
+    return { localPrintUri: null, printPx: null };
+  }
+  const root = baseDir();
+  if (!root) return { localPrintUri: null, printPx: null };
+
+  const dir = `${root}${memoryId}/`;
+  await ensureDir(dir);
+  const printDest = `${dir}voice_cover_print.jpg`;
+
+  const print = await ImageManipulator.manipulateAsync(
+    src,
+    [{ resize: { width: MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH } }],
+    { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
+  );
+  await copyAsync({ from: print.uri, to: printDest }).catch(() => {});
+  const printPx = await getImagePx(printDest).catch(() => null);
+  return { localPrintUri: printDest, printPx };
+}
+
+const voiceCoverPrintInFlight = new Set<string>();
+
+export function scheduleLocalVoiceCoverPrintDerivative(memoryId: string, sourceCoverUri: string): void {
+  const id = memoryId.trim();
+  const src = sourceCoverUri.trim();
+  if (!id || !src || Platform.OS === 'web') return;
+  if (voiceCoverPrintInFlight.has(id)) return;
+  voiceCoverPrintInFlight.add(id);
+
+  void (async () => {
+    try {
+      const cur = getLocalMemoryById(id);
+      if (!cur || cur.type !== 'voice') return;
+      if (cur.local_print_path?.trim()) return;
+
+      const heavy = await ensureLocalVoiceCoverPrintDerivative({ memoryId: id, sourceCoverUri: src });
+      const print = heavy.localPrintUri?.trim() || null;
+      if (!print) return;
+
+      const next: Memory = {
+        ...cur,
+        local_print_path: print,
+        print_px_w: heavy.printPx?.w ?? cur.print_px_w,
+        print_px_h: heavy.printPx?.h ?? cur.print_px_h,
+        updated_at: new Date().toISOString(),
+      };
+      upsertLocalMemory(next);
+
+      const snapIdx = feedMemoriesHydrationSnapshot.findIndex(m => m.id === id);
+      if (snapIdx >= 0) {
+        const snapMemories = [...feedMemoriesHydrationSnapshot];
+        snapMemories[snapIdx] = next;
+        setFeedHydrationSnapshots(
+          feedChildHydrationSnapshot,
+          snapMemories,
+          feedBooksHydrationSnapshot,
+        );
+      }
+
+      DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId: id });
+    } catch (e) {
+      console.warn('[memoryLocalStore] voice cover print', id, e);
+    } finally {
+      voiceCoverPrintInFlight.delete(id);
+    }
+  })();
+}
+
+/** Génère `voice_cover_print.jpg` avant badge DPI livre / export. */
+export async function awaitVoiceCoverPrintDerivativeForMemory(memoryId: string): Promise<Memory | null> {
+  const id = memoryId.trim();
+  const cur = getLocalMemoryById(id);
+  if (!cur || cur.type !== 'voice') return cur;
+  const cover = (cur.voice_cover_path ?? cur.voice_cover_url ?? '').trim();
+  if (!cover) return cur;
+  if (cur.local_print_path?.trim() && cur.print_px_w && cur.print_px_h) return cur;
+
+  try {
+    const heavy = await ensureLocalVoiceCoverPrintDerivative({ memoryId: id, sourceCoverUri: cover });
+    const print = heavy.localPrintUri?.trim() || null;
+    if (!print) return cur;
+
+    const next: Memory = {
+      ...cur,
+      local_print_path: print,
+      print_px_w: heavy.printPx?.w ?? cur.print_px_w,
+      print_px_h: heavy.printPx?.h ?? cur.print_px_h,
+      updated_at: new Date().toISOString(),
+    };
+    upsertLocalMemory(next);
+
+    const snapIdx = feedMemoriesHydrationSnapshot.findIndex(m => m.id === id);
+    if (snapIdx >= 0) {
+      const snapMemories = [...feedMemoriesHydrationSnapshot];
+      snapMemories[snapIdx] = next;
+      setFeedHydrationSnapshots(
+        feedChildHydrationSnapshot,
+        snapMemories,
+        feedBooksHydrationSnapshot,
+      );
+    }
+
+    DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId: id });
+    return next;
+  } catch (e) {
+    console.warn('[memoryLocalStore] awaitVoiceCoverPrintDerivativeForMemory', id, e);
     return cur;
   }
 }

@@ -143,6 +143,7 @@ Aucune autre écriture cloud n'est permise en gratuit. Pas de "petite sync genti
 | Création device-user Supabase (mécanique technique) | [`app/_layout.tsx`](app/_layout.tsx) |
 | Écran d'accueil | [`app/onboarding.tsx`](app/onboarding.tsx) |
 | Paywall (contexte hero, `GENERAL` / `LIMIT_REACHED`…) | [`app/paywall.tsx`](app/paywall.tsx) |
+| Parité aperçu livre ↔ export PDF (checklist miroirs) | [`.cursor/rules/book-maquette-pdf-parity.mdc`](.cursor/rules/book-maquette-pdf-parity.mdc) |
 | Référence canonique complète | [`docs/specs/architecture-locale-cloud.md`](docs/specs/architecture-locale-cloud.md) |
 
 ### Livre et PDF — date affichée (photo, vidéo, audio, légendes)
@@ -158,6 +159,14 @@ Aucune autre écriture cloud n'est permise en gratuit. Pas de "petite sync genti
 - [`services/bookPdf.ts`](services/bookPdf.ts) ne contient plus que **`shareBookPdf`** (partage d’un fichier déjà obtenu du serveur).
 
 **Parité déploiement Supabase — service PDF Railway** : le Node `server/` utilise la **service role** sur les tables du flux export (ex. `public_media_tokens`). Dès qu’une PR ajoute ou utilise une **colonne ou table** côté serveur, il doit exister une migration sous [`supabase/migrations/`](supabase/migrations/) et elle doit être **appliquée en prod** avant ou avec le push Railway. Sinon les inserts échouent ; symptôme historique : **502** sur `generate-pdf` alors que `/health` répond 200 (ex. colonne manquante `expires_at` → migration `20260505120000_public_media_tokens_expires_at.sql`).
+
+### Parité maquette livre ↔ export PDF
+
+L’aperçu in-app (`MaquetteBookPages.tsx`) et le PDF serveur (`htmlBook.ts`) partagent le **même contenu de pages** ; digital et impression ne diffèrent que par le format `@page` et le fond perdu.
+
+- Toute modification de **mise en page, typo, couleurs, recadrage ou texte affiché** dans l’aperçu livre doit être reportée **dans le même PR** sur `server/src/pdf/` (et helpers miroirs).
+- Checklist complète, fichiers couplés et règles typo (Roboto Flex souvenirs vs Garamond éditorial) : [`.cursor/rules/book-maquette-pdf-parity.mdc`](.cursor/rules/book-maquette-pdf-parity.mdc).
+- Après changement côté serveur : **redéployer** `server/` (Railway/VPS) — un reload Metro ne met pas à jour l’export PDF.
 
 ---
 
@@ -193,3 +202,4 @@ flowchart LR
 3. Si une demande utilisateur entre en conflit avec la règle d'or, **lever le drapeau immédiatement** plutôt que de l'exécuter en silence.
 4. Pour toute exception Supabase en gratuit, vérifier qu'elle correspond bien à un des **deux cas autorisés** (achat PDF/livre, audio QR pérenne).
 5. Export PDF livre : **uniquement** serveur — voir **« Export livre PDF — uniquement le service distant »** ci-dessus ; jamais `expo-print` / génération locale.
+6. Changement livre / maquette : lire et appliquer [`.cursor/rules/book-maquette-pdf-parity.mdc`](.cursor/rules/book-maquette-pdf-parity.mdc) — maintenir la parité aperçu ↔ `htmlBook.ts` dans le même PR.

@@ -6,6 +6,7 @@ import {
   ensureLocalPhotoFeedThumbOnly,
   persistOriginalToSandbox,
   scheduleLocalPhotoHeavyDerivatives,
+  scheduleLocalVoiceCoverPrintDerivative,
 } from '@/services/memoryLocalStore';
 import {
   persistFeedLocalThumbnail,
@@ -344,6 +345,9 @@ export async function captureMemoryLocalOnly(params: {
     typeof voicePlaybackStartSec === 'number' && Number.isFinite(voicePlaybackStartSec)
       ? voicePlaybackStartSec
       : null;
+  if (voiceCoverPath) {
+    scheduleLocalVoiceCoverPrintDerivative(id, voiceCoverPath);
+  }
   return stampLibraryAsset(mem);
 }
 

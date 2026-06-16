@@ -16,8 +16,10 @@ import type { UploadStatus } from '@/types/local';
 import {
   ensureLocalPhotoDerivatives,
   ensureLocalPhotoFeedThumbOnly,
+  ensureLocalVoiceCoverPrintDerivative,
   persistOriginalToSandbox,
   scheduleLocalPhotoHeavyDerivatives,
+  scheduleLocalVoiceCoverPrintDerivative,
 } from '@/services/memoryLocalStore';
 import {
   mergeServerMemoryRowWithExistingLocal,
@@ -33,6 +35,7 @@ import {
   checkVideoLimit,
   invalidateMemoryLimitCache,
   MEDIA_BOOK_PRINT_MAX_WIDTH,
+  MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH,
 } from '@/lib/limits';
 import { getUserTier } from '@/lib/userTier';
 import { deleteLocalMediaFiles } from '@/lib/localCleanup';
@@ -63,11 +66,13 @@ import {
 import { captureMemoryLocalOnly, capturePhotoAlbumLocalOnly } from '@/services/localOnlyMemoryCapture';
 import { getSignedUrlAfterMediaUpload } from '@/lib/mediaSignedUrl';
 import {
+  collectVoiceCoverLocalUploadUriCandidates,
   getAlbumCanonicalFavoriteUrls,
   isFeedMultiPhotoAlbum,
 } from '@/utils/memoryPhotos';
 import {
   isLocalMediaUriReadable,
+  pickFirstReadableLocalMediaUri,
   rebaseSandboxUriToCurrentContainer,
 } from '@/utils/localMediaReadable';
 
@@ -347,15 +352,15 @@ async function stratifiedUpload(params: {
   };
 }
 
-/** Cover vocal : même cible que le dérivé photo `print_*` (livre A5 / PDF). */
+/** Cover vocal : dérivé print local (2600px) ou repli upload cloud (1600px). */
 async function prepareLocalUriForVoiceCoverUpload(coverUri: string): Promise<string> {
   const trimmed = coverUri.trim();
   if (!trimmed || Platform.OS === 'web') return trimmed;
   try {
     const manipulated = await ImageManipulator.manipulateAsync(
       trimmed,
-      [{ resize: { width: MEDIA_BOOK_PRINT_MAX_WIDTH } }],
-      { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG }
+      [{ resize: { width: MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH } }],
+      { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG }
     );
     return manipulated?.uri?.trim() ? manipulated.uri : trimmed;
   } catch {
@@ -1659,6 +1664,9 @@ export async function uploadMedia({
       };
 
       upsertLocalMemory(mem);
+      if (voiceCoverLocal) {
+        scheduleLocalVoiceCoverPrintDerivative(memoryId, voiceCoverLocal);
+      }
       if (!suppressFeedEmit) {
         DeviceEventEmitter.emit('petitmo:memories-inserted', { memories: [mem] });
       }
@@ -2239,6 +2247,7 @@ export async function updateMemoryContent(memoryId: string, content: string) {
      * La sync Supabase peut échouer (réseau, session, RLS) mais l’utilisateur ne doit pas perdre son texte.
      */
     updateLocalMemoryContent(memoryId, content);
+    DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId });
 
     if ((await getCachedUserMode()) === 'local') {
       return true;
@@ -2324,7 +2333,14 @@ export async function persistVoiceCoverToCloudForPdfExport(
     } = await supabase.auth.getUser();
     if (!user) return null;
 
-    const up = await uploadVoiceCoverToStorage(user.id, childId, localCoverUri.trim());
+    const row = getLocalMemoryById(memoryId);
+    const uploadUri =
+      (row
+        ? await pickFirstReadableLocalMediaUri(collectVoiceCoverLocalUploadUriCandidates(row))
+        : null) ?? localCoverUri.trim();
+    if (!uploadUri) return null;
+
+    const up = await uploadVoiceCoverToStorage(user.id, childId, uploadUri);
     if (!up) return null;
 
     const { error } = await supabase
@@ -2394,10 +2410,17 @@ export async function updateVoiceMemoryCover(
       }
       const existing = getLocalMemoryById(memoryId);
       if (!existing) return null;
+      const heavy = await ensureLocalVoiceCoverPrintDerivative({
+        memoryId,
+        sourceCoverUri: dest,
+      });
       const next: Memory = {
         ...existing,
         voice_cover_url: dest,
         voice_cover_path: dest,
+        local_print_path: heavy.localPrintUri ?? null,
+        print_px_w: heavy.printPx?.w ?? null,
+        print_px_h: heavy.printPx?.h ?? null,
         updated_at: updatedAt,
       };
       upsertLocalMemory(next);
@@ -2428,6 +2451,9 @@ export async function updateVoiceMemoryCover(
         voice_cover_path: up.path,
         updated_at: new Date().toISOString(),
       });
+      if (!trimmed.startsWith('http')) {
+        scheduleLocalVoiceCoverPrintDerivative(memoryId, trimmed);
+      }
     }
     DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId });
     void triggerProcessMemory(memoryId);

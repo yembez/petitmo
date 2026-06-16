@@ -31,6 +31,7 @@ import { ensureVoiceMemoryCloudForBookExport } from '@/services/migration';
 import { persistVoiceCoverToCloudForPdfExport } from '@/services/media';
 import {
   collectPhotoLocalUploadUriCandidates,
+  collectVoiceCoverLocalUploadUriCandidates,
   getVoiceCoverUriForBookPreview,
   inferLocalDisplayPathFromPrint,
 } from '@/utils/memoryPhotos';
@@ -140,6 +141,9 @@ function mergeMemoryWithLocalRowForVoiceCover(m: Memory): Memory {
       ...m,
       voice_cover_path: m.voice_cover_path ?? row.voice_cover_path ?? null,
       voice_cover_url: m.voice_cover_url ?? row.voice_cover_url ?? null,
+      local_print_path: m.local_print_path ?? row.local_print_path ?? null,
+      print_px_w: m.print_px_w ?? row.print_px_w ?? null,
+      print_px_h: m.print_px_h ?? row.print_px_h ?? null,
     };
   } catch {
     return m;
@@ -900,7 +904,9 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
           Platform.OS !== 'web'
         ) {
           try {
-            const readableCover = await pickFirstReadableLocalMediaUri([coverUri]);
+            const readableCover = await pickFirstReadableLocalMediaUri(
+              collectVoiceCoverLocalUploadUriCandidates(merged),
+            );
             if (!readableCover) throw new Error('VOICE_COVER_NOT_READABLE');
             const compressed = await compressLocalJpegForGuestUpload(readableCover);
             const { readUrl } = await guestUploadMediaImageThenReadUrl({

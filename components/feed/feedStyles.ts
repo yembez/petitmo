@@ -27,6 +27,10 @@ const GREY_ACTIVE_BORDER = '#D1D5DB';
 /** Hauteur du bloc « traits + date · âge » — alignée sur `styles.daySeparatorBlock` (chaque post) */
 const DAY_SEPARATOR_BLOCK_H = verticalScale(46);
 
+/** Interligne corps souvenir fil (~1,3× la taille — aligné livre `.memory-text`). */
+const FEED_TEXT_BODY_LINE_HEIGHT = scale(22);
+const FEED_CAPTION_LINE_HEIGHT = scale(21);
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -442,9 +446,6 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '600',
     textAlign: 'left',
-    textShadowColor: 'rgba(0, 0, 0, 0.42)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
   },
   feedMetaPillAge: {
     fontSize: scale(12),
@@ -452,9 +453,6 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.92)',
     fontWeight: '500',
     textAlign: 'left',
-    textShadowColor: 'rgba(0, 0, 0, 0.42)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
   },
   feedMetaPillLocationText: {
     fontSize: scale(12),
@@ -463,9 +461,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     flexShrink: 1,
     textAlign: 'right',
-    textShadowColor: 'rgba(0, 0, 0, 0.42)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
   },
   feedMetaPillLocationPlaceholder: {
     color: 'rgba(255, 255, 255, 0.78)',
@@ -627,7 +622,7 @@ const styles = StyleSheet.create({
     fontSize: scale(17),
     fontWeight: '400',
     color: '#1C1C1E',
-    lineHeight: scale(27),
+    lineHeight: FEED_TEXT_BODY_LINE_HEIGHT,
     textAlign: 'justify',
     ...Platform.select({
       android: {
@@ -654,7 +649,7 @@ const styles = StyleSheet.create({
     fontSize: scale(16),
     fontWeight: '400',
     color: '#1C1C1E',
-    lineHeight: scale(25),
+    lineHeight: FEED_CAPTION_LINE_HEIGHT,
     textAlign: 'justify',
     ...Platform.select({
       android: {

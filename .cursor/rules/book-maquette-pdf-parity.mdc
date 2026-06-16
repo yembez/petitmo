@@ -1,0 +1,50 @@
+---
+description: Parité obligatoire entre aperçu livre (maquette app) et export PDF serveur (digital + impression).
+globs: src/book/**/*,server/src/pdf/**/*,src/book/pdfPreviewTypo.ts,constants/memoryTextFont.ts
+alwaysApply: false
+---
+
+# Parité maquette livre ↔ export PDF
+
+Toute modification de **mise en page, typo, couleurs, recadrage ou contenu affiché** dans l’aperçu livre doit être reportée **dans le même PR** sur le rendu serveur PDF.
+
+## Pipeline unique (digital = impression, sauf format page)
+
+Les deux exports passent par **`server/src/pdf/htmlBook.ts`** → `buildBookHtml()` → Playwright (`renderPdf.ts`).
+
+| Mode | `exportMode` | Format `@page` | Différences |
+|------|--------------|----------------|-------------|
+| PDF numérique | `digital` | A5 148×210 mm | Validation `validateDigitalPdfBytes` après génération |
+| Impression | `print` | A5 + fond perdu 3 mm (`print-bleed`) | Même HTML/CSS ; marges safe + `.bleed-x` sur certains visuels |
+
+**Le contenu des pages (typo, positions, crops, textes) est identique** entre digital et print. Seuls changent : dimensions de page, fond perdu, folio/couverture en bord de coupe.
+
+Ne pas créer de styles ou logique « PDF écran seulement » vs « impression seulement » sans justification produit explicite.
+
+## Fichiers à maintenir en miroir
+
+| Aperçu app | Export PDF / logique partagée |
+|------------|-------------------------------|
+| `src/book/maquette/MaquetteBookPages.tsx` | `server/src/pdf/htmlBook.ts` (HTML + CSS) |
+| `src/book/pdfPreviewTypo.ts` (pt → px aperçu) | Classes CSS `htmlBook` (source de vérité en **pt/mm**) |
+| `src/book/quoteFitLevel.ts` | `server/src/pdf/maquetteAlign.ts` → `quoteFitLevelFromBody`, `normalizeQuoteBodyLikeMaquette` |
+| `utils/bookPhotoCropLayout.ts` | `server/src/pdf/bookPhotoCropLayout.ts` |
+| `constants/memoryTextFont.ts` | Classe `.memory-text` + Roboto Flex dans `htmlBook` |
+| `constants/bookCoverThumbnail.ts` (`BOOK_COVER_PHOTO_HEIGHT_RATIO`) | `server/src/constants/pdfDigitalSpec.ts` → `BOOK_COVER_PHOTO_HEIGHT_RATIO` |
+
+## Textes de souvenirs (Roboto Flex)
+
+Corps et annotations utilisateur (citation, légende photo, texte audio, description vidéo) :
+
+- **App** : `MEMORY_TEXT_FONT_*` + `memoryTextStyle()` dans la maquette.
+- **PDF** : classe **`memory-text`** sur les blocs correspondants (pas Garamond italique).
+
+Titres éditoriaux livre (couverture, chapitre, titre vidéo) : **EB Garamond** — hors scope « texte souvenir ».
+
+## Checklist avant de merger un changement livre
+
+1. Modifier la maquette **et** `htmlBook.ts` (ou helper miroir dans `server/src/pdf/`).
+2. Si nouvelle constante mm/pt : mettre à jour `pdfPreviewTypo.ts` pour l’aperçu.
+3. Vérifier **digital et print** (même CSS ; tester `exportMode: 'print'` si fond perdu touché).
+4. **Redéployer** le serveur `server/` (Railway/VPS) — Metro seul ne met pas à jour le PDF.
+5. Pas de génération PDF sur l’appareil (`expo-print` interdit — voir `architecture.mdc`).

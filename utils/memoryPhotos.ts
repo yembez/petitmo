@@ -183,6 +183,15 @@ export function collectBookPhotoDpiUriCandidates(args: {
   };
 
   const { memory, photoRef, displayUri, bookPrintUri } = args;
+  if (memory?.type === 'voice') {
+    add(memory.local_print_path);
+    const cover = (memory.voice_cover_path ?? '').trim();
+    if (cover) add(inferLocalVoiceCoverPrintPath(cover));
+    add(memory.voice_cover_path);
+    add(memory.voice_cover_url);
+    if (displayUri) add(displayUri);
+    return out;
+  }
   if (memory) {
     add(memory.local_original_path);
     add(memory.local_print_path);
@@ -205,6 +214,14 @@ export function getBookPhotoPrintPixelSize(
   memory: Memory,
   _photoRef?: string,
 ): { w: number; h: number } | null {
+  if (memory.type === 'voice') {
+    const pw = memory.print_px_w;
+    const ph = memory.print_px_h;
+    if (typeof pw === 'number' && typeof ph === 'number' && pw > 0 && ph > 0) {
+      return { w: pw, h: ph };
+    }
+    return null;
+  }
   if (memory.type !== 'photo') return null;
   const pw = memory.print_px_w;
   const ph = memory.print_px_h;
@@ -254,8 +271,44 @@ export function getPrimaryPhotoUriForBookPreview(memory: Memory): string {
   return getBookPhotoPrintUri(memory);
 }
 
-/** Photo de fond d’un vocal : `voice_cover_path` puis `voice_cover_url`. */
+/** Chemin sandbox `voice_cover_print.jpg` (parité `print.jpg` des photos). */
+export function inferLocalVoiceCoverPrintPath(coverPath: string): string {
+  const c = coverPath.trim();
+  if (!c) return '';
+  if (/voice_cover_print\./i.test(c)) return c;
+  const slash = c.lastIndexOf('/');
+  const dir = slash >= 0 ? c.slice(0, slash + 1) : '';
+  return `${dir}voice_cover_print.jpg`;
+}
+
+/** Candidats locaux cover vocal pour upload PDF / cloud (qualité print d’abord). */
+export function collectVoiceCoverLocalUploadUriCandidates(memory: Memory): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (u: string | null | undefined) => {
+    const t = (u ?? '').trim();
+    if (!t || seen.has(t)) return;
+    seen.add(t);
+    out.push(t);
+  };
+  if (memory.type !== 'voice') return out;
+  add(memory.local_print_path);
+  const cover = (memory.voice_cover_path ?? '').trim();
+  if (cover) add(inferLocalVoiceCoverPrintPath(cover));
+  add(memory.voice_cover_path);
+  return out;
+}
+
+/** Livre / PDF : dérivé print local (`local_print_path`), sinon cover d’origine. */
 export function getVoiceCoverUriForBookPreview(memory: Memory): string {
+  const localPick = firstNonEmpty(memory.local_print_path, memory.voice_cover_path);
+  const remotePick = firstNonEmpty(memory.voice_cover_url);
+  const raw = localPick.trim() || remotePick.trim();
+  return raw ? normalizeMemoryMediaUriForDisplay(raw) : '';
+}
+
+/** Fil / favoris / viewer : cover légère (pas le dérivé print livre). */
+export function getVoiceCoverUriForFeedAndViewer(memory: Memory): string {
   const localPick = firstNonEmpty(memory.voice_cover_path);
   const remotePick = firstNonEmpty(memory.voice_cover_url);
   const raw = localPick.trim() || remotePick.trim();
@@ -283,11 +336,6 @@ export function appendLocalMediaCacheBuster(
     return `${base}${sep}petitmo_v=${encodeURIComponent(rev)}`;
   }
   return base;
-}
-
-/** Fil, favoris, viewer — alias vocal aligné sur la maquette livre. */
-export function getVoiceCoverUriForFeedAndViewer(memory: Memory): string {
-  return getVoiceCoverUriForBookPreview(memory);
 }
 
 /** URI affichage cover vocal fil / viewer (cache-buster local sur `updated_at`). */

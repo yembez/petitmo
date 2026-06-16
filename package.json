@@ -24,6 +24,8 @@
     "@expo-google-fonts/patrick-hand": "^0.4.1",
     "@expo-google-fonts/patrick-hand-sc": "^0.4.1",
     "@expo-google-fonts/quicksand": "^0.4.1",
+    "@expo-google-fonts/roboto": "^0.4.3",
+    "@expo-google-fonts/roboto-condensed": "^0.4.2",
     "@expo-google-fonts/roboto-flex": "^0.4.1",
     "@expo-google-fonts/sora": "^0.4.2",
     "@expo/ngrok": "^4.1.3",

@@ -21,6 +21,7 @@ import {
   Modal,
   Image,
   RefreshControl,
+  InteractionManager,
   type ListRenderItem,
 } from 'react-native';
 import { useFonts, DMSans_400Regular, DMSans_500Medium, DMSans_600SemiBold, DMSans_700Bold } from '@expo-google-fonts/dm-sans';
@@ -29,24 +30,22 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Image as ExpoImage } from 'expo-image';
 import { buildBookPages, type BookPage } from '@/src/book/BookEngine';
 import MaquetteBookPages from '@/src/book/maquette/MaquetteBookPages';
-import {
-  mergePhotoNoteTitleBody,
-  mergeVideoTitleBody,
-  splitPhotoNoteTitleBody,
-  splitVideoTitleBody,
-} from '@/src/book/bookTextParts';
 import EditTextModal from '@/components/EditTextModal';
 import { BookPreviewZoomWrap } from '@/components/BookPreviewZoomWrap';
 import { bookPrintFrameMmFor, type BookPhotoPageType } from '@/utils/bookPhotoPrintDpi';
 import { getChildren, getOrSelectFirstChild } from '@/services/children';
-import { getFamilyMemories, getMemoryById } from '@/services/media';
+import { getFamilyMemories, updateMemoryContent } from '@/services/media';
+import { getLocalMemoryById, updateLocalMemoryContent } from '@/lib/localDb';
+import { awaitVoiceCoverPrintDerivativeForMemory } from '@/services/memoryLocalStore';
 import { loadBookSelectionKeys, memoryIdFromBookSelectionKey } from '@/services/bookSelection';
+import { setPendingFavorisAddToBookId } from '@/services/favorisBookAddFlow';
 import {
   applyBookCoverFromUri,
   dedupeMemoryIds,
@@ -178,19 +177,10 @@ type SpreadRow = {
 type TextEditTarget =
   | { kind: 'cover'; modalTitle: string }
   | { kind: 'chapter'; modalTitle: string }
-  | {
-      kind: 'memory';
-      memory: Memory;
-      modalTitle: string;
-      fields: 'single' | 'title-body';
-      /** Requis si `fields === 'title-body'` */
-      textMode?: 'photo-note' | 'video';
-    };
+  | { kind: 'memory'; memory: Memory; modalTitle: string };
 
-function mergeMemory(m: Memory, edits: Record<string, Partial<Memory>>): Memory {
-  const e = edits[m.id];
-  return e ? { ...m, ...e } : m;
-}
+
+const EMPTY_MEMORY_EDITS: Record<string, Partial<Memory>> = {};
 
 function monthNameFrLower(d: Date): string {
   const raw = d.toLocaleDateString('fr-FR', { month: 'long' });
@@ -321,7 +311,6 @@ export default function BookPreviewScreen() {
   const [bookSelectionKeys, setBookSelectionKeys] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [localEdits, setLocalEdits] = useState<Record<string, Partial<Memory>>>({});
   const [rotations, setRotations] = useState<Record<string, number>>({});
   const [photoCrops, setPhotoCrops] = useState<Record<string, { xPct: number; yPct: number; scale: number }>>({});
   const [imagePxCache, setImagePxCache] = useState<Record<string, { w: number; h: number }>>({});
@@ -342,6 +331,8 @@ export default function BookPreviewScreen() {
   const [guestExportSubmitting, setGuestExportSubmitting] = useState(false);
   const pendingGuestExportMode = useRef<'screen' | 'print'>('screen');
   const [coverPickerOpen, setCoverPickerOpen] = useState(false);
+  /** Depuis un tap en mode spread (paysage) : ouvre l’éditeur puis la modale texte sur la page tapée. */
+  const [pendingTextEditPageIndex, setPendingTextEditPageIndex] = useState<number | null>(null);
   const [cropDpiMetaByKey, setCropDpiMetaByKey] = useState<
     Record<
       string,
@@ -362,17 +353,46 @@ export default function BookPreviewScreen() {
   const editorOpenRef = useRef(false);
   const coverPickerOpenRef = useRef(false);
 
+  const openTextEditForPage = useCallback((page: BookPage, m: Memory | null) => {
+    if (!page) return;
+    switch (page.type) {
+      case 'cover':
+        setTextEditTarget({ kind: 'cover', modalTitle: 'Titre du livre' });
+        return;
+      case 'chapter':
+        setTextEditTarget({ kind: 'chapter', modalTitle: 'Titre des chapitres' });
+        return;
+      case 'photo-full':
+      case 'quote':
+      case 'audio':
+      case 'photo-note':
+      case 'video':
+        if (!m) return;
+        setTextEditTarget({ kind: 'memory', memory: m, modalTitle: 'Modifier le texte' });
+        return;
+      default:
+        return;
+    }
+  }, []);
+
   const pages = useMemo(() => {
     if (!child) return [];
     return buildBookPages(child, bookMemories);
   }, [child, bookMemories]);
 
   // Préparation best-effort en fond: pousse les médias nécessaires + déclenche les dérivés pour l’export serveur.
+  const exportPrepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!isBookPdfServerConfigured()) return;
     if (!child || pages.length === 0) return;
-    void runBookExportPrepInBackground({ pages, localEdits });
-  }, [child, localEdits, pages]);
+    if (exportPrepTimerRef.current) clearTimeout(exportPrepTimerRef.current);
+    exportPrepTimerRef.current = setTimeout(() => {
+      void runBookExportPrepInBackground({ pages, localEdits: EMPTY_MEMORY_EDITS });
+    }, 2500);
+    return () => {
+      if (exportPrepTimerRef.current) clearTimeout(exportPrepTimerRef.current);
+    };
+  }, [child, pages]);
 
   const pageRows = useMemo(
     () => pages.map((page, i) => ({ page, pageNum: i + 1 })),
@@ -508,8 +528,9 @@ export default function BookPreviewScreen() {
     return getBookPhotoPrintPixelSize(coverMem, bookSnapshot?.coverPhotoUrl ?? undefined) ?? undefined;
   }, [cropDpiMetaByKey.cover, bookSnapshot]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent === true;
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const childId = await getOrSelectFirstChild();
@@ -535,6 +556,7 @@ export default function BookPreviewScreen() {
       setChild(ch);
 
       let memoryIds: Set<string>;
+      let bookForHeal: Book | null = null;
       if (bookId) {
         let b = await getBook(bookId);
         if (!b) {
@@ -544,25 +566,26 @@ export default function BookPreviewScreen() {
           return;
         }
         b = await healBookMemoryIdsIfWiped(b);
-        b = await healBookCoverIfNeeded(b);
+        if (b.textEdits && Object.keys(b.textEdits).length > 0) {
+          for (const [id, e] of Object.entries(b.textEdits)) {
+            if (e.content !== undefined) {
+              updateLocalMemoryContent(id, e.content ?? '');
+            }
+          }
+          b = { ...b, textEdits: undefined };
+          await upsertBook(b);
+        }
         setBookSnapshot(b);
+        bookForHeal = b;
         setCropDpiMetaByKey(prev => {
           if (!prev.cover) return prev;
           const { cover: _c, ...rest } = prev;
           return rest;
         });
-        // Le titre du livre sert de titre PDF/couverture dans l’aperçu.
         setCoverTitleLine(b.title);
         setCoverPhotoUrl(resolveBookCoverEditorUri(b));
         if (b.rotations) setRotations(b.rotations);
         if (b.photoCrops) setPhotoCrops(b.photoCrops);
-        if (b.textEdits) {
-          const edits: Record<string, Partial<Memory>> = {};
-          for (const [id, e] of Object.entries(b.textEdits)) {
-            if (e.content !== undefined) edits[id] = { content: e.content };
-          }
-          setLocalEdits(edits);
-        }
         if (b.chapterTitle) setChapterTitleLine(b.chapterTitle);
         memoryIds = new Set(b.memoryIds);
         setBookSelectionKeys(b.memoryIds);
@@ -572,17 +595,31 @@ export default function BookPreviewScreen() {
         memoryIds = new Set(keys.map(memoryIdFromBookSelectionKey));
       }
 
-      const all = (await getFamilyMemories()) as Memory[];
-      setAllMemories(all);
       const picked: Memory[] = [];
       for (const id of memoryIds) {
-        const row = await getMemoryById(id);
+        const row = getLocalMemoryById(id);
         if (row) picked.push(row as Memory);
       }
       picked.sort(
         (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
       );
       setBookMemories(picked);
+
+      if (bookForHeal) {
+        const snapshotId = bookForHeal.id;
+        InteractionManager.runAfterInteractions(() => {
+          void (async () => {
+            const healed = await healBookCoverIfNeeded(bookForHeal!);
+            if (healed.id !== snapshotId) return;
+            setBookSnapshot(prev => (prev?.id === snapshotId ? healed : prev));
+            setCoverPhotoUrl(resolveBookCoverEditorUri(healed));
+          })();
+        });
+      }
+
+      InteractionManager.runAfterInteractions(() => {
+        void getFamilyMemories().then(all => setAllMemories(all as Memory[]));
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Chargement impossible');
     } finally {
@@ -590,9 +627,61 @@ export default function BookPreviewScreen() {
     }
   }, [bookId]);
 
+  const refreshBookMemoriesFromDb = useCallback(async () => {
+    if (!bookId) return;
+    const b = await getBook(bookId);
+    if (!b) return;
+    const ids = dedupeMemoryIds(b.memoryIds ?? []);
+    const picked: Memory[] = [];
+    for (const id of ids) {
+      const row = getLocalMemoryById(id);
+      if (row) picked.push(row as Memory);
+    }
+    picked.sort(
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+    );
+    setBookMemories(picked);
+    setBookSelectionKeys(ids);
+  }, [bookId]);
+
+  const bookScreenWasBlurredRef = useRef(false);
+  const voiceCoverPrintBackfillRef = useRef(new Set<string>());
   useEffect(() => {
     void load();
   }, [load]);
+
+  /** Souvenirs audio existants : génère `voice_cover_print.jpg` (2600px) pour le badge DPI livre. */
+  useEffect(() => {
+    for (const m of bookMemories) {
+      if (m.type !== 'voice' || !(m.voice_cover_path ?? m.voice_cover_url ?? '').trim()) continue;
+      if ((m.local_print_path ?? '').trim() && m.print_px_w && m.print_px_h) continue;
+      if (voiceCoverPrintBackfillRef.current.has(m.id)) continue;
+      voiceCoverPrintBackfillRef.current.add(m.id);
+      void awaitVoiceCoverPrintDerivativeForMemory(m.id).then(updated => {
+        if (!updated?.local_print_path) return;
+        setBookMemories(prev => prev.map(x => (x.id === updated.id ? updated : x)));
+        setCropDpiMetaByKey(prev => {
+          const { [updated.id]: _drop, ...rest } = prev;
+          return rest;
+        });
+      });
+    }
+  }, [bookMemories]);
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        bookScreenWasBlurredRef.current = true;
+      };
+    }, [])
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!bookId || !bookScreenWasBlurredRef.current) return;
+      void refreshBookMemoriesFromDb();
+    }, [bookId, refreshBookMemoriesFromDb])
+  );
 
   // Auto-save customizations to AsyncStorage when they change
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -603,12 +692,7 @@ export default function BookPreviewScreen() {
       void (async () => {
         const b = await getBook(bookId);
         if (!b) return;
-        const textEditsForSave: Record<string, { content?: string | null }> = {};
-        for (const [id, e] of Object.entries(localEdits)) {
-          if (e.content !== undefined) textEditsForSave[id] = { content: e.content ?? null };
-        }
         const hasRotations = Object.keys(rotations).some(k => rotations[k] !== 0);
-        const hasEdits = Object.keys(textEditsForSave).length > 0;
         const hasCrops = Object.keys(photoCrops).length > 0;
         const persistedIds = dedupeMemoryIds(b.memoryIds ?? []);
         const resolvedIds = dedupeMemoryIds(bookMemories.map(m => m.id));
@@ -617,7 +701,7 @@ export default function BookPreviewScreen() {
           memoryIds: resolvedIds.length > 0 ? resolvedIds : persistedIds,
           rotations: hasRotations ? rotations : undefined,
           photoCrops: hasCrops ? photoCrops : undefined,
-          textEdits: hasEdits ? textEditsForSave : undefined,
+          textEdits: undefined,
           chapterTitle: chapterTitleLine ?? undefined,
         });
       })();
@@ -625,7 +709,7 @@ export default function BookPreviewScreen() {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [bookId, loading, rotations, photoCrops, localEdits, chapterTitleLine, bookMemories]);
+  }, [bookId, loading, rotations, photoCrops, chapterTitleLine, bookMemories]);
 
   const upsertPhotoCrop = useCallback(
     (key: string, next: { xPct: number; yPct: number; scale: number }) => {
@@ -855,6 +939,7 @@ export default function BookPreviewScreen() {
   const unlockAndGoToFavorisForAdd = useCallback(() => {
     unlockOrientationPortrait();
     if (bookId) {
+      setPendingFavorisAddToBookId(bookId);
       router.replace({
         pathname: '/(tabs)/favoris',
         params: { addToBookId: bookId },
@@ -919,12 +1004,7 @@ export default function BookPreviewScreen() {
     return () => sub.remove();
   }, [unlockAndBack]);
 
-  const onMemoryFieldEdit = useCallback((memoryId: string, field: keyof Memory, value: string | null) => {
-    setLocalEdits(prev => ({
-      ...prev,
-      [memoryId]: { ...prev[memoryId], [field]: value },
-    }));
-  }, []);
+  const merge = useCallback((m: Memory) => m, []);
 
   const onRotateMemory = useCallback((memoryId: string) => {
     setRotations(prev => ({
@@ -955,7 +1035,23 @@ export default function BookPreviewScreen() {
     [isLandscape, pageRows.length, screenWidth, spreadRows.length]
   );
 
-  const merge = useCallback((m: Memory) => mergeMemory(m, localEdits), [localEdits]);
+  useEffect(() => {
+    if (!editorOpen) return;
+    if (pendingTextEditPageIndex == null) return;
+    const ix = Math.max(0, Math.min(pendingTextEditPageIndex, Math.max(0, pageRows.length - 1)));
+    const row = pageRows[ix];
+    if (!row) {
+      setPendingTextEditPageIndex(null);
+      return;
+    }
+    setEditorPageIndex(ix);
+    setCurrentPageIndex(ix);
+    requestAnimationFrame(() => {
+      const m = memoryForMaquette(row.page, merge);
+      openTextEditForPage(row.page, m ?? null);
+      setPendingTextEditPageIndex(null);
+    });
+  }, [editorOpen, merge, openTextEditForPage, pageRows, pendingTextEditPageIndex]);
 
   const cropDpiPayloadForPageRow = useCallback(
     (row: PageRow) => {
@@ -999,71 +1095,6 @@ export default function BookPreviewScreen() {
 
       const coverDisplayTitle = coverTitleLine ?? `Journal de ${child!.name}`;
 
-      const openTextEditForThisPage = () => {
-        switch (page.type) {
-          case 'cover':
-            setTextEditTarget({ kind: 'cover', modalTitle: 'Titre du livre' });
-            break;
-          case 'chapter':
-            setTextEditTarget({ kind: 'chapter', modalTitle: 'Titre des chapitres' });
-            break;
-          case 'photo-full':
-            if (m) {
-              setTextEditTarget({
-                kind: 'memory',
-                memory: m,
-                modalTitle: 'Modifier le titre',
-                fields: 'single',
-              });
-            }
-            break;
-          case 'photo-note':
-            if (m) {
-              setTextEditTarget({
-                kind: 'memory',
-                memory: m,
-                modalTitle: 'Titre et texte',
-                fields: 'title-body',
-                textMode: 'photo-note',
-              });
-            }
-            break;
-          case 'quote':
-            if (m) {
-              setTextEditTarget({
-                kind: 'memory',
-                memory: m,
-                modalTitle: 'Modifier le texte',
-                fields: 'single',
-              });
-            }
-            break;
-          case 'audio':
-            if (m) {
-              setTextEditTarget({
-                kind: 'memory',
-                memory: m,
-                modalTitle: 'Modifier le titre',
-                fields: 'single',
-              });
-            }
-            break;
-          case 'video':
-            if (m) {
-              setTextEditTarget({
-                kind: 'memory',
-                memory: m,
-                modalTitle: 'Titre et description',
-                fields: 'title-body',
-                textMode: 'video',
-              });
-            }
-            break;
-          default:
-            break;
-        }
-      };
-
       return (
         <MaquetteBookPages
           page={page}
@@ -1097,7 +1128,7 @@ export default function BookPreviewScreen() {
               onRotateMemory(m.id);
             }
           }}
-          onRequestTextEdit={openTextEditForThisPage}
+          onRequestTextEdit={() => openTextEditForPage(page, m ?? null)}
           qrUrl={qrUrl}
         />
       );
@@ -1115,6 +1146,7 @@ export default function BookPreviewScreen() {
       photoCrops,
       rotations,
       openCoverPicker,
+      openTextEditForPage,
       upsertPhotoCrop,
     ]
   );
@@ -1232,7 +1264,8 @@ export default function BookPreviewScreen() {
             <BookPreviewZoomWrap
               width={editorPage.w}
               height={editorPage.h}
-              isPagerActive={index === currentPageIndex}
+              isPagerActive={index === editorPageIndex}
+              zoomEnabled={false}
             >
               {renderMaquettePage(item)}
             </BookPreviewZoomWrap>
@@ -1240,7 +1273,7 @@ export default function BookPreviewScreen() {
         </View>
       </View>
     ),
-    [currentPageIndex, editorPage, renderMaquettePage, screenWidth, availHPortrait]
+    [editorPageIndex, editorPage, renderMaquettePage, screenWidth, availHPortrait]
   );
 
   const renderSpreadItem: ListRenderItem<SpreadRow> = useCallback(
@@ -1288,7 +1321,12 @@ export default function BookPreviewScreen() {
               coverPhotoImgPxH={row.page.type === 'cover' ? cropDpiMetaByKey.cover?.imgPxH : undefined}
               chapterDisplayTitle={row.page.type === 'chapter' ? (chapterTitleLine ?? undefined) : undefined}
               onRotate={() => {}}
-              onRequestTextEdit={() => {}}
+              onRequestTextEdit={() => {
+                // En mode spread (paysage), on ne sait pas éditer “in place” : on ouvre l’éditeur
+                // sur la page tapée puis on affiche la modale texte.
+                setPendingTextEditPageIndex(Math.max(0, row.pageNum - 1));
+                openEditor(Math.max(0, row.pageNum - 1));
+              }}
               qrUrl={qrUrl}
             />
           </View>
@@ -1525,54 +1563,9 @@ export default function BookPreviewScreen() {
 
   const handleToolbarEdit = useCallback(() => {
     if (!currentPage || !editOk) return;
-    if (currentPage.type === 'cover') {
-      setTextEditTarget({ kind: 'cover', modalTitle: 'Titre du livre' });
-      return;
-    }
-    if (currentPage.type === 'chapter') {
-      setTextEditTarget({ kind: 'chapter', modalTitle: 'Titre des chapitres' });
-      return;
-    }
-    const m = merge(currentPage.memory);
-    if (currentPage.type === 'quote') {
-      setTextEditTarget({
-        kind: 'memory',
-        memory: m,
-        modalTitle: 'Modifier le texte',
-        fields: 'single',
-      });
-    } else if (currentPage.type === 'photo-full') {
-      setTextEditTarget({
-        kind: 'memory',
-        memory: m,
-        modalTitle: 'Modifier le titre',
-        fields: 'single',
-      });
-    } else if (currentPage.type === 'photo-note') {
-      setTextEditTarget({
-        kind: 'memory',
-        memory: m,
-        modalTitle: 'Titre et texte',
-        fields: 'title-body',
-        textMode: 'photo-note',
-      });
-    } else if (currentPage.type === 'audio') {
-      setTextEditTarget({
-        kind: 'memory',
-        memory: m,
-        modalTitle: 'Modifier le titre',
-        fields: 'single',
-      });
-    } else if (currentPage.type === 'video') {
-      setTextEditTarget({
-        kind: 'memory',
-        memory: m,
-        modalTitle: 'Titre et description',
-        fields: 'title-body',
-        textMode: 'video',
-      });
-    }
-  }, [currentPage, editOk, merge]);
+    const m = 'memory' in currentPage ? merge(currentPage.memory) : null;
+    openTextEditForPage(currentPage, m);
+  }, [currentPage, editOk, merge, openTextEditForPage]);
 
   const editModalSingleInitial = useMemo(() => {
     if (!textEditTarget) return '';
@@ -1582,23 +1575,11 @@ export default function BookPreviewScreen() {
     if (textEditTarget.kind === 'chapter') {
       return chapterTitleLine ?? 'Notre histoire';
     }
-    if (textEditTarget.kind === 'memory' && textEditTarget.fields === 'single') {
+    if (textEditTarget.kind === 'memory') {
       return merge(textEditTarget.memory).content ?? '';
     }
     return '';
   }, [textEditTarget, coverTitleLine, chapterTitleLine, child, merge]);
-
-  const editModalTitleBodyInitial = useMemo(() => {
-    if (!textEditTarget || textEditTarget.kind !== 'memory' || textEditTarget.fields !== 'title-body') {
-      return { title: '', body: '' };
-    }
-    const raw = merge(textEditTarget.memory).content ?? '';
-    if (textEditTarget.textMode === 'photo-note') {
-      if (!raw.trim()) return { title: '', body: '' };
-      return splitPhotoNoteTitleBody(raw);
-    }
-    return splitVideoTitleBody(raw);
-  }, [textEditTarget, merge]);
 
   const saveSingleEdit = useCallback(
     (text: string) => {
@@ -1614,36 +1595,33 @@ export default function BookPreviewScreen() {
         }
       } else if (textEditTarget.kind === 'chapter') {
         setChapterTitleLine(text.trim() || null);
-      } else if (textEditTarget.kind === 'memory' && textEditTarget.fields === 'single') {
-        onMemoryFieldEdit(textEditTarget.memory.id, 'content', text);
+      } else if (textEditTarget.kind === 'memory') {
+        const memoryId = textEditTarget.memory.id;
+        setBookMemories(prev =>
+          prev.map(m => (m.id === memoryId ? { ...m, content: text } : m))
+        );
+        setAllMemories(prev =>
+          prev.map(m => (m.id === memoryId ? { ...m, content: text } : m))
+        );
+        void (async () => {
+          const ok = await updateMemoryContent(memoryId, text);
+          if (!ok) {
+            Alert.alert(
+              'Connexion',
+              "Ton texte est bien enregistré sur l’app, mais la synchronisation a échoué. Réessaie plus tard."
+            );
+          }
+        })();
       }
     },
-    [bookId, onMemoryFieldEdit, textEditTarget]
+    [bookId, textEditTarget]
   );
-
-  const saveTitleBodyEdit = useCallback(
-    (title: string, body: string) => {
-      if (!textEditTarget || textEditTarget.kind !== 'memory' || textEditTarget.fields !== 'title-body') {
-        return;
-      }
-      const mode = textEditTarget.textMode;
-      const raw =
-        mode === 'video' ? mergeVideoTitleBody(title, body) : mergePhotoNoteTitleBody(title, body);
-      onMemoryFieldEdit(textEditTarget.memory.id, 'content', raw);
-    },
-    [textEditTarget, onMemoryFieldEdit]
-  );
-
-  const isTitleBodyModal =
-    textEditTarget?.kind === 'memory' && textEditTarget.fields === 'title-body';
 
   const editModalKey = useMemo(() => {
     if (!textEditTarget) return 'closed';
     if (textEditTarget.kind === 'cover') return 'cover';
     if (textEditTarget.kind === 'chapter') return 'chapter';
-    return `${textEditTarget.memory.id}-${textEditTarget.fields}${
-      textEditTarget.fields === 'title-body' ? `-${textEditTarget.textMode}` : ''
-    }`;
+    return `memory-${textEditTarget.memory.id}`;
   }, [textEditTarget]);
 
   const doExportPdf = useCallback(
@@ -1754,10 +1732,6 @@ export default function BookPreviewScreen() {
           if (!proceed) return;
         }
       }
-      const textEditsForPdf: Record<string, Partial<Memory>> = {};
-      for (const [id, e] of Object.entries(localEdits)) {
-        if (e.content !== undefined) textEditsForPdf[id] = { content: e.content };
-      }
 
       const { data: sessData } = await supabase.auth.getSession();
       const accessToken = sessData.session?.access_token ?? null;
@@ -1778,7 +1752,7 @@ export default function BookPreviewScreen() {
             pages,
             rotations,
             photoCrops,
-            localEdits: textEditsForPdf,
+            localEdits: EMPTY_MEMORY_EDITS,
             exportMode,
           });
           await shareBookPdf(localUri);
@@ -1807,7 +1781,6 @@ export default function BookPreviewScreen() {
       coverYearLabel,
       exporting,
       guestExportModalVisible,
-      localEdits,
       pages,
       photoCrops,
       rotations,
@@ -1821,10 +1794,6 @@ export default function BookPreviewScreen() {
 
   const goToBookOrderPdf = useCallback(() => {
     if (!child || exporting || guestExportSubmitting) return;
-    const textEditsForPdf: Record<string, Partial<Memory>> = {};
-    for (const [id, e] of Object.entries(localEdits)) {
-      if (e.content !== undefined) textEditsForPdf[id] = { content: e.content };
-    }
     const memoryPageCountForOrder = pages.filter(
       p =>
         p.type === 'photo-full' ||
@@ -1847,7 +1816,7 @@ export default function BookPreviewScreen() {
       pages,
       rotations,
       photoCrops,
-      localEdits: textEditsForPdf,
+      localEdits: EMPTY_MEMORY_EDITS,
       exportMode: 'screen',
     });
     router.push({
@@ -1870,7 +1839,6 @@ export default function BookPreviewScreen() {
     coverYearLabel,
     exporting,
     guestExportSubmitting,
-    localEdits,
     pages,
     photoCrops,
     rotations,
@@ -1879,10 +1847,6 @@ export default function BookPreviewScreen() {
 
   const goToBookOrderPrint = useCallback(() => {
     if (exporting || guestExportSubmitting || !child) return;
-    const textEditsForPdf: Record<string, Partial<Memory>> = {};
-    for (const [id, e] of Object.entries(localEdits)) {
-      if (e.content !== undefined) textEditsForPdf[id] = { content: e.content };
-    }
     const memoryPageCountForOrder = pages.filter(
       p =>
         p.type === 'photo-full' ||
@@ -1905,7 +1869,7 @@ export default function BookPreviewScreen() {
       pages,
       rotations,
       photoCrops,
-      localEdits: textEditsForPdf,
+      localEdits: EMPTY_MEMORY_EDITS,
       exportMode: 'print',
     });
     router.push({
@@ -1928,7 +1892,6 @@ export default function BookPreviewScreen() {
     coverYearLabel,
     exporting,
     guestExportSubmitting,
-    localEdits,
     pages,
     photoCrops,
     rotations,
@@ -1949,10 +1912,6 @@ export default function BookPreviewScreen() {
       if (!child) return;
       setGuestExportModalVisible(false);
       setGuestExportSubmitting(true);
-      const textEditsForPdf: Record<string, Partial<Memory>> = {};
-      for (const [id, e] of Object.entries(localEdits)) {
-        if (e.content !== undefined) textEditsForPdf[id] = { content: e.content };
-      }
       try {
         const mode = pendingGuestExportMode.current;
         const { localUri } = await generateBookPdfViaServerAsGuest({
@@ -1968,7 +1927,7 @@ export default function BookPreviewScreen() {
           pages,
           rotations,
           photoCrops,
-          localEdits: textEditsForPdf,
+          localEdits: EMPTY_MEMORY_EDITS,
           exportMode: mode,
           consent: {
             email,
@@ -2000,7 +1959,6 @@ export default function BookPreviewScreen() {
       coverPhotoImgPxForPdf,
       coverTitleLine,
       coverYearLabel,
-      localEdits,
       pages,
       photoCrops,
       rotations,
@@ -2112,7 +2070,7 @@ export default function BookPreviewScreen() {
         )}
       </View>
 
-      {loading ? (
+      {loading && bookMemories.length === 0 ? (
         <View style={styles.loadingMid}>
           <ActivityIndicator color={THEME.textMuted} />
         </View>
@@ -2187,6 +2145,7 @@ export default function BookPreviewScreen() {
         presentationStyle="fullScreen"
         onRequestClose={closeEditor}
       >
+        <View style={styles.editorModalRoot}>
         <GestureHandlerRootView style={styles.editorGhRoot}>
           <View style={styles.editorShell}>
           <View style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
@@ -2211,8 +2170,8 @@ export default function BookPreviewScreen() {
               renderItem={renderPageItem as any}
               horizontal
               pagingEnabled
+              scrollEnabled={textEditTarget == null}
               decelerationRate="fast"
-              disableIntervalMomentum
               showsHorizontalScrollIndicator={false}
               onMomentumScrollEnd={onBookPagerMomentumEnd}
               style={styles.editorList}
@@ -2347,35 +2306,19 @@ export default function BookPreviewScreen() {
           ) : null}
 
           </View>
-
-          {isTitleBodyModal ? (
-            <EditTextModal
-              key={editModalKey}
-              variant="title-body"
-              visible={textEditTarget != null}
-              title={textEditTarget?.modalTitle ?? ''}
-              titleFieldLabel="Titre"
-              bodyFieldLabel={
-                textEditTarget?.kind === 'memory' && textEditTarget.textMode === 'video'
-                  ? 'Description'
-                  : 'Texte'
-              }
-              initialTitle={editModalTitleBodyInitial.title}
-              initialBody={editModalTitleBodyInitial.body}
-              onClose={() => setTextEditTarget(null)}
-              onSave={saveTitleBodyEdit}
-            />
-          ) : (
-            <EditTextModal
-              key={editModalKey}
-              visible={textEditTarget != null}
-              initialText={editModalSingleInitial}
-              title={textEditTarget?.modalTitle ?? ''}
-              onClose={() => setTextEditTarget(null)}
-              onSave={saveSingleEdit}
-            />
-          )}
         </GestureHandlerRootView>
+
+        <EditTextModal
+          key={editModalKey}
+          embedded
+          visible={textEditTarget != null}
+          initialText={editModalSingleInitial}
+          previewVariant="book"
+          title={textEditTarget?.modalTitle ?? ''}
+          onClose={() => setTextEditTarget(null)}
+          onSave={saveSingleEdit}
+        />
+        </View>
       </Modal>
 
       <GuestPdfExportModal
@@ -2503,6 +2446,10 @@ const styles = StyleSheet.create({
   },
   editorGhRoot: {
     flex: 1,
+  },
+  editorModalRoot: {
+    flex: 1,
+    position: 'relative',
   },
   editorShell: {
     flex: 1,

@@ -33,6 +33,34 @@ export function pdfMmToPreviewPxH(mm: number, pageHeightPx: number): number {
  */
 const MIN_FS = 1;
 
+/** Réduction légère globale des corps souvenirs (Roboto) — parité `htmlBook.ts` (×15/16). */
+const MEMORY_TEXT_SCALE = 15 / 16;
+
+function memorySouvenirPt(basePt: number): number {
+  return Math.round(basePt * MEMORY_TEXT_SCALE * 100) / 100;
+}
+
+/** Corps souvenir Roboto — 12 pt historique → 11.25 pt. */
+export const PDF_MEMORY_BODY_PT = memorySouvenirPt(12);
+/** Légende sous photo pleine page — 12.75 pt historique → 12 pt. */
+export const PDF_PHOTO_CAPTION_PT = memorySouvenirPt(12.75);
+/** Texte long sous photo (photo-note) — aligné corps souvenir. */
+export const PDF_PHOTO_NOTE_BODY_PT = PDF_MEMORY_BODY_PT;
+/** Description vidéo (corps souvenir) — 10.5 pt historique → ~9.85 pt. */
+export const PDF_VIDEO_SUB_PT = memorySouvenirPt(10.5);
+/** Guillemet citation — fit 0 / 1 / 2. */
+export const PDF_QUOTE_MARK_PT = {
+  0: memorySouvenirPt(42),
+  1: memorySouvenirPt(37),
+  2: memorySouvenirPt(33),
+} as const;
+/** Corps citation — fit 0 hérite `.memory-text` ; fit 1 / 2 réduits. */
+export const PDF_QUOTE_BODY_FIT_PT = {
+  0: PDF_MEMORY_BODY_PT,
+  1: memorySouvenirPt(10.4),
+  2: memorySouvenirPt(9.8),
+} as const;
+
 /** PDF `.label` — 7 pt (méta date/lieu, folio, pastilles). */
 export function pdfLabelStyle(pageWidthPx: number): { fontSize: number } {
   return { fontSize: Math.max(MIN_FS, pdfPtToPreviewPx(7, pageWidthPx)) };
@@ -44,34 +72,57 @@ export function pdfBodyStyle(pageWidthPx: number): { fontSize: number; lineHeigh
   return { fontSize: fs, lineHeight: pdfPtToPreviewPx(11 * 1.65, pageWidthPx) };
 }
 
-/** `.pf-caption` — 12.75 pt, lh 1.45 */
+/** Interligne des textes sous photo (légende pleine page + photo-note) — parité `htmlBook.ts`. */
+export const PDF_PHOTO_UNDER_TEXT_LINE_HEIGHT = 1.3;
+
+/** `.pf-caption` */
 export function pdfPhotoCaptionStyle(pageWidthPx: number): { fontSize: number; lineHeight: number } {
-  const fs = Math.max(MIN_FS, pdfPtToPreviewPx(12.75, pageWidthPx));
-  return { fontSize: fs, lineHeight: pdfPtToPreviewPx(12.75 * 1.45, pageWidthPx) };
+  const fs = Math.max(MIN_FS, pdfPtToPreviewPx(PDF_PHOTO_CAPTION_PT, pageWidthPx));
+  return {
+    fontSize: fs,
+    lineHeight: pdfPtToPreviewPx(PDF_PHOTO_CAPTION_PT * PDF_PHOTO_UNDER_TEXT_LINE_HEIGHT, pageWidthPx),
+  };
+}
+
+/** `.photo-note .pn-text .memory-text` */
+export function pdfPhotoNoteBodyStyle(pageWidthPx: number): { fontSize: number; lineHeight: number } {
+  const fs = Math.max(MIN_FS, pdfPtToPreviewPx(PDF_PHOTO_NOTE_BODY_PT, pageWidthPx));
+  return {
+    fontSize: fs,
+    lineHeight: pdfPtToPreviewPx(PDF_PHOTO_NOTE_BODY_PT * PDF_PHOTO_UNDER_TEXT_LINE_HEIGHT, pageWidthPx),
+  };
 }
 
 export type QuotePdfFitLevel = 0 | 1 | 2;
 
-/** `.quote-body` + variantes quote-fit-1 / quote-fit-2 — police Roboto Flex via `.memory-text` (PDF). */
+/** Corps souvenir Roboto — parité `.memory-text`. */
+export function pdfMemoryTextBodyStyle(pageWidthPx: number): { fontSize: number; lineHeight: number } {
+  const fs = Math.max(MIN_FS, pdfPtToPreviewPx(PDF_MEMORY_BODY_PT, pageWidthPx));
+  return { fontSize: fs, lineHeight: pdfPtToPreviewPx(PDF_MEMORY_BODY_PT * 1.588, pageWidthPx) };
+}
+
+/** `.quote-body` + variantes quote-fit-1 / quote-fit-2 */
 export function pdfQuoteBodyStyle(fit: QuotePdfFitLevel, pageWidthPx: number): { fontSize: number; lineHeight: number } {
   if (fit === 2) {
+    const pt = PDF_QUOTE_BODY_FIT_PT[2];
     return {
-      fontSize: Math.max(MIN_FS, pdfPtToPreviewPx(9.8, pageWidthPx)),
-      lineHeight: pdfPtToPreviewPx(9.8 * 1.42, pageWidthPx),
+      fontSize: Math.max(MIN_FS, pdfPtToPreviewPx(pt, pageWidthPx)),
+      lineHeight: pdfPtToPreviewPx(pt * 1.42, pageWidthPx),
     };
   }
   if (fit === 1) {
+    const pt = PDF_QUOTE_BODY_FIT_PT[1];
     return {
-      fontSize: Math.max(MIN_FS, pdfPtToPreviewPx(10.4, pageWidthPx)),
-      lineHeight: pdfPtToPreviewPx(10.4 * 1.48, pageWidthPx),
+      fontSize: Math.max(MIN_FS, pdfPtToPreviewPx(pt, pageWidthPx)),
+      lineHeight: pdfPtToPreviewPx(pt * 1.48, pageWidthPx),
     };
   }
-  return pdfBodyStyle(pageWidthPx);
+  return pdfMemoryTextBodyStyle(pageWidthPx);
 }
 
-/** Guillemet `.quote-mark` + quote-fit (42 / 37 / 33 pt). */
+/** Guillemet `.quote-mark` + quote-fit */
 export function pdfQuoteMarkStyle(fit: QuotePdfFitLevel, pageWidthPx: number): { fontSize: number; lineHeight: number } {
-  const pt = fit === 2 ? 33 : fit === 1 ? 37 : 42;
+  const pt = PDF_QUOTE_MARK_PT[fit];
   const fs = Math.max(MIN_FS, pdfPtToPreviewPx(pt, pageWidthPx));
   return { fontSize: fs, lineHeight: fs };
 }
@@ -101,8 +152,8 @@ export function pdfVideoTitleStyle(pageWidthPx: number): { fontSize: number } {
 }
 
 export function pdfVideoSubStyle(pageWidthPx: number): { fontSize: number; lineHeight: number } {
-  const fs = Math.max(MIN_FS, pdfPtToPreviewPx(10.5, pageWidthPx));
-  return { fontSize: fs, lineHeight: pdfPtToPreviewPx(10.5 * 1.5, pageWidthPx) };
+  const fs = Math.max(MIN_FS, pdfPtToPreviewPx(PDF_VIDEO_SUB_PT, pageWidthPx));
+  return { fontSize: fs, lineHeight: pdfPtToPreviewPx(PDF_VIDEO_SUB_PT * 1.5, pageWidthPx) };
 }
 
 /** `.folio` — 7 pt, bas 8 mm (htmlBook). */

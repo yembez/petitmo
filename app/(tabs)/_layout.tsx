@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Platform } from 'react-native';
 import { useFonts, DMSans_400Regular, DMSans_500Medium } from '@expo-google-fonts/dm-sans';
 import { Tabs } from 'expo-router';
 import { TabTransitionProvider, useTabTransition } from '@/contexts/TabTransitionContext';
+import { MemoryTextFontProvider } from '@/contexts/MemoryTextFontContext';
 import type { LucideIcon } from 'lucide-react-native';
 import { BookOpenText, Heart, List, Plus } from 'lucide-react-native';
 import { PlatformPressable } from '@react-navigation/elements';
@@ -121,9 +122,11 @@ function CaptureTabIcon({ focused, color }: { focused: boolean; color: string })
 
 export default function TabLayout() {
   return (
-    <TabTransitionProvider>
-      <TabLayoutInner />
-    </TabTransitionProvider>
+    <MemoryTextFontProvider>
+      <TabTransitionProvider>
+        <TabLayoutInner />
+      </TabTransitionProvider>
+    </MemoryTextFontProvider>
   );
 }
 

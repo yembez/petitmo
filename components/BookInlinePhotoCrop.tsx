@@ -137,6 +137,7 @@ export function BookInlinePhotoCrop({
   const panGesture = useMemo(
     () =>
       Gesture.Pan()
+        .failOffsetX([-14, 14])
         .onBegin(() => {
           panStartX.value = tx.value;
           panStartY.value = ty.value;

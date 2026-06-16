@@ -66,6 +66,17 @@ import {
 import { useFeedPhotoDisplayUrls } from '@/hooks/useFeedPhotoDisplayUrls';
 import { clampAudioBookAnnotation } from '@/lib/audioBookAnnotation';
 import { AddToBookModal } from '@/components/AddToBookModal';
+import {
+  addMemoriesToBook,
+  BookUpgradeRequiredError,
+  createBook,
+  upsertBook,
+} from '@/services/books';
+import { getLocalMemoryById } from '@/lib/localDb';
+import {
+  clearPendingFavorisAddToBookId,
+  consumePendingFavorisAddToBookId,
+} from '@/services/favorisBookAddFlow';
 
 type FavListItem = {
   key: string;
@@ -963,6 +974,16 @@ function FavorisScreen() {
     setSelectionMode(false);
     setSelectedIds(new Set());
     setAddToBookTargetId(null);
+    clearPendingFavorisAddToBookId();
+  }, []);
+
+  const applyAddToBookIntent = useCallback((bookId: string) => {
+    const id = bookId.trim();
+    if (!id) return;
+    setAddToBookTargetId(id);
+    setCreateBookFlowTitle(null);
+    setSelectionMode(true);
+    setSelectedIds(new Set());
   }, []);
 
   const handleExitSelection = useCallback(() => {
@@ -995,11 +1016,21 @@ function FavorisScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      const pendingBookId = consumePendingFavorisAddToBookId();
+      if (pendingBookId) {
+        applyAddToBookIntent(pendingBookId);
+      }
+
       setStatusBarStyle('light');
       /** Déjà hydraté (onglet resté monté) → pas de resync au focus. */
       if (memoriesRef.current.length > 0) {
         setLoading(false);
-        return;
+        return () => {
+          setPullOverscrollPx(0);
+          galleryScrollY.value = 0;
+          setSelectionMode(false);
+          setSelectedIds(new Set());
+        };
       }
 
       const hasCached =
@@ -1019,9 +1050,8 @@ function FavorisScreen() {
         galleryScrollY.value = 0;
         setSelectionMode(false);
         setSelectedIds(new Set());
-        setAddToBookTargetId(null);
       };
-    }, [load])
+    }, [applyAddToBookIntent, load])
   );
 
   useEffect(() => {
@@ -1054,11 +1084,8 @@ function FavorisScreen() {
   useEffect(() => {
     const id = typeof params.addToBookId === 'string' ? params.addToBookId.trim() : '';
     if (!id) return;
-    setAddToBookTargetId(id);
-    setCreateBookFlowTitle(null);
-    setSelectionMode(true);
-    setSelectedIds(new Set());
-  }, [params.addToBookId]);
+    applyAddToBookIntent(id);
+  }, [applyAddToBookIntent, params.addToBookId]);
 
   const favoriteItems = useMemo(() => buildFavoriteItems(memories), [memories]);
 
@@ -1226,16 +1253,15 @@ function FavorisScreen() {
                 style={styles.selectionActionBtn}
                 activeOpacity={0.9}
                 onPress={async () => {
+                  if (selectedMemoryIds.length === 0) return;
+
                   if (createBookFlowTitle) {
-                    // Flux "Livres → Nouveau" : on crée le livre maintenant, puis on ajoute la sélection.
-                    const { createBook, addMemoriesToBook, upsertBook } = await import('@/services/books');
-                    const { getLocalMemoryById } = await import('@/lib/localDb');
                     const created = await createBook(createBookFlowTitle);
                     let updated = null;
                     try {
                       updated = await addMemoriesToBook(created.id, selectedMemoryIds);
                     } catch (e) {
-                      if (e instanceof Error && e.name === 'BookUpgradeRequiredError') {
+                      if (e instanceof BookUpgradeRequiredError) {
                         Alert.alert(
                           'Petitmo+',
                           'Pour pouvoir ajouter une vidéo dans le livre et la revoir à tout moment grâce au QR Code, passer à Petitmo+.',
@@ -1244,7 +1270,6 @@ function FavorisScreen() {
                               text: 'Annuler',
                               style: 'cancel',
                               onPress: () => {
-                                // Rester sur Favoris, et retirer les vidéos de la sélection.
                                 setSelectedIds(prev => {
                                   const next = new Set(prev);
                                   for (const it of galleryItems) {
@@ -1267,14 +1292,16 @@ function FavorisScreen() {
                       Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
                       return;
                     }
-                    // Couverture par défaut: première photo sélectionnée (source, jamais un thumb).
+                    if (!updated) {
+                      Alert.alert('Petitmo', 'Livre introuvable.');
+                      return;
+                    }
                     for (const id of selectedMemoryIds) {
                       const m = getLocalMemoryById(id);
                       if (!m || m.type !== 'photo') continue;
                       const src = canonicalBookCoverPhotoRef(m).trim();
                       if (src) {
-                        // IMPORTANT: ne pas écraser memoryIds (utiliser la version déjà enrichie).
-                        await upsertBook({ ...(updated ?? created), coverPhotoUrl: src });
+                        await upsertBook({ ...updated, coverPhotoUrl: src });
                       }
                       break;
                     }
@@ -1284,12 +1311,15 @@ function FavorisScreen() {
                     return;
                   }
                   if (addToBookTargetId) {
-                    const { addMemoriesToBook } = await import('@/services/books');
                     const targetId = addToBookTargetId;
                     try {
-                      await addMemoriesToBook(targetId, selectedMemoryIds);
+                      const updated = await addMemoriesToBook(targetId, selectedMemoryIds);
+                      if (!updated) {
+                        Alert.alert('Petitmo', 'Livre introuvable.');
+                        return;
+                      }
                     } catch (e) {
-                      if (e instanceof Error && e.name === 'BookUpgradeRequiredError') {
+                      if (e instanceof BookUpgradeRequiredError) {
                         Alert.alert(
                           'Petitmo+',
                           'Pour pouvoir ajouter une vidéo dans le livre et la revoir à tout moment grâce au QR Code, passer à Petitmo+.',
@@ -1320,7 +1350,6 @@ function FavorisScreen() {
                       Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
                       return;
                     }
-                    setAddToBookTargetId(null);
                     exitSelection();
                     router.replace({ pathname: '/book-preview', params: { bookId: targetId } });
                     return;

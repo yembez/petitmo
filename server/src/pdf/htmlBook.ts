@@ -7,7 +7,6 @@ import {
   BOOK_COVER_PHOTO_HEIGHT_RATIO,
 } from '../constants/pdfDigitalSpec';
 import type { BookPageServer } from '../types/contracts';
-import { splitVideoTitleBody } from './bookTextParts';
 import type { ChildRow, MemoryRow } from './memoryRow';
 import { memoryBookDisplayDateIso } from './memoryBookDisplayDate';
 import { clampAudioBookAnnotation } from './audioBookAnnotation';
@@ -210,7 +209,7 @@ function pagePhotoFull(
       <div class="pf-meta">${esc(dateWithAgeCaps(memoryBookDisplayDateIso(m), birthdate))}</div>
       ${locLabel ? `<div class="pf-meta pf-meta-loc">${esc(locLabel)}</div>` : ''}
     </div>
-    ${captionHtml ? `<div class="pf-caption body">${captionHtml}</div>` : ''}
+    ${captionHtml ? `<div class="pf-caption body memory-text">${captionHtml}</div>` : ''}
   </div>
   <div class="folio">${pageNum}</div>
 </div>`;
@@ -238,7 +237,7 @@ function pagePhotoNote(
       <div class="label">${esc(dateWithAgeCaps(memoryBookDisplayDateIso(m), birthdate))}</div>
       ${locLabel ? `<div class="label pn-meta-loc">${esc(locLabel)}</div>` : ''}
     </div>
-    ${legend ? `<div class="body">${romanHtml(legend)}</div>` : ''}
+    ${legend ? `<div class="body memory-text">${romanHtml(legend)}</div>` : ''}
   </div>
   <div class="folio">${pageNum}</div>
 </div>`;
@@ -312,7 +311,7 @@ function pageAudio(
         ${locLabel ? `<span class="label audio-meta-loc">${esc(locLabel)}</span>` : ''}
       </div>
     </div>
-    ${titleHtml ? `<div class="audio-title-above-qr body">${titleHtml}</div>` : ''}
+    ${titleHtml ? `<div class="audio-title-above-qr body memory-text">${titleHtml}</div>` : ''}
     <div class="audio-qr-block">
       ${qrImgTag(qrUrl)}
       <div class="label audio-qr-hint">Scanner pour écouter</div>
@@ -341,9 +340,8 @@ function pageVideo(
   birthdate: string | null | undefined
 ): string {
   const raw = sanitizeText((m.content ?? '').trim());
-  const { title: videoTitleRaw, body: videoBodyRaw } = splitVideoTitleBody(raw);
-  const vTitle = (videoTitleRaw || 'Vidéo').trim();
-  const sub = videoBodyRaw.trim() ? videoBodyRaw : 'Regarde ce moment en vidéo.';
+  const vTitle = 'Vidéo';
+  const sub = raw || 'Regarde ce moment en vidéo.';
   const thumbUrl = imgAttrFirst([m.thumbnail_url, m.poster_url]);
   const locLabel = bookPdfLocationLabel(m.location);
   return `<div class="page video">
@@ -356,7 +354,7 @@ function pageVideo(
       ${locLabel ? `<div class="label video-meta-loc">${esc(locLabel)}</div>` : ''}
     </div>
     <div class="video-title-line">${esc(vTitle)}</div>
-    <div class="video-sub-line">${romanHtml(sub)}</div>
+    <div class="video-sub-line memory-text">${romanHtml(sub)}</div>
     <div class="audio-qr video-qr-bottom">
       ${qrImgTag(qrUrl)}
       <div class="label" style="margin-top:3mm;">Scanner pour regarder</div>
@@ -457,7 +455,7 @@ function buildHtmlDocument(
 <title>${esc(title)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500&amp;family=EB+Garamond:ital,wght@0,400;1,400&amp;family=Roboto+Flex:opsz,wght@8..144,400&amp;display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500&amp;family=EB+Garamond:ital,wght@0,400;1,400&amp;family=Roboto:wght@400&amp;display=swap" rel="stylesheet" />
 <style>
 
 * { margin:0; padding:0; box-sizing:border-box;
@@ -528,9 +526,11 @@ body.print-bleed .inner {
 }
 .body p { margin:0 0 6pt; }
 .memory-text {
-  font-family:'Roboto Flex',sans-serif;
+  font-family:'Roboto',sans-serif;
   font-style:normal;
   font-weight:400;
+  font-size:11.25pt;
+  line-height:1.588;
   text-align:justify;
 }
 .folio {
@@ -611,7 +611,8 @@ body.print-bleed .pf-footer {
   color:#3A3A3C; letter-spacing:.15pt; text-transform:none; text-align:right;
   flex:1; min-width:0;
 }
-.pf-caption { margin-top:2.1mm; font-size:12.75pt; line-height:1.45; }
+.pf-caption { margin-top:2.1mm; font-size:11.95pt; line-height:1.3; }
+.pf-caption.memory-text { font-size:11.95pt; line-height:1.3; }
 .placeholder { background:#F2F2F7; }
 
 .photo-note { flex-direction:column; }
@@ -634,6 +635,9 @@ body.print-bleed .pn-text {
 .pn-meta-loc {
   font-weight:600; color:#3A3A3C; letter-spacing:.15pt; text-transform:none;
   text-align:right; flex:1; min-width:0;
+}
+.photo-note .pn-text .body.memory-text {
+  font-size:11.25pt; line-height:1.3;
 }
 
 body.print-bleed .bleed-x {
@@ -680,16 +684,16 @@ body.print-bleed .bleed-x {
   text-align:right; flex:1; min-width:0;
 }
 .quote-mark {
-  font-family:'Roboto Flex',sans-serif; font-style:normal; font-weight:400;
-  font-size:42pt; color:rgba(0,0,0,.06); line-height:1; margin-bottom:1.5mm; margin-left:5mm;
+  font-family:'Roboto',sans-serif; font-style:normal; font-weight:400;
+  font-size:39.38pt; color:rgba(0,0,0,.06); line-height:1; margin-bottom:1.5mm; margin-left:5mm;
 }
 .quote-body { overflow:hidden; text-align:justify; }
-.quote-fit-1 .quote-body { font-size:10.4pt; line-height:1.48; }
+.quote-fit-1 .quote-body { font-size:9.75pt; line-height:1.48; }
 .quote-fit-1 .quote-body p { margin:0 0 4pt; }
-.quote-fit-2 .quote-body { font-size:9.8pt; line-height:1.42; }
+.quote-fit-2 .quote-body { font-size:9.19pt; line-height:1.42; }
 .quote-fit-2 .quote-body p { margin:0 0 3pt; }
-.quote-fit-1 .quote-mark { font-size:37pt; line-height:1; }
-.quote-fit-2 .quote-mark { font-size:33pt; margin-bottom:1mm; line-height:1; }
+.quote-fit-1 .quote-mark { font-size:34.69pt; line-height:1; }
+.quote-fit-2 .quote-mark { font-size:30.94pt; margin-bottom:1mm; line-height:1; }
 .quote-rule { display:flex; align-items:center; gap:4pt; margin-top:6mm; }
 .quote-rule-seg { flex:1; height:.3pt; background:rgba(0,0,0,.08); }
 .quote-rule-dot { width:4pt; height:4pt; border-radius:50%; background:rgba(0,0,0,.08); }
@@ -828,10 +832,10 @@ body.print-bleed .video-text-block {
 }
 .video-sub-line {
   margin-top:2.6mm;
-  font-family:'EB Garamond',serif; font-style:italic;
-  font-size:10.5pt; line-height:1.5;
-  color:#6B7280; text-align:justify;
+  font-size:9.84pt; line-height:1.5;
+  color:#6B7280;
 }
+.video-sub-line.memory-text { color:#1C1C1E; }
 .video-sub-line p { margin:0 0 4pt; }
 .video-qr-bottom { margin-top:auto; padding-bottom:3mm; align-items:center; }
 

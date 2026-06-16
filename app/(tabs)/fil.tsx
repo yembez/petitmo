@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useCallback, useMemo, useRef, useEffect, type ReactNode } from 'react';
 import { verticalScale } from '@/utils/responsive';
 import EditTextModal from '@/components/EditTextModal';
+import { feedMemoryTextEditPreviewVariant } from '@/utils/memoryTextEditStyles';
 import { usePrefetchMemories } from '@/hooks/usePrefetchMemories';
 import { useFeedVideoAutoplay } from '@/hooks/useFeedVideoAutoplay';
 import { useStableViewabilityPairs } from '@/hooks/useStableViewabilityPairs';
@@ -336,6 +337,7 @@ function FilScreen() {
         key={editingMemory?.id ?? 'edit-modal-closed'}
         visible={editModalVisible}
         initialText={editingMemory?.content?.trim() ?? ''}
+        previewVariant={feedMemoryTextEditPreviewVariant(editingMemory?.type)}
         title={
           !editingMemory
             ? 'Modifier le texte'

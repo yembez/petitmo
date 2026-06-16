@@ -13,6 +13,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   DeviceEventEmitter,
+  InteractionManager,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -209,17 +210,34 @@ function LivresScreen() {
   const load = useCallback(async (opts?: { pull?: boolean; force?: boolean }) => {
     if (opts?.pull) setRefreshing(true);
     try {
-      const bks = await healAllBookCovers(await healAllBookMemoryIdsIfWiped(await listBooks()));
+      const sync = listBooksFromSqliteSync();
+      if (!opts?.force) {
+        applyBooksList(sync);
+      }
+      const healed = await healAllBookCovers(
+        await healAllBookMemoryIdsIfWiped(await listBooks()),
+      );
       if (opts?.force) {
-        booksSigRef.current = booksListVisualSignature(bks);
-        setBooks(bks);
-        setFeedBooksHydrationSnapshot(bks);
+        booksSigRef.current = booksListVisualSignature(healed);
+        setBooks(healed);
+        setFeedBooksHydrationSnapshot(healed);
         return;
       }
-      applyBooksList(bks);
+      applyBooksList(healed);
     } finally {
       setRefreshing(false);
     }
+  }, [applyBooksList]);
+
+  const healBooksInBackground = useCallback(() => {
+    InteractionManager.runAfterInteractions(() => {
+      void (async () => {
+        const healed = await healAllBookCovers(
+          await healAllBookMemoryIdsIfWiped(listBooksFromSqliteSync()),
+        );
+        applyBooksList(healed);
+      })();
+    });
   }, [applyBooksList]);
 
   useFocusEffect(
@@ -227,12 +245,7 @@ function LivresScreen() {
       /** Déjà affiché → resync SQLite ; répare les couvertures favoris en arrière-plan si besoin. */
       if (booksRef.current.length > 0) {
         applyBooksList(listBooksFromSqliteSync());
-        void (async () => {
-          const healed = await healAllBookCovers(
-            await healAllBookMemoryIdsIfWiped(listBooksFromSqliteSync()),
-          );
-          applyBooksList(healed);
-        })();
+        healBooksInBackground();
         return;
       }
       const cached = feedBooksHydrationSnapshot;
@@ -242,7 +255,7 @@ function LivresScreen() {
         return;
       }
       void load();
-    }, [applyBooksList, load])
+    }, [applyBooksList, load, healBooksInBackground])
   );
 
   useEffect(() => {
