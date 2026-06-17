@@ -14,9 +14,9 @@ function nearlyEqual(a: number, b: number): boolean {
 }
 
 /**
- * Contrôles post-génération pour le mode **digital** (A5 148×210 mm, portrait) :
+ * Contrôles post-génération pour le mode **digital** (Gelato 210×280 mm, portrait) :
  * — nombre de pages = attendu (détecte une page blanche « en trop » ou une page manquante) ;
- * — chaque page en portrait A5 (évite liseré / format par défaut si `@page` ignoré).
+ * — chaque page au format attendu (évite liseré / format par défaut si `@page` ignoré).
  */
 export async function validateDigitalPdfBytes(
   pdfBytes: Buffer,
@@ -44,14 +44,14 @@ export async function validateDigitalPdfBytes(
 
   for (let i = 0; i < pages.length; i += 1) {
     const { width, height } = pages[i].getSize();
-    const portraitA5 =
+    const portraitExpected =
       nearlyEqual(width, EXPECT_W_PT) &&
       nearlyEqual(height, EXPECT_H_PT) &&
       width <= height + SIZE_TOL_PT;
-    if (!portraitA5) {
+    if (!portraitExpected) {
       return {
         ok: false,
-        message: `PDF page ${i + 1} size mismatch: got ${width.toFixed(1)}×${height.toFixed(1)} pt, expected ~${EXPECT_W_PT.toFixed(1)}×${EXPECT_H_PT.toFixed(1)} pt (A5 portrait, no bleed)`,
+        message: `PDF page ${i + 1} size mismatch: got ${width.toFixed(1)}×${height.toFixed(1)} pt, expected ~${EXPECT_W_PT.toFixed(1)}×${EXPECT_H_PT.toFixed(1)} pt (Gelato 21×28 portrait, no bleed)`,
       };
     }
   }

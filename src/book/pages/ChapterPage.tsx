@@ -1,6 +1,5 @@
 import { View, Text, StyleSheet } from 'react-native';
-
-const A5_RATIO = 0.7;
+import { BOOK_PAGE_RATIO } from '@/src/book/pdfPreviewTypo';
 
 export interface ChapterPageProps {
   month: string;
@@ -9,7 +8,7 @@ export interface ChapterPageProps {
 }
 
 export default function ChapterPage({ month, chapterNum, width }: ChapterPageProps) {
-  const height = width / A5_RATIO;
+  const height = width / BOOK_PAGE_RATIO;
   return (
     <View style={[styles.root, { width, height }]}>
       <View style={styles.inner}>

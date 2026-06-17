@@ -39,7 +39,13 @@ import { buildBookPages, type BookPage } from '@/src/book/BookEngine';
 import MaquetteBookPages from '@/src/book/maquette/MaquetteBookPages';
 import EditTextModal from '@/components/EditTextModal';
 import { BookPreviewZoomWrap } from '@/components/BookPreviewZoomWrap';
-import { bookPrintFrameMmFor, type BookPhotoPageType } from '@/utils/bookPhotoPrintDpi';
+import {
+  bookPrintFrameMmFor,
+  effectiveBookPhotoPrintDpi,
+  BOOK_PAGE_W_MM,
+  BOOK_PAGE_H_MM,
+  type BookPhotoPageType,
+} from '@/utils/bookPhotoPrintDpi';
 import { getChildren, getOrSelectFirstChild } from '@/services/children';
 import { getFamilyMemories, updateMemoryContent } from '@/services/media';
 import { getLocalMemoryById, updateLocalMemoryContent } from '@/lib/localDb';
@@ -95,7 +101,7 @@ const HEADER_H = 44;
 const BOTTOM_H = 82;
 /** Vue verticale (Phase 1) : marge latérale ; pages collées à la reliure (trait + ombres latérales). */
 const BROWSE_SIDE_PAD = 16;
-/** Éditeur plein écran : marges autour de la page A5 (effet feuillet posé sur le fond). */
+/** Éditeur plein écran : marges autour de la page Gelato 21×28 (effet feuillet posé sur le fond). */
 const EDITOR_PAGE_SIDE_PAD = 28;
 const EDITOR_PAGE_VERT_PAD = 24;
 const BROWSE_PAGE_GAP = 0;
@@ -108,16 +114,10 @@ const QR_BASE = 'https://petitmo.app/m';
 const MIN_BOOK_SELECTION_KEYS = 5;
 const MAX_BOOK_SELECTION_KEYS = 80;
 
-/** Aligné sur `printFrameMmFor` — ratio largeur / hauteur de la page à l’impression. */
-const BOOK_PAGE_W_MM = 154;
-const BOOK_PAGE_H_MM = 216;
-/** Marge blanche autour des visuels (photo/vidéo/audio) — parité serveur `--visual-margin`. */
-const BOOK_VISUAL_MARGIN_MM = 10;
-
-/**
- * Spread paysage : deux pages → même gabarit **A5 plein** (154×216 mm à l’échelle), comme un livre ouvert.
- * Page seule (couverture à droite, quatrième à gauche, dernière page impaire) : **même A5** que les demi-pages
- * du double page — la maquette (couverture incluse) attend width/height au ratio 154:216, pas un cadre 154:142.
+/** Aligné sur `bookPhotoPrintDpi` — trim Gelato 21×28 (aperçu éditeur = trim, pas fond perdu). */
+ * Spread paysage : deux pages → même gabarit **Gelato 21×28** (210×280 mm à l’échelle), comme un livre ouvert.
+ * Page seule (couverture à droite, quatrième à gauche, dernière page impaire) : **même format** que les demi-pages
+ * du double page — la maquette (couverture incluse) attend width/height au ratio 210:280, pas un cadre 210:142.
  */
 function computeLandscapeSpreadLayout(
   left: PageRow | null,
@@ -134,29 +134,29 @@ function computeLandscapeSpreadLayout(
   const hairline = Math.max(StyleSheet.hairlineWidth, 1);
   const spineTotal = spineMargin + hairline + spineMargin;
 
-  const trimA5 = { w: BOOK_PAGE_W_MM, h: BOOK_PAGE_H_MM };
+  const trimPage = { w: BOOK_PAGE_W_MM, h: BOOK_PAGE_H_MM };
 
   if (!left && !right) {
     return { left: null, right: null, spineWidth: 0, rowHeight: 0 };
   }
 
   if (!left && right) {
-    const s = Math.min(availW / trimA5.w, availH / trimA5.h);
-    const rw = Math.max(1, Math.floor(s * trimA5.w));
-    const rh = Math.max(1, Math.floor(s * trimA5.h));
+    const s = Math.min(availW / trimPage.w, availH / trimPage.h);
+    const rw = Math.max(1, Math.floor(s * trimPage.w));
+    const rh = Math.max(1, Math.floor(s * trimPage.h));
     return { left: null, right: { width: rw, height: rh }, spineWidth: 0, rowHeight: rh };
   }
 
   if (left && !right) {
-    const s = Math.min(availW / trimA5.w, availH / trimA5.h);
-    const lw = Math.max(1, Math.floor(s * trimA5.w));
-    const lh = Math.max(1, Math.floor(s * trimA5.h));
+    const s = Math.min(availW / trimPage.w, availH / trimPage.h);
+    const lw = Math.max(1, Math.floor(s * trimPage.w));
+    const lh = Math.max(1, Math.floor(s * trimPage.h));
     return { left: { width: lw, height: lh }, right: null, spineWidth: 0, rowHeight: lh };
   }
 
-  const s = Math.min((availW - spineTotal) / (trimA5.w * 2), availH / trimA5.h);
-  const pw = Math.max(1, Math.floor(s * trimA5.w));
-  const ph = Math.max(1, Math.floor(s * trimA5.h));
+  const s = Math.min((availW - spineTotal) / (trimPage.w * 2), availH / trimPage.h);
+  const pw = Math.max(1, Math.floor(s * trimPage.w));
+  const ph = Math.max(1, Math.floor(s * trimPage.h));
   return {
     left: { width: pw, height: ph },
     right: { width: pw, height: ph },
@@ -471,7 +471,7 @@ export default function BookPreviewScreen() {
   const availHLandscape = screenHeight - HEADER_H - insets.top - insets.bottom;
 
   /**
-   * Page éditeur au **ratio A5 (154:216)**, légèrement réduite avec marges latérales —
+   * Page éditeur au **ratio Gelato 21×28 (210:280)**, légèrement réduite avec marges latérales —
    * même logique de fit que le spread, pour parité recadrage / bandeau couverture.
    */
   const editorPage = useMemo(() => {
@@ -486,7 +486,7 @@ export default function BookPreviewScreen() {
 
   /**
    * Vue verticale (Phase 1, style Google Photos) : couverture seule en tête,
-   * puis doubles-pages côte à côte avec un petit espace. Pages au ratio A5 154:216.
+   * puis doubles-pages côte à côte avec un petit espace. Pages au ratio Gelato 210:280.
    */
   const browseLeaf = useMemo(() => {
     const availW = screenWidth - BROWSE_SIDE_PAD * 2;
@@ -1256,21 +1256,23 @@ export default function BookPreviewScreen() {
       <View
         style={[
           styles.pageSlide,
-          { width: screenWidth, height: availHPortrait, justifyContent: 'center' },
+          { width: screenWidth, height: availHPortrait },
         ]}
       >
-        <View style={[styles.editorPageShadow, { width: editorPage.w, height: editorPage.h }]}>
-          <View style={[styles.editorPageCard, { width: editorPage.w, height: editorPage.h }]}>
-            <BookPreviewZoomWrap
-              width={editorPage.w}
-              height={editorPage.h}
-              isPagerActive={index === editorPageIndex}
-              zoomEnabled={false}
-            >
-              {renderMaquettePage(item)}
-            </BookPreviewZoomWrap>
+        <BookPreviewZoomWrap
+          width={screenWidth}
+          height={availHPortrait}
+          isPagerActive={index === editorPageIndex}
+          allowOverflow
+        >
+          <View style={[styles.editorZoomInner, { width: screenWidth, height: availHPortrait }]}>
+            <View style={[styles.editorPageShadow, { width: editorPage.w, height: editorPage.h }]}>
+              <View style={[styles.editorPageCard, { width: editorPage.w, height: editorPage.h }]}>
+                {renderMaquettePage(item)}
+              </View>
+            </View>
           </View>
-        </View>
+        </BookPreviewZoomWrap>
       </View>
     ),
     [editorPageIndex, editorPage, renderMaquettePage, screenWidth, availHPortrait]
@@ -1643,26 +1645,7 @@ export default function BookPreviewScreen() {
         }
       }
       if (exportMode === 'print') {
-        // Contrôle qualité impression (DPI effective) : <240 warning, <200 blocage.
-        const mmToIn = (mm: number) => mm / 25.4;
-        const pageWmm = 154;
-        const pageHmm = 216;
-        const coverHmm = 142;
-        const m = BOOK_VISUAL_MARGIN_MM;
-        // Cadre image inséré (marge 10mm) pour les pages photo ; couverture inchangée (pleine page).
-        const frameMmFor = (t: 'cover' | 'photo-full' | 'photo-note') =>
-          t === 'cover'
-            ? { w: pageWmm, h: coverHmm }
-            : {
-                w: pageWmm - 2 * m,
-                h: (t === 'photo-note' ? pageHmm * 0.6 : pageHmm * 0.82) - 2 * m,
-              };
-        const effDpi = (pxW: number, pxH: number, mmW: number, mmH: number, scale: number) => {
-          const s = Math.max(1, scale);
-          const dpiX = (pxW / s) / mmToIn(mmW);
-          const dpiY = (pxH / s) / mmToIn(mmH);
-          return Math.floor(Math.min(dpiX, dpiY));
-        };
+        // Contrôle qualité impression (DPI sur trim Gelato) : <240 warning, <200 blocage.
         const printUriForMemory = (m: Memory): string =>
           (m.print_url ?? m.display_url ?? m.edited_media_url ?? m.media_url ?? '').trim();
 
@@ -1678,9 +1661,15 @@ export default function BookPreviewScreen() {
               ? getBookPhotoPrintPixelSize(coverMem, bookSnapshot?.coverPhotoUrl ?? undefined)
               : null;
             const cropScale = Math.max(1, photoCrops.cover?.scale ?? 1);
-            const { w: mmW, h: mmH } = frameMmFor('cover');
+            const { w: mmW, h: mmH } = bookPrintFrameMmFor('cover');
             const px = printPx ?? (await getImagePx(coverUri));
-            const dpi = effDpi(px.w, px.h, mmW, mmH, cropScale);
+            const dpi = effectiveBookPhotoPrintDpi({
+              imgPxW: px.w,
+              imgPxH: px.h,
+              printMmW: mmW,
+              printMmH: mmH,
+              scale: cropScale,
+            });
             if (dpi > 0 && dpi < 200) blocks.push(`Couverture (${dpi} DPI)`);
             else if (dpi > 0 && dpi < 240) warns.push(`Couverture (${dpi} DPI)`);
           } catch {
@@ -1695,8 +1684,14 @@ export default function BookPreviewScreen() {
           try {
             const { w, h } = await getImagePx(uri);
             const cropScale = Math.max(1, photoCrops[p.memory.id]?.scale ?? 1);
-            const { w: mmW, h: mmH } = frameMmFor(p.type);
-            const dpi = effDpi(w, h, mmW, mmH, cropScale);
+            const { w: mmW, h: mmH } = bookPrintFrameMmFor(p.type);
+            const dpi = effectiveBookPhotoPrintDpi({
+              imgPxW: w,
+              imgPxH: h,
+              printMmW: mmW,
+              printMmH: mmH,
+              scale: cropScale,
+            });
             const label = `${p.type === 'photo-full' ? 'Photo pleine page' : 'Photo + texte'} (${dpi} DPI)`;
             if (dpi > 0 && dpi < 200) blocks.push(label);
             else if (dpi > 0 && dpi < 240) warns.push(label);
@@ -2558,6 +2553,11 @@ const styles = StyleSheet.create({
   editorPageCard: {
     overflow: 'hidden',
     backgroundColor: '#FFFFFF',
+  },
+  /** Centre la page Gelato dans la slide avant zoom (parité spread `spreadZoomInner`). */
+  editorZoomInner: {
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   pageSlideSpread: {
     justifyContent: 'center',

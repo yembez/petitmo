@@ -1,6 +1,13 @@
-/** Dimensions d’impression du cadre photo (mm) — aligné `printFrameMmFor` / serveur PDF. */
-export const BOOK_PAGE_W_MM = 154;
-export const BOOK_PAGE_H_MM = 216;
+/**
+ * Dimensions livre Gelato 21×28 cm — parité `server/src/constants/pdfDigitalSpec.ts`.
+ * DPI : calcul sur le **trim** (zone de coupe), pas sur la page PDF avec fond perdu.
+ */
+export const BOOK_PAGE_W_MM = 210;
+export const BOOK_PAGE_H_MM = 280;
+/** Fond perdu Gelato (4 mm chaque côté). */
+export const BOOK_PRINT_BLEED_MM = 4;
+export const BOOK_PRINT_PAGE_W_MM = BOOK_PAGE_W_MM + 2 * BOOK_PRINT_BLEED_MM;
+export const BOOK_PRINT_PAGE_H_MM = BOOK_PAGE_H_MM + 2 * BOOK_PRINT_BLEED_MM;
 export const BOOK_VISUAL_MARGIN_MM = 10;
 
 export type BookPhotoPageType = 'cover' | 'photo-full' | 'photo-note' | 'audio';

@@ -141,7 +141,7 @@ export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient,
     if (body.exportMode === 'print') {
       res.status(400).json({
         error:
-          'Le mode impression (154×216 mm, fond perdu) n’est pas encore pris en charge sur cette route avec session. Utilise le flux commande imprimé (ticket export_print).',
+          'Le mode impression (Gelato 210×280 mm + fond perdu 4 mm) n’est pas encore pris en charge sur cette route avec session. Utilise le flux commande imprimé (ticket export_print).',
         code: 'PRINT_MODE_NOT_SUPPORTED_SESSION',
       });
       return;

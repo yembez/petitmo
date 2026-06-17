@@ -16,7 +16,7 @@ function getBrowser(): Promise<Browser> {
 /**
  * Rendu HTML → PDF via **Playwright / Chromium** (moteur d’impression Blink,
  * équivalent au pipeline historique Puppeteer + headless Chrome).
- * `@page` dans le HTML fixe le format (A5 digital ou A5 + fond perdu impression).
+ * `@page` dans le HTML fixe le format (Gelato 21×28 digital ou trim + fond perdu impression).
  */
 async function htmlToPdfBufferRaw(html: string): Promise<Buffer> {
   const browser = await getBrowser();
@@ -42,7 +42,7 @@ export async function htmlToPdfBuffer(html: string): Promise<Buffer> {
 }
 
 /**
- * Mode **digital** uniquement : A5 148×210 mm, marges PDF nulles, puis validation (`pdf-lib`).
+ * Mode **digital** uniquement : Gelato 210×280 mm, marges PDF nulles, puis validation (`pdf-lib`).
  */
 export async function htmlToDigitalPdfBuffer(html: string, expectedPageCount: number): Promise<Buffer> {
   const raw = await htmlToPdfBufferRaw(html);

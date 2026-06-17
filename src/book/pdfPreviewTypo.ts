@@ -1,25 +1,30 @@
 /**
- * Proportions typographiques identiques au PDF HTML (`server/src/pdf/htmlBook.ts`) :
- * page A5 digital 148 × 210 mm, tailles en pt comme en print CSS.
+ * Proportions typographiques alignées sur le PDF HTML (`server/src/pdf/htmlBook.ts`) :
+ * format Gelato 21×28 cm trim (210 × 280 mm), tailles en pt comme en print CSS.
  * La largeur/hauteur du `View` page en px sert d’échelle (même ratio que le PDF).
  */
 
-export const BOOK_DIGITAL_PAGE_WIDTH_MM = 148;
-export const BOOK_DIGITAL_PAGE_HEIGHT_MM = 210;
+/** Format Gelato 21×28cm trim — portrait, ratio 3/4.
+ *  Nom BOOK_DIGITAL_… conservé pour l'instant (rename dans un prompt séparé). */
+export const BOOK_DIGITAL_PAGE_WIDTH_MM = 210;
+export const BOOK_DIGITAL_PAGE_HEIGHT_MM = 280;
 
-/** pt (1/72 in) → px sur une largeur de page = largeur A5 digitale en mm. */
+/** Ratio largeur/hauteur page (210/280 = 0.75). Identique au ratio 3:4 photo portrait smartphone. */
+export const BOOK_PAGE_RATIO = BOOK_DIGITAL_PAGE_WIDTH_MM / BOOK_DIGITAL_PAGE_HEIGHT_MM;
+
+/** pt (1/72 in) → px sur une largeur de page = largeur trim Gelato en mm. */
 export function pdfPtToPreviewPx(pt: number, pageWidthPx: number): number {
   if (!Number.isFinite(pageWidthPx) || pageWidthPx <= 0) return Math.round(pt);
   return (pt / 72) * 25.4 * (pageWidthPx / BOOK_DIGITAL_PAGE_WIDTH_MM);
 }
 
-/** mm le long de la largeur page (même échelle que la largeur A5). */
+/** mm le long de la largeur page (même échelle que la largeur trim). */
 export function pdfMmToPreviewPxW(mm: number, pageWidthPx: number): number {
   if (!Number.isFinite(pageWidthPx) || pageWidthPx <= 0) return mm;
   return (mm / BOOK_DIGITAL_PAGE_WIDTH_MM) * pageWidthPx;
 }
 
-/** mm le long de la hauteur page (même échelle que la hauteur A5). */
+/** mm le long de la hauteur page (même échelle que la hauteur trim). */
 export function pdfMmToPreviewPxH(mm: number, pageHeightPx: number): number {
   if (!Number.isFinite(pageHeightPx) || pageHeightPx <= 0) return mm;
   return (mm / BOOK_DIGITAL_PAGE_HEIGHT_MM) * pageHeightPx;

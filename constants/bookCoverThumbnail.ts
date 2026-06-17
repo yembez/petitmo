@@ -4,7 +4,7 @@ import { scale, verticalScale } from '@/utils/responsive';
 export const BOOK_COVER_THUMB_WIDTH = scale(120);
 export const BOOK_COVER_THUMB_HEIGHT = verticalScale(170);
 
-/** Bande photo = 142 mm sur page 216 mm (aligné maquette / PDF). */
+/** Proportion bande photo couverture (142 mm sur trim historique 216 mm) — aligné PDF / maquette. */
 export const BOOK_COVER_PHOTO_HEIGHT_RATIO = 142 / 216;
 
 export type BookCoverColorTheme = {

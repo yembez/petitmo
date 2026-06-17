@@ -212,12 +212,16 @@ export default function EditChildScreen() {
       Alert.alert('Erreur', 'Le nom est requis');
       return;
     }
+    if (!birthdate.trim()) {
+      Alert.alert('Erreur', 'La date de naissance est requise');
+      return;
+    }
 
     try {
       setIsSaving(true);
       const updates = {
         name: normalizeChildGivenName(name),
-        birthdate: birthdate || null,
+        birthdate: birthdate.trim(),
       };
       const updated =
         (await getCachedUserMode()) === 'local'
@@ -276,6 +280,8 @@ export default function EditChildScreen() {
       ],
     );
   };
+
+  const canSave = !!name.trim() && !!birthdate.trim();
 
   if (!fontsLoaded) {
     return (
@@ -397,10 +403,10 @@ export default function EditChildScreen() {
             petitmoCtaStyles.primary,
             petitmoCtaStyles.primaryFullWidth,
             styles.saveButton,
-            (isSaving || isDeleting) && petitmoCtaStyles.primaryDisabled,
+            (isSaving || isDeleting || !canSave) && petitmoCtaStyles.primaryDisabled,
           ]}
           onPress={handleSave}
-          disabled={isSaving || isDeleting}
+          disabled={isSaving || isDeleting || !canSave}
         >
           {isSaving ? (
             <ActivityIndicator size="small" color={PETITMO_CTA_SPINNER_COLOR} />

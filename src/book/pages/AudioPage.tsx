@@ -6,8 +6,8 @@ import { EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
 import QRCode from 'react-native-qrcode-svg';
 import type { Memory } from '@/types/local';
 import { formatDuration } from '@/utils/date';
+import { BOOK_PAGE_RATIO } from '@/src/book/pdfPreviewTypo';
 
-const A5_RATIO = 0.7;
 const BAR_W = 3;
 const BAR_GAP = 2.5;
 const BAR_STEP = BAR_W + BAR_GAP;
@@ -60,7 +60,7 @@ export default function AudioPage({
     EBGaramond_400Regular_Italic,
   });
 
-  const height = width / A5_RATIO;
+  const height = width / BOOK_PAGE_RATIO;
   const dm400 = fontsLoaded ? 'DMSans_400Regular' : undefined;
   const dm600 = fontsLoaded ? 'DMSans_600SemiBold' : undefined;
   const garamondIt = fontsLoaded ? 'EBGaramond_400Regular_Italic' : undefined;

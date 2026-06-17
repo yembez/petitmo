@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useState } from 'react';
 import { Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useFonts } from 'expo-font';
 import {
   View,
   StyleSheet,
@@ -37,9 +38,11 @@ import {
   hydrateTabScreensFromSqliteSync,
 } from '@/services/tabScreensHydrate';
 import { flushPendingCloudUploadsOnce } from '@/services/pendingCloudFlush';
+import { FEED_META_FONT_SOURCES } from '@/constants/feedMetaFont';
 
 export default function RootLayout() {
   useFrameworkReady();
+  useFonts(FEED_META_FONT_SOURCES);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const pathname = usePathname();
 

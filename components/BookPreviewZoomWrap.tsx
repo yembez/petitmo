@@ -18,8 +18,10 @@ type Props = {
   height: number;
   /** Page / spread actuellement visible dans le FlatList horizontal. */
   isPagerActive: boolean;
-  /** Désactivé pendant le recadrage in-place photo (évite conflit pinch). */
+  /** Désactivé uniquement si besoin explicite ; en éditeur le recadrage photo (geste enfant) prime sur la zone image. */
   zoomEnabled?: boolean;
+  /** Éditeur : la page entière (ombre + carte) grossit sans rognage au cadre interne. */
+  allowOverflow?: boolean;
   children: ReactNode;
 };
 
@@ -32,6 +34,7 @@ export function BookPreviewZoomWrap({
   height,
   isPagerActive,
   zoomEnabled = true,
+  allowOverflow = false,
   children,
 }: Props) {
   const scale = useSharedValue(1);
@@ -126,16 +129,34 @@ export function BookPreviewZoomWrap({
 
   if (!zoomEnabled) {
     return (
-      <View style={[styles.clip, { width, height }]} collapsable={false}>
+      <View
+        style={[
+          styles.clip,
+          { width, height, overflow: allowOverflow ? 'visible' : 'hidden' },
+        ]}
+        collapsable={false}
+      >
         {children}
       </View>
     );
   }
 
+  const clipOverflow = allowOverflow ? 'visible' : 'hidden';
+
   return (
     <GestureDetector gesture={composed}>
-      <View style={[styles.clip, { width, height }]} collapsable={false}>
-        <Animated.View style={[styles.inner, { width, height }, animStyle]} collapsable={false}>
+      <View
+        style={[styles.clip, { width, height, overflow: clipOverflow }]}
+        collapsable={false}
+      >
+        <Animated.View
+          style={[
+            styles.inner,
+            { width, height, overflow: clipOverflow },
+            animStyle,
+          ]}
+          collapsable={false}
+        >
           {children}
         </Animated.View>
       </View>

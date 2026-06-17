@@ -8,8 +8,7 @@ import type { Memory } from '@/types/local';
 import { formatBookLocationShort } from '@/utils/date';
 import FilteredImage from '@/components/FilteredImage';
 import EditTextModal from '@/components/EditTextModal';
-
-const A5_RATIO = 0.7;
+import { BOOK_PAGE_RATIO } from '@/src/book/pdfPreviewTypo';
 
 function formatBookDate(iso: string): string {
   const d = new Date(iso);
@@ -44,7 +43,7 @@ export default function PhotoNotePage({
 
   const [editOpen, setEditOpen] = useState(false);
 
-  const height = width / A5_RATIO;
+  const height = width / BOOK_PAGE_RATIO;
   const uri = memory.edited_media_url ?? memory.media_url;
   const bodyText = (memory.content ?? '').trim() || 'Ta note…';
   const bookLocationLine = formatBookLocationShort(memory.location);

@@ -9,8 +9,7 @@ import { useFonts, DMSans_400Regular, DMSans_400Regular_Italic, DMSans_600SemiBo
 import { EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
 import type { Memory } from '@/types/local';
 import EditTextModal from '@/components/EditTextModal';
-
-const A5_RATIO = 0.7;
+import { BOOK_PAGE_RATIO } from '@/src/book/pdfPreviewTypo';
 
 export interface QuotePageProps {
   memory: Memory;
@@ -42,7 +41,7 @@ export default function QuotePage({
 
   const [editOpen, setEditOpen] = useState(false);
 
-  const height = width / A5_RATIO;
+  const height = width / BOOK_PAGE_RATIO;
   const dm400 = fontsLoaded ? 'DMSans_400Regular' : undefined;
   const dm600 = fontsLoaded ? 'DMSans_600SemiBold' : undefined;
   const dmItalic = fontsLoaded ? 'DMSans_400Regular_Italic' : undefined;

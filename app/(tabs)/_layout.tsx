@@ -222,6 +222,34 @@ function TabLayoutInner() {
         ),
       }}>
       <Tabs.Screen
+        name="livres"
+        options={{
+          title: 'Livres',
+          tabBarIcon: ({ focused, color }) => (
+            <TabBarGlyph
+              Icon={BookOpenText}
+              focused={focused}
+              fillWhenFocused={false}
+              color={color ?? THEME.tabBarInactiveTint}
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="favoris"
+        options={{
+          title: 'Favoris',
+          tabBarIcon: ({ focused, color }) => (
+            <TabBarGlyph
+              Icon={Heart}
+              focused={focused}
+              fillWhenFocused={false}
+              color={color ?? THEME.tabBarInactiveTint}
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="index"
         options={{
           title: 'Capturer',
@@ -257,34 +285,6 @@ function TabLayoutInner() {
           tabBarIcon: ({ focused, color }) => (
             <TabBarGlyph
               Icon={List}
-              focused={focused}
-              fillWhenFocused={false}
-              color={color ?? THEME.tabBarInactiveTint}
-            />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="favoris"
-        options={{
-          title: 'Favoris',
-          tabBarIcon: ({ focused, color }) => (
-            <TabBarGlyph
-              Icon={Heart}
-              focused={focused}
-              fillWhenFocused={false}
-              color={color ?? THEME.tabBarInactiveTint}
-            />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="livres"
-        options={{
-          title: 'Livres',
-          tabBarIcon: ({ focused, color }) => (
-            <TabBarGlyph
-              Icon={BookOpenText}
               focused={focused}
               fillWhenFocused={false}
               color={color ?? THEME.tabBarInactiveTint}

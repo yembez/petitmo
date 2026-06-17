@@ -43,6 +43,7 @@ import {
 } from '@/services/feedScrollRestore';
 import { useFocusEffect } from '@react-navigation/native';
 import { getTimingNudge, markNudgeSeen, recordInstallDate } from '@/lib/paywallTiming';
+import type { Child } from '@/types/local';
 import TabSceneTransition from '@/components/TabSceneTransition';
 
 function FilScreen() {
@@ -98,6 +99,12 @@ function FilScreen() {
   const onFeedHeaderMenuPress = useCallback(() => {
     router.push('/parent-space');
   }, [router]);
+  const onFeedHeaderChildPress = useCallback(
+    (target: Child) => {
+      router.push(`/edit-child?childId=${target.id}`);
+    },
+    [router],
+  );
   const listRef = useRef<FlatList<FeedListItem> | null>(null);
   const feedScrollOffsetRef = useRef(0);
   const pendingScrollIntentRef = useRef<FeedScrollIntent | null>(null);
@@ -262,6 +269,7 @@ function FilScreen() {
         <FeedHeader
           familyChildren={familyChildren}
           paddingTop={insets.top + verticalScale(6)}
+          onPressChild={onFeedHeaderChildPress}
           onMenuPress={onFeedHeaderMenuPress}
         />
       </View>

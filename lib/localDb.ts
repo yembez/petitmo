@@ -419,11 +419,12 @@ export function updateLocalMemoryFavorite(
   id: string,
   isFavorite: boolean
 ): void {
+  const now = new Date().toISOString()
   db.runSync(
     `UPDATE memories 
-     SET is_favorite = ?, synced_at = ? 
+     SET is_favorite = ?, synced_at = ?, updated_at = ? 
      WHERE id = ?`,
-    [isFavorite ? 1 : 0, new Date().toISOString(), id]
+    [isFavorite ? 1 : 0, now, now, id]
   )
 }
 
@@ -446,9 +447,10 @@ export function updateLocalMemoryLocation(id: string, location: string | null): 
 }
 
 export function updateLocalMemoryFavoritePhotoUrls(id: string, urls: string[]): void {
+  const now = new Date().toISOString()
   db.runSync(
-    `UPDATE memories SET favorite_photo_urls = ?, synced_at = ? WHERE id = ?`,
-    [JSON.stringify(urls), new Date().toISOString(), id]
+    `UPDATE memories SET favorite_photo_urls = ?, synced_at = ?, updated_at = ? WHERE id = ?`,
+    [JSON.stringify(urls), now, now, id]
   )
 }
 

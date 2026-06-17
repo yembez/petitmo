@@ -66,7 +66,7 @@ export type GenerateBookPdfPayload = {
    * Les QR médias utilisent `${qrBaseUrl}/q/${token}`.
    */
   qrBaseUrl: string;
-  /** digital = A5 148×210mm ; print = A5 + fond perdu 154×216mm */
+  /** digital = Gelato 210×280 mm ; print = trim + fond perdu 4 mm (218×288 mm page PDF) */
   exportMode: 'digital' | 'print';
   pages: BookPageServer[];
   /** Tier effectif (doit refléter abonnement / achat côté app ; le serveur applique les règles). */

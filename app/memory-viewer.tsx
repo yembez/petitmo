@@ -473,7 +473,7 @@ function ImmersivePage({
       <Text
         style={[
           mediaChrome ? styles.metaDateOnMedia : styles.metaDateOnText,
-          feedDateFontFamily ? { fontFamily: feedDateFontFamily } : null,
+          feedDateFontFamily ? { fontFamily: feedDateFontFamily } : styles.metaDateSystem,
         ]}
         numberOfLines={1}
       >
@@ -484,7 +484,7 @@ function ImmersivePage({
         <Text
           style={[
             mediaChrome ? styles.metaAgeOnMedia : styles.metaAgeOnText,
-            feedAgeFontFamily ? { fontFamily: feedAgeFontFamily } : null,
+            feedAgeFontFamily ? { fontFamily: feedAgeFontFamily } : styles.metaAgeSystem,
           ]}
           numberOfLines={2}
         >
@@ -1221,6 +1221,12 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.88)',
     fontSize: scale(12.5),
     letterSpacing: -0.1,
+  },
+  metaDateSystem: {
+    fontWeight: '600',
+  },
+  metaAgeSystem: {
+    fontWeight: '300',
   },
   chromePill: {
     backgroundColor: CHROME_PILL_BG,

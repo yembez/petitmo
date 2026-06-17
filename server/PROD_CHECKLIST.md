@@ -139,8 +139,9 @@ curl -L "<pdfUrlSigned>" -o out.pdf
 open out.pdf
 ```
 
-### 5) Mode print (fond perdu 3mm)
+### 5) Mode print (fond perdu 4 mm Gelato)
 
 - Le **mode print** est supporté **uniquement** via ticket `export_print` (commande `print_order`).
-- Côté HTML, les pages photo pleine appliquent un “bleed” de **3mm** (`top/left=-3mm`, taille `+6mm`).
+- Page PDF : **218×288 mm** (trim 210×280 + 4 mm de chaque côté).
+- Côté HTML, `--bleed` = 4 mm ; les visuels `.bleed-x` débordent sur le fond perdu.
 

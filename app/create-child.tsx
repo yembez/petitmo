@@ -56,7 +56,7 @@ export default function CreateChildScreen() {
   };
 
   const handleContinue = async () => {
-    if (!childName.trim()) return;
+    if (!childName.trim() || !birthDate.trim()) return;
 
     try {
       setIsCreating(true);
@@ -76,6 +76,8 @@ export default function CreateChildScreen() {
       setIsCreating(false);
     }
   };
+
+  const canContinue = !!childName.trim() && !!birthDate.trim();
 
   if (!fontsLoaded) {
     return (
@@ -160,7 +162,7 @@ export default function CreateChildScreen() {
 
           <View style={styles.inputGroup}>
             <Text style={[styles.label, dm500 ? { fontFamily: dm500 } : null]}>
-              Date de naissance (optionnelle)
+              Date de naissance
             </Text>
             <DatePicker
               value={birthDate}
@@ -174,10 +176,10 @@ export default function CreateChildScreen() {
           style={[
             petitmoCtaStyles.primary,
             petitmoCtaStyles.primaryFullWidth,
-            (!childName.trim() || isCreating) && petitmoCtaStyles.primaryDisabled,
+            (!canContinue || isCreating) && petitmoCtaStyles.primaryDisabled,
           ]}
           onPress={handleContinue}
-          disabled={!childName.trim() || isCreating}
+          disabled={!canContinue || isCreating}
           activeOpacity={0.9}
         >
           {isCreating ? (

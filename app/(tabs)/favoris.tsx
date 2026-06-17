@@ -44,6 +44,7 @@ import { SPACING, FONT_SIZES } from '@/constants/sizes';
 import { useMemoryTextFont } from '@/contexts/MemoryTextFontContext';
 import { getFamilyMemories, requestMissingMediaDerivatives } from '@/services/media';
 import { getOrSelectFirstChild } from '@/services/children';
+import { getLocalMemoryById } from '@/lib/localDb';
 import {
   feedChildHydrationSnapshot,
   feedMemoriesHydrationSnapshot,
@@ -72,7 +73,6 @@ import {
   createBook,
   upsertBook,
 } from '@/services/books';
-import { getLocalMemoryById } from '@/lib/localDb';
 import {
   clearPendingFavorisAddToBookId,
   consumePendingFavorisAddToBookId,
@@ -960,7 +960,12 @@ function FavorisScreen() {
     setMemories(prev => {
       if (
         prev.length === list.length &&
-        prev.every((m, i) => m.id === list[i]?.id && m.updated_at === list[i]?.updated_at)
+        prev.every(
+          (m, i) =>
+            m.id === list[i]?.id &&
+            m.updated_at === list[i]?.updated_at &&
+            m.is_favorite === list[i]?.is_favorite,
+        )
       ) {
         return prev;
       }
@@ -1022,9 +1027,10 @@ function FavorisScreen() {
       }
 
       setStatusBarStyle('light');
-      /** Déjà hydraté (onglet resté monté) → pas de resync au focus. */
+      /** Déjà hydraté → resync SQLite légère (favoris modifiés depuis le fil). */
       if (memoriesRef.current.length > 0) {
         setLoading(false);
+        void load({ background: true });
         return () => {
           setPullOverscrollPx(0);
           galleryScrollY.value = 0;
@@ -1055,10 +1061,37 @@ function FavorisScreen() {
   );
 
   useEffect(() => {
-    const sub = DeviceEventEmitter.addListener('petitmo:memories-invalidate', () => {
+    const subInvalidate = DeviceEventEmitter.addListener('petitmo:memories-invalidate', () => {
       void load();
     });
-    return () => sub.remove();
+    const subUpdated = DeviceEventEmitter.addListener('petitmo:memories-updated', (payload: unknown) => {
+      const memoryId =
+        payload &&
+        typeof payload === 'object' &&
+        payload !== null &&
+        'memoryId' in payload &&
+        typeof (payload as { memoryId?: unknown }).memoryId === 'string'
+          ? (payload as { memoryId: string }).memoryId.trim()
+          : '';
+      if (memoryId) {
+        const row = getLocalMemoryById(memoryId);
+        if (row) {
+          setMemories(prev => {
+            const idx = prev.findIndex(m => m.id === memoryId);
+            if (idx < 0) return prev;
+            const next = [...prev];
+            next[idx] = row;
+            return next;
+          });
+          return;
+        }
+      }
+      void load({ background: true });
+    });
+    return () => {
+      subInvalidate.remove();
+      subUpdated.remove();
+    };
   }, [load]);
 
   useEffect(() => {

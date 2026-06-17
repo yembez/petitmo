@@ -14,6 +14,8 @@ import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 export type FeedHeaderProps = {
   familyChildren: Child[];
   paddingTop: number;
+  /** Ouvre l’éditeur de profil de l’enfant dont l’avatar est tapé. */
+  onPressChild: (child: Child) => void;
   /** Ouvre l’espace parent (même entrée que le menu burger sur l’onglet Capturer). */
   onMenuPress: () => void;
 };
@@ -32,40 +34,60 @@ function familyHeaderTitle(children: Child[]): string {
   if (names.length === 0) return '';
   if (names.length === 1) return names[0];
   if (names.length === 2) return `${names[0]} et ${names[1]}`;
-  return `${names.slice(0, -1).join(', ')} et ${names[names.length - 1]}`;
+  return '';
 }
 
-function FeedHeaderAvatarStack({ familyChildren }: { familyChildren: Child[] }) {
+function FeedHeaderAvatarStack({
+  familyChildren,
+  onPressChild,
+}: {
+  familyChildren: Child[];
+  onPressChild: (child: Child) => void;
+}) {
   if (familyChildren.length === 1) {
     const child = familyChildren[0];
+    const givenName = childDisplayGivenName(child.name) || child.name.trim() || 'Enfant';
     return (
-      <View style={styles.headerAvatarRing}>
+      <TouchableOpacity
+        style={styles.headerAvatarRing}
+        onPress={() => onPressChild(child)}
+        activeOpacity={0.85}
+        accessibilityRole="button"
+        accessibilityLabel={`Modifier le profil de ${givenName}`}
+      >
         <ChildAvatar
           key={`${child.id}-${child.updated_at ?? ''}-${child.local_photo_path ?? ''}`}
           child={child}
           size={HEADER_AVATAR_PX}
         />
-      </View>
+      </TouchableOpacity>
     );
   }
 
   return (
     <View style={styles.headerAvatarRing}>
       <View style={headerAvatarStackStyles.row}>
-        {familyChildren.map((child, index) => (
-          <View
-            key={child.id}
-            style={[
-              headerAvatarStackStyles.slot,
-              index > 0 && { marginLeft: -AVATAR_STACK_OVERLAP },
-              { zIndex: familyChildren.length - index },
-            ]}
-          >
-            <View style={headerAvatarStackStyles.avatarBorder}>
-              <ChildAvatar child={child} size={HEADER_AVATAR_PX} />
-            </View>
-          </View>
-        ))}
+        {familyChildren.map((child, index) => {
+          const givenName = childDisplayGivenName(child.name) || child.name.trim() || 'Enfant';
+          return (
+            <TouchableOpacity
+              key={child.id}
+              style={[
+                headerAvatarStackStyles.slot,
+                index > 0 && { marginLeft: -AVATAR_STACK_OVERLAP },
+                { zIndex: familyChildren.length - index },
+              ]}
+              onPress={() => onPressChild(child)}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel={`Modifier le profil de ${givenName}`}
+            >
+              <View style={headerAvatarStackStyles.avatarBorder}>
+                <ChildAvatar child={child} size={HEADER_AVATAR_PX} />
+              </View>
+            </TouchableOpacity>
+          );
+        })}
       </View>
     </View>
   );
@@ -74,6 +96,7 @@ function FeedHeaderAvatarStack({ familyChildren }: { familyChildren: Child[] }) 
 export const FeedHeader = memo(function FeedHeader({
   familyChildren,
   paddingTop,
+  onPressChild,
   onMenuPress,
 }: FeedHeaderProps) {
   const sorted = sortChildrenByBirthdateAsc(familyChildren);
@@ -92,6 +115,7 @@ export const FeedHeader = memo(function FeedHeader({
   }
 
   const isSolo = sorted.length === 1;
+  const showHeaderNames = sorted.length <= 2;
   const soloChild = isSolo ? sorted[0] : null;
   const givenName = soloChild ? childDisplayGivenName(soloChild.name) || soloChild.name.trim() : '';
   const agePresent = soloChild?.birthdate ? calculateAge(soloChild.birthdate) : '';
@@ -100,18 +124,20 @@ export const FeedHeader = memo(function FeedHeader({
   const inner = (
     <View style={styles.headerRow}>
       <View style={styles.headerLeft}>
-        <FeedHeaderAvatarStack familyChildren={sorted} />
-        <View style={styles.headerNameBlock}>
-          <Text style={styles.headerTitleLine} numberOfLines={2}>
-            <Text style={styles.headerChildName}>{familyTitle}</Text>
-            {isSolo && !!agePresent && (
-              <>
-                <Text style={styles.headerDot}>{' · '}</Text>
-                <Text style={styles.headerChildAge}>{agePresent}</Text>
-              </>
-            )}
-          </Text>
-        </View>
+        <FeedHeaderAvatarStack familyChildren={sorted} onPressChild={onPressChild} />
+        {showHeaderNames && (
+          <View style={styles.headerNameBlock}>
+            <Text style={styles.headerTitleLine} numberOfLines={2}>
+              <Text style={styles.headerChildName}>{familyTitle}</Text>
+              {isSolo && !!agePresent && (
+                <>
+                  <Text style={styles.headerDot}>{' · '}</Text>
+                  <Text style={styles.headerChildAge}>{agePresent}</Text>
+                </>
+              )}
+            </Text>
+          </View>
+        )}
       </View>
       <TouchableOpacity
         style={styles.headerAddBtn}

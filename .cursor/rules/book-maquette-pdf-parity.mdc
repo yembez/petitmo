@@ -14,8 +14,8 @@ Les deux exports passent par **`server/src/pdf/htmlBook.ts`** → `buildBookHtml
 
 | Mode | `exportMode` | Format `@page` | Différences |
 |------|--------------|----------------|-------------|
-| PDF numérique | `digital` | A5 148×210 mm | Validation `validateDigitalPdfBytes` après génération |
-| Impression | `print` | A5 + fond perdu 3 mm (`print-bleed`) | Même HTML/CSS ; marges safe + `.bleed-x` sur certains visuels |
+| PDF numérique | `digital` | Gelato 210×280 mm | Validation `validateDigitalPdfBytes` après génération |
+| Impression | `print` | Gelato trim + fond perdu 4 mm (`print-bleed`, page 218×288 mm) | Même HTML/CSS ; marges safe + `.bleed-x` sur certains visuels |
 
 **Le contenu des pages (typo, positions, crops, textes) est identique** entre digital et print. Seuls changent : dimensions de page, fond perdu, folio/couverture en bord de coupe.
 

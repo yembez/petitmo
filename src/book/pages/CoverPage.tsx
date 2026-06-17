@@ -1,7 +1,6 @@
 import { View, Text, StyleSheet } from 'react-native';
 import type { Child } from '@/types/local';
-
-const A5_RATIO = 0.7;
+import { BOOK_PAGE_RATIO } from '@/src/book/pdfPreviewTypo';
 
 export interface CoverPageProps {
   child: Child;
@@ -9,7 +8,7 @@ export interface CoverPageProps {
 }
 
 export default function CoverPage({ child, width }: CoverPageProps) {
-  const height = width / A5_RATIO;
+  const height = width / BOOK_PAGE_RATIO;
   return (
     <View style={[styles.root, { width, height }]}>
       <View style={styles.inner}>

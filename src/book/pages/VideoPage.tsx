@@ -5,8 +5,8 @@ import { EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
 import QRCode from 'react-native-qrcode-svg';
 import type { Memory } from '@/types/local';
 import { formatBookLocationShort } from '@/utils/date';
+import { BOOK_PAGE_RATIO } from '@/src/book/pdfPreviewTypo';
 
-const PAGE_RATIO = 0.7;
 const IMAGE_ZONE_RATIO = 0.62;
 
 export interface VideoPageProps {
@@ -43,8 +43,8 @@ export default function VideoPage({
     EBGaramond_400Regular_Italic,
   });
 
-  const pageHeight = width / PAGE_RATIO;
-  const imageZoneHeight = (width / PAGE_RATIO) * IMAGE_ZONE_RATIO;
+  const pageHeight = width / BOOK_PAGE_RATIO;
+  const imageZoneHeight = (width / BOOK_PAGE_RATIO) * IMAGE_ZONE_RATIO;
   const dm400 = fontsLoaded ? 'DMSans_400Regular' : undefined;
   const dm600 = fontsLoaded ? 'DMSans_600SemiBold' : undefined;
   const garamondIt = fontsLoaded ? 'EBGaramond_400Regular_Italic' : undefined;

@@ -2151,6 +2151,7 @@ export async function toggleFavoritePhotoUrl(memoryId: string, photoUrl: string)
       const idx = current.findIndex(u => eq(u, trimmed));
       const next = idx >= 0 ? current.filter((_, i) => i !== idx) : [...current, trimmed];
       updateLocalMemoryFavoritePhotoUrls(memoryId, next);
+      DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId });
       return next;
     }
 
