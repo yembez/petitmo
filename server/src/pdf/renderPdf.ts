@@ -22,7 +22,9 @@ async function htmlToPdfBufferRaw(html: string): Promise<Buffer> {
   const browser = await getBrowser();
   const page = await browser.newPage();
   try {
-    await page.setContent(html, { waitUntil: 'networkidle', timeout: 120_000 });
+    // `networkidle` peut ne jamais se déclencher (fonts Google, images lentes) → timeout Railway → 502.
+    await page.setContent(html, { waitUntil: 'load', timeout: 120_000 });
+    await page.evaluate(() => document.fonts.ready);
     await page.emulateMedia({ media: 'print' });
     const buf = await page.pdf({
       printBackground: true,

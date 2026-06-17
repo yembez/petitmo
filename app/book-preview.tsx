@@ -114,7 +114,8 @@ const QR_BASE = 'https://petitmo.app/m';
 const MIN_BOOK_SELECTION_KEYS = 5;
 const MAX_BOOK_SELECTION_KEYS = 80;
 
-/** Aligné sur `bookPhotoPrintDpi` — trim Gelato 21×28 (aperçu éditeur = trim, pas fond perdu). */
+/**
+ * Aligné sur `bookPhotoPrintDpi` — trim Gelato 21×28 (aperçu éditeur = trim, pas fond perdu).
  * Spread paysage : deux pages → même gabarit **Gelato 21×28** (210×280 mm à l’échelle), comme un livre ouvert.
  * Page seule (couverture à droite, quatrième à gauche, dernière page impaire) : **même format** que les demi-pages
  * du double page — la maquette (couverture incluse) attend width/height au ratio 210:280, pas un cadre 210:142.

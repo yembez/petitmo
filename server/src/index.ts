@@ -6,6 +6,13 @@ import { registerGeneratePdfRoute } from './routes/generatePdf';
 import { registerUploadGuestAssetsRoutes } from './routes/uploadGuestAssets';
 import { registerUploadGuestAssetRoute } from './routes/uploadGuestAsset';
 import { registerPublicMediaRoutes } from './routes/publicMedia';
+import {
+  DIGITAL_PAGE_HEIGHT_MM,
+  DIGITAL_PAGE_WIDTH_MM,
+  PRINT_BLEED_MM,
+  PRINT_PAGE_HEIGHT_MM,
+  PRINT_PAGE_WIDTH_MM,
+} from './constants/pdfDigitalSpec';
 
 function main(): void {
   const env = loadEnv();
@@ -31,7 +38,15 @@ function main(): void {
   app.use(express.json({ limit: '60mb' }));
 
   app.get('/health', (_req, res) => {
-    res.status(200).json({ ok: true, service: 'petitmo-pdf-server' });
+    res.status(200).json({
+      ok: true,
+      service: 'petitmo-pdf-server',
+      pdfFormat: {
+        digitalMm: [DIGITAL_PAGE_WIDTH_MM, DIGITAL_PAGE_HEIGHT_MM],
+        printPageMm: [PRINT_PAGE_WIDTH_MM, PRINT_PAGE_HEIGHT_MM],
+        bleedMm: PRINT_BLEED_MM,
+      },
+    });
   });
 
   const supabase = createSupabaseAdmin(env.supabaseUrl, env.supabaseServiceRoleKey);
