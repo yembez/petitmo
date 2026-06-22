@@ -2,13 +2,18 @@
  * Dimensions livre Gelato 21×28 cm — parité `server/src/constants/pdfDigitalSpec.ts`.
  * DPI : calcul sur le **trim** (zone de coupe), pas sur la page PDF avec fond perdu.
  */
+import {
+  BOOK_VISUAL_MARGIN_MM,
+  PHOTO_FULL_BAND_HEIGHT_RATIO,
+  PHOTO_NOTE_BAND_HEIGHT_MM,
+} from '@/src/book/pdfPreviewTypo';
+
 export const BOOK_PAGE_W_MM = 210;
 export const BOOK_PAGE_H_MM = 280;
 /** Fond perdu Gelato (4 mm chaque côté). */
 export const BOOK_PRINT_BLEED_MM = 4;
 export const BOOK_PRINT_PAGE_W_MM = BOOK_PAGE_W_MM + 2 * BOOK_PRINT_BLEED_MM;
 export const BOOK_PRINT_PAGE_H_MM = BOOK_PAGE_H_MM + 2 * BOOK_PRINT_BLEED_MM;
-export const BOOK_VISUAL_MARGIN_MM = 10;
 
 export type BookPhotoPageType = 'cover' | 'photo-full' | 'photo-note' | 'audio';
 
@@ -16,7 +21,9 @@ export function bookPrintFrameMmFor(pageType: BookPhotoPageType): { w: number; h
   if (pageType === 'cover') return { w: BOOK_PAGE_W_MM, h: 142 };
   const m = BOOK_VISUAL_MARGIN_MM;
   const bandHmm =
-    pageType === 'photo-note' || pageType === 'audio' ? BOOK_PAGE_H_MM * 0.6 : BOOK_PAGE_H_MM * 0.82;
+    pageType === 'photo-note' || pageType === 'audio'
+      ? PHOTO_NOTE_BAND_HEIGHT_MM
+      : BOOK_PAGE_H_MM * PHOTO_FULL_BAND_HEIGHT_RATIO;
   return { w: BOOK_PAGE_W_MM - 2 * m, h: bandHmm - 2 * m };
 }
 

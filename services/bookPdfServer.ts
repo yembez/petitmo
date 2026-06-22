@@ -629,7 +629,21 @@ export function mapBookPagesToServerPayload(
         return { type: 'chapter', month: p.month, chapterNum: p.chapterNum };
       case 'back-cover':
         return { type: 'back-cover' };
-      case 'photo-full':
+      case 'photo-full': {
+        const m = p.memory;
+        const ed = localEdits[m.id];
+        const textOverride = typeof ed?.content === 'string' ? ed.content : undefined;
+        const rot = rotations[m.id] ?? 0;
+        const crop = photoCrops[m.id];
+        return {
+          type: p.type,
+          memoryId: m.id,
+          variant: p.variant,
+          ...(rot !== 0 ? { rotation: rot } : {}),
+          ...(crop ? { crop } : {}),
+          ...(textOverride !== undefined ? { textOverride } : {}),
+        };
+      }
       case 'photo-note':
       case 'quote':
       case 'audio':

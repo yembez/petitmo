@@ -1,124 +1,9 @@
-import type { ComponentProps } from 'react';
-import { View, Text, StyleSheet, Platform } from 'react-native';
 import { useFonts, DMSans_400Regular, DMSans_500Medium } from '@expo-google-fonts/dm-sans';
 import { Tabs } from 'expo-router';
 import { TabTransitionProvider, useTabTransition } from '@/contexts/TabTransitionContext';
 import { MemoryTextFontProvider } from '@/contexts/MemoryTextFontContext';
-import type { LucideIcon } from 'lucide-react-native';
-import { BookOpenText, Heart, List, Plus } from 'lucide-react-native';
-import { PlatformPressable } from '@react-navigation/elements';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { CAPTURE_SCREEN_ACCENT } from '@/constants/captureScreenPalette';
+import PetitmoContextTabBar from '@/components/PetitmoContextTabBar';
 import { THEME } from '@/constants/theme';
-import { scale, verticalScale } from '@/utils/responsive';
-import { APP_ICON_PX } from '@/constants/iconSizes';
-import {
-  TAB_BAR_BACKGROUND,
-  TAB_BAR_BORDER_WIDTH,
-  TAB_BAR_CONTAINER_BORDER,
-  TAB_BAR_CORNER_RADIUS,
-  TAB_BAR_FLOAT_SIDE_INSET,
-  TAB_BAR_PADDING_BOTTOM_GAP,
-  TAB_BAR_PADDING_TOP,
-  getTabBarTotalHeight,
-  tabBarContentPaddingBottom,
-  tabBarFloatBottomPosition,
-  tabBarSafeFillHeight,
-} from '@/constants/tabBarLayout';
-
-const TAB_ICON_SIZE = APP_ICON_PX;
-const TAB_ICON_SIZE_FOCUSED = scale(22);
-/** Disque « + » Capturer (onglet inactif) — légèrement plus grand que les icônes voisines. */
-const CAPTURE_TAB_DISC_SIZE = scale(40);
-const CAPTURE_TAB_DISC_ICON_SIZE = scale(24);
-
-function TabBarBackgroundFill() {
-  return (
-    <View
-      pointerEvents="none"
-      style={[
-        StyleSheet.absoluteFillObject,
-        {
-          backgroundColor: TAB_BAR_BACKGROUND,
-          borderRadius: TAB_BAR_CORNER_RADIUS,
-          borderWidth: TAB_BAR_BORDER_WIDTH,
-          borderColor: TAB_BAR_CONTAINER_BORDER,
-          overflow: 'hidden',
-        },
-      ]}
-    />
-  );
-}
-
-/** Bouton onglet : pas de pastille — actif = accent capture via `tabBarActiveTintColor`. */
-function PetitmoTabBarButton(props: ComponentProps<typeof PlatformPressable>) {
-  const { style, 'aria-selected': isActive, ...rest } = props;
-  const flatStyle = StyleSheet.flatten(style) ?? {};
-  const { backgroundColor: _navBg, ...navStyle } = flatStyle;
-
-  return (
-    <View style={styles.tabBarButtonSlot}>
-      <PlatformPressable
-        {...rest}
-        aria-selected={isActive}
-        style={[styles.tabBarPressableBase, navStyle]}
-      />
-    </View>
-  );
-}
-
-function TabBarGlyph({
-  Icon,
-  focused,
-  fillWhenFocused = true,
-  color,
-}: {
-  Icon: LucideIcon;
-  focused: boolean;
-  fillWhenFocused?: boolean;
-  color: string;
-}) {
-  const size = focused ? TAB_ICON_SIZE_FOCUSED : TAB_ICON_SIZE;
-  return (
-    <View style={styles.iconWrap}>
-      <Icon
-        size={size}
-        color={color}
-        fill={focused && fillWhenFocused ? color : 'none'}
-        strokeWidth={focused ? 2.35 : 2.15}
-      />
-    </View>
-  );
-}
-
-/** « + » Capturer : disque accent plein hors onglet ; icône accent seule une fois actif. */
-function CaptureTabIcon({ focused, color }: { focused: boolean; color: string }) {
-  const accent = CAPTURE_SCREEN_ACCENT;
-  if (focused) {
-    return <TabBarGlyph Icon={Plus} focused color={accent} />;
-  }
-
-  return (
-    <View style={[styles.iconWrap, styles.captureDiscWrap]}>
-      <View
-        style={[
-          styles.captureTabDisc,
-          {
-            width: CAPTURE_TAB_DISC_SIZE,
-            height: CAPTURE_TAB_DISC_SIZE,
-            borderRadius: CAPTURE_TAB_DISC_SIZE / 2,
-          },
-        ]}
-      >
-        <Plus
-          size={CAPTURE_TAB_DISC_ICON_SIZE}
-          color={THEME.captureScreenCtaForeground}
-          strokeWidth={2.35}
-        />
-      </View>
-    </View>
-  );
-}
 
 export default function TabLayout() {
   return (
@@ -132,11 +17,6 @@ export default function TabLayout() {
 
 function TabLayoutInner() {
   const { setTabIndex } = useTabTransition();
-  const insets = useSafeAreaInsets();
-  const safeFillHeight = tabBarSafeFillHeight(insets.bottom);
-  const tabBarTotalHeight = getTabBarTotalHeight(insets.bottom);
-  const tabBarBottom = tabBarFloatBottomPosition(insets.bottom);
-  const tabBarPaddingBottom = tabBarContentPaddingBottom(insets.bottom);
   const [tabFontsLoaded] = useFonts({
     DMSans_400Regular,
     DMSans_500Medium,
@@ -152,6 +32,13 @@ function TabLayoutInner() {
           if (typeof index === 'number') setTabIndex(index);
         },
       }}
+      tabBar={props => (
+        <PetitmoContextTabBar
+          {...props}
+          tabLabelFontRegular={tabLabelFontRegular}
+          tabLabelFontMedium={tabLabelFontMedium}
+        />
+      )}
       screenOptions={{
         headerShown: false,
         /** Garder Fil / Favoris montés : évite remontage + rechargement images après long séjour sur Capturer. */
@@ -163,187 +50,11 @@ function TabLayoutInner() {
          */
         freezeOnBlur: false,
         sceneStyle: { backgroundColor: THEME.bg },
-        tabBarActiveTintColor: CAPTURE_SCREEN_ACCENT,
-        tabBarInactiveTintColor: THEME.tabBarInactiveTint,
-        tabBarActiveBackgroundColor: 'transparent',
-        tabBarInactiveBackgroundColor: 'transparent',
-        tabBarBackground: () => <TabBarBackgroundFill />,
-        tabBarButton: props => <PetitmoTabBarButton {...props} />,
-        tabBarStyle: {
-          position: 'absolute',
-          left: TAB_BAR_FLOAT_SIDE_INSET,
-          right: TAB_BAR_FLOAT_SIDE_INSET,
-          bottom: tabBarBottom,
-          backgroundColor: 'transparent',
-          borderTopWidth: 0,
-          borderRightWidth: 0,
-          borderBottomWidth: 0,
-          borderLeftWidth: 0,
-          borderColor: 'transparent',
-          borderTopLeftRadius: TAB_BAR_CORNER_RADIUS,
-          borderTopRightRadius: TAB_BAR_CORNER_RADIUS,
-          borderBottomLeftRadius: TAB_BAR_CORNER_RADIUS,
-          borderBottomRightRadius: TAB_BAR_CORNER_RADIUS,
-          height: tabBarTotalHeight,
-          paddingTop: TAB_BAR_PADDING_TOP,
-          paddingBottom: tabBarPaddingBottom,
-          paddingHorizontal: scale(4),
-          ...Platform.select({
-            ios: {
-              shadowColor: '#3C3126',
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.08,
-              shadowRadius: 8,
-            },
-            android: {
-              elevation: 6,
-            },
-            default: {},
-          }),
-        },
-        tabBarItemStyle: {
-          flex: 1,
-          minWidth: 0,
-          alignItems: 'center',
-          justifyContent: 'center',
-        },
-        tabBarLabel: ({ focused, children, color }) => (
-          <Text
-            style={[
-              styles.tabLabel,
-              tabLabelFontRegular ? { fontFamily: tabLabelFontRegular } : null,
-              focused && tabLabelFontMedium ? { fontFamily: tabLabelFontMedium } : null,
-              { color: color ?? (focused ? CAPTURE_SCREEN_ACCENT : THEME.tabBarInactiveTint) },
-            ]}
-            numberOfLines={1}
-          >
-            {children}
-          </Text>
-        ),
       }}>
-      <Tabs.Screen
-        name="livres"
-        options={{
-          title: 'Livres',
-          tabBarIcon: ({ focused, color }) => (
-            <TabBarGlyph
-              Icon={BookOpenText}
-              focused={focused}
-              fillWhenFocused={false}
-              color={color ?? THEME.tabBarInactiveTint}
-            />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="favoris"
-        options={{
-          title: 'Favoris',
-          tabBarIcon: ({ focused, color }) => (
-            <TabBarGlyph
-              Icon={Heart}
-              focused={focused}
-              fillWhenFocused={false}
-              color={color ?? THEME.tabBarInactiveTint}
-            />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Capturer',
-          tabBarIcon: ({ focused, color }) => (
-            <CaptureTabIcon
-              focused={focused}
-              color={color ?? THEME.tabBarInactiveTint}
-            />
-          ),
-          tabBarLabel: ({ focused, children, color }) => {
-            if (!focused) return null;
-            return (
-              <Text
-                style={[
-                  styles.tabLabel,
-                  tabLabelFontRegular ? { fontFamily: tabLabelFontRegular } : null,
-                  tabLabelFontMedium ? { fontFamily: tabLabelFontMedium } : null,
-                  { color: color ?? CAPTURE_SCREEN_ACCENT },
-                ]}
-                numberOfLines={1}
-              >
-                {children}
-              </Text>
-            );
-          },
-          tabBarActiveTintColor: CAPTURE_SCREEN_ACCENT,
-        }}
-      />
-      <Tabs.Screen
-        name="fil"
-        options={{
-          title: 'Journal',
-          tabBarIcon: ({ focused, color }) => (
-            <TabBarGlyph
-              Icon={List}
-              focused={focused}
-              fillWhenFocused={false}
-              color={color ?? THEME.tabBarInactiveTint}
-            />
-          ),
-        }}
-      />
+      <Tabs.Screen name="favoris" options={{ title: 'Favoris' }} />
+      <Tabs.Screen name="livres" options={{ title: 'Livres' }} />
+      <Tabs.Screen name="index" options={{ title: 'Capturer' }} />
+      <Tabs.Screen name="fil" options={{ title: 'Journal' }} />
     </Tabs>
   );
 }
-
-const styles = StyleSheet.create({
-  tabBarButtonSlot: {
-    flex: 1,
-    minWidth: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tabBarPressableBase: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: verticalScale(2),
-    paddingBottom: verticalScale(2),
-    backgroundColor: 'transparent',
-  },
-  iconWrap: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: verticalScale(0.5),
-  },
-  /** Compense l’absence du libellé « Capturer » — disque un peu plus bas que les autres icônes. */
-  captureDiscWrap: {
-    marginTop: verticalScale(11),
-    marginBottom: 0,
-  },
-  captureTabDisc: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: CAPTURE_SCREEN_ACCENT,
-    ...Platform.select({
-      ios: {
-        shadowColor: CAPTURE_SCREEN_ACCENT,
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.28,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 3,
-      },
-      default: {},
-    }),
-  },
-  tabLabel: {
-    marginTop: 0,
-    marginBottom: verticalScale(1),
-    fontSize: scale(10),
-    lineHeight: scale(11),
-    letterSpacing: 0.15,
-    textAlign: 'center',
-    ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
-  },
-});

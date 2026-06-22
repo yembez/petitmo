@@ -80,6 +80,7 @@ import {
 import { styles, TEXT_POST_GUTTER } from "@/components/feed/feedStyles";
 import { useMemoryTextFont } from '@/contexts/MemoryTextFontContext';
 import { ensurePlaybackAudioForListening } from '@/lib/playbackAudioMode';
+import { useIsFeedVideoAutoplay } from '@/lib/feedAutoplayStore';
 
 /** Icônes d’action (hors favori couleur charte) */
 const ACTION_ICON_INK = '#0A0A0A';
@@ -104,10 +105,8 @@ export type FeedListItem =
 
 type FilMemoryRowProps = {
   memory: Memory;
-  /** Indice dans `memories` (hors pending), pour `postHeights` / snap. */
+  /** Indice dans `memories` (hors pending), pour espacement entre posts. */
   memoryIndex: number;
-  memories: Memory[];
-  setPostHeights: Dispatch<SetStateAction<number[]>>;
   child: Child | null;
   familyChildren: Child[];
   feedDateFontFamily?: string;
@@ -123,19 +122,13 @@ type FilMemoryRowProps = {
   handleDeleteMemory: (m: Memory) => void;
   swipeRefs: MutableRefObject<Map<string, Swipeable | null>>;
   immersiveLaunchRef: RefObject<(memoryId: string, albumPhotoIndex?: number) => void>;
-  /** Ligne « import en cours » : ne pas écrire dans `postHeights` (index hors `memories`). */
-  skipPostHeightMeasurement?: boolean;
   /** Import non finalisé : pas de favori / swipe / actions. */
   isOptimisticFeedPending?: boolean;
-  /** Vidéo sélectionnée pour lecture auto muette dans le fil (style Instagram). */
-  isFeedVideoAutoplay?: boolean;
 };
 function filMemoryRowDataPropsEqual(prev: FilMemoryRowProps, next: FilMemoryRowProps): boolean {
   if (prev.memoryIndex !== next.memoryIndex) return false;
   if (prev.uploadingVoiceCoverId !== next.uploadingVoiceCoverId) return false;
-  if (!!prev.skipPostHeightMeasurement !== !!next.skipPostHeightMeasurement) return false;
   if (!!prev.isOptimisticFeedPending !== !!next.isOptimisticFeedPending) return false;
-  if (!!prev.isFeedVideoAutoplay !== !!next.isFeedVideoAutoplay) return false;
   if (filChildLiteKey(prev.child) !== filChildLiteKey(next.child)) return false;
   if (filFamilyChildrenLiteKey(prev.familyChildren) !== filFamilyChildrenLiteKey(next.familyChildren)) {
     return false;
@@ -219,8 +212,6 @@ const PendingFeedUploadCard = memo(function PendingFeedUploadCard({
 function FilMemoryRow({
   memory,
   memoryIndex,
-  memories,
-  setPostHeights,
   child,
   familyChildren,
   feedDateFontFamily,
@@ -236,10 +227,9 @@ function FilMemoryRow({
   handleDeleteMemory,
   swipeRefs,
   immersiveLaunchRef,
-  skipPostHeightMeasurement = false,
   isOptimisticFeedPending = false,
-  isFeedVideoAutoplay = false,
 }: FilMemoryRowProps) {
+  const isFeedVideoAutoplay = useIsFeedVideoAutoplay(memory.id);
   const memoryTextFont = useMemoryTextFont();
   const photoUrls = useFeedPhotoDisplayUrls(memory);
   const contentTextRaw = memory.content?.trim() || '';
@@ -362,20 +352,7 @@ function FilMemoryRow({
   ) : null;
 
   const postCard = (
-    <View
-      style={styles.postShell}
-      onLayout={(e) => {
-        if (skipPostHeightMeasurement) return;
-        const h = e.nativeEvent.layout.height;
-        const rowIndex = memoryIndex;
-        setPostHeights(prev => {
-          const next = memories.map((_, i) => prev[i] ?? 0);
-          if (next[rowIndex] === h) return prev;
-          next[rowIndex] = h;
-          return next;
-        });
-      }}
-    >
+    <View style={styles.postShell}>
       <View style={styles.post}>
       {memory.type === 'text' ? (
       <View style={styles.daySeparatorBlock}>

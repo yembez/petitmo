@@ -3,8 +3,10 @@ import { DeviceEventEmitter } from 'react-native';
 import {
   deleteLocalBook,
   getLocalBook,
+  getLocalChild,
   getLocalMemoryById,
   listLocalBooks,
+  listLocalChildren,
   updateLocalMemoryFavoritePhotoUrls,
   upsertLocalBook,
   type LocalBookRow,
@@ -37,7 +39,9 @@ import {
   isLocalMediaUriReadable,
   rebaseSandboxUriToCurrentContainer,
 } from '@/utils/localMediaReadable';
-import type { Memory } from '@/types/local';
+import type { Child, Memory } from '@/types/local';
+import { peekSelectedChildIdLastKnown } from '@/services/children';
+import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 
 function bookCoverMatchesMemory(memory: Memory, coverRef: string): boolean {
   const ref = coverRef.trim();
@@ -737,6 +741,43 @@ export async function getBook(bookId: string): Promise<Book | null> {
   return b ? normalizeBook(b) : null;
 }
 
+export type BookPreviewLocalSnapshot = {
+  child: Child;
+  familyChildren: Child[];
+  book: Book;
+  bookMemories: Memory[];
+  bookSelectionKeys: string[];
+};
+
+/**
+ * Hydratation SQLite synchrone — spread visible sans spinner au retour Favoris (replace remonte l’écran).
+ */
+export function readBookPreviewLocalSnapshotSync(bookId: string): BookPreviewLocalSnapshot | null {
+  const raw = getLocalBook(bookId);
+  if (!raw) return null;
+  const book = normalizeBook(raw);
+  if (!book) return null;
+
+  const childId = peekSelectedChildIdLastKnown();
+  if (!childId) return null;
+
+  const familyChildren = sortChildrenByBirthdateAsc(listLocalChildren());
+  const child = getLocalChild(childId) ?? familyChildren.find(c => c.id === childId) ?? null;
+  if (!child) return null;
+
+  const bookSelectionKeys = dedupeMemoryIds(book.memoryIds ?? []);
+  const bookMemories: Memory[] = [];
+  for (const id of bookSelectionKeys) {
+    const row = getLocalMemoryById(id);
+    if (row) bookMemories.push(row as Memory);
+  }
+  bookMemories.sort(
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+  );
+
+  return { child, familyChildren, book, bookMemories, bookSelectionKeys };
+}
+
 export async function createBook(title?: string): Promise<Book> {
   const books = await readAll();
   const book: Book = {
@@ -784,11 +825,14 @@ export async function addMemoriesToBook(bookId: string, memoryIds: string[]): Pr
   if (!b) return null;
   if (ids.length === 0) return b;
 
+  const existingIds = uniq(b.memoryIds ?? []);
+  const newIds = ids.filter(id => !existingIds.includes(id));
+  if (newIds.length === 0) return normalizeBook(b) ?? b;
+
   // Garde-fou produit : sur le plan gratuit, on limite les médias QR dans un livre dès l’ajout.
   const tier = await getUserTier();
   if (tier === 'free') {
-    const existingIds = uniq(b.memoryIds ?? []);
-    const allIds = uniq([...existingIds, ...ids]);
+    const allIds = uniq([...existingIds, ...newIds]);
     const memories = allIds
       .map(id => getLocalMemoryById(id))
       .filter(Boolean) as Array<{ id: string; type: string; duration?: number | null }>;
@@ -813,7 +857,10 @@ export async function addMemoriesToBook(bookId: string, memoryIds: string[]): Pr
     }
   }
 
-  const next: Book = { ...(normalizeBook(b) ?? b), memoryIds: uniq([...(b.memoryIds ?? []), ...ids]) };
+  const next: Book = {
+    ...(normalizeBook(b) ?? b),
+    memoryIds: uniq([...existingIds, ...newIds]),
+  };
   await upsertBook(next);
   return next;
 }

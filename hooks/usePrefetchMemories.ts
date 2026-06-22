@@ -1,12 +1,15 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { Image } from 'expo-image';
 import type { ViewToken } from 'react-native';
 import type { Memory as MemoryRow } from '@/types/local';
 import { getAllPhotoUrlsForFeed } from '@/utils/memoryPhotos';
+import { isFeedScrollIdle } from '@/lib/feedAutoplayStore';
 import { getSignedMediaDisplayUrl, primeSignedMediaDisplayUrls } from '@/lib/mediaSignedUrl';
 
 /** Limite le travail réseau / disque quand beaucoup de lignes sont « viewables ». */
 const PREFETCH_MAX_HTTPS_URLS = 40;
+/** Regroupe les prefetch pendant un scroll rapide (ex. remontée depuis le bas du fil). */
+const PREFETCH_DEBOUNCE_MS = 150;
 
 type FeedListItemForPrefetch =
   | { rowKind: 'memory'; memory: MemoryRow }
@@ -43,28 +46,49 @@ function memoryFromViewTokenItem(item: ViewToken['item']): MemoryRow | null {
 export function usePrefetchMemories(): {
   onViewableItemsChanged: (info: { viewableItems: ViewToken[]; changed: ViewToken[] }) => void;
 } {
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestViewableRef = useRef<ViewToken[]>([]);
+
+  useEffect(
+    () => () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    },
+    [],
+  );
+
+  const runPrefetch = useCallback((viewableItems: ViewToken[]) => {
+    const all = new Set<string>();
+    for (const t of viewableItems) {
+      const m = memoryFromViewTokenItem(t.item);
+      if (!m) continue;
+      for (const u of urisFromMemory(m)) {
+        all.add(u);
+      }
+    }
+    const list = [...all];
+    if (list.length === 0) return;
+    if (list.length > PREFETCH_MAX_HTTPS_URLS) {
+      list.length = PREFETCH_MAX_HTTPS_URLS;
+    }
+    void (async () => {
+      await primeSignedMediaDisplayUrls(list);
+      const signed = await Promise.all(list.map(u => getSignedMediaDisplayUrl(u)));
+      void Image.prefetch(signed, 'disk');
+    })();
+  }, []);
+
   const onViewableItemsChanged = useCallback(
     (info: { viewableItems: ViewToken[]; changed: ViewToken[] }) => {
-      const all = new Set<string>();
-      for (const t of info.viewableItems) {
-        const m = memoryFromViewTokenItem(t.item);
-        if (!m) continue;
-        for (const u of urisFromMemory(m)) {
-          all.add(u);
-        }
-      }
-      const list = [...all];
-      if (list.length === 0) return;
-      if (list.length > PREFETCH_MAX_HTTPS_URLS) {
-        list.length = PREFETCH_MAX_HTTPS_URLS;
-      }
-      void (async () => {
-        await primeSignedMediaDisplayUrls(list);
-        const signed = await Promise.all(list.map(u => getSignedMediaDisplayUrl(u)));
-        void Image.prefetch(signed, 'disk');
-      })();
+      latestViewableRef.current = info.viewableItems;
+      if (!isFeedScrollIdle()) return;
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        debounceRef.current = null;
+        if (!isFeedScrollIdle()) return;
+        runPrefetch(latestViewableRef.current);
+      }, PREFETCH_DEBOUNCE_MS);
     },
-    []
+    [runPrefetch],
   );
 
   return { onViewableItemsChanged };

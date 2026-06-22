@@ -32,7 +32,6 @@ export function useFilFeedList(
   feedLocationPlaceholderFontFamily: string | undefined,
   pendingUploads: PendingUpload[],
   uploadingVoiceCoverId: string | null,
-  setPostHeights: Dispatch<SetStateAction<number[]>>,
   toggleFavorite: (id: string) => void | Promise<void>,
   handleEditMemory: (m: Memory) => void,
   handleEditLocation: (m: Memory) => void,
@@ -40,7 +39,6 @@ export function useFilFeedList(
   handleDeleteMemory: (m: Memory) => void,
   swipeRefs: MutableRefObject<Map<string, Swipeable | null>>,
   immersiveLaunchRef: RefObject<(memoryId: string, albumPhotoIndex?: number) => void>,
-  feedAutoplayMemoryId: string | null
 ): {
   feedData: FeedListItem[];
   renderItem: (info: { item: FeedListItem }) => ReactElement;
@@ -66,13 +64,11 @@ export function useFilFeedList(
     (
       memory: Memory,
       memoryIndex: number,
-      opts?: { skipPostHeight?: boolean; isOptimisticFeedPending?: boolean }
+      opts?: { isOptimisticFeedPending?: boolean }
     ) => (
       <FilMemoryRowMemo
         memory={memory}
         memoryIndex={memoryIndex}
-        memories={memories}
-        setPostHeights={setPostHeights}
         child={child}
         familyChildren={familyChildren}
         feedDateFontFamily={feedDateFontFamily}
@@ -88,13 +84,10 @@ export function useFilFeedList(
         handleDeleteMemory={handleDeleteMemory}
         swipeRefs={swipeRefs}
         immersiveLaunchRef={immersiveLaunchRef}
-        skipPostHeightMeasurement={opts?.skipPostHeight === true}
         isOptimisticFeedPending={opts?.isOptimisticFeedPending === true}
-        isFeedVideoAutoplay={feedAutoplayMemoryId === memory.id}
       />
     ),
     [
-      memories,
       child,
       familyChildren,
       feedDateFontFamily,
@@ -103,7 +96,6 @@ export function useFilFeedList(
       feedLocationPlaceholderFontFamily,
       uploadingVoiceCoverId,
       setMemories,
-      setPostHeights,
       toggleFavorite,
       handleEditMemory,
       handleEditLocation,
@@ -111,7 +103,6 @@ export function useFilFeedList(
       handleDeleteMemory,
       swipeRefs,
       immersiveLaunchRef,
-      feedAutoplayMemoryId,
     ]
   );
 
@@ -134,7 +125,6 @@ export function useFilFeedList(
         if (canRenderOptimisticPendingRow(item.row)) {
           const optimistic = buildOptimisticMemoryForPending(item.row, child);
           return renderMemory(optimistic, 0, {
-            skipPostHeight: true,
             isOptimisticFeedPending: true,
           });
         }

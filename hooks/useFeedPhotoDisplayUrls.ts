@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Platform } from 'react-native';
+import { InteractionManager, Platform } from 'react-native';
 import type { Memory } from '@/types/local';
 import {
   getAllPhotoUrlsForFeed,
@@ -100,123 +100,126 @@ export function useFeedPhotoDisplayUrls(memory: Memory): string[] {
       return;
     }
 
-    const remRaw = getAllPhotoUrlsForFeed(memory);
     let alive = true;
-    void (async () => {
-      const maxProbe = Math.max(remRaw.length, 6);
+    const task = InteractionManager.runAfterInteractions(() => {
+      void (async () => {
+        const remRaw = getAllPhotoUrlsForFeed(memory);
+        const maxProbe = Math.max(remRaw.length, 6);
 
-      const localPromises: Promise<string>[] = [];
-      for (let i = 0; i < maxProbe; i++) {
-        if (Platform.OS === 'web') {
-          localPromises.push(Promise.resolve(''));
-        } else {
-          localPromises.push(
-            getFeedLocalThumbnail(memory.id, i).then(s => (s?.trim() ? s.trim() : ''))
-          );
-        }
-      }
-      const locals = await Promise.all(localPromises);
-      if (!alive) return;
-
-      const localsVerified: string[] = [];
-      for (let i = 0; i < locals.length; i++) {
-        const L = locals[i]?.trim() || '';
-        if (!L || Platform.OS === 'web') {
-          localsVerified.push('');
-          continue;
-        }
-        localsVerified.push((await isLocalMediaUriReadable(L)) ? L : '');
-      }
-      if (!alive) return;
-
-      const remoteOnly = getAllPhotoUrlsForFeedRemoteOnly(memory);
-      const resolvedRaw: string[] = [];
-      for (let i = 0; i < remRaw.length; i++) {
-        const rawIn = remRaw[i]?.trim() || '';
-        const cloudOnly = (remoteOnly[i]?.trim() ?? '').trim();
-        const raw = await maybeSwapDeadSandboxForCloud(rawIn, cloudOnly);
-        resolvedRaw.push(raw);
-      }
-      if (!alive) return;
-
-      const toPrime: string[] = [];
-      for (let i = 0; i < resolvedRaw.length; i++) {
-        const raw = resolvedRaw[i]?.trim() || '';
-        if (!raw) continue;
-        if (localsVerified[i] && Platform.OS !== 'web') continue;
-        if (isLikelyDeviceLocalAsset(raw)) continue;
-        if (isHttpUrl(raw) || extractMediaBucketPath(raw)) {
-          toPrime.push(raw);
-        }
-      }
-      await primeSignedMediaDisplayUrls(toPrime);
-      if (!alive) return;
-
-      const rem: string[] = [];
-      for (let i = 0; i < resolvedRaw.length; i++) {
-        const raw = resolvedRaw[i]?.trim() || '';
-        if (!raw) {
-          rem.push('');
-          continue;
-        }
-        if (localsVerified[i] && Platform.OS !== 'web') {
-          rem.push('');
-          continue;
-        }
-        rem.push(await resolveFeedSlotRemoteUrl(raw));
-      }
-      if (!alive) return;
-
-      const slots: { remote: string; local: string }[] = [];
-      for (let i = 0; i < maxProbe; i++) {
-        const remote = (rem[i]?.trim() || '') || '';
-        const local = (localsVerified[i]?.trim() || '') || '';
-        slots.push({ remote, local });
-      }
-      if (!alive) return;
-
-      setMerged(prev => {
-        const next: string[] = [];
+        const localPromises: Promise<string>[] = [];
         for (let i = 0; i < maxProbe; i++) {
-          const { remote, local } = slots[i] ?? { remote: '', local: '' };
-          let chosen = (local || remote || '').trim();
-          const prevU = (prev[i]?.trim() || '');
-          if (
-            prevU &&
-            isLikelyDeviceLocalAsset(prevU) &&
-            chosen &&
-            isLikelyDeviceLocalAsset(chosen) &&
-            prevU !== chosen
-          ) {
-            chosen = prevU;
+          if (Platform.OS === 'web') {
+            localPromises.push(Promise.resolve(''));
+          } else {
+            localPromises.push(
+              getFeedLocalThumbnail(memory.id, i).then(s => (s?.trim() ? s.trim() : '')),
+            );
           }
-          if (chosen) next.push(chosen);
-          else if (i >= remRaw.length) break;
         }
-        const fromSlots = nonEmptyUrls(next);
-        const fromRem = nonEmptyUrls(rem);
-        const fromSync = nonEmptyUrls(remRaw);
-        const nextMerged =
-          fromSlots.length > 0
-            ? fromSlots
-            : fromRem.length > 0
-              ? fromRem
-              : fromSync.length > 0
-                ? fromSync
-                : nonEmptyUrls(prev);
-        if (
-          prev.length === nextMerged.length &&
-          prev.every((u, j) => u === nextMerged[j])
-        ) {
-          return prev;
+        const locals = await Promise.all(localPromises);
+        if (!alive) return;
+
+        const localsVerified: string[] = [];
+        for (let i = 0; i < locals.length; i++) {
+          const L = locals[i]?.trim() || '';
+          if (!L || Platform.OS === 'web') {
+            localsVerified.push('');
+            continue;
+          }
+          localsVerified.push((await isLocalMediaUriReadable(L)) ? L : '');
         }
-        return nextMerged;
-      });
-      takeFeedBootstrapDisplayUrls(memory.id);
-    })();
+        if (!alive) return;
+
+        const remoteOnly = getAllPhotoUrlsForFeedRemoteOnly(memory);
+        const resolvedRaw: string[] = [];
+        for (let i = 0; i < remRaw.length; i++) {
+          const rawIn = remRaw[i]?.trim() || '';
+          const cloudOnly = (remoteOnly[i]?.trim() ?? '').trim();
+          const raw = await maybeSwapDeadSandboxForCloud(rawIn, cloudOnly);
+          resolvedRaw.push(raw);
+        }
+        if (!alive) return;
+
+        const toPrime: string[] = [];
+        for (let i = 0; i < resolvedRaw.length; i++) {
+          const raw = resolvedRaw[i]?.trim() || '';
+          if (!raw) continue;
+          if (localsVerified[i] && Platform.OS !== 'web') continue;
+          if (isLikelyDeviceLocalAsset(raw)) continue;
+          if (isHttpUrl(raw) || extractMediaBucketPath(raw)) {
+            toPrime.push(raw);
+          }
+        }
+        await primeSignedMediaDisplayUrls(toPrime);
+        if (!alive) return;
+
+        const rem: string[] = [];
+        for (let i = 0; i < resolvedRaw.length; i++) {
+          const raw = resolvedRaw[i]?.trim() || '';
+          if (!raw) {
+            rem.push('');
+            continue;
+          }
+          if (localsVerified[i] && Platform.OS !== 'web') {
+            rem.push('');
+            continue;
+          }
+          rem.push(await resolveFeedSlotRemoteUrl(raw));
+        }
+        if (!alive) return;
+
+        const slots: { remote: string; local: string }[] = [];
+        for (let i = 0; i < maxProbe; i++) {
+          const remote = (rem[i]?.trim() || '') || '';
+          const local = (localsVerified[i]?.trim() || '') || '';
+          slots.push({ remote, local });
+        }
+        if (!alive) return;
+
+        setMerged(prev => {
+          const next: string[] = [];
+          for (let i = 0; i < maxProbe; i++) {
+            const { remote, local } = slots[i] ?? { remote: '', local: '' };
+            let chosen = (local || remote || '').trim();
+            const prevU = (prev[i]?.trim() || '');
+            if (
+              prevU &&
+              isLikelyDeviceLocalAsset(prevU) &&
+              chosen &&
+              isLikelyDeviceLocalAsset(chosen) &&
+              prevU !== chosen
+            ) {
+              chosen = prevU;
+            }
+            if (chosen) next.push(chosen);
+            else if (i >= remRaw.length) break;
+          }
+          const fromSlots = nonEmptyUrls(next);
+          const fromRem = nonEmptyUrls(rem);
+          const fromSync = nonEmptyUrls(remRaw);
+          const nextMerged =
+            fromSlots.length > 0
+              ? fromSlots
+              : fromRem.length > 0
+                ? fromRem
+                : fromSync.length > 0
+                  ? fromSync
+                  : nonEmptyUrls(prev);
+          if (
+            prev.length === nextMerged.length &&
+            prev.every((u, j) => u === nextMerged[j])
+          ) {
+            return prev;
+          }
+          return nextMerged;
+        });
+        takeFeedBootstrapDisplayUrls(memory.id);
+      })();
+    });
 
     return () => {
       alive = false;
+      task.cancel();
     };
   }, [
     memory.type,

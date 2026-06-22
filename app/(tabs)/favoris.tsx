@@ -44,7 +44,7 @@ import { SPACING, FONT_SIZES } from '@/constants/sizes';
 import { useMemoryTextFont } from '@/contexts/MemoryTextFontContext';
 import { getFamilyMemories, requestMissingMediaDerivatives } from '@/services/media';
 import { getOrSelectFirstChild } from '@/services/children';
-import { getLocalMemoryById } from '@/lib/localDb';
+import { getLocalMemoryById, getLocalBook } from '@/lib/localDb';
 import {
   feedChildHydrationSnapshot,
   feedMemoriesHydrationSnapshot,
@@ -71,11 +71,14 @@ import {
   addMemoriesToBook,
   BookUpgradeRequiredError,
   createBook,
+  dedupeMemoryIds,
   upsertBook,
 } from '@/services/books';
 import {
   clearPendingFavorisAddToBookId,
   consumePendingFavorisAddToBookId,
+  setFavorisAddToBookSession,
+  clearFavorisAddToBookSession,
 } from '@/services/favorisBookAddFlow';
 
 type FavListItem = {
@@ -508,6 +511,8 @@ type FavorisFixedTopChromeProps = {
   insetTop: number;
   gradientHeight: number;
   selectionMode: boolean;
+  /** Flux spread livre → favoris : pas d’« Annuler » en haut (CTA bas). */
+  bookAddFromSpreadFlow: boolean;
   selectionHeaderTitle: string;
   onExitSelection: () => void;
   onEnterSelection: () => void;
@@ -518,6 +523,7 @@ function FavorisFixedTopChrome({
   insetTop,
   gradientHeight,
   selectionMode,
+  bookAddFromSpreadFlow,
   selectionHeaderTitle,
   onExitSelection,
   onEnterSelection,
@@ -546,15 +552,19 @@ function FavorisFixedTopChrome({
         >
           {selectionMode ? (
             <>
-              <Pressable
-                onPress={onExitSelection}
-                style={styles.topChromeSideBtn}
-                hitSlop={12}
-                accessibilityRole="button"
-                accessibilityLabel="Annuler la sélection"
-              >
-                <Text style={styles.topChromeBtnTextLight}>Annuler</Text>
-              </Pressable>
+              {bookAddFromSpreadFlow ? (
+                <View style={styles.topChromeSideSpacer} />
+              ) : (
+                <Pressable
+                  onPress={onExitSelection}
+                  style={styles.topChromeSideBtn}
+                  hitSlop={12}
+                  accessibilityRole="button"
+                  accessibilityLabel="Annuler la sélection"
+                >
+                  <Text style={styles.topChromeBtnTextLight}>Annuler</Text>
+                </Pressable>
+              )}
               <Text style={styles.topChromeCenterTitleLight} numberOfLines={1}>
                 {selectionHeaderTitle}
               </Text>
@@ -612,6 +622,8 @@ const HERO_PULL_SCALE_PER_PX = 0.00135;
 const GALLERY_TILE_GAP = 1;
 
 const SELECTION_RING = 22;
+/** Vert « déjà dans le livre » — parité `AddToBookModal.modalThumbCheck`. */
+const IN_BOOK_NOTCH_GREEN = '#16A34A';
 
 /** Zone CTA + padding haut du bandeau « Ajouter au livre » (hors tab bar). */
 const FAVORIS_SELECTION_CTA_BLOCK_HEIGHT = verticalScale(52);
@@ -619,6 +631,11 @@ const FAVORIS_SELECTION_CTA_BLOCK_HEIGHT = verticalScale(52);
 /** Hauteur totale du bandeau blanc : CTA + remplissage sous la tab bar flottante. */
 function favorisSelectionBarHeight(insetsBottom: number): number {
   return FAVORIS_SELECTION_CTA_BLOCK_HEIGHT + tabBarFloatingBottomInset(insetsBottom);
+}
+
+/** Bandeau CTA seul (tab bar masquée — flux spread livre → favoris). */
+function favorisBookAddFlowBarHeight(insetsBottom: number): number {
+  return FAVORIS_SELECTION_CTA_BLOCK_HEIGHT + Math.max(0, insetsBottom);
 }
 
 const AUDIO_WAVE_BARS = [6, 12, 8, 16, 10, 18, 13, 20, 12, 17, 9, 14] as const;
@@ -668,6 +685,8 @@ type GalleryTileProps = {
   tileSize: number;
   selectionMode: boolean;
   isSelected: boolean;
+  /** Encoche verte : souvenir déjà présent dans le livre cible (flux spread → favoris). */
+  isAlreadyInTargetBook: boolean;
   onOpen: (memoryId: string) => void;
   onToggleSelect: (key: string) => void;
 };
@@ -690,6 +709,7 @@ function galleryTilePropsEqual(a: GalleryTileProps, b: GalleryTileProps): boolea
     a.tileSize === b.tileSize &&
     a.selectionMode === b.selectionMode &&
     a.isSelected === b.isSelected &&
+    a.isAlreadyInTargetBook === b.isAlreadyInTargetBook &&
     a.onOpen === b.onOpen &&
     a.onToggleSelect === b.onToggleSelect
   );
@@ -700,6 +720,7 @@ const GalleryTile = memo(function GalleryTile({
   tileSize,
   selectionMode,
   isSelected,
+  isAlreadyInTargetBook,
   onOpen,
   onToggleSelect,
 }: GalleryTileProps) {
@@ -764,6 +785,7 @@ const GalleryTile = memo(function GalleryTile({
 
   const onPress = () => {
     if (selectionMode) {
+      if (isAlreadyInTargetBook) return;
       scaleSv.value = withSequence(
         withTiming(0.94, { duration: 80 }),
         withSpring(1, { damping: 12 })
@@ -785,9 +807,11 @@ const GalleryTile = memo(function GalleryTile({
       accessibilityRole="button"
       accessibilityLabel={
         selectionMode
-          ? isSelected
-            ? 'Désélectionner'
-            : 'Sélectionner'
+          ? isAlreadyInTargetBook
+            ? 'Déjà dans le livre'
+            : isSelected
+              ? 'Désélectionner'
+              : 'Sélectionner'
           : 'Ouvrir le souvenir en plein écran'
       }
     >
@@ -904,7 +928,13 @@ const GalleryTile = memo(function GalleryTile({
           </View>
         ) : null}
 
-        {selectionMode ? (
+        {isAlreadyInTargetBook ? (
+          <View style={styles.inBookNotch} pointerEvents="none">
+            <Check size={scale(12)} color="#FFFFFF" strokeWidth={3} />
+          </View>
+        ) : null}
+
+        {selectionMode && !isAlreadyInTargetBook ? (
           <View
             style={[
               styles.selectionRing,
@@ -980,12 +1010,14 @@ function FavorisScreen() {
     setSelectedIds(new Set());
     setAddToBookTargetId(null);
     clearPendingFavorisAddToBookId();
+    clearFavorisAddToBookSession();
   }, []);
 
   const applyAddToBookIntent = useCallback((bookId: string) => {
     const id = bookId.trim();
     if (!id) return;
     setAddToBookTargetId(id);
+    setFavorisAddToBookSession(id);
     setCreateBookFlowTitle(null);
     setSelectionMode(true);
     setSelectedIds(new Set());
@@ -1036,6 +1068,8 @@ function FavorisScreen() {
           galleryScrollY.value = 0;
           setSelectionMode(false);
           setSelectedIds(new Set());
+          setAddToBookTargetId(null);
+          clearFavorisAddToBookSession();
         };
       }
 
@@ -1056,6 +1090,8 @@ function FavorisScreen() {
         galleryScrollY.value = 0;
         setSelectionMode(false);
         setSelectedIds(new Set());
+        setAddToBookTargetId(null);
+        clearFavorisAddToBookSession();
       };
     }, [applyAddToBookIntent, load])
   );
@@ -1124,6 +1160,12 @@ function FavorisScreen() {
 
   const galleryItems = useMemo(() => favoriteItems, [favoriteItems]);
 
+  const addToBookMemoryIdSet = useMemo(() => {
+    if (!addToBookTargetId) return null;
+    const book = getLocalBook(addToBookTargetId);
+    return new Set(book?.memoryIds ?? []);
+  }, [addToBookTargetId, memories]);
+
   const selectedMemoryIds = useMemo(() => {
     const ids = new Set<string>();
     for (const it of galleryItems) {
@@ -1158,6 +1200,144 @@ function FavorisScreen() {
     return `${n} sélectionnés`;
   }, [selectedIds]);
 
+  const isBookAddFromSpreadFlow = addToBookTargetId != null;
+  const showSelectionBottomBar =
+    isBookAddFromSpreadFlow || (selectionMode && selectedIds.size > 0);
+
+  const galleryListPaddingBottom = useMemo(() => {
+    const extra = verticalScale(6);
+    if (isBookAddFromSpreadFlow) {
+      return favorisBookAddFlowBarHeight(insets.bottom) + extra;
+    }
+    if (selectionMode && selectedIds.size > 0) {
+      return favorisSelectionBarHeight(insets.bottom) + extra;
+    }
+    return tabBarFloatingOverlapPad(insets.bottom) + extra;
+  }, [insets.bottom, isBookAddFromSpreadFlow, selectionMode, selectedIds.size]);
+
+  const handleConfirmSelectionAction = useCallback(async () => {
+    if (selectedMemoryIds.length === 0) return;
+
+    if (createBookFlowTitle) {
+      const created = await createBook(createBookFlowTitle);
+      let updated = null;
+      try {
+        updated = await addMemoriesToBook(created.id, selectedMemoryIds);
+      } catch (e) {
+        if (e instanceof BookUpgradeRequiredError) {
+          Alert.alert(
+            'Petitmo+',
+            'Pour pouvoir ajouter une vidéo dans le livre et la revoir à tout moment grâce au QR Code, passer à Petitmo+.',
+            [
+              {
+                text: 'Annuler',
+                style: 'cancel',
+                onPress: () => {
+                  setSelectedIds(prev => {
+                    const next = new Set(prev);
+                    for (const it of galleryItems) {
+                      if (!next.has(it.key)) continue;
+                      if (it.memory.type === 'video') next.delete(it.key);
+                    }
+                    return next;
+                  });
+                },
+              },
+              {
+                text: 'Passer à Petitmo+',
+                style: 'default',
+                onPress: () =>
+                  router.push({ pathname: '/paywall', params: { context: 'BOOK_VIDEO' } }),
+              },
+            ],
+          );
+          return;
+        }
+        Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
+        return;
+      }
+      if (!updated) {
+        Alert.alert('Petitmo', 'Livre introuvable.');
+        return;
+      }
+      for (const id of selectedMemoryIds) {
+        const m = getLocalMemoryById(id);
+        if (!m || m.type !== 'photo') continue;
+        const src = canonicalBookCoverPhotoRef(m).trim();
+        if (src) {
+          await upsertBook({ ...updated, coverPhotoUrl: src });
+        }
+        break;
+      }
+      setCreateBookFlowTitle(null);
+      exitSelection();
+      router.push({ pathname: '/book-preview', params: { bookId: created.id } });
+      return;
+    }
+
+    if (addToBookTargetId) {
+      const targetId = addToBookTargetId;
+      const book = getLocalBook(targetId);
+      const inBook = new Set(book?.memoryIds ?? []);
+      const idsToAdd = dedupeMemoryIds(selectedMemoryIds.filter(id => !inBook.has(id)));
+      if (idsToAdd.length === 0) {
+        Alert.alert('Petitmo', 'Ces souvenirs sont déjà dans le livre.');
+        return;
+      }
+      try {
+        const updated = await addMemoriesToBook(targetId, idsToAdd);
+        if (!updated) {
+          Alert.alert('Petitmo', 'Livre introuvable.');
+          return;
+        }
+      } catch (e) {
+        if (e instanceof BookUpgradeRequiredError) {
+          Alert.alert(
+            'Petitmo+',
+            'Pour pouvoir ajouter une vidéo dans le livre et la revoir à tout moment grâce au QR Code, passer à Petitmo+.',
+            [
+              {
+                text: 'Annuler',
+                style: 'cancel',
+                onPress: () => {
+                  setSelectedIds(prev => {
+                    const next = new Set(prev);
+                    for (const it of galleryItems) {
+                      if (!next.has(it.key)) continue;
+                      if (it.memory.type === 'video') next.delete(it.key);
+                    }
+                    return next;
+                  });
+                },
+              },
+              {
+                text: 'Passer à Petitmo+',
+                style: 'default',
+                onPress: () =>
+                  router.push({ pathname: '/paywall', params: { context: 'BOOK_VIDEO' } }),
+              },
+            ],
+          );
+          return;
+        }
+        Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
+        return;
+      }
+      exitSelection();
+      router.replace({ pathname: '/book-preview', params: { bookId: targetId } });
+      return;
+    }
+
+    setBookModalVisible(true);
+  }, [
+    addToBookTargetId,
+    createBookFlowTitle,
+    exitSelection,
+    galleryItems,
+    router,
+    selectedMemoryIds,
+  ]);
+
   const openMemory = useCallback(
     (memoryId: string) => {
       router.push({ pathname: '/memory-view', params: { memoryId } });
@@ -1172,11 +1352,14 @@ function FavorisScreen() {
         tileSize={tileSize}
         selectionMode={selectionMode}
         isSelected={selectedIds.has(item.key)}
+        isAlreadyInTargetBook={
+          addToBookMemoryIdSet != null && addToBookMemoryIdSet.has(item.memory.id)
+        }
         onOpen={openMemory}
         onToggleSelect={toggleSelection}
       />
     ),
-    [tileSize, selectionMode, selectedIds, openMemory, toggleSelection]
+    [tileSize, selectionMode, selectedIds, addToBookMemoryIdSet, openMemory, toggleSelection]
   );
 
   const favoritesListHeader = useMemo(() => {
@@ -1238,18 +1421,13 @@ function FavorisScreen() {
                 columnWrapperStyle={styles.galleryRow}
                 contentContainerStyle={[
                   styles.galleryContent,
-                  {
-                    paddingBottom:
-                      selectionMode && selectedIds.size > 0
-                        ? favorisSelectionBarHeight(insets.bottom) + verticalScale(6)
-                        : tabBarFloatingOverlapPad(insets.bottom) + verticalScale(6),
-                  },
+                  { paddingBottom: galleryListPaddingBottom },
                 ]}
                 style={styles.gallery}
                 showsVerticalScrollIndicator={false}
                 scrollEventThrottle={16}
                 ListHeaderComponent={favoritesListHeader}
-                extraData={{ heroHeight, selectionMode, selectionHeaderTitle }}
+                extraData={{ heroHeight, selectionMode, selectionHeaderTitle, addToBookTargetId }}
                 onScroll={e => {
                   const y = e.nativeEvent.contentOffset.y;
                   galleryScrollY.value = y;
@@ -1266,6 +1444,7 @@ function FavorisScreen() {
                 insetTop={insets.top}
                 gradientHeight={heroGradientHeight}
                 selectionMode={selectionMode}
+                bookAddFromSpreadFlow={isBookAddFromSpreadFlow}
                 selectionHeaderTitle={selectionHeaderTitle}
                 onExitSelection={handleExitSelection}
                 onEnterSelection={enterSelectionMode}
@@ -1273,133 +1452,50 @@ function FavorisScreen() {
             </View>
           )}
 
-          {selectionMode && selectedIds.size > 0 ? (
+          {showSelectionBottomBar ? (
             <Reanimated.View
               entering={SlideInDown.duration(280)}
               exiting={SlideOutDown.duration(200)}
               style={[
                 styles.selectionActionBar,
-                { paddingBottom: tabBarFloatingBottomInset(insets.bottom) },
+                {
+                  paddingBottom: isBookAddFromSpreadFlow
+                    ? Math.max(0, insets.bottom)
+                    : tabBarFloatingBottomInset(insets.bottom),
+                },
               ]}
             >
-              <TouchableOpacity
-                style={styles.selectionActionBtn}
-                activeOpacity={0.9}
-                onPress={async () => {
-                  if (selectedMemoryIds.length === 0) return;
-
-                  if (createBookFlowTitle) {
-                    const created = await createBook(createBookFlowTitle);
-                    let updated = null;
-                    try {
-                      updated = await addMemoriesToBook(created.id, selectedMemoryIds);
-                    } catch (e) {
-                      if (e instanceof BookUpgradeRequiredError) {
-                        Alert.alert(
-                          'Petitmo+',
-                          'Pour pouvoir ajouter une vidéo dans le livre et la revoir à tout moment grâce au QR Code, passer à Petitmo+.',
-                          [
-                            {
-                              text: 'Annuler',
-                              style: 'cancel',
-                              onPress: () => {
-                                setSelectedIds(prev => {
-                                  const next = new Set(prev);
-                                  for (const it of galleryItems) {
-                                    if (!next.has(it.key)) continue;
-                                    if (it.memory.type === 'video') next.delete(it.key);
-                                  }
-                                  return next;
-                                });
-                              },
-                            },
-                            {
-                              text: 'Passer à Petitmo+',
-                              style: 'default',
-                              onPress: () => router.push({ pathname: '/paywall', params: { context: 'BOOK_VIDEO' } }),
-                            },
-                          ]
-                        );
-                        return;
-                      }
-                      Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
-                      return;
-                    }
-                    if (!updated) {
-                      Alert.alert('Petitmo', 'Livre introuvable.');
-                      return;
-                    }
-                    for (const id of selectedMemoryIds) {
-                      const m = getLocalMemoryById(id);
-                      if (!m || m.type !== 'photo') continue;
-                      const src = canonicalBookCoverPhotoRef(m).trim();
-                      if (src) {
-                        await upsertBook({ ...updated, coverPhotoUrl: src });
-                      }
-                      break;
-                    }
-                    setCreateBookFlowTitle(null);
-                    exitSelection();
-                    router.push({ pathname: '/book-preview', params: { bookId: created.id } });
-                    return;
+              {isBookAddFromSpreadFlow && selectedIds.size === 0 ? (
+                <TouchableOpacity
+                  style={[styles.selectionActionBtn, styles.selectionActionBtnOutline]}
+                  activeOpacity={0.9}
+                  onPress={handleExitSelection}
+                  accessibilityRole="button"
+                  accessibilityLabel="Annuler et retourner au livre"
+                >
+                  <Text style={[styles.selectionActionBtnText, styles.selectionActionBtnOutlineText]}>
+                    Annuler
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={styles.selectionActionBtn}
+                  activeOpacity={0.9}
+                  onPress={handleConfirmSelectionAction}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    isBookAddFromSpreadFlow ? 'Ajouter au livre' : 'Ajouter au livre'
                   }
-                  if (addToBookTargetId) {
-                    const targetId = addToBookTargetId;
-                    try {
-                      const updated = await addMemoriesToBook(targetId, selectedMemoryIds);
-                      if (!updated) {
-                        Alert.alert('Petitmo', 'Livre introuvable.');
-                        return;
-                      }
-                    } catch (e) {
-                      if (e instanceof BookUpgradeRequiredError) {
-                        Alert.alert(
-                          'Petitmo+',
-                          'Pour pouvoir ajouter une vidéo dans le livre et la revoir à tout moment grâce au QR Code, passer à Petitmo+.',
-                          [
-                            {
-                              text: 'Annuler',
-                              style: 'cancel',
-                              onPress: () => {
-                                setSelectedIds(prev => {
-                                  const next = new Set(prev);
-                                  for (const it of galleryItems) {
-                                    if (!next.has(it.key)) continue;
-                                    if (it.memory.type === 'video') next.delete(it.key);
-                                  }
-                                  return next;
-                                });
-                              },
-                            },
-                            {
-                              text: 'Passer à Petitmo+',
-                              style: 'default',
-                              onPress: () => router.push({ pathname: '/paywall', params: { context: 'BOOK_VIDEO' } }),
-                            },
-                          ]
-                        );
-                        return;
-                      }
-                      Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
-                      return;
-                    }
-                    exitSelection();
-                    router.replace({ pathname: '/book-preview', params: { bookId: targetId } });
-                    return;
-                  }
-                  setBookModalVisible(true);
-                }}
-                accessibilityRole="button"
-                accessibilityLabel="Ajouter au livre"
-              >
-                <Text style={styles.selectionActionBtnText}>
-                  {createBookFlowTitle
-                    ? `Créer « ${createBookFlowTitle} » →`
-                    : addToBookTargetId
-                      ? 'Ajouter →'
-                      : 'Ajouter au livre →'}
-                </Text>
-              </TouchableOpacity>
+                >
+                  <Text style={styles.selectionActionBtnText}>
+                    {createBookFlowTitle
+                      ? `Créer « ${createBookFlowTitle} » →`
+                      : isBookAddFromSpreadFlow
+                        ? 'Ajouter'
+                        : 'Ajouter au livre →'}
+                  </Text>
+                </TouchableOpacity>
+              )}
             </Reanimated.View>
           ) : null}
 
@@ -1562,6 +1658,20 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: '#FFFFFF',
   },
+  /** Encoche verte coin supérieur droit — souvenir déjà dans le livre cible. */
+  inBookNotch: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    width: scale(28),
+    height: scale(28),
+    borderBottomLeftRadius: scale(14),
+    backgroundColor: IN_BOOK_NOTCH_GREEN,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingLeft: scale(2),
+    paddingBottom: scale(1),
+  },
   favorisFloatingChromeGradient: {
     position: 'absolute',
     top: 0,
@@ -1685,6 +1795,14 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: scale(16),
     fontWeight: '800',
+  },
+  selectionActionBtnOutline: {
+    backgroundColor: THEME.bg,
+    borderWidth: 1.5,
+    borderColor: THEME.brandArdoise,
+  },
+  selectionActionBtnOutlineText: {
+    color: THEME.brandArdoise,
   },
   galleryPh: {
     ...StyleSheet.absoluteFillObject,

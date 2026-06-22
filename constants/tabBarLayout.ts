@@ -5,13 +5,13 @@ import { THEME } from '@/constants/theme';
 /**
  * Hauteur utile **icône + libellé** (zone onglets au-dessus du remplissage safe area).
  */
-export const TAB_BAR_CONTENT_HEIGHT = verticalScale(44);
+export const TAB_BAR_CONTENT_HEIGHT = verticalScale(26 + 1 + 11);
 
-/** Padding au-dessus des onglets (dans le bandeau). */
+/** Padding au-dessus des onglets (dans le bandeau) — vide en haut, CTA calés vers le bas. */
 export const TAB_BAR_PADDING_TOP = verticalScale(2);
 
 /** Espace sous les libellés dans la zone onglets (au-dessus du bandeau safe). */
-export const TAB_BAR_PADDING_BOTTOM_GAP = verticalScale(4);
+export const TAB_BAR_PADDING_BOTTOM_GAP = verticalScale(2);
 
 /** Fond tab bar — beige écran Capturer (`THEME.tabBarBackground`). */
 export const TAB_BAR_BACKGROUND = THEME.tabBarBackground;
@@ -21,16 +21,14 @@ export const TAB_BAR_CONTAINER_BORDER = 'rgba(60, 49, 38, 0.08)';
 
 export const TAB_BAR_BORDER_WIDTH = StyleSheet.hairlineWidth;
 
-/** Rayon des coins du bandeau — maquette : arrondi modéré (moins prononcé qu’avant). */
-export const TAB_BAR_CORNER_RADIUS = scale(14);
+/** Coins latéraux du bandeau — 0 = pleine largeur, bords droits au bord écran. */
+export const TAB_BAR_CORNER_RADIUS = 0;
 
 /** @deprecated alias — utiliser `TAB_BAR_CORNER_RADIUS`. */
 export const TAB_BAR_TOP_CORNER_RADIUS = TAB_BAR_CORNER_RADIUS;
 
-/**
- * Marges latérales quand la tab bar est en `position: 'absolute'`.
- */
-export const TAB_BAR_FLOAT_SIDE_INSET = scale(12);
+/** Marge latérale — 0 = tab bar bord à bord. */
+export const TAB_BAR_FLOAT_SIDE_INSET = 0;
 
 /** Décalage du bandeau par rapport au bas de l’écran quand pas de safe area. */
 export const TAB_BAR_FLOAT_BOTTOM_OFFSET = verticalScale(4);

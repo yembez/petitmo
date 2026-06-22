@@ -26,7 +26,6 @@ import { useFeedData } from '@/hooks/useFeedData';
 import { useToggleFavorite } from '@/hooks/useToggleFavorite';
 import { useFilFeedList } from '@/hooks/useFilFeedList';
 import { useFeedMetaFonts } from '@/hooks/useFeedMetaFonts';
-import { useFilLayout } from '@/hooks/useFilLayout';
 import { useFilRowActions } from '@/hooks/useFilRowActions';
 import { styles } from '@/components/feed/feedStyles';
 import { THEME } from '@/constants/theme';
@@ -62,8 +61,6 @@ function FilScreen() {
     memoryFlatListKeyByIdRef,
   } = useFeedData(pendingUploads);
 
-  const { setPostHeights } = useFilLayout({ memories });
-
   const {
     swipeRefs,
     editModalVisible,
@@ -83,13 +80,14 @@ function FilScreen() {
 
   const { onViewableItemsChanged: onPrefetchViewable } = usePrefetchMemories();
   const {
-    feedAutoplayMemoryId,
     onViewableItemsChanged,
     refreshFeedVideoAutoplay,
     suspendFeedInlineVideo,
+    onFeedScrollBegin,
+    onFeedScrollIdle,
   } = useFeedVideoAutoplay(onPrefetchViewable);
   const feedViewabilityConfig = useMemo(
-    () => ({ itemVisiblePercentThreshold: 50, minimumViewTime: 80 }),
+    () => ({ itemVisiblePercentThreshold: 55, minimumViewTime: 120 }),
     [],
   );
   const feedViewabilityPairs = useStableViewabilityPairs(
@@ -154,7 +152,6 @@ function FilScreen() {
     feedLocationPlaceholderFontFamily,
     pendingUploads,
     uploadingVoiceCoverId,
-    setPostHeights,
     toggleFavorite,
     handleEditMemory,
     handleEditLocation,
@@ -162,7 +159,25 @@ function FilScreen() {
     handleDeleteMemory,
     swipeRefs,
     immersiveLaunchRef,
-    feedAutoplayMemoryId
+  );
+
+  const listBottomPad = useMemo(
+    () => verticalScale(28) + tabBarFloatingOverlapPad(insets.bottom),
+    [insets.bottom],
+  );
+  const listContentContainerStyle = useMemo(
+    () => [styles.scrollContent, { paddingBottom: listBottomPad }],
+    [listBottomPad],
+  );
+  const onFeedScroll = useCallback((e: { nativeEvent: { contentOffset: { y: number } } }) => {
+    feedScrollOffsetRef.current = e.nativeEvent.contentOffset.y;
+  }, []);
+  const keyExtractor = useCallback(
+    (item: FeedListItem) =>
+      item.rowKind === 'pending'
+        ? item.row.tempId
+        : memoryFlatListKeyByIdRef.current.get(item.memory.id) ?? item.memory.id,
+    [memoryFlatListKeyByIdRef],
   );
 
   const applyPendingFeedScrollIntent = useCallback(() => {
@@ -176,6 +191,12 @@ function FilScreen() {
     setFeedListOpacity(1);
     return true;
   }, [feedData.length]);
+
+  const onFeedContentSizeChange = useCallback(() => {
+    if (pendingScrollIntentRef.current) {
+      applyPendingFeedScrollIntent();
+    }
+  }, [applyPendingFeedScrollIntent]);
 
   useFocusEffect(
     useCallback(() => {
@@ -277,26 +298,21 @@ function FilScreen() {
         <FlatList<FeedListItem>
           ref={listRef}
           data={feedData}
-          keyExtractor={item =>
-            item.rowKind === 'pending'
-              ? item.row.tempId
-              : memoryFlatListKeyByIdRef.current.get(item.memory.id) ?? item.memory.id
-          }
+          keyExtractor={keyExtractor}
           renderItem={renderItem}
           CellRendererComponent={renderFilListCell}
           viewabilityConfigCallbackPairs={feedViewabilityPairs}
-          onScroll={e => {
-            feedScrollOffsetRef.current = e.nativeEvent.contentOffset.y;
-          }}
+          onScroll={onFeedScroll}
+          onScrollBeginDrag={onFeedScrollBegin}
+          onScrollEndDrag={onFeedScrollIdle}
+          onMomentumScrollEnd={onFeedScrollIdle}
           scrollEventThrottle={16}
-          onContentSizeChange={() => {
-            applyPendingFeedScrollIntent();
-          }}
+          onContentSizeChange={onFeedContentSizeChange}
+          bounces={false}
+          overScrollMode="never"
+          alwaysBounceVertical={false}
           style={styles.scrollView}
-          contentContainerStyle={[
-            styles.scrollContent,
-            { paddingBottom: verticalScale(28) + tabBarFloatingOverlapPad(insets.bottom) },
-          ]}
+          contentContainerStyle={listContentContainerStyle}
           showsVerticalScrollIndicator={false}
           nestedScrollEnabled
           refreshControl={
@@ -319,9 +335,9 @@ function FilScreen() {
                 },
               }
             : {})}
-          initialNumToRender={4}
-          maxToRenderPerBatch={6}
-          windowSize={9}
+          initialNumToRender={6}
+          maxToRenderPerBatch={8}
+          windowSize={11}
         />
       </View>
       {timingNudge && (

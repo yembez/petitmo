@@ -22,3 +22,13 @@ export const PRINT_PAGE_HEIGHT_MM = PRINT_TRIM_HEIGHT_MM + 2 * PRINT_BLEED_MM;
  * Multipliée par `--page-h` dans `htmlBook` — zones internes à recaler dans un prompt dédié.
  */
 export const BOOK_COVER_PHOTO_HEIGHT_RATIO = 142 / 216;
+
+/** Marge visuelle [M] — parité `pdfPreviewTypo.ts` / maquette app. */
+export const BOOK_VISUAL_MARGIN_MM = 12;
+/** Hauteur bande `.pf-image` — 75 % de la page trim. */
+export const PHOTO_FULL_BAND_HEIGHT_RATIO = 0.75;
+/** Zone image utile photo-note (carré dans zone safe 186 mm). */
+export const PHOTO_NOTE_INNER_MM = 186;
+/** Hauteur bande `.pn-image` (padding 12 mm → intérieur 186×186 mm). */
+export const PHOTO_NOTE_BAND_HEIGHT_MM =
+  PHOTO_NOTE_INNER_MM + 2 * BOOK_VISUAL_MARGIN_MM;

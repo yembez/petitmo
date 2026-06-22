@@ -1,8 +1,9 @@
-import { scale, verticalScale } from '@/utils/responsive';
+import { BOOK_PAGE_RATIO } from '@/src/book/pdfPreviewTypo';
+import { scale } from '@/utils/responsive';
 
-/** Miniature couverture liste Livres — angles droits (pas de border radius). */
+/** Miniature couverture liste Livres — ratio Gelato 21×28 (aligné maquette / PDF). */
 export const BOOK_COVER_THUMB_WIDTH = scale(120);
-export const BOOK_COVER_THUMB_HEIGHT = verticalScale(170);
+export const BOOK_COVER_THUMB_HEIGHT = BOOK_COVER_THUMB_WIDTH / BOOK_PAGE_RATIO;
 
 /** Proportion bande photo couverture (142 mm sur trim historique 216 mm) — aligné PDF / maquette. */
 export const BOOK_COVER_PHOTO_HEIGHT_RATIO = 142 / 216;

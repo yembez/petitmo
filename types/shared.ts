@@ -21,6 +21,8 @@ export type BookPageServer = {
   rotation?: number;
   crop?: { xPct: number; yPct: number; scale: number };
   textOverride?: string;
+  /** Gabarit photo pleine page — rendu CSS Phase 2. */
+  variant?: 'FP' | 'M';
 };
 
 export type SubscriptionTier = 'free' | 'premium';

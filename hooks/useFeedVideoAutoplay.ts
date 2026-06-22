@@ -1,10 +1,19 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 import type { ViewToken } from 'react-native';
 import type { Memory } from '@/types/local';
 import type { FeedListItem } from '@/components/feed/FilMemoryRow';
+import {
+  getFeedAutoplayActiveMemoryId,
+  isFeedScrollIdle,
+  setFeedAutoplayActiveMemoryId,
+  setFeedScrollIdle,
+} from '@/lib/feedAutoplayStore';
 import { peekFeedBootstrapVideoUri } from '@/services/feedLocalPhotoCache';
 import { videoPlaybackCandidateFromMemory } from '@/utils/videoMediaUri';
+
+/** Délai après l’arrêt du scroll avant autoplay (évite montage vidéo pendant l’inertie). */
+const FEED_SCROLL_IDLE_MS = 220;
 
 function memoryFromFeedListItem(item: ViewToken['item']): Memory | null {
   if (!item || typeof item !== 'object') return null;
@@ -14,7 +23,6 @@ function memoryFromFeedListItem(item: ViewToken['item']): Memory | null {
   return null;
 }
 
-/** Suffisant pour choisir une ligne « autoplay » sans attendre la résolution async des URLs signées. */
 function hasLikelyPlayableVideoUri(m: Memory): boolean {
   if (m.type !== 'video') return false;
   if (videoPlaybackCandidateFromMemory(m)) return true;
@@ -23,48 +31,55 @@ function hasLikelyPlayableVideoUri(m: Memory): boolean {
 }
 
 /**
- * Combine le prefetch médias avec la sélection d’**une** vidéo « active » dans le fil (lecture auto muette, type Instagram).
+ * Prefetch médias + sélection d’**une** vidéo « active » dans le fil (lecture auto muette).
+ * L’état autoplay vit dans `feedAutoplayStore` — pas de re-render de la liste entière.
  */
 export function useFeedVideoAutoplay(
-  onPrefetchViewable: (info: { viewableItems: ViewToken[]; changed: ViewToken[] }) => void
+  onPrefetchViewable: (info: { viewableItems: ViewToken[]; changed: ViewToken[] }) => void,
 ): {
-  feedAutoplayMemoryId: string | null;
   onViewableItemsChanged: (info: { viewableItems: ViewToken[]; changed: ViewToken[] }) => void;
-  /** Réapplique la dernière visibilité (ex. retour sur l’onglet Fil après un autre onglet). */
   refreshFeedVideoAutoplay: () => void;
-  /** Arrête la lecture inline (ex. avant `memory-viewer`) pour éviter deux pistes vidéo. */
   suspendFeedInlineVideo: () => void;
+  onFeedScrollBegin: () => void;
+  onFeedScrollIdle: () => void;
 } {
-  const [feedAutoplayMemoryId, setFeedAutoplayMemoryId] = useState<string | null>(null);
   const lastViewableRef = useRef<ViewToken[]>([]);
+  const scrollIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const suspendFeedInlineVideo = useCallback(() => {
-    setFeedAutoplayMemoryId(null);
+  const clearScrollIdleTimer = useCallback(() => {
+    if (scrollIdleTimerRef.current) {
+      clearTimeout(scrollIdleTimerRef.current);
+      scrollIdleTimerRef.current = null;
+    }
   }, []);
 
-  const applyViewableItems = useCallback(
-    (viewableItems: ViewToken[]) => {
-      let bestId: string | null = null;
-      let bestIdx = Number.POSITIVE_INFINITY;
-      for (const t of viewableItems) {
-        if (!t.isViewable) continue;
-        const m = memoryFromFeedListItem(t.item);
-        if (!m || !hasLikelyPlayableVideoUri(m)) continue;
-        const idx = typeof t.index === 'number' ? t.index : 999999;
-        if (idx < bestIdx) {
-          bestIdx = idx;
-          bestId = m.id;
-        }
+  useEffect(() => () => clearScrollIdleTimer(), [clearScrollIdleTimer]);
+
+  const suspendFeedInlineVideo = useCallback(() => {
+    setFeedAutoplayActiveMemoryId(null);
+  }, []);
+
+  const applyViewableItems = useCallback((viewableItems: ViewToken[]) => {
+    let bestId: string | null = null;
+    let bestIdx = Number.POSITIVE_INFINITY;
+    for (const t of viewableItems) {
+      if (!t.isViewable) continue;
+      const m = memoryFromFeedListItem(t.item);
+      if (!m || !hasLikelyPlayableVideoUri(m)) continue;
+      const idx = typeof t.index === 'number' ? t.index : 999999;
+      if (idx < bestIdx) {
+        bestIdx = idx;
+        bestId = m.id;
       }
-      setFeedAutoplayMemoryId(prev => (prev === bestId ? prev : bestId));
-    },
-    [],
-  );
+    }
+    setFeedAutoplayActiveMemoryId(bestId);
+  }, []);
 
   const onViewableItemsChanged = useCallback(
     (info: { viewableItems: ViewToken[]; changed: ViewToken[] }) => {
       onPrefetchViewable(info);
       lastViewableRef.current = info.viewableItems;
+      if (!isFeedScrollIdle()) return;
       applyViewableItems(info.viewableItems);
     },
     [onPrefetchViewable, applyViewableItems],
@@ -75,13 +90,30 @@ export function useFeedVideoAutoplay(
       applyViewableItems(lastViewableRef.current);
       return;
     }
-    setFeedAutoplayMemoryId(null);
+    if (getFeedAutoplayActiveMemoryId() !== null) {
+      setFeedAutoplayActiveMemoryId(null);
+    }
   }, [applyViewableItems]);
 
+  const onFeedScrollBegin = useCallback(() => {
+    setFeedScrollIdle(false);
+    clearScrollIdleTimer();
+  }, [clearScrollIdleTimer]);
+
+  const onFeedScrollIdle = useCallback(() => {
+    clearScrollIdleTimer();
+    scrollIdleTimerRef.current = setTimeout(() => {
+      scrollIdleTimerRef.current = null;
+      setFeedScrollIdle(true);
+      refreshFeedVideoAutoplay();
+    }, FEED_SCROLL_IDLE_MS);
+  }, [clearScrollIdleTimer, refreshFeedVideoAutoplay]);
+
   return {
-    feedAutoplayMemoryId,
     onViewableItemsChanged,
     refreshFeedVideoAutoplay,
     suspendFeedInlineVideo,
+    onFeedScrollBegin,
+    onFeedScrollIdle,
   };
 }

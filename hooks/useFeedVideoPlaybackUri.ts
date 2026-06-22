@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Platform } from 'react-native';
+import { InteractionManager, Platform } from 'react-native';
 import type { Memory } from '@/types/local';
 import {
   getFeedLocalVideoPath,
@@ -39,7 +39,8 @@ export function useFeedVideoPlaybackUri(memory: Memory): string {
     }
 
     let alive = true;
-    void (async () => {
+    const task = InteractionManager.runAfterInteractions(() => {
+      void (async () => {
       const feedCopy =
         Platform.OS === 'web' ? null : ((await getFeedLocalVideoPath(memory.id))?.trim() ?? '');
       const boot = peekFeedBootstrapVideoUri(memory.id)?.trim() ?? '';
@@ -67,9 +68,11 @@ export function useFeedVideoPlaybackUri(memory: Memory): string {
         void persistFeedLocalVideo(memory.id, sourcePath);
       }
     })();
+    });
 
     return () => {
       alive = false;
+      task.cancel();
     };
   }, [
     memory.type,

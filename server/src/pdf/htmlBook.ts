@@ -5,6 +5,9 @@ import {
   PRINT_PAGE_WIDTH_MM,
   PRINT_BLEED_MM,
   BOOK_COVER_PHOTO_HEIGHT_RATIO,
+  BOOK_VISUAL_MARGIN_MM,
+  PHOTO_FULL_BAND_HEIGHT_RATIO,
+  PHOTO_NOTE_INNER_MM,
 } from '../constants/pdfDigitalSpec';
 import type { BookPageServer } from '../types/contracts';
 import type { ChildRow, MemoryRow } from './memoryRow';
@@ -88,20 +91,6 @@ function romanHtml(text: string): string {
       return `<p>${inner}</p>`;
     })
     .join('\n');
-}
-
-function clampChars(s: string, maxChars: number): string {
-  if (maxChars <= 0) return '';
-  const t = s.trim();
-  if (t.length <= maxChars) return t;
-  return t.slice(0, maxChars).trimEnd();
-}
-
-function clampWithEllipsis(s: string, maxChars: number): string {
-  const t = s.trim();
-  if (t.length <= maxChars) return t;
-  if (maxChars <= 1) return '…';
-  return `${t.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
 }
 
 function monthCaps(label: string): string {
@@ -223,7 +212,7 @@ function pagePhotoNote(
   birthdate: string | null | undefined
 ): string {
   const src = imgAttr(photoMainUrl(m));
-  const legend = clampWithEllipsis(sanitizeText((m.content ?? '').trim()), 420);
+  const legend = sanitizeText((m.content ?? '').trim());
   const rotCss = rot ? `transform: rotate(${rot}deg); transform-origin: center;` : '';
   const locLabel = bookPdfLocationLabel(m.location);
   return `<div class="page photo-note">
@@ -248,7 +237,7 @@ function pageQuote(
   pageNum: number,
   birthdate: string | null | undefined
 ): string {
-  const raw = clampChars(sanitizeText((m.content ?? '').trim()), 600);
+  const raw = sanitizeText((m.content ?? '').trim());
   const body = normalizeQuoteBodyLikeMaquette(raw);
   const fitLevel = quoteFitLevelFromBody(body);
   const locLabel = bookPdfLocationLabel(m.location);
@@ -442,9 +431,9 @@ function buildHtmlDocument(
   isPrint: boolean
 ): string {
   const bleedMm = isPrint ? PRINT_BLEED_MM : 0;
-  const pnImgHmm = (pageHmm * 0.6).toFixed(2);
+  const pnImgHmm = (PHOTO_NOTE_INNER_MM + 2 * BOOK_VISUAL_MARGIN_MM).toFixed(2);
   const coverPhotoHmm = (pageHmm * BOOK_COVER_PHOTO_HEIGHT_RATIO).toFixed(2);
-  const pfImgHmm = (pageHmm * 0.82).toFixed(2);
+  const pfImgHmm = (pageHmm * PHOTO_FULL_BAND_HEIGHT_RATIO).toFixed(2);
   const videoThumbHmm = (pageHmm * 0.42).toFixed(2);
   const bodyClass = isPrint ? ' class="print-bleed"' : '';
   return `<!DOCTYPE html>
@@ -470,7 +459,7 @@ function buildHtmlDocument(
   --video-thumb-h:${videoThumbHmm}mm;
   --pad-x:15mm;
   --pad-x-safe:calc(15mm + var(--bleed));
-  --visual-margin:10mm;
+  --visual-margin:${BOOK_VISUAL_MARGIN_MM}mm;
 }
 html { margin:0; padding:0; background:#fff; }
 body {
@@ -611,8 +600,8 @@ body.print-bleed .pf-footer {
   color:#3A3A3C; letter-spacing:.15pt; text-transform:none; text-align:right;
   flex:1; min-width:0;
 }
-.pf-caption { margin-top:2.1mm; font-size:11.95pt; line-height:1.3; }
-.pf-caption.memory-text { font-size:11.95pt; line-height:1.3; }
+.pf-caption { margin-top:2.1mm; font-size:11.25pt; line-height:1.3; }
+.pf-caption.memory-text { font-size:11.25pt; line-height:1.3; }
 .placeholder { background:#F2F2F7; }
 
 .photo-note { flex-direction:column; }
@@ -637,7 +626,7 @@ body.print-bleed .pn-text {
   text-align:right; flex:1; min-width:0;
 }
 .photo-note .pn-text .body.memory-text {
-  font-size:11.25pt; line-height:1.3;
+  font-size:10pt; line-height:1.35;
 }
 
 body.print-bleed .bleed-x {

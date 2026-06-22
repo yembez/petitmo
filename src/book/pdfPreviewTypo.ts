@@ -12,6 +12,19 @@ export const BOOK_DIGITAL_PAGE_HEIGHT_MM = 280;
 /** Ratio largeur/hauteur page (210/280 = 0.75). Identique au ratio 3:4 photo portrait smartphone. */
 export const BOOK_PAGE_RATIO = BOOK_DIGITAL_PAGE_WIDTH_MM / BOOK_DIGITAL_PAGE_HEIGHT_MM;
 
+/** Marge blanche autour des visuels [M] — parité `--visual-margin` dans `htmlBook.ts`. */
+export const BOOK_VISUAL_MARGIN_MM = 12;
+
+/** Hauteur bande photo pleine page (`.pf-image`) — 75 % de la page trim. */
+export const PHOTO_FULL_BAND_HEIGHT_RATIO = 0.75;
+
+/** Zone image utile photo-note / audio (carré dans la zone safe 186 mm). */
+export const PHOTO_NOTE_INNER_MM = 186;
+
+/** Hauteur bande conteneur `.pn-image` (padding 12 mm inclus → intérieur 186×186 mm). */
+export const PHOTO_NOTE_BAND_HEIGHT_MM =
+  PHOTO_NOTE_INNER_MM + 2 * BOOK_VISUAL_MARGIN_MM;
+
 /** pt (1/72 in) → px sur une largeur de page = largeur trim Gelato en mm. */
 export function pdfPtToPreviewPx(pt: number, pageWidthPx: number): number {
   if (!Number.isFinite(pageWidthPx) || pageWidthPx <= 0) return Math.round(pt);
@@ -47,10 +60,10 @@ function memorySouvenirPt(basePt: number): number {
 
 /** Corps souvenir Roboto — 12 pt historique → 11.25 pt. */
 export const PDF_MEMORY_BODY_PT = memorySouvenirPt(12);
-/** Légende sous photo pleine page — 12.75 pt historique → 12 pt. */
-export const PDF_PHOTO_CAPTION_PT = memorySouvenirPt(12.75);
-/** Texte long sous photo (photo-note) — aligné corps souvenir. */
-export const PDF_PHOTO_NOTE_BODY_PT = PDF_MEMORY_BODY_PT;
+/** Légende sous photo pleine page — 12 pt historique → 11.25 pt. */
+export const PDF_PHOTO_CAPTION_PT = memorySouvenirPt(12);
+/** Texte long sous photo (photo-note) — 10 pt net (pas de scale ×15/16). */
+export const PDF_PHOTO_NOTE_BODY_PT = 10;
 /** Description vidéo (corps souvenir) — 10.5 pt historique → ~9.85 pt. */
 export const PDF_VIDEO_SUB_PT = memorySouvenirPt(10.5);
 /** Guillemet citation — fit 0 / 1 / 2. */
@@ -77,15 +90,17 @@ export function pdfBodyStyle(pageWidthPx: number): { fontSize: number; lineHeigh
   return { fontSize: fs, lineHeight: pdfPtToPreviewPx(11 * 1.65, pageWidthPx) };
 }
 
-/** Interligne des textes sous photo (légende pleine page + photo-note) — parité `htmlBook.ts`. */
-export const PDF_PHOTO_UNDER_TEXT_LINE_HEIGHT = 1.3;
+/** Interligne légende photo pleine page — parité `.pf-caption` dans `htmlBook.ts`. */
+export const PDF_PHOTO_CAPTION_LINE_HEIGHT = 1.3;
+/** Interligne texte photo-note — parité `.photo-note .pn-text .memory-text`. */
+export const PDF_PHOTO_NOTE_LINE_HEIGHT = 1.35;
 
 /** `.pf-caption` */
 export function pdfPhotoCaptionStyle(pageWidthPx: number): { fontSize: number; lineHeight: number } {
   const fs = Math.max(MIN_FS, pdfPtToPreviewPx(PDF_PHOTO_CAPTION_PT, pageWidthPx));
   return {
     fontSize: fs,
-    lineHeight: pdfPtToPreviewPx(PDF_PHOTO_CAPTION_PT * PDF_PHOTO_UNDER_TEXT_LINE_HEIGHT, pageWidthPx),
+    lineHeight: pdfPtToPreviewPx(PDF_PHOTO_CAPTION_PT * PDF_PHOTO_CAPTION_LINE_HEIGHT, pageWidthPx),
   };
 }
 
@@ -94,7 +109,7 @@ export function pdfPhotoNoteBodyStyle(pageWidthPx: number): { fontSize: number; 
   const fs = Math.max(MIN_FS, pdfPtToPreviewPx(PDF_PHOTO_NOTE_BODY_PT, pageWidthPx));
   return {
     fontSize: fs,
-    lineHeight: pdfPtToPreviewPx(PDF_PHOTO_NOTE_BODY_PT * PDF_PHOTO_UNDER_TEXT_LINE_HEIGHT, pageWidthPx),
+    lineHeight: pdfPtToPreviewPx(PDF_PHOTO_NOTE_BODY_PT * PDF_PHOTO_NOTE_LINE_HEIGHT, pageWidthPx),
   };
 }
 

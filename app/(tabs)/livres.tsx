@@ -21,8 +21,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { BookOpen, Plus } from 'lucide-react-native';
 import { useFonts, EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
 import { Inter_500Medium, Inter_700Bold } from '@expo-google-fonts/inter';
-import { Swipeable } from 'react-native-gesture-handler';
-import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import { RectButton, Swipeable, TouchableOpacity as GestureTouchableOpacity } from 'react-native-gesture-handler';
 import { scale, verticalScale } from '@/utils/responsive';
 import { THEME } from '@/constants/theme';
 import BookCoverThumbnail from '@/components/BookCoverThumbnail';
@@ -42,17 +41,22 @@ import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { normalizeMemoryMediaUriForDisplay } from '@/utils/memoryPhotos';
 import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
 import TabSceneTransition from '@/components/TabSceneTransition';
+import { setPendingFavorisAddToBookId } from '@/services/favorisBookAddFlow';
 
-const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+/** Priorité au swipe horizontal « supprimer » (comme le fil). */
+const BOOK_SWIPE_AXIS_LOCK = {
+  activeOffsetX: [-14, 14] as [number, number],
+  failOffsetY: [-12, 12] as [number, number],
+};
 
-const BOOK_ROW_PRESS_SPRING = { damping: 18, stiffness: 320 };
+const BOOK_SWIPE_DELETE_WIDTH = scale(96);
 
 type BookListRowProps = {
   book: Book;
   coverTitleFontFamily?: string;
   listTitleFontFamily?: string;
   listMetaFontFamily?: string;
-  onOpen: (bookId: string) => void;
+  onOpen: (book: Book) => void;
   onDelete: (book: Book) => void;
 };
 
@@ -92,10 +96,8 @@ const BookListRow = memo(function BookListRow({
   onOpen,
   onDelete,
 }: BookListRowProps) {
-  const pressScale = useSharedValue(1);
-  const rowAnimStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: pressScale.value }],
-  }));
+  const swipeRef = useRef<Swipeable>(null);
+  const suppressRowPressRef = useRef(false);
 
   const coverRaw = resolveBookListRowCoverUri(book);
   const coverSigned = useSignedMediaUrl(coverRaw || null) ?? '';
@@ -107,33 +109,48 @@ const BookListRow = memo(function BookListRow({
   const count = book.memoryIds.length;
   const dateLabel = bookCoverPeriodLabelForBook(book);
 
+  const handleRowPress = () => {
+    if (suppressRowPressRef.current) {
+      suppressRowPressRef.current = false;
+      return;
+    }
+    onOpen(book);
+  };
+
   return (
     <Swipeable
+      ref={swipeRef}
+      friction={2}
+      overshootRight={false}
+      {...BOOK_SWIPE_AXIS_LOCK}
+      onSwipeableWillOpen={() => {
+        suppressRowPressRef.current = true;
+      }}
+      onSwipeableClose={() => {
+        setTimeout(() => {
+          suppressRowPressRef.current = false;
+        }, 120);
+      }}
       renderRightActions={() => (
-        <View style={styles.swipeActions}>
-          <TouchableOpacity
+        <View style={styles.swipeDeleteContainer}>
+          <RectButton
             style={styles.swipeDeleteBtn}
-            onPress={() => onDelete(book)}
-            activeOpacity={0.9}
+            onPress={() => {
+              swipeRef.current?.close();
+              onDelete(book);
+            }}
             accessibilityRole="button"
             accessibilityLabel={`Supprimer le livre ${book.title}`}
           >
             <Text style={styles.swipeDeleteText}>Supprimer</Text>
-          </TouchableOpacity>
+          </RectButton>
         </View>
       )}
-      rightThreshold={scale(42)}
-      overshootRight={false}
     >
-      <AnimatedPressable
-        style={[styles.row, rowAnimStyle]}
-        onPress={() => onOpen(book.id)}
-        onPressIn={() => {
-          pressScale.value = withSpring(0.98, BOOK_ROW_PRESS_SPRING);
-        }}
-        onPressOut={() => {
-          pressScale.value = withSpring(1, BOOK_ROW_PRESS_SPRING);
-        }}
+      <GestureTouchableOpacity
+        style={styles.row}
+        activeOpacity={0.92}
+        onPress={handleRowPress}
         accessibilityRole="button"
         accessibilityLabel={`Livre ${book.title}`}
       >
@@ -173,7 +190,7 @@ const BookListRow = memo(function BookListRow({
           </Text>
         </View>
         <Text style={styles.chevron}>→</Text>
-      </AnimatedPressable>
+      </GestureTouchableOpacity>
     </Swipeable>
   );
 }, bookListRowPropsEqual);
@@ -270,10 +287,35 @@ function LivresScreen() {
   }, [load]);
 
   const openBook = useCallback(
-    (bookId: string) => {
-      router.push({ pathname: '/book-preview', params: { bookId } });
+    (book: Book) => {
+      if (book.memoryIds.length === 0) {
+        Alert.alert(
+          book.title || 'Livre vide',
+          'Ce livre ne contient pas encore de souvenirs.',
+          [
+            { text: 'Annuler', style: 'cancel' },
+            {
+              text: 'Supprimer',
+              style: 'destructive',
+              onPress: () => confirmDelete(book),
+            },
+            {
+              text: 'Ajouter des favoris',
+              onPress: () => {
+                setPendingFavorisAddToBookId(book.id);
+                router.push({
+                  pathname: '/(tabs)/favoris',
+                  params: { addToBookId: book.id },
+                });
+              },
+            },
+          ],
+        );
+        return;
+      }
+      router.push({ pathname: '/book-preview', params: { bookId: book.id } });
     },
-    [router]
+    [router, confirmDelete]
   );
 
   const confirmDelete = useCallback((b: Book) => {
@@ -563,16 +605,17 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(0,0,0,0.08)',
     gap: scale(14),
   },
-  swipeActions: {
+  swipeDeleteContainer: {
+    width: BOOK_SWIPE_DELETE_WIDTH,
     justifyContent: 'center',
-    alignItems: 'flex-end',
+    alignItems: 'stretch',
   },
   swipeDeleteBtn: {
-    height: '100%',
+    flex: 1,
     justifyContent: 'center',
+    alignItems: 'center',
     backgroundColor: '#E23B3B',
-    paddingHorizontal: scale(18),
-    borderRadius: 0,
+    paddingHorizontal: scale(8),
   },
   swipeDeleteText: {
     color: '#FFFFFF',

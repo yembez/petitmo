@@ -1,50 +1,150 @@
 ---
-description: Parité obligatoire entre aperçu livre (maquette app) et export PDF serveur (digital + impression).
-globs: src/book/**/*,server/src/pdf/**/*,src/book/pdfPreviewTypo.ts,constants/memoryTextFont.ts
+description: Parité obligatoire entre aperçu livre (maquette app) et export PDF serveur (digital + impression). Contient aussi toutes les règles de mise en page du livre petitmo.
+globs: src/book/**/*,server/src/pdf/**/*,src/book/pdfPreviewTypo.ts,constants/memoryTextFont.ts,utils/textLimits.ts
 alwaysApply: false
 ---
 
-# Parité maquette livre ↔ export PDF
+# Règles livre petitmo — mise en page + parité maquette ↔ PDF
 
-Toute modification de **mise en page, typo, couleurs, recadrage ou contenu affiché** dans l’aperçu livre doit être reportée **dans le même PR** sur le rendu serveur PDF.
+Spec complète : `docs/specs/book-page-layout.md`
 
-## Pipeline unique (digital = impression, sauf format page)
+---
 
-Les deux exports passent par **`server/src/pdf/htmlBook.ts`** → `buildBookHtml()` → Playwright (`renderPdf.ts`).
+## Format de page
 
-| Mode | `exportMode` | Format `@page` | Différences |
-|------|--------------|----------------|-------------|
-| PDF numérique | `digital` | Gelato 210×280 mm | Validation `validateDigitalPdfBytes` après génération |
-| Impression | `print` | Gelato trim + fond perdu 4 mm (`print-bleed`, page 218×288 mm) | Même HTML/CSS ; marges safe + `.bleed-x` sur certains visuels |
+- Trim : **210 × 280 mm**, ratio 3/4 (`BOOK_PAGE_RATIO = 0.75`)
+- Fond perdu impression Gelato : **4 mm** tout autour (`PRINT_BLEED_MM = 4`)
+- Marge latérale safe [M] : **12 mm** de chaque côté → zone safe = **186 mm** de large
+- Largeur photo [M] = 210 − 2 × 12 = **186 mm**
 
-**Le contenu des pages (typo, positions, crops, textes) est identique** entre digital et print. Seuls changent : dimensions de page, fond perdu, folio/couverture en bord de coupe.
+---
 
-Ne pas créer de styles ou logique « PDF écran seulement » vs « impression seulement » sans justification produit explicite.
+## Deux variantes de gabarit photo
 
-## Fichiers à maintenir en miroir
+### [M] — Marge intérieure
+- Photo dans la zone safe : marge 12 mm gauche + droite (et haut)
+- `--visual-margin: 12mm` dans `htmlBook.ts`
 
-| Aperçu app | Export PDF / logique partagée |
-|------------|-------------------------------|
-| `src/book/maquette/MaquetteBookPages.tsx` | `server/src/pdf/htmlBook.ts` (HTML + CSS) |
-| `src/book/pdfPreviewTypo.ts` (pt → px aperçu) | Classes CSS `htmlBook` (source de vérité en **pt/mm**) |
-| `src/book/quoteFitLevel.ts` | `server/src/pdf/maquetteAlign.ts` → `quoteFitLevelFromBody`, `normalizeQuoteBodyLikeMaquette` |
+### [FP] — Fond perdu
+- Photo sans marge latérale, s'étend jusqu'aux bords + bleed
+- Zone blanche basse (pied) : **45 mm** pour date + légende courte
+- **Jamais deux [FP] consécutives** (règle BookEngine)
+- **Jamais deux [FP] face à face** dans un spread (pages paire/impaire)
+
+---
+
+## Types de pages et zones photo
+
+| Type | Gabarit | Zone photo | Texte |
+|------|---------|------------|-------|
+| `photo-full` | [M] ou [FP] selon alternance | [M] 186×210 mm (75% hauteur) · [FP] pleine largeur ~235 mm | Court ≤ 3 lignes, 11.25 pt |
+| `photo-note` | [M] uniquement | Carré fixe **186×186 mm** | Long 4–12 lignes, **10 pt** |
+| `quote` | — | Aucune | Texte pur, 3 tailles auto |
+| `audio` | [M] | Même squelette que photo-note | Annotation + QR |
+| `video` | [M] | 42% hauteur page | Titre + QR |
+
+---
+
+## Seuil court / long (BookEngine)
+
+```
+estimateBookLines(memory.content, BOOK_CHARS_PER_LINE=42) <= 3
+  → photo-full
+> 3
+  → photo-note
+```
+
+Utiliser `estimateBookLines()` de `utils/textLimits.ts` — **pas** `countWords()`.
+
+---
+
+## Alternance [FP] / [M]
+
+```
+lastWasFP = false
+
+pour chaque souvenir :
+  photo-note  → toujours [M], lastWasFP = false
+  photo-full  → variant = lastWasFP ? 'M' : 'FP'
+               lastWasFP = (variant === 'FP')
+  audio/video → lastWasFP = false  (pages [M] qui brisent la séquence)
+```
+
+Règle spread : si page N est [FP] et que N+1 serait aussi [FP] (après calcul d'alternance), forcer N+1 en [M].
+
+---
+
+## Typographie texte souvenir
+
+| Contexte | Font | Taille | Interligne | Max lignes |
+|----------|------|--------|------------|------------|
+| Caption photo-full | Roboto | **11.25 pt** | 1.30 | 3 |
+| Texte photo-note | Roboto | **10 pt** | 1.35 | 12 |
+| Quote fit 0 (court) | Roboto | **16 pt** | 1.50 | 3 |
+| Quote fit 1 (moyen) | Roboto | **13 pt** | 1.45 | 8 |
+| Quote fit 2 (long) | Roboto | **11.25 pt** | 1.40 | 28 |
+
+Seuils quote fit :
+- fit 0 : ≤ 3 lignes estimées
+- fit 1 : 4–8 lignes
+- fit 2 : 9–28 lignes
+
+Titres éditoriaux (couverture, chapitre, vidéo) : **EB Garamond italic** — jamais sur texte souvenir.
+
+---
+
+## Limites de saisie (source de vérité)
+
+| Type de souvenir | Limite | Fichier |
+|-----------------|--------|---------|
+| Texte pur (`write.tsx`) | **28 lignes** | `utils/textLimits.ts` → `MAX_BOOK_LINES` |
+| Caption photo/audio/vidéo (`EditTextModal`) | **12 lignes** | À implémenter avec le même `estimateBookLines()` |
+
+**Règle absolue : aucune troncature dans le livre.** La limite est à la saisie, pas à l'affichage.
+
+- `pageQuote` dans `htmlBook.ts` : **supprimer** `clampChars(s, 600)` — le budget est garanti par la saisie
+- `pagePhotoNote` dans `htmlBook.ts` : **supprimer** `clampWithEllipsis(…, 420)` — idem
+
+---
+
+## UI aperçu app
+
+- **Supprimer** le banner "Photo" / "Photo & note" (28 px) dans `PhotoFullPage.tsx` et `PhotoNotePage.tsx`
+- Remplacer par une ligne méta date/âge discrète (~16 px max, DM Sans 7 pt)
+
+---
+
+## Parité maquette livre ↔ export PDF
+
+Toute modification de mise en page, typo, couleurs ou contenu affiché dans l'aperçu livre doit être reportée **dans le même commit** sur le rendu serveur PDF.
+
+### Pipeline
+
+Les deux exports passent par `server/src/pdf/htmlBook.ts` → `buildBookHtml()` → Playwright (`renderPdf.ts`).
+
+| Mode | `exportMode` | Format `@page` |
+|------|--------------|----------------|
+| PDF numérique | `digital` | 210×280 mm |
+| Impression | `print` | 218×288 mm (trim + 4 mm bleed) |
+
+Le contenu des pages est identique entre digital et print. Seuls changent : dimensions de page et fond perdu.
+
+### Fichiers miroir obligatoires
+
+| Aperçu app | Export PDF |
+|------------|------------|
+| `src/book/pages/PhotoFullPage.tsx` | `htmlBook.ts` → `.photo-full-stack` / `.pf-image` / `.pf-footer` |
+| `src/book/pages/PhotoNotePage.tsx` | `htmlBook.ts` → `.photo-note` / `.pn-image` / `.pn-text` |
+| `src/book/maquette/MaquetteBookPages.tsx` | `htmlBook.ts` (rendu global) |
+| `src/book/pdfPreviewTypo.ts` (pt → px aperçu) | Classes CSS `htmlBook` (source de vérité en pt/mm) |
+| `src/book/quoteFitLevel.ts` | `server/src/pdf/maquetteAlign.ts` → `quoteFitLevelFromBody` |
 | `utils/bookPhotoCropLayout.ts` | `server/src/pdf/bookPhotoCropLayout.ts` |
-| `constants/memoryTextFont.ts` | Classe `.memory-text` + Roboto Flex dans `htmlBook` |
-| `constants/bookCoverThumbnail.ts` (`BOOK_COVER_PHOTO_HEIGHT_RATIO`) | `server/src/constants/pdfDigitalSpec.ts` → `BOOK_COVER_PHOTO_HEIGHT_RATIO` |
+| `constants/memoryTextFont.ts` | Classe `.memory-text` dans `htmlBook` |
 
-## Textes de souvenirs (Roboto Flex)
+### Checklist avant de merger
 
-Corps et annotations utilisateur (citation, légende photo, texte audio, description vidéo) :
-
-- **App** : `MEMORY_TEXT_FONT_*` + `memoryTextStyle()` dans la maquette.
-- **PDF** : classe **`memory-text`** sur les blocs correspondants (pas Garamond italique).
-
-Titres éditoriaux livre (couverture, chapitre, titre vidéo) : **EB Garamond** — hors scope « texte souvenir ».
-
-## Checklist avant de merger un changement livre
-
-1. Modifier la maquette **et** `htmlBook.ts` (ou helper miroir dans `server/src/pdf/`).
-2. Si nouvelle constante mm/pt : mettre à jour `pdfPreviewTypo.ts` pour l’aperçu.
-3. Vérifier **digital et print** (même CSS ; tester `exportMode: 'print'` si fond perdu touché).
-4. **Redéployer** le serveur `server/` (Railway/VPS) — Metro seul ne met pas à jour le PDF.
-5. Pas de génération PDF sur l’appareil (`expo-print` interdit — voir `architecture.mdc`).
+1. Modifier l'aperçu **et** `htmlBook.ts` dans le même commit.
+2. Toute nouvelle constante mm/pt → mettre à jour `pdfPreviewTypo.ts`.
+3. Tester `exportMode: 'print'` si le fond perdu est touché.
+4. **Redéployer** `server/` (Railway/VPS) — Metro ne met pas à jour le PDF.
+5. `expo-print` interdit — génération PDF uniquement via le serveur distant.

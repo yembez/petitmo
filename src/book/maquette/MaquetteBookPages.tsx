@@ -57,6 +57,9 @@ import {
   pdfQuoteMarkStyle,
   pdfVideoSubStyle,
   pdfVideoTitleStyle,
+  BOOK_VISUAL_MARGIN_MM,
+  PHOTO_FULL_BAND_HEIGHT_RATIO,
+  PHOTO_NOTE_BAND_HEIGHT_MM,
 } from '@/src/book/pdfPreviewTypo';
 
 /** Alinéa (cadratin) en début de paragraphe — typographie roman. */
@@ -228,11 +231,8 @@ function CroppedPhotoDisplay({
 }
 
 /**
- * Marge blanche autour des visuels (photo, poster vidéo, vignette audio) — 10 mm symétriques.
- * DOIT rester identique au CSS serveur (`--visual-margin` sur `.pf-image` / `.pn-image` / `.video-thumb`)
- * pour garder la parité aperçu ↔ PDF.
+ * Marge blanche autour des visuels — parité `--visual-margin` dans `htmlBook.ts`.
  */
-const VISUAL_MARGIN_MM = 10;
 
 type InlineCropConfig = {
   dpiMetaByKey: Record<
@@ -270,8 +270,8 @@ function VisualBand({
   bandH: number;
   children: (frameW: number, frameH: number) => ReactNode;
 }) {
-  const mx = pdfMmToPreviewPxW(VISUAL_MARGIN_MM, width);
-  const my = pdfMmToPreviewPxH(VISUAL_MARGIN_MM, height);
+  const mx = pdfMmToPreviewPxW(BOOK_VISUAL_MARGIN_MM, width);
+  const my = pdfMmToPreviewPxH(BOOK_VISUAL_MARGIN_MM, height);
   const frameW = Math.max(1, width - 2 * mx);
   const frameH = Math.max(1, bandH - 2 * my);
   return (
@@ -755,7 +755,7 @@ function MaquettePhotoSimple({
 }) {
   const uri = getPrimaryPhotoUriForBookPreview(memory);
   const caption = (memory.content ?? '').trim();
-  const imgH = height * 0.82;
+  const imgH = height * PHOTO_FULL_BAND_HEIGHT_RATIO;
   const bookLoc = bookMaquetteLocationLabel(memory);
   const photoInline = buildInlineCropProps(inlineCropConfig, memory.id);
 
@@ -812,7 +812,6 @@ function MaquettePhotoSimple({
               { marginTop: pdfMmToPreviewPxH(2.1, height) },
               memoryTextStyle(memoryTextFont),
             ]}
-            numberOfLines={3}
           >
             {romanParagraphs(caption)}
           </Text>
@@ -858,7 +857,7 @@ function MaquettePhotoNote({
 }) {
   const uri = getPrimaryPhotoUriForBookPreview(memory);
   const legend = (memory.content ?? '').trim();
-  const imgH = height * 0.6;
+  const imgH = pdfMmToPreviewPxH(PHOTO_NOTE_BAND_HEIGHT_MM, height);
   const bookLoc = bookMaquetteLocationLabel(memory);
   const photoInline = buildInlineCropProps(inlineCropConfig, memory.id);
 
@@ -1115,8 +1114,8 @@ function MaquetteAudio({
   // Proportions réelles PDF : QR audio = 17mm (`.page.audio .audio-qr-block .qr`).
   const qrSize = Math.max(12, Math.round(pdfMmToPreviewPxW(17, width)));
   const coverUri = getVoiceCoverUriForBookPreview(memory);
-  /** Même `.pn-image` que photo-note / PDF (`pageH * 0.6`). */
-  const imgH = height * 0.6;
+  /** Même `.pn-image` que photo-note / PDF (bande 210 mm trim, intérieur 186×186 mm). */
+  const imgH = pdfMmToPreviewPxH(PHOTO_NOTE_BAND_HEIGHT_MM, height);
   const bookLoc = bookMaquetteLocationLabel(memory);
   const photoInline = buildInlineCropProps(inlineCropConfig, memory.id);
   // Proportions réelles PDF : anneau lecteur = 14mm (`.audio-ring`).

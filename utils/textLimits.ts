@@ -8,6 +8,9 @@
 /** Plafond de lignes sur la page « Petits mots » (fit level 2 inclus). Lignes vides comptées. */
 export const MAX_BOOK_LINES = 28;
 
+/** Plafond captions photo / audio / vidéo dans le livre (photo-full + photo-note). */
+export const MAX_BOOK_CAPTION_LINES = 12;
+
 /**
  * Largeur moyenne en caractères d’une ligne sur la page citation livre.
  * Aligné sur `quoteFitLevel.ts` / `server/src/pdf/maquetteAlign.ts` (≈ 42 car/ligne).
@@ -64,9 +67,9 @@ export function estimateVisualLines(text: string): number {
   return estimateBookLines(text);
 }
 
-function trimToBookLineBudget(text: string): string {
+function trimToLineBudget(text: string, maxLines: number): string {
   let clamped = text;
-  while (clamped.length > 0 && estimateBookLines(clamped) > MAX_BOOK_LINES) {
+  while (clamped.length > 0 && estimateBookLines(clamped) > maxLines) {
     const lastNewline = clamped.lastIndexOf('\n');
     if (lastNewline >= 0) {
       clamped = clamped.slice(0, lastNewline);
@@ -77,12 +80,30 @@ function trimToBookLineBudget(text: string): string {
   return clamped;
 }
 
+function trimToBookLineBudget(text: string): string {
+  return trimToLineBudget(text, MAX_BOOK_LINES);
+}
+
 /**
  * Pendant la saisie : plafond lignes livre uniquement (pas de troncature agressive caractère par caractère).
  */
 export function clampTextBookLineBudget(text: string): string {
   let t = text.length > MAX_TEXT_CHARS_SAFETY ? text.slice(0, MAX_TEXT_CHARS_SAFETY) : text;
   return trimToBookLineBudget(t);
+}
+
+/** Pendant la saisie : plafond lignes caption livre (photo / audio / vidéo). */
+export function clampTextCaptionLineBudget(text: string): string {
+  const maxChars = MAX_BOOK_CAPTION_LINES * BOOK_CHARS_PER_LINE;
+  let t = text.length > maxChars ? text.slice(0, maxChars) : text;
+  return trimToLineBudget(t, MAX_BOOK_CAPTION_LINES);
+}
+
+/** Plafond lignes livre paramétrable (saisie). */
+export function clampTextToBookLineBudget(text: string, maxLines: number): string {
+  const maxChars = maxLines * BOOK_CHARS_PER_LINE;
+  let t = text.length > maxChars ? text.slice(0, maxChars) : text;
+  return trimToLineBudget(t, maxLines);
 }
 
 /** @deprecated — utiliser `clampTextBookLineBudget` */

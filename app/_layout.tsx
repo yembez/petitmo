@@ -265,6 +265,8 @@ export default function RootLayout() {
           name="book-preview"
           options={{
             animation: 'slide_from_right',
+            /** Favoris → replace : transition « retour » (spread glisse depuis la gauche). */
+            animationTypeForReplace: 'pop',
             gestureEnabled: true,
             fullScreenGestureEnabled: true,
             contentStyle: { flex: 1, backgroundColor: THEME.bg },

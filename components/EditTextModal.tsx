@@ -27,7 +27,7 @@ import {
   MAX_BOOK_LINES,
   estimateBookLines,
   clampText,
-  clampTextBookLineBudget,
+  clampTextToBookLineBudget,
   TEXT_TRUNCATION_ALERT_TITLE,
   TEXT_TRUNCATION_ALERT_MESSAGE,
   TEXT_TRUNCATION_MODIFY_LABEL,
@@ -43,6 +43,8 @@ export type EditTextModalProps = {
   onClose: () => void;
   embedded?: boolean;
   previewVariant?: MemoryTextEditPreviewVariant;
+  /** Plafond lignes livre à la saisie (défaut : `MAX_BOOK_LINES`). */
+  bookLineBudget?: number;
 } & (
   | {
       initialText: string;
@@ -69,6 +71,8 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
   const insets = useSafeAreaInsets();
   const memoryTextFont = useMemoryTextFontScreen();
   const useMemoryPreview = props.previewVariant != null && props.variant !== 'title-body';
+
+  const lineBudget = props.bookLineBudget ?? MAX_BOOK_LINES;
 
   const [text, setText] = React.useState(
     props.variant === 'title-body' ? '' : props.initialText
@@ -97,7 +101,8 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
     }
 
     const raw = text.trim();
-    const finalText = clampText(raw);
+    const finalText =
+      lineBudget === MAX_BOOK_LINES ? clampText(raw) : clampTextToBookLineBudget(raw, lineBudget);
 
     if (finalText !== raw) {
       Alert.alert(TEXT_TRUNCATION_ALERT_TITLE, TEXT_TRUNCATION_ALERT_MESSAGE, [
@@ -199,7 +204,7 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
                   memoryInputStyle,
                 ]}
                 value={text}
-                onChangeText={t => setText(clampTextBookLineBudget(t))}
+                onChangeText={t => setText(clampTextToBookLineBudget(t, lineBudget))}
                 placeholder="Ajouter un texte..."
                 placeholderTextColor="#AEAEB2"
                 multiline
@@ -216,7 +221,7 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
                 </Text>
               ) : null}
               <Text style={styles.charHint}>
-                {estimateBookLines(text)}/{MAX_BOOK_LINES} lignes · livre
+                {estimateBookLines(text)}/{lineBudget} lignes · livre
               </Text>
             </View>
           </>

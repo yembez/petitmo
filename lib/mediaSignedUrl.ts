@@ -119,6 +119,17 @@ export async function getSignedMediaDisplayUrl(remoteUrlOrPath: string): Promise
   return signed ?? trimmed;
 }
 
+/** Lecture synchrone du cache (évite un flash URL → re-sign en fil si prefetch déjà passé). */
+export function peekSignedMediaDisplayUrl(remoteUrlOrPath: string): string | null {
+  const trimmed = remoteUrlOrPath.trim();
+  if (!trimmed) return null;
+  const path = extractMediaBucketPath(trimmed);
+  if (!path) return trimmed;
+  const cached = signedDisplayCache.get(path);
+  if (cached && cached.expiresAt > Date.now() + CACHE_SKEW_MS) return cached.url;
+  return null;
+}
+
 /** Après upload authentifié : URL signée stockée en base (TTL plus long ; le fil re-signe via le cache). */
 export const MEDIA_POST_UPLOAD_SIGNED_TTL_SEC = 60 * 60 * 24 * 7;
 
@@ -134,18 +145,25 @@ export async function getSignedUrlAfterMediaUpload(filePath: string): Promise<st
 
 export function useSignedMediaUrl(url: string | null | undefined): string | null {
   const raw = typeof url === 'string' ? url.trim() : '';
-  const initial = raw || null;
-  const [out, setOut] = useState<string | null>(initial);
+  const [out, setOut] = useState<string | null>(() => {
+    if (!raw) return null;
+    return peekSignedMediaDisplayUrl(raw) ?? raw;
+  });
 
   useEffect(() => {
     if (!raw) {
       setOut(null);
       return;
     }
+    const cached = peekSignedMediaDisplayUrl(raw);
+    if (cached) {
+      setOut(prev => (prev === cached ? prev : cached));
+      return;
+    }
     let alive = true;
     void (async () => {
       const next = await getSignedMediaDisplayUrl(raw);
-      if (alive) setOut(next || null);
+      if (alive) setOut(prev => (prev === next ? prev : next || null));
     })();
     return () => {
       alive = false;

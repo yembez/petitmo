@@ -8,8 +8,8 @@ export const TAB_TRANSITION_DURATION_MS = 220;
 export const TAB_TRANSITION_SLIDE_Y_PX = 16;
 
 export const TAB_ROUTE_INDEX = {
-  livres: 0,
-  favoris: 1,
+  favoris: 0,
+  livres: 1,
   index: 2,
   fil: 3,
 } as const;

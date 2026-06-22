@@ -55,10 +55,12 @@ import { setPendingFavorisAddToBookId } from '@/services/favorisBookAddFlow';
 import {
   applyBookCoverFromUri,
   dedupeMemoryIds,
+  deleteBook,
   findBookCoverMemory,
   getBook,
   healBookCoverIfNeeded,
   healBookMemoryIdsIfWiped,
+  readBookPreviewLocalSnapshotSync,
   resolveBookCoverEditorUri,
   resolveBookCoverPrintUri,
   upsertBook,
@@ -88,6 +90,7 @@ import {
 import { runBookExportPrepInBackground } from '@/services/bookExportPrep';
 import { getBookExportPrepIssues } from '@/services/bookExportPrep';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
+import { MAX_BOOK_CAPTION_LINES, MAX_BOOK_LINES } from '@/utils/textLimits';
 
 import type { Child, Memory } from '@/types/local';
 import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
@@ -306,25 +309,45 @@ export default function BookPreviewScreen() {
   const dm600 = fontsLoaded ? 'DMSans_600SemiBold' : undefined;
   const dm700 = fontsLoaded ? 'DMSans_700Bold' : undefined;
 
-  const [child, setChild] = useState<Child | null>(null);
-  const [familyChildren, setFamilyChildren] = useState<Child[]>([]);
-  const [bookMemories, setBookMemories] = useState<Memory[]>([]);
-  const [bookSelectionKeys, setBookSelectionKeys] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
+  const localSnapshotRef = useRef(
+    bookId ? readBookPreviewLocalSnapshotSync(bookId) : null,
+  );
+  const localSnapshot = localSnapshotRef.current;
+  const hadLocalSnapshotRef = useRef(localSnapshot != null);
+
+  const [child, setChild] = useState<Child | null>(localSnapshot?.child ?? null);
+  const [familyChildren, setFamilyChildren] = useState<Child[]>(
+    localSnapshot?.familyChildren ?? [],
+  );
+  const [bookMemories, setBookMemories] = useState<Memory[]>(localSnapshot?.bookMemories ?? []);
+  const [bookSelectionKeys, setBookSelectionKeys] = useState<string[]>(
+    localSnapshot?.bookSelectionKeys ?? [],
+  );
+  const [loading, setLoading] = useState(!localSnapshot);
   const [error, setError] = useState<string | null>(null);
-  const [rotations, setRotations] = useState<Record<string, number>>({});
-  const [photoCrops, setPhotoCrops] = useState<Record<string, { xPct: number; yPct: number; scale: number }>>({});
+  const [rotations, setRotations] = useState<Record<string, number>>(
+    localSnapshot?.book.rotations ?? {},
+  );
+  const [photoCrops, setPhotoCrops] = useState<
+    Record<string, { xPct: number; yPct: number; scale: number }>
+  >(localSnapshot?.book.photoCrops ?? {});
   const [imagePxCache, setImagePxCache] = useState<Record<string, { w: number; h: number }>>({});
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
   /** Éditeur plein écran (Phase 1) : ouvert au tap sur une page de la vue verticale. */
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorPageIndex, setEditorPageIndex] = useState(0);
   /** Titre principal de la couverture (ligne complète, ex. « Journal de … »). */
-  const [coverTitleLine, setCoverTitleLine] = useState<string | null>(null);
-  const [bookSnapshot, setBookSnapshot] = useState<Book | null>(null);
-  const [coverPhotoUrl, setCoverPhotoUrl] = useState<string | null>(null);
+  const [coverTitleLine, setCoverTitleLine] = useState<string | null>(
+    localSnapshot?.book.title ?? null,
+  );
+  const [bookSnapshot, setBookSnapshot] = useState<Book | null>(localSnapshot?.book ?? null);
+  const [coverPhotoUrl, setCoverPhotoUrl] = useState<string | null>(
+    localSnapshot ? resolveBookCoverEditorUri(localSnapshot.book) : null,
+  );
   /** Texte des pages chapitre (éditable). */
-  const [chapterTitleLine, setChapterTitleLine] = useState<string | null>(null);
+  const [chapterTitleLine, setChapterTitleLine] = useState<string | null>(
+    localSnapshot?.book.chapterTitle ?? null,
+  );
   const [textEditTarget, setTextEditTarget] = useState<TextEditTarget | null>(null);
   const [exporting, setExporting] = useState(false);
   const [allMemories, setAllMemories] = useState<Memory[]>([]);
@@ -648,7 +671,7 @@ export default function BookPreviewScreen() {
   const bookScreenWasBlurredRef = useRef(false);
   const voiceCoverPrintBackfillRef = useRef(new Set<string>());
   useEffect(() => {
-    void load();
+    void load({ silent: hadLocalSnapshotRef.current });
   }, [load]);
 
   /** Souvenirs audio existants : génère `voice_cover_print.jpg` (2600px) pour le badge DPI livre. */
@@ -936,6 +959,21 @@ export default function BookPreviewScreen() {
     unlockOrientationPortrait();
     router.replace('/(tabs)/favoris');
   }, [router, unlockOrientationPortrait]);
+
+  const confirmDeleteBookAndBack = useCallback(() => {
+    if (!bookId) return;
+    Alert.alert('Supprimer ce livre ?', 'Cette action est définitive.', [
+      { text: 'Annuler', style: 'cancel' },
+      {
+        text: 'Supprimer',
+        style: 'destructive',
+        onPress: () => {
+          void deleteBook(bookId);
+          unlockAndBack();
+        },
+      },
+    ]);
+  }, [bookId, unlockAndBack]);
 
   const unlockAndGoToFavorisForAdd = useCallback(() => {
     unlockOrientationPortrait();
@@ -1584,6 +1622,14 @@ export default function BookPreviewScreen() {
     return '';
   }, [textEditTarget, coverTitleLine, chapterTitleLine, child, merge]);
 
+  const editModalLineBudget = useMemo(() => {
+    if (!textEditTarget || textEditTarget.kind !== 'memory') return undefined;
+    const t = textEditTarget.memory.type;
+    if (t === 'text') return MAX_BOOK_LINES;
+    if (t === 'photo' || t === 'voice' || t === 'video') return MAX_BOOK_CAPTION_LINES;
+    return undefined;
+  }, [textEditTarget]);
+
   const saveSingleEdit = useCallback(
     (text: string) => {
       if (!textEditTarget) return;
@@ -2007,6 +2053,17 @@ export default function BookPreviewScreen() {
         >
           <Text style={[styles.retryBtnText, dm500 && { fontFamily: dm500 }]}>Aller aux favoris →</Text>
         </Pressable>
+        <Pressable
+          onPress={confirmDeleteBookAndBack}
+          style={[styles.retryBtn, styles.guardDeleteBtn]}
+          accessibilityRole="button"
+          accessibilityLabel="Supprimer ce livre"
+        >
+          <Text style={[styles.guardDeleteBtnText, dm500 && { fontFamily: dm500 }]}>Supprimer ce livre</Text>
+        </Pressable>
+        <Pressable onPress={unlockAndBack} hitSlop={12} accessibilityRole="button">
+          <Text style={[styles.guardBackLink, dm500 && { fontFamily: dm500 }]}>← Retour</Text>
+        </Pressable>
       </View>
     );
   }
@@ -2310,6 +2367,7 @@ export default function BookPreviewScreen() {
           visible={textEditTarget != null}
           initialText={editModalSingleInitial}
           previewVariant="book"
+          bookLineBudget={editModalLineBudget}
           title={textEditTarget?.modalTitle ?? ''}
           onClose={() => setTextEditTarget(null)}
           onSave={saveSingleEdit}
@@ -2373,6 +2431,20 @@ const styles = StyleSheet.create({
     color: THEME.textPrimary,
     fontWeight: '500',
     fontSize: 16,
+  },
+  guardDeleteBtn: {
+    marginTop: 4,
+  },
+  guardDeleteBtnText: {
+    color: '#E23B3B',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  guardBackLink: {
+    marginTop: 20,
+    color: THEME.textMuted,
+    fontWeight: '500',
+    fontSize: 15,
   },
   header: {
     height: HEADER_H,
