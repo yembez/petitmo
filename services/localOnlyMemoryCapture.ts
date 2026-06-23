@@ -65,6 +65,7 @@ function emptyMemoryShell(params: {
     user_id: userId,
     type,
     content: null,
+    text_title: null,
     media_url: null,
     media_path: null,
     extra_photo_urls: [],
@@ -111,6 +112,7 @@ export function buildLocalTextMemory(params: {
   childId: string;
   userId: string;
   content: string;
+  textTitle?: string | null;
   location: string | null;
   syncStatus?: 'local' | 'pending';
 }): Memory {
@@ -126,6 +128,7 @@ export function buildLocalTextMemory(params: {
     location: params.location,
   });
   mem.content = params.content.trim();
+  mem.text_title = params.textTitle?.trim() ? params.textTitle.trim() : null;
   mem.sync_status = params.syncStatus ?? 'local';
   return mem;
 }

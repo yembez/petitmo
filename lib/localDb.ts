@@ -12,6 +12,7 @@ export function initLocalDb(): void {
       child_id TEXT NOT NULL,
       type TEXT NOT NULL,
       content TEXT,
+      text_title TEXT,
       local_media_path TEXT,
       local_original_path TEXT,
       local_thumb_path TEXT,
@@ -129,6 +130,7 @@ export function initLocalDb(): void {
     add('thumbnail_path', 'TEXT');
     add('poster_print_url', 'TEXT');
     add('captured_overlay_ink', 'TEXT');
+    add('text_title', 'TEXT');
   } catch {
     // Silencieux (ne doit pas empêcher l’app de démarrer)
   }
@@ -311,7 +313,7 @@ export function upsertLocalMemory(memory: Memory, uploadStatus?: UploadStatus): 
 
   db.runSync(
     `INSERT OR REPLACE INTO memories (
-      id, child_id, user_id, type, content,
+      id, child_id, user_id, type, content, text_title,
       local_media_path, local_original_path, local_thumb_path, local_display_path, local_print_path,
       original_px_w, original_px_h, print_px_w, print_px_h,
       media_url, media_path, thumb_url, display_url,
@@ -324,7 +326,7 @@ export function upsertLocalMemory(memory: Memory, uploadStatus?: UploadStatus): 
       upload_status, sync_status, synced_at,
       import_asset_id, import_source_fingerprint
     ) VALUES (
-      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
     )`,
     [
       memory.id,
@@ -332,6 +334,7 @@ export function upsertLocalMemory(memory: Memory, uploadStatus?: UploadStatus): 
       (memory.user_id ?? '').trim() || '',
       memory.type,
       memory.content ?? null,
+      memory.text_title?.trim() ? memory.text_title.trim() : null,
       memory.local_media_path ?? null,
       memory.local_original_path ?? null,
       memory.local_thumb_path ?? null,
@@ -436,6 +439,26 @@ export function updateLocalMemoryContent(
     `UPDATE memories SET content = ?, updated_at = ? WHERE id = ?`,
     [newContent, new Date().toISOString(), id]
   )
+}
+
+export function updateLocalMemoryText(
+  id: string,
+  payload: { content: string; textTitle?: string | null }
+): void {
+  const now = new Date().toISOString()
+  if (payload.textTitle !== undefined) {
+    const title = payload.textTitle?.trim() ? payload.textTitle.trim() : null
+    db.runSync(
+      `UPDATE memories SET content = ?, text_title = ?, updated_at = ? WHERE id = ?`,
+      [payload.content, title, now, id]
+    )
+    return
+  }
+  db.runSync(`UPDATE memories SET content = ?, updated_at = ? WHERE id = ?`, [
+    payload.content,
+    now,
+    id,
+  ])
 }
 
 export function updateLocalMemoryLocation(id: string, location: string | null): void {
@@ -544,6 +567,10 @@ function deserializeMemory(row: Record<string, unknown>): Memory {
     user_id: typeof row.user_id === 'string' ? row.user_id : '',
     type: row.type as Memory['type'],
     content: row.content as string | null,
+    text_title:
+      typeof row.text_title === 'string' && row.text_title.trim()
+        ? row.text_title.trim()
+        : null,
     media_url: row.media_url as string | null,
     media_path: row.media_path as string | null,
     extra_photo_urls: safeJsonParse(row.extra_photo_urls as string, []),

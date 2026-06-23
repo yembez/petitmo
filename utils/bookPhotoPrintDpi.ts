@@ -6,7 +6,10 @@ import {
   BOOK_VISUAL_MARGIN_MM,
   PHOTO_FULL_BAND_HEIGHT_RATIO,
   PHOTO_NOTE_BAND_HEIGHT_MM,
+  PHOTO_FULL_FP_FOOTER_MM,
+  PHOTO_FULL_FP_IMAGE_HEIGHT_MM,
 } from '@/src/book/pdfPreviewTypo';
+import type { PhotoFullVariant } from '@/src/book/BookEngine';
 
 export const BOOK_PAGE_W_MM = 210;
 export const BOOK_PAGE_H_MM = 280;
@@ -17,9 +20,15 @@ export const BOOK_PRINT_PAGE_H_MM = BOOK_PAGE_H_MM + 2 * BOOK_PRINT_BLEED_MM;
 
 export type BookPhotoPageType = 'cover' | 'photo-full' | 'photo-note' | 'audio';
 
-export function bookPrintFrameMmFor(pageType: BookPhotoPageType): { w: number; h: number } {
+export function bookPrintFrameMmFor(
+  pageType: BookPhotoPageType,
+  photoFullVariant?: PhotoFullVariant
+): { w: number; h: number } {
   if (pageType === 'cover') return { w: BOOK_PAGE_W_MM, h: 142 };
   const m = BOOK_VISUAL_MARGIN_MM;
+  if (pageType === 'photo-full' && photoFullVariant === 'FP') {
+    return { w: BOOK_PAGE_W_MM, h: PHOTO_FULL_FP_IMAGE_HEIGHT_MM };
+  }
   const bandHmm =
     pageType === 'photo-note' || pageType === 'audio'
       ? PHOTO_NOTE_BAND_HEIGHT_MM

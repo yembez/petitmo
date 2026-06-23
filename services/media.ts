@@ -56,6 +56,7 @@ import {
   getLocalMemories,
   getLocalMemoryById,
   updateLocalMemoryContent,
+  updateLocalMemoryText,
   updateLocalMemoryFavorite,
   updateLocalMemoryFavoritePhotoUrls,
   updateLocalMemoryLocation,
@@ -2242,27 +2243,36 @@ export async function removeFavoritePhotoUrl(memoryId: string, photoUrl: string)
 }
 
 export async function updateMemoryContent(memoryId: string, content: string) {
+  return updateMemoryText(memoryId, { content });
+}
+
+export async function updateMemoryText(
+  memoryId: string,
+  payload: { content: string; textTitle?: string | null }
+) {
   try {
-    /**
-     * Offline-first: on persiste localement *tout de suite* pour éviter une perte de saisie.
-     * La sync Supabase peut échouer (réseau, session, RLS) mais l’utilisateur ne doit pas perdre son texte.
-     */
-    updateLocalMemoryContent(memoryId, content);
+    updateLocalMemoryText(memoryId, payload);
     DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId });
 
     if ((await getCachedUserMode()) === 'local') {
       return true;
     }
 
-    const { error } = await supabase.from('memories').update({ content }).eq('id', memoryId);
+    const patch: { content: string; text_title?: string | null } = {
+      content: payload.content,
+    };
+    if (payload.textTitle !== undefined) {
+      patch.text_title = payload.textTitle?.trim() ? payload.textTitle.trim() : null;
+    }
+
+    const { error } = await supabase.from('memories').update(patch).eq('id', memoryId);
     if (error) throw error;
     return true;
   } catch (error) {
-    console.error('Update memory content error:', error);
+    console.error('Update memory text error:', error);
     return false;
   }
 }
-
 export async function updateMemoryLocation(memoryId: string, location: string | null) {
   try {
     /**

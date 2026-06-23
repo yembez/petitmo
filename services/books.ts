@@ -778,6 +778,35 @@ export function readBookPreviewLocalSnapshotSync(bookId: string): BookPreviewLoc
   return { child, familyChildren, book, bookMemories, bookSelectionKeys };
 }
 
+/** Garde-fou plan gratuit : vidéo / quota audio dans un livre. */
+async function assertBookMemoriesAllowedForTier(allMemoryIds: readonly string[]): Promise<void> {
+  const tier = await getUserTier();
+  if (tier !== 'free') return;
+
+  const memories = allMemoryIds
+    .map(id => getLocalMemoryById(id))
+    .filter(Boolean) as Array<{ id: string; type: string; duration?: number | null }>;
+
+  if (memories.some(m => m.type === 'video')) {
+    throw new BookUpgradeRequiredError(
+      'Pour pouvoir ajouter une vidéo dans le livre et la revoir à tout moment grâce au QR Code, passer à Petitmo+.'
+    );
+  }
+
+  const audios = memories.filter(m => m.type === 'voice');
+  if (audios.length > FREE_TIER_BOOK_AUDIO_MAX_COUNT) {
+    throw new Error(
+      `Avec le plan gratuit, ce livre peut contenir au maximum ${FREE_TIER_BOOK_AUDIO_MAX_COUNT} souvenirs audio.`
+    );
+  }
+  const tooLong = audios.find(m => (m.duration ?? 0) > FREE_TIER_BOOK_VOICE_MAX_DURATION);
+  if (tooLong) {
+    throw new Error(
+      `Avec le plan gratuit, chaque souvenir audio est limité à ${FREE_TIER_BOOK_VOICE_MAX_DURATION} secondes.`
+    );
+  }
+}
+
 export async function createBook(title?: string): Promise<Book> {
   const books = await readAll();
   const book: Book = {
@@ -795,6 +824,56 @@ export async function createBook(title?: string): Promise<Book> {
     chapterTitle: null,
   });
   return book;
+}
+
+/**
+ * Crée un livre et y attache les souvenirs en une seule écriture SQLite.
+ * Évite les livres vides orphelins si l’app redémarre entre `createBook` et `addMemoriesToBook`.
+ */
+export async function createBookWithMemories(title: string | undefined, memoryIds: string[]): Promise<Book> {
+  const ids = uniq(memoryIds);
+  if (ids.length === 0) {
+    throw new Error('Sélectionne au moins un souvenir pour créer le livre.');
+  }
+  await assertBookMemoriesAllowedForTier(ids);
+
+  const books = await readAll();
+  const book: Book = {
+    id: safeId(),
+    title: (title ?? '').trim() || `Livre ${books.length + 1}`,
+    createdAt: new Date().toISOString(),
+    memoryIds: ids,
+  };
+  await upsertBook(book);
+  return book;
+}
+
+/**
+ * Retire les livres vides en doublon de titre lorsqu’un autre livre du même nom contient déjà des souvenirs.
+ * Corrige les orphelins laissés par d’anciennes versions (create puis crash avant add).
+ */
+export function pruneOrphanEmptyBookDuplicates(): number {
+  const rows = listLocalBooks();
+  const byTitle = new Map<string, LocalBookRow[]>();
+  for (const b of rows) {
+    const key = (b.title ?? '').trim().toLowerCase();
+    if (!key) continue;
+    const group = byTitle.get(key) ?? [];
+    group.push(b);
+    byTitle.set(key, group);
+  }
+
+  let removed = 0;
+  for (const group of byTitle.values()) {
+    const hasPopulated = group.some(b => (b.memoryIds?.length ?? 0) > 0);
+    if (!hasPopulated) continue;
+    for (const b of group) {
+      if ((b.memoryIds?.length ?? 0) > 0) continue;
+      deleteLocalBook(b.id);
+      removed++;
+    }
+  }
+  return removed;
 }
 
 export async function upsertBook(next: Book): Promise<void> {
@@ -829,33 +908,7 @@ export async function addMemoriesToBook(bookId: string, memoryIds: string[]): Pr
   const newIds = ids.filter(id => !existingIds.includes(id));
   if (newIds.length === 0) return normalizeBook(b) ?? b;
 
-  // Garde-fou produit : sur le plan gratuit, on limite les médias QR dans un livre dès l’ajout.
-  const tier = await getUserTier();
-  if (tier === 'free') {
-    const allIds = uniq([...existingIds, ...newIds]);
-    const memories = allIds
-      .map(id => getLocalMemoryById(id))
-      .filter(Boolean) as Array<{ id: string; type: string; duration?: number | null }>;
-
-    if (memories.some(m => m.type === 'video')) {
-      throw new BookUpgradeRequiredError(
-        'Pour pouvoir ajouter une vidéo dans le livre et la revoir à tout moment grâce au QR Code, passer à Petitmo+.'
-      );
-    }
-
-    const audios = memories.filter(m => m.type === 'voice');
-    if (audios.length > FREE_TIER_BOOK_AUDIO_MAX_COUNT) {
-      throw new Error(
-        `Avec le plan gratuit, ce livre peut contenir au maximum ${FREE_TIER_BOOK_AUDIO_MAX_COUNT} souvenirs audio.`
-      );
-    }
-    const tooLong = audios.find(m => (m.duration ?? 0) > FREE_TIER_BOOK_VOICE_MAX_DURATION);
-    if (tooLong) {
-      throw new Error(
-        `Avec le plan gratuit, chaque souvenir audio est limité à ${FREE_TIER_BOOK_VOICE_MAX_DURATION} secondes.`
-      );
-    }
-  }
+  await assertBookMemoriesAllowedForTier(uniq([...existingIds, ...newIds]));
 
   const next: Book = {
     ...(normalizeBook(b) ?? b),

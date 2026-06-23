@@ -678,6 +678,14 @@ function FilMemoryRow({
 
           {memory.type === 'text' && (
             <View style={styles.textBody}>
+              {!!memory.text_title?.trim() && (
+                <Text
+                  style={[styles.textTitle, { fontFamily: memoryTextFont }]}
+                  {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
+                >
+                  {memory.text_title.trim()}
+                </Text>
+              )}
               <ScrollableTextBlock maxHeight={FEED_TEXT_POST_SCROLL_MAX_H}>
                 {bookParagraphs.map((para, idx) => (
                   <Text

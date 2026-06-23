@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, type Dispatch, type SetStateAction } from 'react';
 import { Alert } from 'react-native';
+import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { getLocalMemoryById } from '@/lib/localDb';
 import {
@@ -12,6 +13,7 @@ import { Swipeable } from 'react-native-gesture-handler';
 import type { Memory } from '@/utils/feedHelpers';
 
 export function useFilRowActions(setMemories: Dispatch<SetStateAction<Memory[]>>) {
+  const router = useRouter();
   const swipeRefs = useRef<Map<string, Swipeable | null>>(new Map());
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingMemory, setEditingMemory] = useState<Memory | null>(null);
@@ -21,9 +23,13 @@ export function useFilRowActions(setMemories: Dispatch<SetStateAction<Memory[]>>
 
   const handleEditMemory = useCallback((memory: Memory) => {
     if (memory.id.startsWith('pending_')) return;
+    if (memory.type === 'text') {
+      router.push({ pathname: '/write', params: { memoryId: memory.id } });
+      return;
+    }
     setEditingMemory(memory);
     setEditModalVisible(true);
-  }, []);
+  }, [router]);
 
   const handleSaveEdit = useCallback(
     async (text: string) => {

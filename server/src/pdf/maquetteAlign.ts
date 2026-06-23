@@ -102,14 +102,85 @@ export function normalizeQuoteBodyLikeMaquette(raw: string): string {
   return paragraphs.join('\n\n');
 }
 
-/** Miroir : `src/book/quoteFitLevel.ts` — garder les seuils identiques. */
+const BOOK_CHARS_PER_LINE = 42;
+
+/** Miroir `utils/textLimits.ts` — `estimateBookLines`. */
+function estimateBookLines(text: string): number {
+  if (!text) return 0;
+  const physicalLines = text.split('\n');
+  let total = 0;
+  for (const line of physicalLines) {
+    if (line.length === 0) {
+      total += 1;
+      continue;
+    }
+    total += Math.max(1, Math.ceil((line.length + 1) / BOOK_CHARS_PER_LINE));
+  }
+  return total;
+}
+
+export type TextMemorySizeTier = 'lg' | 'md' | 'sm';
+export type TextMemoryLayoutVariant = 'guillemet' | 'titled' | 'dropcap';
+
+export function textMemoryBookLineCount(rawContent: string): number {
+  return estimateBookLines(normalizeQuoteBodyLikeMaquette(rawContent));
+}
+
+export function textMemorySizeTierFromLineCount(lines: number): TextMemorySizeTier {
+  if (lines <= 8) return 'lg';
+  if (lines <= 15) return 'md';
+  return 'sm';
+}
+
+export function textMemoryLayoutVariant(memory: {
+  text_title?: string | null;
+  content?: string | null;
+}): TextMemoryLayoutVariant {
+  if ((memory.text_title ?? '').trim()) return 'titled';
+  const lines = textMemoryBookLineCount(memory.content ?? '');
+  return lines <= 8 ? 'guillemet' : 'dropcap';
+}
+
+export function resolveTextMemoryBookLayout(memory: {
+  text_title?: string | null;
+  content?: string | null;
+}): {
+  body: string;
+  lines: number;
+  tier: TextMemorySizeTier;
+  variant: TextMemoryLayoutVariant;
+  title: string;
+} {
+  const body = normalizeQuoteBodyLikeMaquette(memory.content ?? '');
+  const lines = estimateBookLines(body);
+  return {
+    body,
+    lines,
+    tier: textMemorySizeTierFromLineCount(lines),
+    variant: textMemoryLayoutVariant(memory),
+    title: (memory.text_title ?? '').trim(),
+  };
+}
+
+export function textMemoryBodyAlignCenter(tier: TextMemorySizeTier, variant: TextMemoryLayoutVariant): boolean {
+  if (variant === 'guillemet') return true;
+  if (variant === 'dropcap') return false;
+  return tier === 'lg' || tier === 'md';
+}
+
+export function textMemoryBodyTextAlign(
+  tier: TextMemorySizeTier,
+  variant: TextMemoryLayoutVariant,
+): 'center' | 'left' | 'justify' {
+  if (textMemoryBodyAlignCenter(tier, variant)) return 'center';
+  if (variant === 'dropcap' || (variant === 'titled' && tier === 'sm')) return 'left';
+  return 'justify';
+}
+
+/** @deprecated — 0=lg, 1=md, 2=sm */
 export function quoteFitLevelFromBody(body: string): 0 | 1 | 2 {
-  if (!body.trim()) return 0;
-  const paragraphCount = body.split(/\n{2,}/).filter(p => p.trim()).length;
-  const approxLines = Math.ceil(body.length / 42) + paragraphCount * 2;
-  if (approxLines >= 22 || body.length >= 520 || paragraphCount >= 5) return 2;
-  if (approxLines >= 18 || body.length >= 420 || paragraphCount >= 3) return 1;
-  return 0;
+  const tier = textMemorySizeTierFromLineCount(estimateBookLines(normalizeQuoteBodyLikeMaquette(body)));
+  return tier === 'lg' ? 0 : tier === 'md' ? 1 : 2;
 }
 
 export function dateFrCaps(iso: string): string {

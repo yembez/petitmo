@@ -35,7 +35,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Image as ExpoImage } from 'expo-image';
-import { buildBookPages, type BookPage } from '@/src/book/BookEngine';
+import { buildBookPages, type BookPage, type PhotoFullVariant } from '@/src/book/BookEngine';
 import MaquetteBookPages from '@/src/book/maquette/MaquetteBookPages';
 import EditTextModal from '@/components/EditTextModal';
 import { BookPreviewZoomWrap } from '@/components/BookPreviewZoomWrap';
@@ -784,6 +784,7 @@ export default function BookPreviewScreen() {
       storageKey: string;
       uri: string;
       pageType: BookPhotoPageType;
+      photoFullVariant?: PhotoFullVariant;
     }): Promise<{
       imgPxW: number;
       imgPxH: number;
@@ -793,7 +794,7 @@ export default function BookPreviewScreen() {
       printMmH: number;
       sourceUri?: string;
     }> => {
-      const mm = bookPrintFrameMmFor(payload.pageType);
+      const mm = bookPrintFrameMmFor(payload.pageType, payload.photoFullVariant);
       const finish = (display: { w: number; h: number }, dpi: { w: number; h: number }) => ({
         imgPxW: display.w,
         imgPxH: display.h,
@@ -896,6 +897,7 @@ export default function BookPreviewScreen() {
       storageKey: string;
       uri: string;
       pageType: BookPhotoPageType;
+      photoFullVariant?: PhotoFullVariant;
     }) => {
       void (async () => {
         let alreadyCached = false;
@@ -1105,7 +1107,12 @@ export default function BookPreviewScreen() {
       if (page.type === 'photo-full' || page.type === 'photo-note') {
         const uri = getPrimaryPhotoUriForBookPreview(m).trim();
         if (!uri) return null;
-        return { storageKey: m.id, uri, pageType: page.type };
+        return {
+          storageKey: m.id,
+          uri,
+          pageType: page.type,
+          ...(page.type === 'photo-full' ? { photoFullVariant: page.variant } : {}),
+        };
       }
       if (page.type === 'audio') {
         const uri = getVoiceCoverUriForBookPreview(m).trim();
@@ -1731,7 +1738,10 @@ export default function BookPreviewScreen() {
           try {
             const { w, h } = await getImagePx(uri);
             const cropScale = Math.max(1, photoCrops[p.memory.id]?.scale ?? 1);
-            const { w: mmW, h: mmH } = bookPrintFrameMmFor(p.type);
+            const { w: mmW, h: mmH } = bookPrintFrameMmFor(
+              p.type,
+              p.type === 'photo-full' ? p.variant : undefined
+            );
             const dpi = effectiveBookPhotoPrintDpi({
               imgPxW: w,
               imgPxH: h,

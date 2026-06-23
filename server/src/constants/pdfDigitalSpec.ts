@@ -32,3 +32,10 @@ export const PHOTO_NOTE_INNER_MM = 186;
 /** Hauteur bande `.pn-image` (padding 12 mm → intérieur 186×186 mm). */
 export const PHOTO_NOTE_BAND_HEIGHT_MM =
   PHOTO_NOTE_INNER_MM + 2 * BOOK_VISUAL_MARGIN_MM;
+
+/** Pied blanc fixe photo-full [FP] (date + légende courte). */
+export const PHOTO_FULL_FP_FOOTER_MM = 45;
+
+/** Hauteur zone image photo-full [FP] sur trim 280 mm → 235 mm. */
+export const PHOTO_FULL_FP_IMAGE_HEIGHT_MM =
+  DIGITAL_PAGE_HEIGHT_MM - PHOTO_FULL_FP_FOOTER_MM;

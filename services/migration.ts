@@ -87,6 +87,7 @@ async function migrateText(memory: Memory, userId: string): Promise<void> {
     user_id: userId,
     type: 'text',
     content: memory.content,
+    text_title: memory.text_title ?? null,
     location: memory.location,
     inserted_at: memory.inserted_at ?? memory.created_at,
     created_at: memory.created_at,

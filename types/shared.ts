@@ -32,6 +32,8 @@ export type GuestMemoryForPdfPayload = {
   id: string;
   type: 'voice' | 'video' | 'photo' | 'text';
   content?: string | null;
+  /** Titre optionnel sur souvenir texte (page livre avec titre). */
+  text_title?: string | null;
   /** Lieu brut (optionnel) affiché si présent dans le livre. */
   location?: string | null;
   media_url?: string | null;

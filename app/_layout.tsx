@@ -24,6 +24,7 @@ import { getOrSelectFirstChild } from '@/services/children';
 import { processPendingGuestRawUploads } from '@/services/pendingRawGuestUploads';
 import {
   migrateBooksFromAsyncStorageToSqliteOnce,
+  pruneOrphanEmptyBookDuplicates,
   restoreBooksFromSupabaseIfPremium,
   backupBooksToSupabaseIfPremium,
   flushPendingBookDeletesToSupabase,
@@ -67,6 +68,7 @@ export default function RootLayout() {
 
   useLayoutEffect(() => {
     initLocalDb();
+    pruneOrphanEmptyBookDuplicates();
     hydrateTabScreensFromSqliteSync();
     setIsAuthReady(true);
   }, []);
@@ -75,7 +77,11 @@ export default function RootLayout() {
     // TEMPORAIRE — retirer avant la mise en production
     // void resetUserTierForTesting();
     // Migration durable : livres AsyncStorage → SQLite (one-shot).
-    void migrateBooksFromAsyncStorageToSqliteOnce();
+    void migrateBooksFromAsyncStorageToSqliteOnce().then(() => {
+      if (pruneOrphanEmptyBookDuplicates() > 0) {
+        hydrateTabScreensFromSqliteSync();
+      }
+    });
     void runWeeklyCleanup();
     void processPendingGuestRawUploads();
 
@@ -219,6 +225,9 @@ export default function RootLayout() {
     void (async () => {
       await flushPendingBookDeletesToSupabase();
       await restoreBooksFromSupabaseIfPremium();
+      if (pruneOrphanEmptyBookDuplicates() > 0) {
+        hydrateTabScreensFromSqliteSync();
+      }
       await backupBooksToSupabaseIfPremium();
       await warmSelectedChildIdFromStorage();
       hydrateTabScreensFromSqliteSync();

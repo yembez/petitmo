@@ -40,6 +40,8 @@ export interface Database {
           user_id: string
           type: 'text' | 'voice' | 'photo' | 'video'
           content: string | null
+          /** Titre optionnel — souvenirs `text` uniquement. */
+          text_title?: string | null
           media_url: string | null
           /** Chemin Storage (bucket media) de `media_url` */
           media_path: string | null
@@ -89,6 +91,7 @@ export interface Database {
           user_id: string
           type: 'text' | 'voice' | 'photo' | 'video'
           content?: string | null
+          text_title?: string | null
           media_url?: string | null
           media_path?: string | null
           extra_photo_urls?: Json

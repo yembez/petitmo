@@ -11,7 +11,7 @@ import {
   ActivityIndicator,
   DeviceEventEmitter,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { ChevronLeft, Mic } from 'lucide-react-native';
 import { scale, verticalScale } from '@/utils/responsive';
 import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
@@ -24,9 +24,11 @@ import { getOrSelectFirstChild } from '@/services/children';
 import { armFeedSnapToLatestOnFocus } from '@/services/feedScrollRestore';
 import {
   MAX_BOOK_LINES,
+  MAX_TEXT_MEMORY_TITLE_CHARS,
   estimateBookLines,
   clampText,
   clampTextBookLineBudget,
+  enforceTextBookLineBudgetOnInput,
   TEXT_TRUNCATION_ALERT_TITLE,
   TEXT_TRUNCATION_ALERT_MESSAGE,
   TEXT_TRUNCATION_MODIFY_LABEL,
@@ -34,9 +36,14 @@ import {
   TEXT_SAVE_FAILED_ALERT_TITLE,
   TEXT_SAVE_FAILED_ALERT_MESSAGE,
 } from '@/utils/textLimits';
-import { upsertLocalMemory } from '@/lib/localDb';
+import {
+  applyLeadingCapitalWhenStartingText,
+  capitalizeFirstLetterFr,
+} from '@/utils/frenchTextInput';
+import { upsertLocalMemory, getLocalMemoryById } from '@/lib/localDb';
 import { buildLocalTextMemory } from '@/services/localOnlyMemoryCapture';
 import { ensureMemoryUploadedForCloud } from '@/services/migration';
+import { updateMemoryText } from '@/services/media';
 
 type SpeechRecognitionResultLike = {
   isFinal: boolean
@@ -63,11 +70,39 @@ type SpeechRecognitionCtor = new () => SpeechRecognitionLike
 
 export default function WriteScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ memoryId?: string }>();
+  const editMemoryId =
+    typeof params.memoryId === 'string' && params.memoryId.trim()
+      ? params.memoryId.trim()
+      : '';
+  const isEditing = editMemoryId.length > 0;
+
+  const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isWebSpeechSupported, setIsWebSpeechSupported] = useState(false);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const hydratedEditIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!isEditing) {
+      hydratedEditIdRef.current = null;
+      return;
+    }
+    if (hydratedEditIdRef.current === editMemoryId) return;
+
+    const mem = getLocalMemoryById(editMemoryId);
+    if (!mem || mem.type !== 'text') {
+      Alert.alert('Erreur', 'Ce souvenir texte est introuvable.');
+      router.back();
+      return;
+    }
+
+    hydratedEditIdRef.current = editMemoryId;
+    setTitle(mem.text_title?.trim() ?? '');
+    setContent(mem.content?.trim() ?? '');
+  }, [editMemoryId, isEditing, router]);
 
   useEffect(() => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -97,7 +132,14 @@ export default function WriteScreen() {
           }
 
           if (finalTranscript) {
-            setContent(prev => clampTextBookLineBudget(prev + finalTranscript));
+            setContent(prev => {
+              const merged = prev + finalTranscript;
+              const normalized =
+                !prev.trim() && merged.trim()
+                  ? capitalizeFirstLetterFr(merged)
+                  : merged;
+              return enforceTextBookLineBudgetOnInput(prev, normalized, MAX_BOOK_LINES);
+            });
           }
         };
 
@@ -152,6 +194,33 @@ export default function WriteScreen() {
     }
   };
 
+  const executeUpdate = async (textToSave: string) => {
+    try {
+      setIsSaving(true);
+      setContent(textToSave);
+
+      const textTitle = title.trim() ? title.trim() : null;
+      const ok = await updateMemoryText(editMemoryId, {
+        content: textToSave,
+        textTitle,
+      });
+
+      if (!ok) {
+        Alert.alert(
+          'Connexion',
+          "Ton texte est bien enregistré sur l’app, mais la synchronisation a échoué. Réessaie plus tard."
+        );
+      }
+
+      router.back();
+    } catch (error) {
+      console.error('Error updating text:', error);
+      Alert.alert(TEXT_SAVE_FAILED_ALERT_TITLE, TEXT_SAVE_FAILED_ALERT_MESSAGE);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const executeSave = async (textToSave: string) => {
     try {
       setIsSaving(true);
@@ -181,6 +250,7 @@ export default function WriteScreen() {
         childId,
         userId: user.id,
         content: textToSave,
+        textTitle: title.trim() ? title.trim() : null,
         location: null,
         syncStatus: mode === 'local' ? 'local' : 'pending',
       });
@@ -219,7 +289,7 @@ export default function WriteScreen() {
       return;
     }
 
-    await executeSave(textToSave);
+    await (isEditing ? executeUpdate(textToSave) : executeSave(textToSave));
   };
 
   return (
@@ -245,14 +315,39 @@ export default function WriteScreen() {
 
       <View style={styles.inputContainer}>
         <TextInput
+          style={styles.titleInput}
+          placeholder="Titre (optionnel)"
+          placeholderTextColor="#AEAEB2"
+          value={title}
+          onChangeText={t =>
+            setTitle(prev =>
+              applyLeadingCapitalWhenStartingText(prev, t).slice(0, MAX_TEXT_MEMORY_TITLE_CHARS)
+            )
+          }
+          maxLength={MAX_TEXT_MEMORY_TITLE_CHARS}
+          returnKeyType="next"
+          autoCapitalize="sentences"
+          autoCorrect
+        />
+        <TextInput
           style={styles.input}
           multiline
           placeholder="Écris-lui ce que tu aimerais lui dire aujourd'hui…"
           placeholderTextColor="#0F0F0F"
           value={content}
-          onChangeText={(t) => setContent(clampTextBookLineBudget(t))}
+          onChangeText={t =>
+            setContent(prev =>
+              enforceTextBookLineBudgetOnInput(
+                prev,
+                applyLeadingCapitalWhenStartingText(prev, t),
+                MAX_BOOK_LINES,
+              )
+            )
+          }
           autoFocus
           textAlignVertical="top"
+          autoCapitalize="sentences"
+          autoCorrect
         />
         <Text style={styles.charCounter}>
           {estimateBookLines(content)}/{MAX_BOOK_LINES} lignes · livre
@@ -303,6 +398,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.lg,
     paddingTop: SPACING.md,
     position: 'relative',
+  },
+  titleInput: {
+    fontSize: FONT_SIZES.lg,
+    fontWeight: '600',
+    color: '#1C1C1E',
+    lineHeight: scale(26),
+    marginBottom: SPACING.sm,
+    paddingBottom: SPACING.xs,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(0,0,0,0.08)',
   },
   input: {
     flex: 1,

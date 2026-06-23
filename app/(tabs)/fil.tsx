@@ -358,18 +358,16 @@ function FilScreen() {
         </TouchableOpacity>
       )}
       <EditTextModal
-        key={editingMemory?.id ?? 'edit-modal-closed'}
+        key={editingMemory?.id ?? 'edit-caption-modal-closed'}
         visible={editModalVisible}
         initialText={editingMemory?.content?.trim() ?? ''}
         previewVariant={feedMemoryTextEditPreviewVariant(editingMemory?.type)}
         title={
           !editingMemory
             ? 'Modifier le texte'
-            : editingMemory.type === 'text'
-              ? 'Modifier le texte'
-              : editingMemory.content?.trim()
-                ? 'Modifier l’annotation'
-                : 'Annoter'
+            : editingMemory.content?.trim()
+              ? 'Modifier l’annotation'
+              : 'Annoter'
         }
         onClose={closeEditModal}
         onSave={handleSaveEdit}

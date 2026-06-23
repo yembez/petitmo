@@ -25,14 +25,20 @@ import {
 } from '@/utils/memoryTextEditStyles';
 import {
   MAX_BOOK_LINES,
+  MAX_TEXT_MEMORY_TITLE_CHARS,
   estimateBookLines,
   clampText,
   clampTextToBookLineBudget,
+  enforceTextBookLineBudgetOnInput,
   TEXT_TRUNCATION_ALERT_TITLE,
   TEXT_TRUNCATION_ALERT_MESSAGE,
   TEXT_TRUNCATION_MODIFY_LABEL,
   TEXT_TRUNCATION_SAVE_LABEL,
 } from '@/utils/textLimits';
+import {
+  applyLeadingCapitalWhenStartingText,
+  capitalizeFirstLetterFr,
+} from '@/utils/frenchTextInput';
 
 const TEXT_INPUT_WEB_LANG =
   Platform.OS === 'web' ? ({ lang: 'fr-FR' } as Record<string, string>) : {};
@@ -70,7 +76,7 @@ export default function EditTextModal(props: EditTextModalProps) {
 function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
   const insets = useSafeAreaInsets();
   const memoryTextFont = useMemoryTextFontScreen();
-  const useMemoryPreview = props.previewVariant != null && props.variant !== 'title-body';
+  const useMemoryPreview = props.previewVariant != null;
 
   const lineBudget = props.bookLineBudget ?? MAX_BOOK_LINES;
 
@@ -84,18 +90,38 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
     props.variant === 'title-body' ? props.initialBody : ''
   );
 
-  React.useEffect(() => {
-    if (props.variant === 'title-body') {
-      setFieldTitle(props.initialTitle);
-      setFieldBody(props.initialBody);
-      return;
-    }
-    setText(props.initialText);
-  }, [props.variant, props.initialText, props.initialTitle, props.initialBody]);
+  const applyBodyInput = (prev: string, next: string) =>
+    enforceTextBookLineBudgetOnInput(
+      prev,
+      applyLeadingCapitalWhenStartingText(prev, next),
+      lineBudget,
+    );
 
   const handleSave = () => {
     if (props.variant === 'title-body') {
-      props.onSave(fieldTitle, fieldBody);
+      const bodyRaw = fieldBody.trim();
+      const finalBody =
+        lineBudget === MAX_BOOK_LINES
+          ? clampText(bodyRaw)
+          : clampTextToBookLineBudget(bodyRaw, lineBudget);
+      const titleRaw = fieldTitle.trim();
+      const finalTitle = titleRaw.slice(0, MAX_TEXT_MEMORY_TITLE_CHARS);
+
+      if (finalBody !== bodyRaw) {
+        Alert.alert(TEXT_TRUNCATION_ALERT_TITLE, TEXT_TRUNCATION_ALERT_MESSAGE, [
+          { text: TEXT_TRUNCATION_MODIFY_LABEL, style: 'cancel' },
+          {
+            text: TEXT_TRUNCATION_SAVE_LABEL,
+            onPress: () => {
+              props.onSave(finalTitle, finalBody);
+              props.onClose();
+            },
+          },
+        ]);
+        return;
+      }
+
+      props.onSave(finalTitle, finalBody);
       props.onClose();
       return;
     }
@@ -157,38 +183,111 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
 
       <View style={styles.editorBody}>
         {props.variant === 'title-body' ? (
-          <>
-            <Text style={styles.fieldLabel}>{props.titleFieldLabel ?? 'Titre'}</Text>
-            <TextInput
-              {...TEXT_INPUT_WEB_LANG}
-              style={styles.inputTitle}
-              value={fieldTitle}
-              onChangeText={setFieldTitle}
-              placeholder="Titre…"
-              placeholderTextColor="#9CA3AF"
-              multiline
-              scrollEnabled
-              textAlignVertical="top"
-              maxLength={100}
-              autoFocus
-            />
-            <Text style={[styles.fieldLabel, styles.fieldLabelSecond]}>
-              {props.bodyFieldLabel ?? 'Texte'}
-            </Text>
-            <TextInput
-              {...TEXT_INPUT_WEB_LANG}
-              style={styles.input}
-              value={fieldBody}
-              onChangeText={setFieldBody}
-              placeholder="Texte…"
-              placeholderTextColor="#9CA3AF"
-              multiline
-              scrollEnabled
-              textAlignVertical="top"
-              maxLength={500}
-            />
-            <Text style={styles.charHint}>{fieldBody.length}/500</Text>
-          </>
+          useMemoryPreview ? (
+            <>
+              <View
+                style={[
+                  styles.memoryInputHost,
+                  memoryChromeStyle,
+                ]}
+              >
+                <TextInput
+                  {...TEXT_INPUT_WEB_LANG}
+                  style={[styles.feedTitleInCard, { fontFamily: memoryTextFont }]}
+                  value={fieldTitle}
+                  onChangeText={t =>
+                    setFieldTitle(prev =>
+                      applyLeadingCapitalWhenStartingText(prev, t).slice(
+                        0,
+                        MAX_TEXT_MEMORY_TITLE_CHARS
+                      )
+                    )
+                  }
+                  placeholder={props.titleFieldLabel ?? 'Titre (optionnel)'}
+                  placeholderTextColor="#AEAEB2"
+                  multiline
+                  scrollEnabled={false}
+                  textAlignVertical="top"
+                  maxLength={MAX_TEXT_MEMORY_TITLE_CHARS}
+                  autoCapitalize="sentences"
+                  autoCorrect
+                  {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
+                />
+                <TextInput
+                  {...TEXT_INPUT_WEB_LANG}
+                  style={[
+                    styles.memoryInput,
+                    memoryInputStyle,
+                    { fontFamily: memoryTextFont },
+                  ]}
+                  value={fieldBody}
+                  onChangeText={t => setFieldBody(prev => applyBodyInput(prev, t))}
+                  placeholder={props.bodyFieldLabel ?? 'Texte…'}
+                  placeholderTextColor="#AEAEB2"
+                  multiline
+                  scrollEnabled
+                  textAlignVertical="top"
+                  autoFocus
+                  autoCapitalize="sentences"
+                  autoCorrect
+                  {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
+                />
+              </View>
+              <View style={styles.footerMeta}>
+                <Text style={styles.paragraphHint}>
+                  Double saut de ligne = nouveau paragraphe (alinéa)
+                </Text>
+                <Text style={styles.charHint}>
+                  {estimateBookLines(fieldBody)}/{lineBudget} lignes · livre
+                </Text>
+              </View>
+            </>
+          ) : (
+            <>
+              <Text style={styles.fieldLabel}>{props.titleFieldLabel ?? 'Titre'}</Text>
+              <TextInput
+                {...TEXT_INPUT_WEB_LANG}
+                style={styles.inputTitle}
+                value={fieldTitle}
+                onChangeText={t =>
+                  setFieldTitle(prev =>
+                    applyLeadingCapitalWhenStartingText(prev, t).slice(
+                      0,
+                      MAX_TEXT_MEMORY_TITLE_CHARS
+                    )
+                  )
+                }
+                placeholder="Titre…"
+                placeholderTextColor="#9CA3AF"
+                multiline
+                scrollEnabled
+                textAlignVertical="top"
+                maxLength={MAX_TEXT_MEMORY_TITLE_CHARS}
+                autoCapitalize="sentences"
+                autoCorrect
+              />
+              <Text style={[styles.fieldLabel, styles.fieldLabelSecond]}>
+                {props.bodyFieldLabel ?? 'Texte'}
+              </Text>
+              <TextInput
+                {...TEXT_INPUT_WEB_LANG}
+                style={styles.input}
+                value={fieldBody}
+                onChangeText={t => setFieldBody(prev => applyBodyInput(prev, t))}
+                placeholder="Texte…"
+                placeholderTextColor="#9CA3AF"
+                multiline
+                scrollEnabled
+                textAlignVertical="top"
+                maxLength={500}
+                autoCapitalize="sentences"
+                autoCorrect
+              />
+              <Text style={styles.charHint}>
+                {estimateBookLines(fieldBody)}/{lineBudget} lignes · livre
+              </Text>
+            </>
+          )
         ) : (
           <>
             <View
@@ -204,13 +303,23 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
                   memoryInputStyle,
                 ]}
                 value={text}
-                onChangeText={t => setText(clampTextToBookLineBudget(t, lineBudget))}
+                onChangeText={t =>
+                  setText(prev =>
+                    enforceTextBookLineBudgetOnInput(
+                      prev,
+                      applyLeadingCapitalWhenStartingText(prev, t),
+                      lineBudget,
+                    )
+                  )
+                }
                 placeholder="Ajouter un texte..."
                 placeholderTextColor="#AEAEB2"
                 multiline
                 scrollEnabled
                 textAlignVertical="top"
                 autoFocus
+                autoCapitalize="sentences"
+                autoCorrect
                 {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
               />
             </View>
@@ -399,6 +508,19 @@ const styles = StyleSheet.create({
     maxHeight: scale(100),
     textAlignVertical: 'top',
     backgroundColor: THEME.bg,
+  },
+  /** Titre dans la carte blanche fil (parité `feedStyles.textTitle`). */
+  feedTitleInCard: {
+    width: '100%',
+    fontSize: scale(20),
+    fontWeight: '600',
+    color: '#1C1C1E',
+    lineHeight: scale(28),
+    marginBottom: verticalScale(12),
+    padding: 0,
+    textAlign: 'left',
+    flexShrink: 0,
+    maxHeight: scale(84),
   },
   footerMeta: {
     flexDirection: 'row',

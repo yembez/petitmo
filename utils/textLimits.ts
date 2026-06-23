@@ -11,6 +11,9 @@ export const MAX_BOOK_LINES = 28;
 /** Plafond captions photo / audio / vidéo dans le livre (photo-full + photo-note). */
 export const MAX_BOOK_CAPTION_LINES = 12;
 
+/** Titre optionnel sur un souvenir texte (fil). */
+export const MAX_TEXT_MEMORY_TITLE_CHARS = 100;
+
 /**
  * Largeur moyenne en caractères d’une ligne sur la page citation livre.
  * Aligné sur `quoteFitLevel.ts` / `server/src/pdf/maquetteAlign.ts` (≈ 42 car/ligne).
@@ -85,7 +88,23 @@ function trimToBookLineBudget(text: string): string {
 }
 
 /**
- * Pendant la saisie : plafond lignes livre uniquement (pas de troncature agressive caractère par caractère).
+ * Pendant la saisie : refuse le dépassement sans raccourcir le texte existant.
+ * Évite les effacements / réapparitions avec la dictée clavier près du plafond.
+ */
+export function enforceTextBookLineBudgetOnInput(
+  prev: string,
+  next: string,
+  maxLines: number,
+): string {
+  const maxChars = maxLines * BOOK_CHARS_PER_LINE;
+  if (next.length > maxChars) return prev;
+  if (estimateBookLines(next) > maxLines) return prev;
+  return next;
+}
+
+/**
+ * Pendant la saisie : plafond lignes livre — tronque à l’enregistrement (`clampText`).
+ * @deprecated Préférer `enforceTextBookLineBudgetOnInput` en `onChangeText`.
  */
 export function clampTextBookLineBudget(text: string): string {
   let t = text.length > MAX_TEXT_CHARS_SAFETY ? text.slice(0, MAX_TEXT_CHARS_SAFETY) : text;

@@ -70,7 +70,7 @@ import { AddToBookModal } from '@/components/AddToBookModal';
 import {
   addMemoriesToBook,
   BookUpgradeRequiredError,
-  createBook,
+  createBookWithMemories,
   dedupeMemoryIds,
   upsertBook,
 } from '@/services/books';
@@ -975,6 +975,7 @@ function FavorisScreen() {
   const [bookModalVisible, setBookModalVisible] = useState(false);
   const [createBookFlowTitle, setCreateBookFlowTitle] = useState<string | null>(null);
   const [addToBookTargetId, setAddToBookTargetId] = useState<string | null>(null);
+  const createBookInFlightRef = useRef(false);
 
   const load = useCallback(async (opts?: { background?: boolean }) => {
     const childId = await getOrSelectFirstChild();
@@ -1147,8 +1148,9 @@ function FavorisScreen() {
     // Auto: passer en mode sélection.
     setSelectionMode(true);
     setSelectedIds(new Set());
-    // Nettoyage params non critique (on évite des loops en restant minimaliste).
-  }, [params.createBookTitle]);
+    // Évite de réouvrir le flux « créer livre » après redémarrage (param persistant expo-router).
+    router.setParams({ createBookTitle: '' });
+  }, [params.createBookTitle, router]);
 
   useEffect(() => {
     const id = typeof params.addToBookId === 'string' ? params.addToBookId.trim() : '';
@@ -1217,12 +1219,13 @@ function FavorisScreen() {
 
   const handleConfirmSelectionAction = useCallback(async () => {
     if (selectedMemoryIds.length === 0) return;
+    if (createBookInFlightRef.current) return;
 
     if (createBookFlowTitle) {
-      const created = await createBook(createBookFlowTitle);
-      let updated = null;
+      createBookInFlightRef.current = true;
+      let updated: Awaited<ReturnType<typeof createBookWithMemories>> | null = null;
       try {
-        updated = await addMemoriesToBook(created.id, selectedMemoryIds);
+        updated = await createBookWithMemories(createBookFlowTitle, selectedMemoryIds);
       } catch (e) {
         if (e instanceof BookUpgradeRequiredError) {
           Alert.alert(
@@ -1255,6 +1258,8 @@ function FavorisScreen() {
         }
         Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
         return;
+      } finally {
+        createBookInFlightRef.current = false;
       }
       if (!updated) {
         Alert.alert('Petitmo', 'Livre introuvable.');
@@ -1271,7 +1276,7 @@ function FavorisScreen() {
       }
       setCreateBookFlowTitle(null);
       exitSelection();
-      router.push({ pathname: '/book-preview', params: { bookId: created.id } });
+      router.push({ pathname: '/book-preview', params: { bookId: updated.id } });
       return;
     }
 

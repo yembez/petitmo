@@ -37,15 +37,15 @@ Spec complète : `docs/specs/book-page-layout.md`
 
 | Type | Gabarit | Zone photo | Texte |
 |------|---------|------------|-------|
-| `photo-full` | [M] ou [FP] selon alternance | [M] 186×210 mm (75% hauteur) · [FP] pleine largeur ~235 mm | Court ≤ 3 lignes, 11.25 pt |
-| `photo-note` | [M] uniquement | Carré fixe **186×186 mm** | Long 4–12 lignes, **10 pt** |
-| `quote` | — | Aucune | Texte pur, 3 tailles auto |
+| `photo-full` | [M] ou [FP] selon alternance | [M] 186×210 mm (75% hauteur) · [FP] pleine largeur ~235 mm | Court ≤ 3 lignes, 11.25 pt Roboto |
+| `photo-note` | [M] uniquement | Carré fixe **186×186 mm** | Long 4–12 lignes, **10 pt** Roboto |
+| `quote` (Petits mots) | — | Aucune | Texte pur seul, variantes ci-dessous |
 | `audio` | [M] | Même squelette que photo-note | Annotation + QR |
 | `video` | [M] | 42% hauteur page | Titre + QR |
 
 ---
 
-## Seuil court / long (BookEngine)
+## Seuil court / long (BookEngine — photos)
 
 ```
 estimateBookLines(memory.content, BOOK_CHARS_PER_LINE=42) <= 3
@@ -74,22 +74,58 @@ Règle spread : si page N est [FP] et que N+1 serait aussi [FP] (après calcul d
 
 ---
 
-## Typographie texte souvenir
+## Page « Petits mots » (souvenir texte seul)
+
+Police corps + titre : **EB Garamond** droit (`.text-memory-editorial`). Méta (date, folio, pastille) : **DM Sans** 7 pt.
+
+Champ optionnel `text_title` → variante **titled** (toute longueur). Sans titre : **guillemet** (≤ 8 lignes) ou **dropcap** (9+ lignes).
+
+### Paliers (lignes estimées, `BOOK_CHARS_PER_LINE = 42`)
+
+| Palier | Lignes | Classe CSS |
+|--------|--------|------------|
+| `lg` | 1–8 | `quote-tier-lg` |
+| `md` | 9–15 | `quote-tier-md` |
+| `sm` | 16–28 | `quote-tier-sm` |
+
+Logique : `src/book/quoteFitLevel.ts` ↔ `server/src/pdf/maquetteAlign.ts` (`resolveTextMemoryBookLayout`).
+
+### Variantes
+
+| Variante | Condition | Corps | Colonne max | Alignement corps | Centrage vertical |
+|----------|-----------|-------|-------------|------------------|-------------------|
+| **guillemet** | sans `text_title`, ≤ 8 lignes | 22 pt, lh 1.48 | 112 mm | centré | oui |
+| **titled** lg/md | avec `text_title`, ≤ 15 lignes | 20 / 16 pt | 128 / 140 mm | centré | oui |
+| **titled** sm | avec `text_title`, 16–28 lignes | 14 pt, lh 1.52 | 132 mm | gauche, multi-paragraphes | oui |
+| **dropcap** md/sm | sans `text_title`, 9+ lignes | 16 / 14 pt, lh 1.52 | 136 / 130 mm | gauche, lettrine | oui |
+
+Guillemet : `"` **52 pt** italique, couleur **#6B8F7E**, filet **28 mm** sous le bloc.
+
+Titled : titre **28 / 26 / 24 pt** (lg/md/sm), filet **24 / 30 / 30 mm**, marge sous bloc titre **5 / 4,5 / 4 mm**.
+
+Dropcap : lettrine **52 / 46 pt** (md/sm), espace entre paragraphes **5,5 mm**.
+
+Marges page citation : **18 mm** latérales ; padding vertical palier **13 / 12 / 11 mm**.
+
+### Constantes partagées (source de vérité mm/pt)
+
+Toutes dans `src/book/pdfPreviewTypo.ts` — **reporter les mêmes valeurs** dans le CSS de `server/src/pdf/htmlBook.ts` :
+
+- `PDF_TEXT_MEMORY_BODY_PT`, `PDF_TEXT_MEMORY_BODY_LH`
+- `PDF_TEXT_MEMORY_TITLE_PT`, `PDF_TEXT_MEMORY_TITLE_BLOCK_MARGIN_MM`, `PDF_TEXT_MEMORY_TITLE_RULE_MM`
+- `PDF_TEXT_MEMORY_COLUMN_*`, `PDF_GUILLEMET_*`, `PDF_TEXT_MEMORY_PARA_GAP_MM`
+
+---
+
+## Typographie autres textes souvenir (Roboto)
 
 | Contexte | Font | Taille | Interligne | Max lignes |
 |----------|------|--------|------------|------------|
 | Caption photo-full | Roboto | **11.25 pt** | 1.30 | 3 |
 | Texte photo-note | Roboto | **10 pt** | 1.35 | 12 |
-| Quote fit 0 (court) | Roboto | **16 pt** | 1.50 | 3 |
-| Quote fit 1 (moyen) | Roboto | **13 pt** | 1.45 | 8 |
-| Quote fit 2 (long) | Roboto | **11.25 pt** | 1.40 | 28 |
+| Audio / vidéo (annotation) | Roboto | voir `pdfPreviewTypo.ts` | — | 12 |
 
-Seuils quote fit :
-- fit 0 : ≤ 3 lignes estimées
-- fit 1 : 4–8 lignes
-- fit 2 : 9–28 lignes
-
-Titres éditoriaux (couverture, chapitre, vidéo) : **EB Garamond italic** — jamais sur texte souvenir.
+Titres éditoriaux (couverture, chapitre, vidéo) : **EB Garamond italic** — pas sur corps souvenir photo/audio.
 
 ---
 
@@ -98,19 +134,12 @@ Titres éditoriaux (couverture, chapitre, vidéo) : **EB Garamond italic** — j
 | Type de souvenir | Limite | Fichier |
 |-----------------|--------|---------|
 | Texte pur (`write.tsx`) | **28 lignes** | `utils/textLimits.ts` → `MAX_BOOK_LINES` |
-| Caption photo/audio/vidéo (`EditTextModal`) | **12 lignes** | À implémenter avec le même `estimateBookLines()` |
+| Caption photo/audio/vidéo (`EditTextModal`) | **12 lignes** | `estimateBookLines()` |
 
 **Règle absolue : aucune troncature dans le livre.** La limite est à la saisie, pas à l'affichage.
 
-- `pageQuote` dans `htmlBook.ts` : **supprimer** `clampChars(s, 600)` — le budget est garanti par la saisie
-- `pagePhotoNote` dans `htmlBook.ts` : **supprimer** `clampWithEllipsis(…, 420)` — idem
-
----
-
-## UI aperçu app
-
-- **Supprimer** le banner "Photo" / "Photo & note" (28 px) dans `PhotoFullPage.tsx` et `PhotoNotePage.tsx`
-- Remplacer par une ligne méta date/âge discrète (~16 px max, DM Sans 7 pt)
+- `pageQuote` : pas de `clampChars` — budget garanti par la saisie
+- `pagePhotoNote` : pas de `clampWithEllipsis` arbitraire — idem
 
 ---
 
@@ -127,7 +156,7 @@ Les deux exports passent par `server/src/pdf/htmlBook.ts` → `buildBookHtml()` 
 | PDF numérique | `digital` | 210×280 mm |
 | Impression | `print` | 218×288 mm (trim + 4 mm bleed) |
 
-Le contenu des pages est identique entre digital et print. Seuls changent : dimensions de page et fond perdu.
+Le contenu des pages est **identique** entre digital et print. Seuls changent : dimensions de page et fond perdu.
 
 ### Fichiers miroir obligatoires
 
@@ -135,16 +164,18 @@ Le contenu des pages est identique entre digital et print. Seuls changent : dime
 |------------|------------|
 | `src/book/pages/PhotoFullPage.tsx` | `htmlBook.ts` → `.photo-full-stack` / `.pf-image` / `.pf-footer` |
 | `src/book/pages/PhotoNotePage.tsx` | `htmlBook.ts` → `.photo-note` / `.pn-image` / `.pn-text` |
-| `src/book/maquette/MaquetteBookPages.tsx` | `htmlBook.ts` (rendu global) |
-| `src/book/pdfPreviewTypo.ts` (pt → px aperçu) | Classes CSS `htmlBook` (source de vérité en pt/mm) |
-| `src/book/quoteFitLevel.ts` | `server/src/pdf/maquetteAlign.ts` → `quoteFitLevelFromBody` |
+| `src/book/maquette/MaquetteBookPages.tsx` | `htmlBook.ts` → `pageQuote()` + classes `quote-variant-*` |
+| `src/book/pdfPreviewTypo.ts` (pt/mm → px aperçu) | CSS `htmlBook.ts` (mêmes valeurs en pt/mm) |
+| `src/book/quoteFitLevel.ts` | `server/src/pdf/maquetteAlign.ts` |
 | `utils/bookPhotoCropLayout.ts` | `server/src/pdf/bookPhotoCropLayout.ts` |
 | `constants/memoryTextFont.ts` | Classe `.memory-text` dans `htmlBook` |
 
-### Checklist avant de merger
+### Checklist avant de merger (Petits mots)
 
-1. Modifier l'aperçu **et** `htmlBook.ts` dans le même commit.
-2. Toute nouvelle constante mm/pt → mettre à jour `pdfPreviewTypo.ts`.
-3. Tester `exportMode: 'print'` si le fond perdu est touché.
-4. **Redéployer** `server/` (Railway/VPS) — Metro ne met pas à jour le PDF.
-5. `expo-print` interdit — génération PDF uniquement via le serveur distant.
+1. Modifier `MaquetteBookPages.tsx` **et** `htmlBook.ts` dans le même commit.
+2. Nouvelle constante mm/pt → `pdfPreviewTypo.ts` **puis** CSS PDF avec la même valeur.
+3. Vérifier les **trois variantes** × paliers concernés (guillemet / titled / dropcap).
+4. `text_title` propagé : SQLite → `bookPdfServer.ts` → `generatePdf.ts` → `MemoryRow`.
+5. Tester `exportMode: 'print'` si le fond perdu est touché.
+6. **Redéployer** `server/` (Railway/VPS) — Metro ne met pas à jour le PDF.
+7. `expo-print` interdit — génération PDF uniquement via le serveur distant.

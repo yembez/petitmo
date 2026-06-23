@@ -22,7 +22,7 @@ import type { Book } from '@/services/books';
 import {
   addMemoriesToBook,
   BookUpgradeRequiredError,
-  createBook,
+  createBookWithMemories,
   dedupeMemoryIds,
   listBooks,
   removeMemoriesFromBook,
@@ -183,10 +183,9 @@ export function AddToBookModal({
   }, []);
 
   const createAndAddToNewBook = useCallback(async () => {
-    const created = await createBook(newBookTitle);
-    let updated: Book | null = null;
+    let created: Book;
     try {
-      updated = await addMemoriesToBook(created.id, selectionMemoryIds);
+      created = await createBookWithMemories(newBookTitle, selectionMemoryIds);
     } catch (e) {
       if (e instanceof BookUpgradeRequiredError && e.code === 'BOOK_VIDEO_REQUIRES_PLUS') {
         showBookVideoPaywallAlert();
@@ -195,14 +194,14 @@ export function AddToBookModal({
       Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
       return;
     }
+    const updated = created;
     // Couverture par défaut: première photo sélectionnée (source, jamais un thumb).
     for (const id of selectionMemoryIds) {
       const m = getLocalMemoryById(id);
       if (!m || m.type !== 'photo') continue;
       const src = canonicalBookCoverPhotoRef(m).trim();
       if (src) {
-        // IMPORTANT: ne pas écraser memoryIds (utiliser la version déjà enrichie).
-        await upsertBook({ ...(updated ?? created), coverPhotoUrl: src });
+        await upsertBook({ ...updated, coverPhotoUrl: src });
       }
       break;
     }

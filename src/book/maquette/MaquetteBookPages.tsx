@@ -16,14 +16,14 @@ import {
   DMSans_500Medium,
   DMSans_600SemiBold,
 } from '@expo-google-fonts/dm-sans';
-import { EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
+import { EBGaramond_400Regular, EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
 import {
   MEMORY_TEXT_FONT_FAMILY,
   MEMORY_TEXT_FONT_FALLBACK,
   MEMORY_TEXT_FONT_SOURCES,
 } from '@/constants/memoryTextFont';
 import { Video, ResizeMode } from 'expo-av';
-import type { BookPage } from '@/src/book/BookEngine';
+import type { BookPage, PhotoFullVariant } from '@/src/book/BookEngine';
 import type { Child, Memory } from '@/types/local';
 import { formatDuration, formatBookLocationShort } from '@/utils/date';
 import { formatFamilyAgesLine } from '@/utils/childrenAge';
@@ -38,7 +38,13 @@ import {
   getVoiceCoverUriForBookPreview,
 } from '@/utils/memoryPhotos';
 import { memoryBookDisplayDateIso } from '@/utils/memoryBookDisplayDate';
-import { normalizeQuoteBodyLikeMaquette, quoteFitLevelFromBody } from '@/src/book/quoteFitLevel';
+import {
+  resolveTextMemoryBookLayout,
+  textMemoryBodyAlignCenter,
+  textMemoryBodyTextAlign,
+  type TextMemoryLayoutVariant,
+  type TextMemorySizeTier,
+} from '@/src/book/quoteFitLevel';
 import {
   pdfChapterMonthStyle,
   pdfChapterSubStyle,
@@ -53,13 +59,29 @@ import {
   pdfPhotoCaptionStyle,
   pdfPhotoNoteBodyStyle,
   pdfPtToPreviewPx,
-  pdfQuoteBodyStyle,
   pdfQuoteMarkStyle,
+  pdfQuotePagePadX,
+  pdfQuotePagePadY,
+  PDF_GUILLEMET_RULE_MM,
+  PDF_DROPCAP_PARA_GAP_MM,
+  PDF_GUILLEMET_BODY_MARGIN_BOTTOM_MM,
+  PDF_GUILLEMET_MARK_MARGIN_BOTTOM_MM,
+  PDF_GUILLEMET_RULE_MARGIN_TOP_MM,
+  PDF_TEXT_MEMORY_TITLE_BLOCK_MARGIN_MM,
+  PDF_TEXT_MEMORY_TITLE_RULE_MM,
+  pdfTextMemoryColumnMaxWidthPx,
+  pdfTextMemoryBodyStyle,
+  pdfTextMemoryDropcapBodyStyle,
+  pdfTextMemoryDropCapStyle,
+  pdfTextMemoryGuillemetBodyStyle,
+  pdfTextMemoryTitleStyle,
   pdfVideoSubStyle,
   pdfVideoTitleStyle,
   BOOK_VISUAL_MARGIN_MM,
   PHOTO_FULL_BAND_HEIGHT_RATIO,
   PHOTO_NOTE_BAND_HEIGHT_MM,
+  PHOTO_FULL_FP_FOOTER_MM,
+  PHOTO_FULL_FP_IMAGE_HEIGHT_MM,
 } from '@/src/book/pdfPreviewTypo';
 
 /** Alinéa (cadratin) en début de paragraphe — typographie roman. */
@@ -85,8 +107,327 @@ function romanParagraphs(text: string): string {
     .map(p => p.trim())
     .filter(Boolean)
     .map(p => `${EM_QUAD}${p.replace(/\n/g, `\n${EM_QUAD}`)}`)
-    // Un seul retour ligne entre paragraphes (évite une "ligne vide" trop marquée).
     .join('\n');
+}
+
+/** Paragraphes centrés sans alinéa (maquette titre + corps centré). */
+function centeredBookParagraphs(text: string): string {
+  if (!text.trim()) return text;
+  return text
+    .split(/\n{2,}/)
+    .map(p => p.trim())
+    .filter(Boolean)
+    .map(p => p.replace(/\n/g, '\n'))
+    .join('\n\n');
+}
+
+function editorialTextStyle(garamond?: string, memoryTextFont?: string) {
+  if (garamond) {
+    return { fontFamily: garamond, fontStyle: 'normal' as const, fontWeight: '400' as const };
+  }
+  return memoryTextStyle(memoryTextFont ?? MEMORY_TEXT_FONT_FALLBACK);
+}
+
+function firstGrapheme(s: string): string {
+  const m = s.match(/^\s*(\p{L}|\p{N})/u);
+  return m?.[0] ?? s.charAt(0);
+}
+
+function textMemoryTitleBlockMargin(tier: TextMemorySizeTier, pageHeightPx: number): number {
+  return pdfMmToPreviewPxH(PDF_TEXT_MEMORY_TITLE_BLOCK_MARGIN_MM[tier], pageHeightPx);
+}
+
+function splitBookParagraphs(text: string): string[] {
+  return text
+    .split(/\n{2,}/)
+    .map(p => p.trim())
+    .filter(Boolean);
+}
+
+function textMemoryMidJustify(
+  variant: TextMemoryLayoutVariant,
+  _tier: TextMemorySizeTier,
+): 'center' | 'flex-start' {
+  if (variant === 'dropcap' || variant === 'titled') return 'center';
+  if (_tier === 'sm') return 'flex-start';
+  return 'center';
+}
+
+function TextMemoryQuoteHeader({
+  width,
+  dm600,
+}: {
+  width: number;
+  dm600?: string;
+}) {
+  return (
+    <View style={styles.quoteHeader}>
+      <View style={styles.quoteHeaderLeft}>
+        <View
+          style={[
+            styles.sageDot,
+            {
+              width: Math.max(4, pdfPtToPreviewPx(6, width)),
+              height: Math.max(4, pdfPtToPreviewPx(6, width)),
+              borderRadius: Math.max(2, pdfPtToPreviewPx(3, width)),
+            },
+          ]}
+        />
+        <Text
+          style={[
+            styles.quoteLabel,
+            pdfLabelStyle(width),
+            dm600 ? { fontFamily: dm600 } : { fontWeight: '600' },
+          ]}
+        >
+          Petits mots
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function TextMemoryQuoteFooter({
+  memory,
+  familyChildren,
+  width,
+  height,
+  dm400,
+  onRequestTextEdit,
+}: {
+  memory: Memory;
+  familyChildren: Child[];
+  width: number;
+  height: number;
+  dm400?: string;
+  onRequestTextEdit: () => void;
+}) {
+  const bookLoc = bookMaquetteLocationLabel(memory);
+  const folioClearance = pdfMmToPreviewPxH(8, height) + pdfPtToPreviewPx(9, width);
+  return (
+    <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
+      <View style={[styles.quoteFooter, { paddingBottom: folioClearance }]}>
+        <View style={[styles.quoteRuleRow, { marginTop: pdfMmToPreviewPxH(6, height) }]}>
+          <View style={styles.quoteRuleSeg} />
+          <View
+            style={[
+              styles.quoteRuleDot,
+              {
+                width: Math.max(4, pdfPtToPreviewPx(4, width)),
+                height: Math.max(4, pdfPtToPreviewPx(4, width)),
+                borderRadius: Math.max(2, pdfPtToPreviewPx(2, width)),
+                marginHorizontal: pdfPtToPreviewPx(4, width),
+              },
+            ]}
+          />
+          <View style={styles.quoteRuleSeg} />
+        </View>
+        <View style={styles.photoDateLocRow}>
+          <Text style={[styles.photoDate, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
+            {dateWithAgeCaps(memory, familyChildren)}
+          </Text>
+          {bookLoc ? (
+            <Text
+              style={[styles.photoLocationBook, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}
+              numberOfLines={2}
+            >
+              {bookLoc}
+            </Text>
+          ) : null}
+        </View>
+      </View>
+    </Pressable>
+  );
+}
+
+function TextMemoryBodyContent({
+  body,
+  variant,
+  tier,
+  width,
+  height,
+  memoryTextFont,
+  garamond,
+  garamondIt,
+  centerBody,
+  bodyTextAlign,
+  columnMaxW,
+}: {
+  body: string;
+  variant: TextMemoryLayoutVariant;
+  tier: TextMemorySizeTier;
+  width: number;
+  height: number;
+  memoryTextFont: string;
+  garamond?: string;
+  garamondIt?: string;
+  centerBody: boolean;
+  bodyTextAlign: 'center' | 'left' | 'justify';
+  columnMaxW?: number;
+}) {
+  const bodyScaled =
+    variant === 'guillemet' ? pdfTextMemoryGuillemetBodyStyle(width) : pdfTextMemoryBodyStyle(tier, width);
+  const bodyFont = editorialTextStyle(garamond, memoryTextFont);
+  const bodyText = centerBody ? centeredBookParagraphs(body) : romanParagraphs(body);
+  const bodyWrapStyle = columnMaxW
+    ? { maxWidth: columnMaxW, alignSelf: 'center' as const, width: '100%' as const }
+    : undefined;
+
+  if (variant === 'dropcap') {
+    const trimmed = body.trim();
+    if (!trimmed) return null;
+    const paragraphs = splitBookParagraphs(trimmed);
+    if (paragraphs.length === 0) return null;
+    const bodyScaled = pdfTextMemoryDropcapBodyStyle(tier, width);
+    const capStyle = pdfTextMemoryDropCapStyle(tier, width);
+    const paraGap = pdfMmToPreviewPxH(PDF_DROPCAP_PARA_GAP_MM, height);
+    const firstPara = paragraphs[0]!;
+    const cap = firstGrapheme(firstPara);
+    const capIdx = firstPara.search(/\p{L}|\p{N}/u);
+    const afterCap = capIdx >= 0 ? firstPara.slice(capIdx + cap.length) : firstPara.slice(1);
+    const firstBody = afterCap.replace(/\n/g, `\n${EM_QUAD}`);
+    const restParas = paragraphs.slice(1);
+    return (
+      <View style={bodyWrapStyle}>
+        <View style={styles.textMemoryDropCapRow}>
+          <Text
+            style={[
+              styles.textMemoryDropCap,
+              capStyle,
+              garamond ? { fontFamily: garamond } : { fontFamily: memoryTextFont },
+              { marginRight: pdfPtToPreviewPx(3, width) },
+            ]}
+            {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
+          >
+            {cap}
+          </Text>
+          <Text
+            style={[
+              styles.quoteBody,
+              bodyScaled,
+              bodyFont,
+              { flex: 1, textAlign: 'left' as const },
+            ]}
+            {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
+          >
+            {firstBody}
+          </Text>
+        </View>
+        {restParas.map((para, idx) => (
+          <Text
+            key={`dropcap-p-${idx}`}
+            style={[
+              styles.quoteBody,
+              bodyScaled,
+              bodyFont,
+              { textAlign: 'left' as const, marginTop: paraGap },
+            ]}
+            {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
+          >
+            {`${EM_QUAD}${para.replace(/\n/g, `\n${EM_QUAD}`)}`}
+          </Text>
+        ))}
+      </View>
+    );
+  }
+
+  if (variant === 'guillemet') {
+    const markScaled = pdfQuoteMarkStyle(width);
+    const ruleW = pdfMmToPreviewPxW(PDF_GUILLEMET_RULE_MM, width);
+    const markFont = garamondIt
+      ? { fontFamily: garamondIt, fontStyle: 'normal' as const }
+      : garamond
+        ? { fontFamily: garamond, fontStyle: 'italic' as const }
+        : { fontFamily: memoryTextFont, fontStyle: 'normal' as const };
+    return (
+      <View style={bodyWrapStyle}>
+        <Text
+          style={[
+            styles.quoteMark,
+            markScaled,
+            markFont,
+            {
+              color: SAGE,
+              marginTop: 0,
+              marginLeft: 0,
+              marginBottom: pdfMmToPreviewPxH(PDF_GUILLEMET_MARK_MARGIN_BOTTOM_MM, height),
+              textAlign: 'center' as const,
+              alignSelf: 'center' as const,
+            },
+          ]}
+          {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
+        >
+          {'\u201C'}
+        </Text>
+        <Text
+          style={[
+            styles.quoteBody,
+            bodyScaled,
+            bodyFont,
+            { textAlign: bodyTextAlign, marginBottom: pdfMmToPreviewPxH(PDF_GUILLEMET_BODY_MARGIN_BOTTOM_MM, height) },
+          ]}
+          {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
+        >
+          {bodyText}
+        </Text>
+        <View
+          style={[
+            styles.textMemoryGuillemetRule,
+            {
+              width: ruleW,
+              marginTop: pdfMmToPreviewPxH(PDF_GUILLEMET_RULE_MARGIN_TOP_MM, height),
+              alignSelf: 'center' as const,
+            },
+          ]}
+        />
+      </View>
+    );
+  }
+
+  if (variant === 'titled' && tier === 'sm') {
+    const paragraphs = splitBookParagraphs(body.trim());
+    if (paragraphs.length === 0) return null;
+    const paraGap = pdfMmToPreviewPxH(PDF_DROPCAP_PARA_GAP_MM, height);
+    return (
+      <View style={bodyWrapStyle}>
+        {paragraphs.map((para, idx) => (
+          <Text
+            key={`titled-sm-p-${idx}`}
+            style={[
+              styles.quoteBody,
+              bodyScaled,
+              bodyFont,
+              {
+                textAlign: bodyTextAlign,
+                marginTop: idx > 0 ? paraGap : 0,
+              },
+            ]}
+            {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
+          >
+            {idx === 0
+              ? para.replace(/\n/g, `\n${EM_QUAD}`)
+              : `${EM_QUAD}${para.replace(/\n/g, `\n${EM_QUAD}`)}`}
+          </Text>
+        ))}
+      </View>
+    );
+  }
+
+  return (
+    <View style={bodyWrapStyle}>
+      <Text
+        style={[
+          styles.quoteBody,
+          bodyScaled,
+          bodyFont,
+          { textAlign: bodyTextAlign },
+        ]}
+        {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
+      >
+        {bodyText}
+      </Text>
+    </View>
+  );
 }
 
 /** Lieu affiché dans la maquette livre : forme courte si possible, sinon texte brut. */
@@ -293,6 +634,23 @@ function VisualBand({
   );
 }
 
+/** Bande photo pleine largeur sans marge [FP] — parité `.pf-variant-fp .pf-image`. */
+function FullBleedBand({
+  width,
+  bandH,
+  children,
+}: {
+  width: number;
+  bandH: number;
+  children: (frameW: number, frameH: number) => ReactNode;
+}) {
+  return (
+    <View style={{ width, height: bandH, overflow: 'hidden', backgroundColor: '#F2F2F7' }}>
+      {children(width, bandH)}
+    </View>
+  );
+}
+
 function barHeightsFromId(id: string): number[] {
   const rand = mulberry32(hashSeed(id));
   const heights: number[] = [];
@@ -395,6 +753,7 @@ export default function MaquetteBookPages(props: Props) {
     DMSans_400Regular_Italic,
     DMSans_500Medium,
     DMSans_600SemiBold,
+    EBGaramond_400Regular,
     EBGaramond_400Regular_Italic,
     ...MEMORY_TEXT_FONT_SOURCES,
   });
@@ -403,6 +762,7 @@ export default function MaquetteBookPages(props: Props) {
   const dm600 = fontsLoaded ? 'DMSans_600SemiBold' : undefined;
   const dmItalic = fontsLoaded ? 'DMSans_400Regular_Italic' : undefined;
   const garamondIt = fontsLoaded ? 'EBGaramond_400Regular_Italic' : undefined;
+  const garamond = fontsLoaded ? 'EBGaramond_400Regular' : undefined;
   const memoryTextFont = fontsLoaded ? MEMORY_TEXT_FONT_FAMILY : MEMORY_TEXT_FONT_FALLBACK;
 
   const pad = Math.min(28, width * 0.06);
@@ -490,6 +850,7 @@ export default function MaquetteBookPages(props: Props) {
           onRequestTextEdit={onRequestTextEdit}
           dm400={dm400}
           memoryTextFont={memoryTextFont}
+          variant={page.variant}
         />
       );
     case 'photo-note':
@@ -528,6 +889,8 @@ export default function MaquetteBookPages(props: Props) {
           onRequestTextEdit={onRequestTextEdit}
           dm400={dm400}
           dm600={dm600}
+          garamond={garamond}
+          garamondIt={garamondIt}
           memoryTextFont={memoryTextFont}
         />
       );
@@ -737,6 +1100,7 @@ function MaquettePhotoSimple({
   onRequestTextEdit,
   dm400,
   memoryTextFont,
+  variant,
 }: {
   memory: Memory;
   familyChildren: Child[];
@@ -752,32 +1116,59 @@ function MaquettePhotoSimple({
   onRequestTextEdit: () => void;
   dm400?: string;
   memoryTextFont: string;
+  variant: PhotoFullVariant;
 }) {
   const uri = getPrimaryPhotoUriForBookPreview(memory);
   const caption = (memory.content ?? '').trim();
-  const imgH = height * PHOTO_FULL_BAND_HEIGHT_RATIO;
+  const isFp = variant === 'FP';
+  const imgH = isFp
+    ? pdfMmToPreviewPxH(PHOTO_FULL_FP_IMAGE_HEIGHT_MM, height)
+    : height * PHOTO_FULL_BAND_HEIGHT_RATIO;
+  const footerH = isFp ? pdfMmToPreviewPxH(PHOTO_FULL_FP_FOOTER_MM, height) : undefined;
   const bookLoc = bookMaquetteLocationLabel(memory);
   const photoInline = buildInlineCropProps(inlineCropConfig, memory.id);
 
+  const imageBand = isFp ? (
+    <FullBleedBand width={width} bandH={imgH}>
+      {(fw, fh) =>
+        uri ? (
+          <BookPagePhotoFrame
+            uri={uri}
+            frameW={fw}
+            frameH={fh}
+            crop={photoCrop}
+            rotation={rotation}
+            inlineCrop={photoInline}
+            showRotateButton={!!photoInline}
+            onRotate={onRotate}
+            typoScale={typoScale}
+          />
+        ) : null
+      }
+    </FullBleedBand>
+  ) : (
+    <VisualBand width={width} height={height} bandH={imgH}>
+      {(fw, fh) =>
+        uri ? (
+          <BookPagePhotoFrame
+            uri={uri}
+            frameW={fw}
+            frameH={fh}
+            crop={photoCrop}
+            rotation={rotation}
+            inlineCrop={photoInline}
+            showRotateButton={!!photoInline}
+            onRotate={onRotate}
+            typoScale={typoScale}
+          />
+        ) : null
+      }
+    </VisualBand>
+  );
+
   return (
     <View style={[styles.paper, { width, height }]}>
-      <VisualBand width={width} height={height} bandH={imgH}>
-        {(fw, fh) =>
-          uri ? (
-            <BookPagePhotoFrame
-              uri={uri}
-              frameW={fw}
-              frameH={fh}
-              crop={photoCrop}
-              rotation={rotation}
-              inlineCrop={photoInline}
-              showRotateButton={!!photoInline}
-              onRotate={onRotate}
-              typoScale={typoScale}
-            />
-          ) : null
-        }
-      </VisualBand>
+      {imageBand}
       <Pressable
         style={[
           styles.photoFooter,
@@ -786,6 +1177,9 @@ function MaquettePhotoSimple({
             paddingTop: pdfMmToPreviewPxH(3.7, height),
             paddingBottom: pdfMmToPreviewPxH(10, height),
             minHeight: 0,
+            ...(footerH != null
+              ? { height: footerH, flexShrink: 0, flexGrow: 0, maxHeight: footerH }
+              : null),
           },
         ]}
         onPress={onRequestTextEdit}
@@ -942,6 +1336,8 @@ function MaquetteQuote({
   onRequestTextEdit,
   dm400,
   dm600,
+  garamond,
+  garamondIt,
   memoryTextFont,
 }: {
   memory: Memory;
@@ -955,116 +1351,97 @@ function MaquetteQuote({
   onRequestTextEdit: () => void;
   dm400?: string;
   dm600?: string;
+  garamond?: string;
+  garamondIt?: string;
   memoryTextFont: string;
 }) {
-  const raw = memory.content ?? '';
-  const body = useMemo(() => normalizeQuoteBodyLikeMaquette(raw), [raw]);
-  const fitLevel = quoteFitLevelFromBody(body);
-
-  const bookLoc = bookMaquetteLocationLabel(memory);
-
-  const markScaled = pdfQuoteMarkStyle(fitLevel, width);
-  const bodyScaled = pdfQuoteBodyStyle(fitLevel, width);
+  const layout = useMemo(() => resolveTextMemoryBookLayout(memory), [memory]);
+  const { body, tier, variant, title } = layout;
+  const centerBody = textMemoryBodyAlignCenter(tier, variant);
+  const bodyTextAlign = textMemoryBodyTextAlign(tier, variant);
+  const titleScaled = pdfTextMemoryTitleStyle(tier, width);
+  const titleRuleW = pdfMmToPreviewPxW(PDF_TEXT_MEMORY_TITLE_RULE_MM[tier], width);
+  const quotePadX = pdfQuotePagePadX(width);
+  const quotePadY = pdfQuotePagePadY(tier, height);
+  const columnMaxW = pdfTextMemoryColumnMaxWidthPx(tier, variant, width);
 
   return (
-    <View style={[styles.paper, { width, height }]}>
-      <View style={[styles.quoteScreenCol, { paddingHorizontal: pad }]}>
-        <View style={[styles.quoteHeader, { paddingTop: pdfMmToPreviewPxH(14, height) }]}>
-          <View style={styles.quoteHeaderLeft}>
-            <View
-              style={[
-                styles.sageDot,
-                {
-                  width: Math.max(4, pdfPtToPreviewPx(6, width)),
-                  height: Math.max(4, pdfPtToPreviewPx(6, width)),
-                  borderRadius: Math.max(2, pdfPtToPreviewPx(3, width)),
-                },
-              ]}
-            />
-            <Text
-              style={[
-                styles.quoteLabel,
-                pdfLabelStyle(width),
-                dm600 ? { fontFamily: dm600 } : { fontWeight: '600' },
-              ]}
-            >
-              Petits mots
-            </Text>
-          </View>
-        </View>
+    <View style={[styles.paper, { width, height, flexDirection: 'column' }]}>
+      <View
+        style={[
+          styles.quoteScreenCol,
+          {
+            flex: 1,
+            minHeight: 0,
+            paddingHorizontal: quotePadX,
+            paddingTop: quotePadY,
+            paddingBottom: quotePadY,
+          },
+        ]}
+      >
+        <TextMemoryQuoteHeader width={width} dm600={dm600} />
         <View
           style={{
             flex: 1,
             minHeight: 0,
-            justifyContent: 'center',
-            paddingTop: Math.round(4 * typoScale),
-            paddingBottom: Math.round(8 * typoScale),
+            justifyContent: textMemoryMidJustify(variant, tier),
+            paddingHorizontal: pdfMmToPreviewPxW(3, width),
           }}
         >
           <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
-            <View>
-              <Text
-                style={[
-                  styles.quoteMark,
-                  markScaled,
-                  {
-                    marginLeft: pdfMmToPreviewPxW(5, width),
-                    marginTop: pdfMmToPreviewPxH(1.5, height),
-                    fontFamily: memoryTextFont,
-                    fontStyle: 'normal',
-                    fontWeight: '400',
-                  },
-                ]}
-              >
-                {'\u201C'}
-              </Text>
-              <View style={{ paddingHorizontal: pdfMmToPreviewPxW(3, width) }}>
-                <Text
-                  style={[
-                    styles.quoteBody,
-                    bodyScaled,
-                    memoryTextStyle(memoryTextFont),
-                  ]}
-                  {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
-                >
-                  {romanParagraphs(body)}
-                </Text>
+            <View style={{ width: '100%', alignItems: 'center' }}>
+              <View style={{ width: '100%', maxWidth: columnMaxW }}>
+                {variant === 'titled' && title ? (
+                  <View
+                    style={[
+                      styles.textMemoryTitleBlock,
+                      { marginBottom: textMemoryTitleBlockMargin(tier, height) },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.textMemoryTitle,
+                        titleScaled,
+                        garamond ? { fontFamily: garamond } : memoryTextStyle(memoryTextFont),
+                        { textAlign: 'center' as const },
+                      ]}
+                      {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
+                    >
+                      {title}
+                    </Text>
+                    <View
+                      style={[
+                        styles.textMemoryTitleRule,
+                        { width: titleRuleW, marginTop: pdfMmToPreviewPxH(3, height) },
+                      ]}
+                    />
+                  </View>
+                ) : null}
+                <TextMemoryBodyContent
+                  body={body}
+                  variant={variant}
+                  tier={tier}
+                  width={width}
+                  height={height}
+                  memoryTextFont={memoryTextFont}
+                  garamond={garamond}
+                  garamondIt={garamondIt}
+                  centerBody={centerBody}
+                  bodyTextAlign={bodyTextAlign}
+                  columnMaxW={columnMaxW}
+                />
               </View>
             </View>
           </Pressable>
         </View>
-        <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
-          <View style={[styles.quoteFooter, { paddingBottom: Math.round(36 * typoScale) }]}>
-            <View style={[styles.quoteRuleRow, { marginTop: Math.round(8 * typoScale) }]}>
-              <View style={styles.quoteRuleSeg} />
-              <View
-                style={[
-                  styles.quoteRuleDot,
-                  {
-                    width: Math.max(4, Math.round(6 * typoScale)),
-                    height: Math.max(4, Math.round(6 * typoScale)),
-                    borderRadius: Math.max(2, Math.round(3 * typoScale)),
-                    marginHorizontal: Math.round(6 * typoScale),
-                  },
-                ]}
-              />
-              <View style={styles.quoteRuleSeg} />
-            </View>
-            <View style={styles.photoDateLocRow}>
-              <Text style={[styles.photoDate, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
-                {dateWithAgeCaps(memory, familyChildren)}
-              </Text>
-              {bookLoc ? (
-                <Text
-                  style={[styles.photoLocationBook, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}
-                  numberOfLines={2}
-                >
-                  {bookLoc}
-                </Text>
-              ) : null}
-            </View>
-          </View>
-        </Pressable>
+        <TextMemoryQuoteFooter
+          memory={memory}
+          familyChildren={familyChildren}
+          width={width}
+          height={height}
+          dm400={dm400}
+          onRequestTextEdit={onRequestTextEdit}
+        />
       </View>
       <Folio n={pageNum} dm400={dm400} pageWidthPx={width} pageHeightPx={height} />
     </View>
@@ -1610,7 +1987,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'flex-start',
     alignItems: 'center',
-    paddingTop: 16,
     flexShrink: 0,
   },
   quoteMid: {
@@ -1641,10 +2017,34 @@ const styles = StyleSheet.create({
     lineHeight: 44,
   },
   quoteBody: {
-    fontSize: 16,
     color: INK,
-    lineHeight: 26,
     textAlign: 'justify' as const,
+  },
+  textMemoryTitleBlock: {
+    alignItems: 'center',
+  },
+  textMemoryTitle: {
+    color: INK,
+    fontWeight: '400',
+  },
+  textMemoryTitleRule: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(0,0,0,0.12)',
+    alignSelf: 'center',
+  },
+  textMemoryGuillemetRule: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(0,0,0,0.12)',
+  },
+  textMemoryDropCapRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  textMemoryDropCap: {
+    color: INK,
+    marginRight: 4,
+    marginTop: 2,
+    fontWeight: '400',
   },
   quoteBodyFit1: {
     fontSize: 15,
@@ -1658,7 +2058,7 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     textAlign: 'justify' as const,
   },
-  quoteFooter: { width: '100%', paddingBottom: 36, flexShrink: 0, marginTop: 'auto' },
+  quoteFooter: { width: '100%', flexShrink: 0 },
   quoteRuleRow: {
     flexDirection: 'row',
     alignItems: 'center',

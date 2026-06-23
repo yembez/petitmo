@@ -8,6 +8,8 @@ export type MemoryRow = {
   user_id: string;
   type: 'text' | 'voice' | 'photo' | 'video';
   content: string | null;
+  /** Titre optionnel (souvenir texte) — page « Petits mots » avec titre. */
+  text_title?: string | null;
   media_url: string | null;
   /** Chemin bucket `media` pour téléchargement service role. */
   media_path: string | null;

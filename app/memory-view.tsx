@@ -38,7 +38,7 @@ import {
   formatDuration,
   formatBookLocationShort,
 } from '@/utils/date';
-import { addMemoryToBook, BookUpgradeRequiredError, createBook, listBooks, removeMemoryFromBook, type Book } from '@/services/books';
+import { addMemoryToBook, BookUpgradeRequiredError, createBookWithMemories, listBooks, removeMemoryFromBook, type Book } from '@/services/books';
 import type { Child, Memory } from '@/types/local';
 import { formatFamilyAgesLine, sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 
@@ -180,10 +180,9 @@ export default function MemoryViewScreen() {
 
   const createAndAddToNewBook = useCallback(async () => {
     if (!memoryId) return;
-    const created = await createBook(newBookTitle);
-    let updated: Awaited<ReturnType<typeof addMemoryToBook>> = null;
+    let created: Book;
     try {
-      updated = await addMemoryToBook(created.id, memoryId);
+      created = await createBookWithMemories(newBookTitle, [memoryId]);
     } catch (e) {
       if (e instanceof BookUpgradeRequiredError && e.code === 'BOOK_VIDEO_REQUIRES_PLUS') {
         showBookVideoPaywallAlert();
@@ -192,7 +191,7 @@ export default function MemoryViewScreen() {
       Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
       return;
     }
-    setBooks(prev => [updated ?? created, ...prev]);
+    setBooks(prev => [created, ...prev]);
     closeBookModal();
   }, [closeBookModal, memoryId, newBookTitle, showBookVideoPaywallAlert]);
 

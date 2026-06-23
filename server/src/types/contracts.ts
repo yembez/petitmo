@@ -32,6 +32,7 @@ export type GuestMemoryForPdfPayload = {
   id: string;
   type: 'voice' | 'video' | 'photo' | 'text';
   content?: string | null;
+  text_title?: string | null;
   media_url?: string | null;
   media_path?: string | null;
   edited_media_url?: string | null;

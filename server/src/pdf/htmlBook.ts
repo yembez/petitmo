@@ -8,6 +8,7 @@ import {
   BOOK_VISUAL_MARGIN_MM,
   PHOTO_FULL_BAND_HEIGHT_RATIO,
   PHOTO_NOTE_INNER_MM,
+  PHOTO_FULL_FP_FOOTER_MM,
 } from '../constants/pdfDigitalSpec';
 import type { BookPageServer } from '../types/contracts';
 import type { ChildRow, MemoryRow } from './memoryRow';
@@ -18,8 +19,9 @@ import {
   audioWaveformSvg,
   bookPdfLocationLabel,
   dateWithAgeCaps,
-  normalizeQuoteBodyLikeMaquette,
-  quoteFitLevelFromBody,
+  resolveTextMemoryBookLayout,
+  textMemoryBodyAlignCenter,
+  textMemoryBodyTextAlign,
 } from './maquetteAlign';
 
 const EM = '\u2003';
@@ -91,6 +93,69 @@ function romanHtml(text: string): string {
       return `<p>${inner}</p>`;
     })
     .join('\n');
+}
+
+/** Paragraphes centrés sans alinéa (titre + corps centré, paliers lg/md). */
+function romanHtmlCentered(text: string): string {
+  const clean = sanitizeText(text);
+  if (!clean.trim()) return '';
+  return clean
+    .split(/\n{2,}/)
+    .map(p => p.trim())
+    .filter(Boolean)
+    .map(p => {
+      const lines = p.split(/\n/).map(l => l.trim()).filter(Boolean);
+      const inner = lines.map(l => esc(l)).join('<br/>\n');
+      return `<p>${inner}</p>`;
+    })
+    .join('\n');
+}
+
+/** Corps titre long (sm) : 1ʳᵉ ligne sans alinéa, paragraphes suivants avec cadratin. */
+function romanHtmlTitledSm(text: string): string {
+  const clean = sanitizeText(text);
+  if (!clean.trim()) return '';
+  const paragraphs = clean
+    .split(/\n{2,}/)
+    .map(p => p.trim())
+    .filter(Boolean);
+  return paragraphs
+    .map((p, idx) => {
+      const lines = p.split(/\n/).map(l => l.trim()).filter(Boolean);
+      const inner = lines
+        .map((l, li) => (idx === 0 && li === 0 ? esc(l) : esc(EM + l)))
+        .join('<br/>\n');
+      return `<p>${inner}</p>`;
+    })
+    .join('\n');
+}
+
+/** Lettrine : 1ʳᵉ lettre hors alinéa, reste comme `romanHtml` sans cadratin sur le 1er paragraphe. */
+function romanHtmlDropCap(text: string): string {
+  const clean = sanitizeText(text);
+  if (!clean.trim()) return '';
+  const paragraphs = clean
+    .split(/\n{2,}/)
+    .map(p => p.trim())
+    .filter(Boolean);
+  if (paragraphs.length === 0) return '';
+
+  const firstPara = paragraphs[0]!;
+  const capMatch = firstPara.match(/^(\p{L}|\p{N})/u);
+  const cap = capMatch?.[0] ?? firstPara.charAt(0);
+  const afterCap = capMatch ? firstPara.slice(capMatch.index! + cap.length) : firstPara.slice(1);
+  const firstLines = afterCap.split(/\n/).map(l => l.trim()).filter(Boolean);
+  const firstInner = firstLines
+    .map((l, i) => (i === 0 ? esc(l) : esc(EM + l)))
+    .join('<br/>\n');
+  const firstP = `<p class="dropcap-p"><span class="text-dropcap">${esc(cap)}</span>${firstInner}</p>`;
+
+  const rest = paragraphs.slice(1).map(p => {
+    const lines = p.split(/\n/).map(l => l.trim()).filter(Boolean);
+    const inner = lines.map(l => esc(EM + l)).join('<br/>\n');
+    return `<p>${inner}</p>`;
+  });
+  return [firstP, ...rest].join('\n');
 }
 
 function monthCaps(label: string): string {
@@ -178,15 +243,20 @@ function pagePhotoFull(
   rot: number,
   pageNum: number,
   crop: PhotoCrop | undefined,
-  birthdate: string | null | undefined
+  birthdate: string | null | undefined,
+  variant: 'FP' | 'M' | undefined,
+  printBleed: boolean
 ): string {
   const src = imgAttr(photoMainUrl(m));
   const captionRaw = sanitizeText((m.content ?? '').trim());
   const rotCss = rot ? `transform: rotate(${rot}deg); transform-origin: center;` : '';
   const captionHtml = captionRaw ? romanHtml(captionRaw) : '';
   const locLabel = bookPdfLocationLabel(m.location);
-  return `<div class="page photo-full-stack">
-  <div class="pf-image">
+  const isFp = variant === 'FP';
+  const variantCls = isFp ? ' pf-variant-fp' : ' pf-variant-m';
+  const bleedCls = isFp && printBleed ? ' bleed-x' : '';
+  return `<div class="page photo-full-stack${variantCls}">
+  <div class="pf-image${bleedCls}">
     ${
       src
         ? `<div class="crop-frame" style="width:100%;height:100%;"><img class="crop-img" src="${src}" alt="" style="${cropCss(crop)}${rotCss}" /></div>`
@@ -237,19 +307,46 @@ function pageQuote(
   pageNum: number,
   birthdate: string | null | undefined
 ): string {
-  const raw = sanitizeText((m.content ?? '').trim());
-  const body = normalizeQuoteBodyLikeMaquette(raw);
-  const fitLevel = quoteFitLevelFromBody(body);
+  const layout = resolveTextMemoryBookLayout(m);
+  const { body, tier, variant, title } = layout;
+  const centerBody = textMemoryBodyAlignCenter(tier, variant);
+  const bodyTextAlign = textMemoryBodyTextAlign(tier, variant);
   const locLabel = bookPdfLocationLabel(m.location);
-  return `<div class="page quote">
-  <div class="inner quote-inner quote-fit-${fitLevel}">
+  const bodyHtml = centerBody ? romanHtmlCentered(body) : romanHtml(body);
+  const titledSmBodyHtml = romanHtmlTitledSm(body);
+
+  const titleBlock =
+    variant === 'titled' && title
+      ? `<div class="text-memory-title-block">
+      <div class="text-memory-title text-tier-${tier}">${esc(title)}</div>
+      <div class="text-memory-title-rule text-tier-${tier}"></div>
+    </div>`
+      : '';
+
+  let midInner = '';
+  if (variant === 'guillemet') {
+    midInner = `<div class="quote-mark">\u201C</div>
+      <div class="body quote-body text-memory-editorial quote-guillemet-body" style="text-align:${bodyTextAlign}">${bodyHtml}</div>
+      <div class="quote-guillemet-rule"></div>`;
+  } else if (variant === 'dropcap') {
+    midInner = `<div class="body quote-body text-memory-editorial text-tier-${tier} quote-dropcap-body">${romanHtmlDropCap(body)}</div>`;
+  } else if (variant === 'titled' && tier === 'sm') {
+    midInner = `<div class="body quote-body text-memory-editorial text-tier-${tier} quote-titled-sm-body">${titledSmBodyHtml}</div>`;
+  } else {
+    midInner = `<div class="body quote-body text-memory-editorial text-tier-${tier}" style="text-align:${bodyTextAlign}">${bodyHtml}</div>`;
+  }
+
+  return `<div class="page quote quote-variant-${variant}">
+  <div class="inner quote-inner quote-tier-${tier}">
     <div class="quote-header">
       <span class="dot sage"></span>
       <span class="label" style="color:#6B8F7E;text-transform:none;">Petits mots</span>
     </div>
-    <div class="quote-mid">
-      <div class="quote-mark">\u201C</div>
-      <div class="body quote-body memory-text">${romanHtml(body)}</div>
+    <div class="quote-mid quote-mid-${variant} quote-tier-${tier}">
+      <div class="text-memory-column text-tier-${tier}">
+      ${titleBlock}
+      ${midInner}
+      </div>
     </div>
     <div class="quote-footer-block">
       <div class="quote-rule">
@@ -397,7 +494,7 @@ function renderPage(page: BookPageServer, input: BuildBookHtmlInput, pageNum: nu
       const birthdate = child.birthdate;
       switch (page.type) {
         case 'photo-full':
-          return pagePhotoFull(m, rot, pageNum, crop, birthdate);
+          return pagePhotoFull(m, rot, pageNum, crop, birthdate, page.variant, printBleed);
         case 'photo-note':
           return pagePhotoNote(m, rot, pageNum, crop, birthdate);
         case 'quote':
@@ -456,6 +553,8 @@ function buildHtmlDocument(
   --pn-img-h:${pnImgHmm}mm;
   --cover-photo-h:${coverPhotoHmm}mm;
   --pf-img-h:${pfImgHmm}mm;
+  --pf-fp-footer-h:${PHOTO_FULL_FP_FOOTER_MM}mm;
+  --pf-fp-img-h:calc(var(--page-h) - var(--pf-fp-footer-h));
   --video-thumb-h:${videoThumbHmm}mm;
   --pad-x:15mm;
   --pad-x-safe:calc(15mm + var(--bleed));
@@ -575,13 +674,31 @@ body.print-bleed .chapter-inner {
 
 .photo-full-stack { flex-direction:column; }
 .pf-image {
-  width:var(--page-w); height:var(--pf-img-h); flex-shrink:0; overflow:hidden;
-  box-sizing:border-box; padding:var(--visual-margin); background:#FFFFFF;
+  width:var(--page-w); flex-shrink:0; overflow:hidden;
+  box-sizing:border-box; background:#FFFFFF;
+}
+.pf-variant-m .pf-image {
+  height:var(--pf-img-h);
+  padding:var(--visual-margin);
+}
+.pf-variant-fp .pf-image {
+  height:var(--pf-fp-img-h);
+  padding:0;
 }
 .pf-footer {
-  flex:1; min-height:0; overflow:hidden;
+  overflow:hidden;
   padding:3.7mm var(--pad-x) 10mm;
   display:flex; flex-direction:column;
+  box-sizing:border-box;
+}
+.pf-variant-m .pf-footer {
+  flex:1; min-height:0;
+}
+.pf-variant-fp .pf-footer {
+  flex:0 0 var(--pf-fp-footer-h);
+  height:var(--pf-fp-footer-h);
+  min-height:var(--pf-fp-footer-h);
+  max-height:var(--pf-fp-footer-h);
 }
 body.print-bleed .pf-footer {
   padding-left:var(--pad-x-safe);
@@ -636,7 +753,7 @@ body.print-bleed .bleed-x {
   box-sizing:border-box;
 }
 
-.quote .inner { padding-top:14mm; padding-bottom:14mm; }
+.quote .inner { padding-top:14mm; padding-bottom:14mm; padding-left:18mm; padding-right:18mm; }
 .quote-inner {
   justify-content:flex-start;
   display:flex;
@@ -644,8 +761,9 @@ body.print-bleed .bleed-x {
   flex:1;
   min-height:0;
 }
-.quote-fit-1 { padding-top:12mm; padding-bottom:12mm; }
-.quote-fit-2 { padding-top:11mm; padding-bottom:11mm; }
+.quote-tier-lg { padding-top:13mm; padding-bottom:13mm; }
+.quote-tier-md { padding-top:12mm; padding-bottom:12mm; }
+.quote-tier-sm { padding-top:11mm; padding-bottom:11mm; }
 .quote-header {
   display:flex; align-items:center; gap:4pt;
   flex-shrink:0;
@@ -659,6 +777,51 @@ body.print-bleed .bleed-x {
   padding:0 3mm;
   overflow:hidden;
 }
+.quote-mid-dropcap { justify-content:center; }
+.quote-mid-titled { justify-content:center; }
+.text-memory-editorial {
+  font-family:'EB Garamond',serif;
+  font-style:normal;
+  font-weight:400;
+  color:#1C1C1E;
+}
+.text-memory-title-block {
+  text-align:center;
+  flex-shrink:0;
+}
+.text-memory-title {
+  font-family:'EB Garamond',serif;
+  font-style:normal;
+  font-weight:400;
+  color:#1C1C1E;
+}
+.text-tier-lg.text-memory-title { font-size:28pt; line-height:1.15; }
+.text-tier-md.text-memory-title { font-size:26pt; line-height:1.2; }
+.text-tier-sm.text-memory-title { font-size:24pt; line-height:1.2; }
+.text-memory-title-rule {
+  height:.3pt;
+  background:rgba(0,0,0,.12);
+  margin:4mm auto 0;
+}
+.text-tier-lg.text-memory-title-rule { width:24mm; }
+.text-tier-md.text-memory-title-rule { width:30mm; }
+.text-tier-sm.text-memory-title-rule { width:30mm; }
+.text-memory-column {
+  width:100%;
+  max-width:140mm;
+  margin-left:auto;
+  margin-right:auto;
+}
+.quote-variant-titled.quote-tier-lg .text-memory-column { max-width:128mm; }
+.quote-variant-titled.quote-tier-md .text-memory-column { max-width:140mm; }
+.quote-variant-titled.quote-tier-sm .text-memory-column { max-width:132mm; }
+.quote-variant-guillemet.quote-tier-lg .text-memory-column { max-width:112mm; }
+.quote-variant-dropcap.quote-tier-md .text-memory-column { max-width:136mm; }
+.quote-variant-dropcap.quote-tier-sm .text-memory-column { max-width:130mm; }
+/* Espacements Petits mots — valeurs = pdfPreviewTypo.ts (PDF_TEXT_MEMORY_*_MM, PDF_GUILLEMET_*) */
+.quote-variant-titled.quote-tier-lg .text-memory-title-block { margin-bottom:5mm; }
+.quote-variant-titled.quote-tier-md .text-memory-title-block { margin-bottom:4.5mm; }
+.quote-variant-titled.quote-tier-sm .text-memory-title-block { margin-bottom:4mm; }
 .quote-footer-block {
   flex-shrink:0;
   margin-top:auto;
@@ -673,16 +836,56 @@ body.print-bleed .bleed-x {
   text-align:right; flex:1; min-width:0;
 }
 .quote-mark {
-  font-family:'Roboto',sans-serif; font-style:normal; font-weight:400;
-  font-size:39.38pt; color:rgba(0,0,0,.06); line-height:1; margin-bottom:1.5mm; margin-left:5mm;
+  font-family:'EB Garamond',serif; font-style:italic; font-weight:400;
+  font-size:52pt; color:#6B8F7E; line-height:1; margin-bottom:4mm;
+  text-align:center; align-self:center;
 }
-.quote-body { overflow:hidden; text-align:justify; }
-.quote-fit-1 .quote-body { font-size:9.75pt; line-height:1.48; }
-.quote-fit-1 .quote-body p { margin:0 0 4pt; }
-.quote-fit-2 .quote-body { font-size:9.19pt; line-height:1.42; }
-.quote-fit-2 .quote-body p { margin:0 0 3pt; }
-.quote-fit-1 .quote-mark { font-size:34.69pt; line-height:1; }
-.quote-fit-2 .quote-mark { font-size:30.94pt; margin-bottom:1mm; line-height:1; }
+.quote-guillemet-body {
+  font-size:22pt; line-height:1.48;
+  margin-bottom:5mm;
+}
+.quote-guillemet-body p { margin:0; }
+.quote-guillemet-rule {
+  width:28mm; height:.3pt; background:rgba(0,0,0,.12);
+  margin:2mm auto 0;
+}
+.quote-inline-rule {
+  display:flex; align-items:center; gap:4pt; margin:4mm auto 0; width:42%;
+}
+.quote-body { overflow:hidden; }
+.quote-tier-lg .quote-body { font-size:20pt; line-height:1.52; }
+.quote-tier-lg .quote-body p { margin:0 0 5pt; }
+.quote-tier-md .quote-body { font-size:16pt; line-height:1.5; }
+.quote-tier-md .quote-body p { margin:0 0 4pt; }
+.quote-tier-sm .quote-body { font-size:11.25pt; line-height:1.4; }
+.quote-tier-sm .quote-body p { margin:0 0 3pt; }
+.quote-variant-guillemet .quote-mark { display:block; }
+.quote-dropcap-body { text-align:left; }
+.quote-variant-dropcap.quote-tier-md .quote-dropcap-body {
+  font-size:16pt; line-height:1.52;
+}
+.quote-variant-dropcap.quote-tier-sm .quote-dropcap-body {
+  font-size:14pt; line-height:1.52;
+}
+.quote-titled-sm-body { text-align:left; }
+.quote-variant-titled.quote-tier-sm .quote-titled-sm-body {
+  font-size:14pt; line-height:1.52;
+}
+.quote-titled-sm-body p { margin:0 0 5.5mm; text-align:left; }
+.quote-titled-sm-body p:last-child { margin-bottom:0; }
+.quote-dropcap-body .dropcap-p { margin:0 0 5.5mm; text-align:left; }
+.quote-dropcap-body p { margin:0 0 5.5mm; text-align:left; }
+.quote-dropcap-body p:last-child,
+.quote-dropcap-body .dropcap-p:last-child { margin-bottom:0; }
+.text-dropcap {
+  float:left;
+  font-family:'EB Garamond',serif;
+  font-weight:400;
+  line-height:.82;
+  margin-right:3pt;
+}
+.quote-tier-md .text-dropcap { font-size:52pt; }
+.quote-tier-sm .text-dropcap { font-size:46pt; }
 .quote-rule { display:flex; align-items:center; gap:4pt; margin-top:6mm; }
 .quote-rule-seg { flex:1; height:.3pt; background:rgba(0,0,0,.08); }
 .quote-rule-dot { width:4pt; height:4pt; border-radius:50%; background:rgba(0,0,0,.08); }

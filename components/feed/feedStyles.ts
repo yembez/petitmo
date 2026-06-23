@@ -615,6 +615,15 @@ const styles = StyleSheet.create({
   textBookParagraphSpacing: {
     marginTop: verticalScale(16),
   },
+  textTitle: {
+    width: '100%',
+    fontSize: scale(20),
+    fontWeight: '600',
+    color: '#1C1C1E',
+    lineHeight: scale(28),
+    marginBottom: verticalScale(12),
+    textAlign: 'left',
+  },
   /** `width: '100%'` : sans largeur explicite, le `Text` peut se comporter en shrink-wrap et la justification ne s’applique pas à chaque ligne après un `\n`. */
   textContent: {
     width: '100%',
