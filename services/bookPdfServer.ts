@@ -37,7 +37,7 @@ import {
 } from '@/utils/memoryPhotos';
 import { pickFirstReadableLocalMediaUri } from '@/utils/localMediaReadable';
 import { resolveServerPdfEntitlements } from '@/lib/digitalExportPurchase';
-import { MEDIA_BOOK_PRINT_MAX_WIDTH } from '@/lib/limits';
+import { MEDIA_BOOK_PRINT_MAX_WIDTH, MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH } from '@/lib/limits';
 import { isInitExportConfigured, postInitExport, postGuestUploadUrls } from '@/services/initExportApi';
 
 /** Erreur HTTP / téléchargement après appel au service PDF. */
@@ -246,13 +246,18 @@ function isHttps(u: string | null | undefined): boolean {
   return typeof u === 'string' && /^https:\/\//i.test(u.trim());
 }
 
-async function compressLocalJpegForGuestUpload(localUri: string): Promise<string> {
+async function compressLocalJpegForGuestUpload(
+  localUri: string,
+  opts?: { maxWidth?: number; quality?: number }
+): Promise<string> {
   if (Platform.OS === 'web') return localUri;
+  const maxWidth = opts?.maxWidth ?? MEDIA_BOOK_PRINT_MAX_WIDTH;
+  const quality = opts?.quality ?? 0.82;
   try {
     const manipulated = await ImageManipulator.manipulateAsync(
       localUri,
-      [{ resize: { width: MEDIA_BOOK_PRINT_MAX_WIDTH } }],
-      { compress: 0.82, format: ImageManipulator.SaveFormat.JPEG }
+      [{ resize: { width: maxWidth } }],
+      { compress: quality, format: ImageManipulator.SaveFormat.JPEG }
     );
     return manipulated?.uri || localUri;
   } catch {
@@ -880,13 +885,25 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
   const coverLocal = (coverPhotoUrlOut ?? '').trim();
   if (coverLocal && !isHttps(coverLocal) && Platform.OS !== 'web') {
     try {
-      const coverCandidates = [coverLocal, inferLocalDisplayPathFromPrint(coverLocal)];
+      // Cover = page la plus exposée à l'impression : on privilégie la source la plus haute
+      // résolution disponible (original/print) et on garde le display (basse réso) en dernier recours.
+      const coverHighRes: string[] = [coverLocal];
       for (const m of memories) {
-        if (m.type === 'photo') coverCandidates.push(...collectPhotoLocalUploadUriCandidates(m));
+        if (m.type !== 'photo') continue;
+        coverHighRes.push(m.local_original_path ?? '', m.local_print_path ?? '');
       }
+      const coverFallback: string[] = [inferLocalDisplayPathFromPrint(coverLocal)];
+      for (const m of memories) {
+        if (m.type === 'photo') coverFallback.push(...collectPhotoLocalUploadUriCandidates(m));
+      }
+      const coverCandidates = [...coverHighRes, ...coverFallback].filter(u => u.trim().length > 0);
       const readableCover = await pickFirstReadableLocalMediaUri(coverCandidates);
       if (!readableCover) throw new Error('COVER_NOT_READABLE');
-      const compressedCover = await compressLocalJpegForGuestUpload(readableCover);
+      // Pleine définition livre (3200 px ≈ 370 DPI sur cover 210 mm), pas la compression photo (1600 px).
+      const compressedCover = await compressLocalJpegForGuestUpload(readableCover, {
+        maxWidth: MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH,
+        quality: 0.9,
+      });
       const { readUrl } = await guestUploadMediaImageThenReadUrl({
         pdfTicket,
         asset: { kind: 'cover' },

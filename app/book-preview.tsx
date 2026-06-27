@@ -674,7 +674,7 @@ export default function BookPreviewScreen() {
     void load({ silent: hadLocalSnapshotRef.current });
   }, [load]);
 
-  /** Souvenirs audio existants : génère `voice_cover_print.jpg` (2600px) pour le badge DPI livre. */
+  /** Souvenirs audio existants : génère `voice_cover_print.jpg` (3200px) pour le badge DPI livre. */
   useEffect(() => {
     for (const m of bookMemories) {
       if (m.type !== 'voice' || !(m.voice_cover_path ?? m.voice_cover_url ?? '').trim()) continue;

@@ -19,8 +19,9 @@ export const FREE_TIER_BOOK_AUDIO_MAX_COUNT = 5
  */
 export const MEDIA_BOOK_PRINT_MAX_WIDTH = 1600
 
-/** Largeur du dérivé local `print.jpg` / `voice_cover_print.jpg` (impression livre, badge DPI). */
-export const MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH = 2600
+/** Largeur du dérivé local `print.jpg` / `voice_cover_print.jpg` (impression livre, badge DPI).
+ *  3200 px → ~370 DPI sur une cover 210 mm (avec marge de recadrage), ≥ 300 DPI sur photo pleine page. */
+export const MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH = 3200
 
 export type LimitCheck = {
   canCreate: boolean

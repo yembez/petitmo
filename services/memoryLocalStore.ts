@@ -108,7 +108,7 @@ export async function ensureLocalPhotoFeedThumbOnly(params: {
   return { localThumbUri: thumbDest, originalPx };
 }
 
-/** Display 1400px + print 2600px — qualité fil / livre (peut tourner en arrière-plan). */
+/** Display 1400px + print 3200px — qualité fil / livre (peut tourner en arrière-plan). */
 export async function ensureLocalPhotoDisplayPrintDerivatives(params: {
   memoryId: string;
   localOriginalUri: string;
