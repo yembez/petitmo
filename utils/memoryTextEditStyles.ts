@@ -26,10 +26,14 @@ const platformTextBreak: Pick<TextStyle, 'textBreakStrategy'> = Platform.select(
   default: {},
 }) as Pick<TextStyle, 'textBreakStrategy'>;
 
-/** Typo du champ de saisie — alignée fil / livre imprimé. */
+/**
+ * Typo du champ de saisie — alignée fil / livre.
+ * NB : les modales de saisie n'utilisent **jamais** la typo Garamond (réservée au rendu livre) ;
+ * elles restent sur la police courante des souvenirs.
+ */
 export function memoryTextEditInputStyle(
   variant: MemoryTextEditPreviewVariant,
-  fontFamily: string
+  fontFamily: string,
 ): TextStyle {
   if (variant === 'feed-caption') {
     return {

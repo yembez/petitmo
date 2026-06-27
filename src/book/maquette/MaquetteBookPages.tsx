@@ -7,7 +7,7 @@ import {
   Platform,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import Svg, { Rect } from 'react-native-svg';
+import Svg, { Rect, Path } from 'react-native-svg';
 import QRCode from 'react-native-qrcode-svg';
 import {
   useFonts,
@@ -22,16 +22,15 @@ import {
   MEMORY_TEXT_FONT_FALLBACK,
   MEMORY_TEXT_FONT_SOURCES,
 } from '@/constants/memoryTextFont';
-import { Video, ResizeMode } from 'expo-av';
 import type { BookPage, PhotoFullVariant } from '@/src/book/BookEngine';
 import type { Child, Memory } from '@/types/local';
-import { formatDuration, formatBookLocationShort } from '@/utils/date';
+import { formatBookLocationShort } from '@/utils/date';
 import { formatFamilyAgesLine } from '@/utils/childrenAge';
 import type { PhotoCrop } from '@/src/book/photoCrop';
 import { bookPhotoCropImageRect } from '@/utils/bookPhotoCropLayout';
 import BookPagePhotoFrame from '@/components/BookPagePhotoFrame';
 import CoverPageSpineOverlay from '@/components/CoverPageSpineOverlay';
-import { clampAudioBookAnnotation } from '@/lib/audioBookAnnotation';
+import { clampMediaBookCaption } from '@/lib/mediaBookCaption';
 import {
   getPrimaryPhotoUriForBookPreview,
   getVideoPosterUriForBookPreview,
@@ -53,7 +52,17 @@ import {
   pdfCoverTitleStyle,
   pdfFolioStyle,
   pdfLabelStyle,
-  pdfMemoryTextBodyStyle,
+  PDF_MEDIA_QR_QR_MM,
+  PDF_MEDIA_QR_CARD_W_MM,
+  PDF_MEDIA_QR_CARD_PAD_MM,
+  PDF_MEDIA_QR_CARD_RADIUS_MM,
+  PDF_MEDIA_QR_GAP_MM,
+  PDF_MEDIA_QR_TYPE_ICON_MM,
+  PDF_MEDIA_QR_PULL_UP_MM,
+  PDF_MEDIA_QR_CARD_BORDER_COLOR,
+  PDF_MEDIA_QR_MUTED_COLOR,
+  PDF_MEDIA_TEXT_PAD_X_MM,
+  pdfMediaCaptionStyle,
   pdfMmToPreviewPxH,
   pdfMmToPreviewPxW,
   pdfPhotoCaptionStyle,
@@ -75,8 +84,6 @@ import {
   pdfTextMemoryDropCapStyle,
   pdfTextMemoryGuillemetBodyStyle,
   pdfTextMemoryTitleStyle,
-  pdfVideoSubStyle,
-  pdfVideoTitleStyle,
   BOOK_VISUAL_MARGIN_MM,
   PHOTO_FULL_BAND_HEIGHT_RATIO,
   PHOTO_NOTE_BAND_HEIGHT_MM,
@@ -404,9 +411,7 @@ function TextMemoryBodyContent({
             ]}
             {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
           >
-            {idx === 0
-              ? para.replace(/\n/g, `\n${EM_QUAD}`)
-              : `${EM_QUAD}${para.replace(/\n/g, `\n${EM_QUAD}`)}`}
+            {`${EM_QUAD}${para.replace(/\n/g, `\n${EM_QUAD}`)}`}
           </Text>
         ))}
       </View>
@@ -850,6 +855,7 @@ export default function MaquetteBookPages(props: Props) {
           onRequestTextEdit={onRequestTextEdit}
           dm400={dm400}
           memoryTextFont={memoryTextFont}
+          garamond={garamond}
           variant={page.variant}
         />
       );
@@ -872,6 +878,7 @@ export default function MaquetteBookPages(props: Props) {
           dm400={dm400}
           dm600={dm600}
           memoryTextFont={memoryTextFont}
+          garamond={garamond}
         />
       );
     case 'quote':
@@ -895,9 +902,11 @@ export default function MaquetteBookPages(props: Props) {
         />
       );
     case 'audio':
+    case 'video':
       if (!memory) return <View style={[styles.paper, { width, height }]} />;
       return (
-        <MaquetteAudio
+        <MaquetteMediaQr
+          kind={page.type}
           memory={memory}
           familyChildren={familyChildren}
           width={width}
@@ -912,26 +921,7 @@ export default function MaquetteBookPages(props: Props) {
           inlineCropConfig={inlineCropConfig}
           onRequestTextEdit={onRequestTextEdit}
           dm400={dm400}
-          dm600={dm600}
-          memoryTextFont={memoryTextFont}
-        />
-      );
-    case 'video':
-      if (!memory) return <View style={[styles.paper, { width, height }]} />;
-      return (
-        <MaquetteVideo
-          memory={memory}
-          familyChildren={familyChildren}
-          width={width}
-          height={height}
-          pad={pad}
-          typoScale={typoScale}
-          pageNum={pageNum}
-          qrUrl={qrUrl}
-          onRequestTextEdit={onRequestTextEdit}
-          dm400={dm400}
-          dm600={dm600}
-          garamondIt={garamondIt}
+          garamond={garamond}
           memoryTextFont={memoryTextFont}
         />
       );
@@ -1100,6 +1090,7 @@ function MaquettePhotoSimple({
   onRequestTextEdit,
   dm400,
   memoryTextFont,
+  garamond,
   variant,
 }: {
   memory: Memory;
@@ -1116,10 +1107,12 @@ function MaquettePhotoSimple({
   onRequestTextEdit: () => void;
   dm400?: string;
   memoryTextFont: string;
+  garamond?: string;
   variant: PhotoFullVariant;
 }) {
   const uri = getPrimaryPhotoUriForBookPreview(memory);
   const caption = (memory.content ?? '').trim();
+  const mediaPad = Math.round(pdfMmToPreviewPxW(PDF_MEDIA_TEXT_PAD_X_MM, width));
   const isFp = variant === 'FP';
   const imgH = isFp
     ? pdfMmToPreviewPxH(PHOTO_FULL_FP_IMAGE_HEIGHT_MM, height)
@@ -1173,12 +1166,19 @@ function MaquettePhotoSimple({
         style={[
           styles.photoFooter,
           {
-            paddingHorizontal: pad,
-            paddingTop: pdfMmToPreviewPxH(3.7, height),
+            paddingHorizontal: mediaPad,
+            marginTop: isFp ? 0 : pdfMmToPreviewPxH(-PDF_MEDIA_QR_PULL_UP_MM, height),
+            paddingTop: isFp ? pdfMmToPreviewPxH(3.7, height) : 0,
             paddingBottom: pdfMmToPreviewPxH(10, height),
             minHeight: 0,
             ...(footerH != null
-              ? { height: footerH, flexShrink: 0, flexGrow: 0, maxHeight: footerH }
+              ? {
+                  height: footerH,
+                  flexBasis: footerH,
+                  flexShrink: 0,
+                  flexGrow: 0,
+                  maxHeight: footerH,
+                }
               : null),
           },
         ]}
@@ -1198,18 +1198,20 @@ function MaquettePhotoSimple({
             </Text>
           ) : null}
         </View>
-        {caption.length > 0 ? (
-          <Text
-            style={[
-              styles.photoCaption,
-              pdfPhotoCaptionStyle(width),
-              { marginTop: pdfMmToPreviewPxH(2.1, height) },
-              memoryTextStyle(memoryTextFont),
-            ]}
-          >
-            {romanParagraphs(caption)}
-          </Text>
-        ) : null}
+        <View style={styles.mediaQrBodyWrap}>
+          {caption.length > 0 ? (
+            <Text
+              style={[
+                styles.photoCaption,
+                pdfPhotoCaptionStyle(width),
+                { marginTop: 0 },
+                editorialTextStyle(garamond, memoryTextFont),
+              ]}
+            >
+              {romanParagraphs(caption)}
+            </Text>
+          ) : null}
+        </View>
       </Pressable>
       <Folio n={pageNum} dm400={dm400} pageWidthPx={width} pageHeightPx={height} />
     </View>
@@ -1232,6 +1234,7 @@ function MaquettePhotoNote({
   dm400,
   dm600,
   memoryTextFont,
+  garamond,
 }: {
   memory: Memory;
   familyChildren: Child[];
@@ -1248,9 +1251,11 @@ function MaquettePhotoNote({
   dm400?: string;
   dm600?: string;
   memoryTextFont: string;
+  garamond?: string;
 }) {
   const uri = getPrimaryPhotoUriForBookPreview(memory);
   const legend = (memory.content ?? '').trim();
+  const mediaPad = Math.round(pdfMmToPreviewPxW(PDF_MEDIA_TEXT_PAD_X_MM, width));
   const imgH = pdfMmToPreviewPxH(PHOTO_NOTE_BAND_HEIGHT_MM, height);
   const bookLoc = bookMaquetteLocationLabel(memory);
   const photoInline = buildInlineCropProps(inlineCropConfig, memory.id);
@@ -1275,48 +1280,52 @@ function MaquettePhotoNote({
         }
       </VisualBand>
       <View style={[styles.page4TextBlock, { flex: 1, minHeight: 0 }]}>
-        <View
+        <Pressable
+          onPress={onRequestTextEdit}
+          accessibilityRole="button"
           style={{
             flex: 1,
-            paddingHorizontal: pad,
-            paddingTop: pdfMmToPreviewPxH(4, height),
+            flexDirection: 'column',
+            paddingHorizontal: mediaPad,
+            marginTop: pdfMmToPreviewPxH(-PDF_MEDIA_QR_PULL_UP_MM, height),
+            paddingTop: 0,
             paddingBottom: pdfMmToPreviewPxH(14, height),
           }}
         >
-          <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
-            <View
-              style={[
-                styles.page4MetaRow,
-                { marginBottom: pdfMmToPreviewPxH(2, height), gap: pdfMmToPreviewPxW(3, width) },
-              ]}
-            >
-              <Text style={[styles.page4Meta, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
-                {dateWithAgeCaps(memory, familyChildren)}
+          <View
+            style={[
+              styles.page4MetaRow,
+              { marginBottom: pdfMmToPreviewPxH(2, height), gap: pdfMmToPreviewPxW(3, width) },
+            ]}
+          >
+            <Text style={[styles.page4Meta, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
+              {dateWithAgeCaps(memory, familyChildren)}
+            </Text>
+            {bookLoc ? (
+              <Text
+                style={[styles.page4MetaLocation, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}
+                numberOfLines={2}
+              >
+                {bookLoc}
               </Text>
-              {bookLoc ? (
-                <Text
-                  style={[styles.page4MetaLocation, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}
-                  numberOfLines={2}
-                >
-                  {bookLoc}
-                </Text>
-              ) : null}
-            </View>
+            ) : null}
+          </View>
+          <View style={styles.mediaQrBodyWrap}>
             {legend.length > 0 ? (
               <Text
                 style={[
                   styles.page4Body,
                   pdfPhotoNoteBodyStyle(width),
-                  { marginTop: pdfMmToPreviewPxH(4, height) },
-                  memoryTextStyle(memoryTextFont),
+                  { marginTop: 0 },
+                  editorialTextStyle(garamond, memoryTextFont),
                 ]}
                 {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
               >
                 {romanParagraphs(legend)}
               </Text>
             ) : null}
-          </Pressable>
-        </View>
+          </View>
+        </Pressable>
       </View>
       <Folio n={pageNum} dm400={dm400} pageWidthPx={width} pageHeightPx={height} />
     </View>
@@ -1448,7 +1457,109 @@ function MaquetteQuote({
   );
 }
 
-function MaquetteAudio({
+type MediaQrKind = 'audio' | 'video';
+
+function MediaQrVisualFallback({
+  kind,
+  width,
+  frameW,
+  frameH,
+  memoryId,
+  typoScale,
+}: {
+  kind: MediaQrKind;
+  width: number;
+  frameW: number;
+  frameH: number;
+  memoryId: string;
+  typoScale: number;
+}) {
+  const heights = useMemo(() => barHeightsFromId(memoryId), [memoryId]);
+  const accent = kind === 'audio' ? VOCAL_BLUE : SAGE;
+  const ringSize = Math.max(28, Math.round(Math.min(frameW, frameH) * 0.2));
+  const waveContentW = BAR_COUNT * BAR_W + (BAR_COUNT - 1) * BAR_GAP;
+  const waveW = Math.min(frameW * 0.7, pdfMmToPreviewPxW(118, width));
+  const waveH = Math.max(12, Math.round(18 * typoScale));
+
+  return (
+    <View style={[styles.mediaQrFallback, { width: frameW, height: frameH }]}>
+      <View
+        style={[
+          styles.mediaQrFallbackRing,
+          {
+            width: ringSize,
+            height: ringSize,
+            borderRadius: ringSize / 2,
+            borderColor: `${accent}73`,
+          },
+        ]}
+      >
+        <Text style={[styles.mediaQrFallbackPlay, { fontSize: ringSize * 0.34, color: accent }]}>▶</Text>
+      </View>
+      {kind === 'audio' ? (
+        <Svg
+          width={waveW}
+          height={waveH}
+          viewBox={`0 0 ${waveContentW} 24`}
+          preserveAspectRatio="xMidYMid meet"
+        >
+          {heights.map((h, i) => (
+            <Rect
+              key={i}
+              x={i * (BAR_W + BAR_GAP)}
+              y={(24 - h) / 2}
+              width={BAR_W}
+              height={h}
+              rx={1}
+              fill={i < BAR_COUNT * 0.4 ? VOCAL_BLUE : 'rgba(0,0,0,0.12)'}
+            />
+          ))}
+        </Svg>
+      ) : null}
+    </View>
+  );
+}
+
+/** Pictogramme type média (haut-parleur / caméra) — tracé identique au PDF (`mediaTypeIconSvg`). */
+function MediaTypeIcon({
+  kind,
+  size,
+  color,
+}: {
+  kind: MediaQrKind;
+  size: number;
+  color: string;
+}) {
+  return (
+    <Svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {kind === 'audio' ? (
+        <>
+          <Path d="M11 5 6 9H2v6h4l5 4z" />
+          <Path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+          <Path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+        </>
+      ) : (
+        <>
+          <Path d="M23 7 16 12 23 17Z" />
+          <Path d="M3 5h11a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z" />
+        </>
+      )}
+    </Svg>
+  );
+}
+
+/** Page audio / vidéo : visuel (optionnel) + méta + légende + carte QR (bordure grise). */
+function MaquetteMediaQr({
+  kind,
   memory,
   familyChildren,
   width,
@@ -1463,9 +1574,10 @@ function MaquetteAudio({
   inlineCropConfig,
   onRequestTextEdit,
   dm400,
-  dm600,
+  garamond,
   memoryTextFont,
 }: {
+  kind: MediaQrKind;
   memory: Memory;
   familyChildren: Child[];
   width: number;
@@ -1480,70 +1592,86 @@ function MaquetteAudio({
   inlineCropConfig?: InlineCropConfig;
   onRequestTextEdit: () => void;
   dm400?: string;
-  dm600?: string;
+  garamond?: string;
   memoryTextFont: string;
 }) {
-  const heights = useMemo(() => barHeightsFromId(memory.id), [memory.id]);
-  const totalSec = memory.duration ?? 0;
-  const durLabel = formatDuration(Math.max(0, Math.floor(totalSec)));
-  const waveContentW = BAR_COUNT * BAR_W + (BAR_COUNT - 1) * BAR_GAP;
-  const titleRaw = clampAudioBookAnnotation((memory.content ?? '').trim());
-  // Proportions réelles PDF : QR audio = 17mm (`.page.audio .audio-qr-block .qr`).
-  const qrSize = Math.max(12, Math.round(pdfMmToPreviewPxW(17, width)));
-  const coverUri = getVoiceCoverUriForBookPreview(memory);
-  /** Même `.pn-image` que photo-note / PDF (bande 210 mm trim, intérieur 186×186 mm). */
+  const captionRaw = clampMediaBookCaption((memory.content ?? '').trim());
+  const mediaPad = Math.round(pdfMmToPreviewPxW(PDF_MEDIA_TEXT_PAD_X_MM, width));
+  const qrSize = Math.max(12, Math.round(pdfMmToPreviewPxW(PDF_MEDIA_QR_QR_MM, width)));
+  const visualUri =
+    kind === 'audio'
+      ? getVoiceCoverUriForBookPreview(memory)
+      : getVideoPosterUriForBookPreview(memory);
   const imgH = pdfMmToPreviewPxH(PHOTO_NOTE_BAND_HEIGHT_MM, height);
   const bookLoc = bookMaquetteLocationLabel(memory);
-  const photoInline = buildInlineCropProps(inlineCropConfig, memory.id);
-  // Proportions réelles PDF : anneau lecteur = 14mm (`.audio-ring`).
-  const ringSize = Math.max(10, Math.round(pdfMmToPreviewPxW(14, width)));
-  const playerGap = Math.max(2, Math.round(pdfMmToPreviewPxW(2, width)));
-  const waveSvgH = Math.max(8, Math.round(18 * typoScale));
-  const waveSvgW = Math.max(56, width - 2 * pad - ringSize - playerGap);
-  const dotSize = Math.max(6, Math.round(8 * typoScale));
+  const photoInline = kind === 'audio' ? buildInlineCropProps(inlineCropConfig, memory.id) : undefined;
+  const cardW = Math.round(pdfMmToPreviewPxW(PDF_MEDIA_QR_CARD_W_MM, width));
+  const cardPad = Math.max(4, Math.round(pdfMmToPreviewPxW(PDF_MEDIA_QR_CARD_PAD_MM, width)));
+  const cardRadius = Math.round(pdfMmToPreviewPxW(PDF_MEDIA_QR_CARD_RADIUS_MM, width));
+  const bodyGap = Math.round(pdfMmToPreviewPxW(PDF_MEDIA_QR_GAP_MM, width));
+  const typeIconSize = Math.max(8, Math.round(pdfMmToPreviewPxW(PDF_MEDIA_QR_TYPE_ICON_MM, width)));
+  const typeLabel = kind === 'audio' ? 'Audio' : 'Video';
+  const qrHint = kind === 'audio' ? 'Scanner pour écouter' : 'Scanner pour visionner';
 
   return (
     <View style={[styles.paper, { width, height }]}>
       <VisualBand width={width} height={height} bandH={imgH}>
         {(fw, fh) =>
-          coverUri ? (
-            <BookPagePhotoFrame
-              uri={coverUri}
+          visualUri ? (
+            kind === 'audio' ? (
+              <BookPagePhotoFrame
+                uri={visualUri}
+                frameW={fw}
+                frameH={fh}
+                crop={photoCrop}
+                rotation={rotation}
+                inlineCrop={photoInline}
+                showRotateButton={!!photoInline}
+                onRotate={onRotate}
+                typoScale={typoScale}
+              />
+            ) : (
+              <ExpoImage
+                source={{ uri: visualUri }}
+                recyclingKey={visualUri}
+                cachePolicy="memory-disk"
+                transition={0}
+                priority="high"
+                style={StyleSheet.absoluteFillObject}
+                contentFit="cover"
+              />
+            )
+          ) : (
+            <MediaQrVisualFallback
+              kind={kind}
+              width={width}
               frameW={fw}
               frameH={fh}
-              crop={photoCrop}
-              rotation={rotation}
-              inlineCrop={photoInline}
-              showRotateButton={!!photoInline}
-              onRotate={onRotate}
+              memoryId={memory.id}
               typoScale={typoScale}
             />
-          ) : null
+          )
         }
       </VisualBand>
-      <View style={[styles.audioBelowPhoto, { paddingBottom: pdfMmToPreviewPxH(14, height) }]}>
+      <View
+        style={[
+          styles.audioBelowPhoto,
+          {
+            marginTop: pdfMmToPreviewPxH(-PDF_MEDIA_QR_PULL_UP_MM, height),
+            paddingTop: 0,
+            paddingBottom: pdfMmToPreviewPxH(14, height),
+          },
+        ]}
+      >
         <View
           style={[
             styles.audioMetaRow,
             {
-              paddingHorizontal: pad,
-              paddingTop: pdfMmToPreviewPxH(3, height),
-              paddingBottom: pdfMmToPreviewPxH(3, height),
-              gap: pdfMmToPreviewPxH(2, height),
+              paddingHorizontal: mediaPad,
+              paddingBottom: pdfMmToPreviewPxH(2, height),
             },
           ]}
         >
-          <View style={styles.quoteHeaderLeft}>
-            <View
-              style={[
-                styles.vocalDot,
-                { width: dotSize, height: dotSize, borderRadius: dotSize / 2 },
-              ]}
-            />
-            <Text style={[styles.vocalLabel, pdfLabelStyle(width), dm600 && { fontFamily: dm600 }]}>
-              Audio
-            </Text>
-          </View>
           <View
             style={[
               styles.page4MetaRow,
@@ -1563,29 +1691,52 @@ function MaquetteAudio({
             ) : null}
           </View>
         </View>
-        <View style={{ flex: 1, minHeight: 0 }}>
+        <View style={[styles.mediaQrSep, { marginHorizontal: mediaPad }]} />
+        <View style={styles.mediaQrBodyWrap}>
           <View
-            style={{
-              flex: 1,
-              paddingHorizontal: pad,
-              paddingTop: pdfMmToPreviewPxH(2, height),
-              paddingBottom: pdfMmToPreviewPxH(2, height),
-            }}
+            style={[
+              styles.mediaQrBodyRow,
+              {
+                paddingHorizontal: mediaPad,
+                gap: bodyGap,
+              },
+            ]}
           >
-            <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
-              {titleRaw.length > 0 ? (
+            <Pressable
+              onPress={onRequestTextEdit}
+              accessibilityRole="button"
+              style={styles.mediaQrCaptionCol}
+            >
+              {captionRaw.length > 0 ? (
                 <Text
                   style={[
-                    styles.audioCaption,
-                    pdfMemoryTextBodyStyle(width),
-                    memoryTextStyle(memoryTextFont),
+                    styles.mediaQrCaption,
+                    pdfMediaCaptionStyle(width),
+                    editorialTextStyle(garamond, memoryTextFont),
                   ]}
                   {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
                 >
-                  {romanParagraphs(titleRaw)}
+                  {romanParagraphs(captionRaw)}
                 </Text>
               ) : null}
-              <View style={[styles.audioQrCenter, { marginTop: pdfMmToPreviewPxH(2, height) }]}>
+            </Pressable>
+            <View
+              style={[
+                styles.mediaQrCard,
+                {
+                  width: cardW,
+                  padding: cardPad,
+                  borderRadius: cardRadius,
+                  borderColor: PDF_MEDIA_QR_CARD_BORDER_COLOR,
+                },
+              ]}
+            >
+              <Text
+                style={[styles.mediaQrCardHint, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}
+              >
+                {qrHint}
+              </Text>
+              <View style={[styles.mediaQrCardQr, { marginVertical: cardPad }]}>
                 {qrUrl.trim().length > 0 ? (
                   <QRCode value={qrUrl} size={qrSize} backgroundColor="#FFFFFF" color={INK} />
                 ) : (
@@ -1598,182 +1749,20 @@ function MaquetteAudio({
                     }}
                   />
                 )}
+              </View>
+              <View style={styles.mediaQrCardType}>
                 <Text
                   style={[
-                    styles.audioQrHint,
+                    styles.mediaQrCardTypeLabel,
                     pdfLabelStyle(width),
-                    { marginTop: pdfMmToPreviewPxH(2.5, height) },
                     dm400 && { fontFamily: dm400 },
                   ]}
                 >
-                  Scanner pour écouter
+                  {typeLabel}
                 </Text>
-              </View>
-            </Pressable>
-          </View>
-          <View
-            style={[
-              styles.audioPlayerRow,
-              { paddingHorizontal: pad, paddingTop: pdfMmToPreviewPxH(1, height), gap: playerGap },
-            ]}
-          >
-            <View
-              style={[
-                styles.audioRingInline,
-                {
-                  width: ringSize,
-                  height: ringSize,
-                  borderRadius: ringSize / 2,
-                  borderWidth: Math.max(1, 1.5 * typoScale),
-                },
-              ]}
-            >
-              <Text style={[styles.playGlyphInline, { fontSize: pdfPtToPreviewPx(9, width) }]}>▶</Text>
-            </View>
-            <View style={styles.audioWaveCol}>
-              <Svg
-                width={waveSvgW}
-                height={waveSvgH}
-                viewBox={`0 0 ${waveContentW} 24`}
-                preserveAspectRatio="xMidYMid meet"
-              >
-                {heights.map((h, i) => (
-                  <Rect
-                    key={i}
-                    x={i * (BAR_W + BAR_GAP)}
-                    y={(24 - h) / 2}
-                    width={BAR_W}
-                    height={h}
-                    rx={1}
-                    fill={i < BAR_COUNT * 0.4 ? VOCAL_BLUE : 'rgba(0,0,0,0.12)'}
-                  />
-                ))}
-              </Svg>
-              <View style={styles.audioDurRowWide}>
-                <Text style={[styles.audioDur, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>0:00</Text>
-                <Text style={[styles.audioDur, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
-                  {durLabel}
-                </Text>
+                <MediaTypeIcon kind={kind} size={typeIconSize} color={PDF_MEDIA_QR_MUTED_COLOR} />
               </View>
             </View>
-          </View>
-        </View>
-      </View>
-      <Folio n={pageNum} dm400={dm400} pageWidthPx={width} pageHeightPx={height} />
-    </View>
-  );
-}
-
-function MaquetteVideo({
-  memory,
-  familyChildren,
-  width,
-  height,
-  pad,
-  typoScale,
-  pageNum,
-  qrUrl,
-  onRequestTextEdit,
-  dm400,
-  dm600,
-  garamondIt,
-  memoryTextFont,
-}: {
-  memory: Memory;
-  familyChildren: Child[];
-  width: number;
-  height: number;
-  pad: number;
-  typoScale: number;
-  pageNum: number;
-  qrUrl: string;
-  onRequestTextEdit: () => void;
-  dm400?: string;
-  dm600?: string;
-  garamondIt?: string;
-  memoryTextFont: string;
-}) {
-  const posterImageUri = getVideoPosterUriForBookPreview(memory);
-  const imgH = height * 0.42;
-  const raw = (memory.content ?? '').trim();
-  const title = 'Vidéo';
-  const sub = raw || 'Regarde ce moment en vidéo.';
-  const bookLoc = bookMaquetteLocationLabel(memory);
-  // Proportions réelles PDF : QR vidéo = 22mm (`.qr`).
-  const videoQrSize = Math.max(14, Math.round(pdfMmToPreviewPxW(22, width)));
-
-  return (
-    <View style={[styles.paper, { width, height }]}>
-      <VisualBand width={width} height={height} bandH={imgH}>
-        {() =>
-          posterImageUri ? (
-            <ExpoImage
-              source={{ uri: posterImageUri }}
-              recyclingKey={posterImageUri}
-              cachePolicy="memory-disk"
-              transition={0}
-              priority="high"
-              style={StyleSheet.absoluteFillObject}
-              contentFit="cover"
-            />
-          ) : null
-        }
-      </VisualBand>
-      <View style={{ flex: 1, minHeight: 0, paddingHorizontal: pad, paddingTop: Math.round(20 * typoScale) }}>
-        <View style={{ flex: 1, paddingBottom: Math.round(16 * typoScale) }}>
-          <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
-            <View style={[styles.noteMetaRow, { marginBottom: Math.round(8 * typoScale) }]}>
-              <Text style={[styles.noteMeta, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
-                {dateWithAgeCaps(memory, familyChildren)}
-              </Text>
-              {bookLoc ? (
-                <Text
-                  style={[styles.noteMetaLocation, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}
-                  numberOfLines={2}
-                >
-                  {bookLoc}
-                </Text>
-              ) : null}
-            </View>
-            <Text
-              style={[
-                styles.videoTitle,
-                pdfVideoTitleStyle(width),
-                { marginTop: Math.round(4 * typoScale) },
-                dm600 && { fontFamily: dm600 },
-                garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
-              ]}
-            >
-              {title}
-            </Text>
-            <Text
-              style={[
-                styles.videoSub,
-                pdfVideoSubStyle(width),
-                { marginTop: Math.round(10 * typoScale) },
-                memoryTextStyle(memoryTextFont),
-              ]}
-              {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
-            >
-              {romanParagraphs(sub)}
-            </Text>
-          </Pressable>
-          <View style={{ alignItems: 'center', marginTop: Math.round(16 * typoScale) }}>
-            {qrUrl.trim().length > 0 ? (
-              <QRCode value={qrUrl} size={videoQrSize} backgroundColor="#FFFFFF" color={INK} />
-            ) : (
-              <View
-                style={{
-                  width: videoQrSize,
-                  height: videoQrSize,
-                  borderRadius: 4,
-                  backgroundColor: '#EEEEEE',
-                }}
-              />
-            )}
-            <Text style={[styles.audioQrHint, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
-              Scanner pour regarder
-            </Text>
           </View>
         </View>
       </View>
@@ -2082,10 +2071,16 @@ const styles = StyleSheet.create({
     flexDirection: 'column',
     alignItems: 'flex-start',
     flexShrink: 0,
-    paddingTop: 10,
-    paddingBottom: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: LINE,
+  },
+  mediaQrSep: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: LINE,
+    flexShrink: 0,
+  },
+  mediaQrBodyWrap: {
+    flex: 1,
+    minHeight: 0,
+    justifyContent: 'center',
   },
   audioLower: {
     flex: 1,
@@ -2105,6 +2100,39 @@ const styles = StyleSheet.create({
     color: INK,
     textAlign: 'justify' as const,
   },
+  mediaQrBodyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  mediaQrCaptionCol: {
+    flex: 1,
+    minWidth: 0,
+  },
+  mediaQrCaption: {
+    color: INK,
+    textAlign: 'left' as const,
+  },
+  mediaQrCard: {
+    borderWidth: 1,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'stretch',
+  },
+  mediaQrCardHint: {
+    color: PDF_MEDIA_QR_MUTED_COLOR,
+    textAlign: 'left' as const,
+  },
+  mediaQrCardQr: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mediaQrCardType: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  mediaQrCardTypeLabel: {
+    color: PDF_MEDIA_QR_MUTED_COLOR,
+  },
   audioQrCenter: {
     alignItems: 'center',
     marginTop: 8,
@@ -2115,6 +2143,22 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     gap: 6,
     paddingTop: 6,
+  },
+  audioBottomBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    flexShrink: 0,
+    marginTop: 'auto',
+  },
+  audioWaveColNarrow: {
+    flexGrow: 0,
+    flexShrink: 0,
+  },
+  audioQrCorner: {
+    marginLeft: 'auto',
+    alignItems: 'flex-end',
+    flexShrink: 0,
   },
   audioRingInline: {
     width: 44,
@@ -2142,8 +2186,22 @@ const styles = StyleSheet.create({
   },
   audioDur: { fontSize: 9, color: MUTED },
   audioQrHint: { marginTop: 6, fontSize: 10, color: MUTED },
-  videoTitle: { marginTop: 4, fontSize: 18, color: INK },
-  videoSub: { marginTop: 10, fontSize: 14, color: '#6B7280', lineHeight: 22, textAlign: 'justify' as const },
+  mediaQrFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F2F2F7',
+    gap: 10,
+  },
+  mediaQrFallbackRing: {
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  mediaQrFallbackPlay: {
+    marginLeft: 2,
+    lineHeight: undefined,
+  },
   rotateOverlayBtn: {
     position: 'absolute',
     bottom: 10,

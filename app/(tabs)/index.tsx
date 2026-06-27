@@ -36,8 +36,8 @@ import TabSceneTransition from '@/components/TabSceneTransition';
 const CAPTURE_TITLE_FONT_SIZE = 18;
 const CAPTURE_TITLE_LINE_HEIGHT = 24;
 const CAPTURE_TITLE_HEART_SIZE = scale(16);
-const CAPTURE_HEADER_DATE_FONT_SIZE = 20;
-const CAPTURE_HEADER_DATE_LINE_HEIGHT = 24;
+const CAPTURE_HEADER_DATE_FONT_SIZE = 15;
+const CAPTURE_HEADER_DATE_LINE_HEIGHT = 20;
 /** Hauteur de la ligne date / logo / menu (alignés sur le bouton burger). */
 const CAPTURE_HEADER_ROW_H = scale(40);
 
@@ -59,7 +59,6 @@ import {
 } from '@/services/children';
 import { hydrateTabScreensFromSqliteSync } from '@/services/tabScreensHydrate';
 import type { Child } from '@/types/local';
-import PetitmoLogoManuscrit, { PETITMO_LOGO_VIEWBOX } from '@/components/PetitmoLogoManuscrit';
 import { checkMemoryLimit } from '@/lib/limits';
 import { getLocalChild, listLocalChildren } from '@/lib/localDb';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
@@ -493,8 +492,6 @@ function CapturerScreen() {
   }
 
   const headerMenuIconSize = scale(22);
-  const captureLogoH = scale(36);
-  const captureLogoW = captureLogoH * (PETITMO_LOGO_VIEWBOX.width / PETITMO_LOGO_VIEWBOX.height);
   const captureHeaderDate = formatCaptureHeaderDate();
   const captureBottomReserve = tabBarFloatingOverlapPad(insets.bottom);
   const childGivenName = childDisplayGivenName(child.name);
@@ -547,11 +544,17 @@ function CapturerScreen() {
                 <Menu size={headerMenuIconSize} color={THEME.textPrimary} strokeWidth={2} />
               </TouchableOpacity>
               <View style={styles.captureHeaderLogoAbsolute} pointerEvents="none">
-                <PetitmoLogoManuscrit
-                  width={captureLogoW}
-                  height={captureLogoH}
-                  color={THEME.textTertiary}
-                />
+                <Text
+                  style={[
+                    styles.captureHeaderTitle,
+                    captureTitleBoldFont
+                      ? { fontFamily: captureTitleBoldFont }
+                      : { fontWeight: '700' },
+                  ]}
+                  accessibilityRole="header"
+                >
+                  Capture
+                </Text>
               </View>
             </View>
           </View>
@@ -803,6 +806,13 @@ const styles = StyleSheet.create({
     height: CAPTURE_HEADER_ROW_H,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  captureHeaderTitle: {
+    fontSize: scale(26),
+    lineHeight: scale(30),
+    color: THEME.textPrimary,
+    letterSpacing: -0.3,
+    ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
   },
   captureHeaderMenuHit: {
     zIndex: 1,

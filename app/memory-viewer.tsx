@@ -49,6 +49,7 @@ import { ensurePlaybackAudioForListening } from '@/lib/playbackAudioMode';
 import AudioPlayer from '@/components/AudioPlayer';
 import EditTextModal from '@/components/EditTextModal';
 import { feedMemoryTextEditPreviewVariant } from '@/utils/memoryTextEditStyles';
+import { bookLineBudgetForMemoryType, bookCharsPerLineForMemoryType } from '@/utils/textLimits';
 import { updateMemoryContent } from '@/services/media';
 import { useToggleFavorite } from '@/hooks/useToggleFavorite';
 import {
@@ -339,6 +340,8 @@ export default function MemoryViewerScreen() {
         visible={editingTextMemory !== null}
         initialText={editingTextMemory?.content ?? ''}
         previewVariant={feedMemoryTextEditPreviewVariant(editingTextMemory?.type)}
+        bookLineBudget={bookLineBudgetForMemoryType(editingTextMemory?.type)}
+        bookCharsPerLine={bookCharsPerLineForMemoryType(editingTextMemory?.type)}
         title="Modifier le texte"
         onClose={() => setEditingTextMemory(null)}
         onSave={handleSaveTextEdit}

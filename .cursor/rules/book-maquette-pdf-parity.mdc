@@ -40,8 +40,8 @@ Spec complète : `docs/specs/book-page-layout.md`
 | `photo-full` | [M] ou [FP] selon alternance | [M] 186×210 mm (75% hauteur) · [FP] pleine largeur ~235 mm | Court ≤ 3 lignes, 11.25 pt Roboto |
 | `photo-note` | [M] uniquement | Carré fixe **186×186 mm** | Long 4–12 lignes, **10 pt** Roboto |
 | `quote` (Petits mots) | — | Aucune | Texte pur seul, variantes ci-dessous |
-| `audio` | [M] | Même squelette que photo-note | Annotation + QR |
-| `video` | [M] | 42% hauteur page | Titre + QR |
+| `audio` | [M] | Même squelette que photo-note | Légende Garamond + carte QR |
+| `video` | [M] | Même squelette que photo-note | Légende Garamond + carte QR |
 
 ---
 
@@ -117,15 +117,37 @@ Toutes dans `src/book/pdfPreviewTypo.ts` — **reporter les mêmes valeurs** dan
 
 ---
 
-## Typographie autres textes souvenir (Roboto)
+## Typographie textes sous visuels (Roboto)
 
-| Contexte | Font | Taille | Interligne | Max lignes |
-|----------|------|--------|------------|------------|
-| Caption photo-full | Roboto | **11.25 pt** | 1.30 | 3 |
-| Texte photo-note | Roboto | **10 pt** | 1.35 | 12 |
-| Audio / vidéo (annotation) | Roboto | voir `pdfPreviewTypo.ts` | — | 12 |
+### Photos
 
-Titres éditoriaux (couverture, chapitre, vidéo) : **EB Garamond italic** — pas sur corps souvenir photo/audio.
+| Page | Typo corps | Interligne | Plafond saisie |
+|------|------------|------------|----------------|
+| `photo-full` (≤ 3 lignes) | **11,25 pt** | 1,30 | **12 lignes** |
+| `photo-note` (> 3 lignes) | **10 pt** | 1,35 | **12 lignes** |
+
+### Audio / vidéo (gabarit unifié `MaquetteMediaQr`)
+
+Audio **et** vidéo partagent strictement la même mise en page : **visuel** (couverture optionnelle) → date/lieu (collés sous la photo) → **trait de séparation** → bloc `[ légende | carte QR ]` **centré verticalement** entre le trait et le bas de page. Pas de lecteur audio (waveform / play / durée supprimés), pas de pastille type, pas de titre.
+
+| Élément | Spec |
+|---------|------|
+| Bande visuelle | Carré **186×186 mm** (`PHOTO_NOTE_BAND_HEIGHT_MM`) |
+| Sans visuel | Fond `#F2F2F7` + anneau lecture + onde (audio) ou anneau seul (vidéo) |
+| Méta | Date·âge à gauche, **lieu à droite** — collés sous la photo (`.media-qr-meta-row`, padding-top page 2,5 mm) |
+| Trait | Filet `.media-qr-sep` juste sous la méta (`mediaQrSep`) |
+| Légende | **EB Garamond droit 11 pt**, interligne 1,5, **aligné à gauche**, alinéa par paragraphe — **6 lignes max** (`MAX_MEDIA_CAPTION_LINES`), ~55 car/ligne (`MEDIA_CAPTION_CHARS_PER_LINE`) |
+| Centrage | Bloc texte + carte **centré verticalement** (`.media-qr-body-wrap` / `mediaQrBodyWrap`) |
+| Carte QR | Bloc à droite, **bordure grise `#D8D8DD`**, **angles carrés (radius 0)**, largeur **38 mm**, padding 4 mm (`PDF_MEDIA_QR_CARD_*`) |
+| Contenu carte | Libellé haut (gris `#AEAEB2`) → **QR 18 mm** (`PDF_MEDIA_QR_QR_MM`) → ligne basse : mot + pictogramme |
+| Libellé | Audio « **Scanner pour écouter** » · Vidéo « **Scanner pour visionner** » |
+| Mot + picto | Audio « Audio » + haut-parleur · Vidéo « Video » + caméra — gris `#AEAEB2`, picto **4 mm** (`mediaTypeIconSvg` / `MediaTypeIcon`, mêmes tracés SVG) |
+
+Le `content` entier est la légende (audio comme vidéo).
+
+La typo **Garamond est réservée au rendu livre** (aperçu maquette + PDF). Les **modales de saisie/édition de texte n'utilisent jamais Garamond** (police courante des souvenirs) ; elles n'héritent que du **budget de saisie** (lignes × car/ligne) via `bookLineBudgetForMemoryType` / `bookCharsPerLineForMemoryType`.
+
+Fichiers : `lib/mediaBookCaption.ts` ↔ `server/src/pdf/mediaBookCaption.ts` · `MaquetteMediaQr` + `MediaTypeIcon` ↔ `pageMediaQr()` + `mediaTypeIconSvg()` dans `htmlBook.ts`.
 
 ---
 
@@ -133,13 +155,11 @@ Titres éditoriaux (couverture, chapitre, vidéo) : **EB Garamond italic** — p
 
 | Type de souvenir | Limite | Fichier |
 |-----------------|--------|---------|
-| Texte pur (`write.tsx`) | **28 lignes** | `utils/textLimits.ts` → `MAX_BOOK_LINES` |
-| Caption photo/audio/vidéo (`EditTextModal`) | **12 lignes** | `estimateBookLines()` |
+| Texte pur (`write.tsx`) | **28 lignes** | `MAX_BOOK_LINES` |
+| Photo (légende livre) | **12 lignes** × 42 car | `MAX_BOOK_CAPTION_LINES` |
+| Audio / vidéo (légende livre) | **6 lignes** × ~55 car | `MAX_MEDIA_CAPTION_LINES` / `MEDIA_CAPTION_CHARS_PER_LINE` |
 
-**Règle absolue : aucune troncature dans le livre.** La limite est à la saisie, pas à l'affichage.
-
-- `pageQuote` : pas de `clampChars` — budget garanti par la saisie
-- `pagePhotoNote` : pas de `clampWithEllipsis` arbitraire — idem
+**Règle absolue : aucune troncature dans le livre** — sauf garde-fou `clampMediaBookCaption` si contenu legacy dépasse le budget. La saisie impose le plafond via `bookLineBudgetForMemoryType`.
 
 ---
 
@@ -167,6 +187,9 @@ Le contenu des pages est **identique** entre digital et print. Seuls changent : 
 | `src/book/maquette/MaquetteBookPages.tsx` | `htmlBook.ts` → `pageQuote()` + classes `quote-variant-*` |
 | `src/book/pdfPreviewTypo.ts` (pt/mm → px aperçu) | CSS `htmlBook.ts` (mêmes valeurs en pt/mm) |
 | `src/book/quoteFitLevel.ts` | `server/src/pdf/maquetteAlign.ts` |
+| `src/book/bookTextParts.ts` | `server/src/pdf/bookTextParts.ts` |
+| `lib/mediaBookCaption.ts` | `server/src/pdf/mediaBookCaption.ts` |
+| `utils/textLimits.ts` (`bookLineBudgetForMemoryType`) | budgets alignés côté rendu livre |
 | `utils/bookPhotoCropLayout.ts` | `server/src/pdf/bookPhotoCropLayout.ts` |
 | `constants/memoryTextFont.ts` | Classe `.memory-text` dans `htmlBook` |
 

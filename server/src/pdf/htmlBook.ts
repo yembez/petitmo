@@ -6,6 +6,7 @@ import {
   PRINT_BLEED_MM,
   BOOK_COVER_PHOTO_HEIGHT_RATIO,
   BOOK_VISUAL_MARGIN_MM,
+  PDF_MEDIA_TEXT_PAD_X_MM,
   PHOTO_FULL_BAND_HEIGHT_RATIO,
   PHOTO_NOTE_INNER_MM,
   PHOTO_FULL_FP_FOOTER_MM,
@@ -13,7 +14,7 @@ import {
 import type { BookPageServer } from '../types/contracts';
 import type { ChildRow, MemoryRow } from './memoryRow';
 import { memoryBookDisplayDateIso } from './memoryBookDisplayDate';
-import { clampAudioBookAnnotation } from './audioBookAnnotation';
+import { clampMediaBookCaption } from './mediaBookCaption';
 import { coverCropImgInlineStyle } from './bookPhotoCropLayout';
 import {
   audioWaveformSvg,
@@ -120,11 +121,9 @@ function romanHtmlTitledSm(text: string): string {
     .map(p => p.trim())
     .filter(Boolean);
   return paragraphs
-    .map((p, idx) => {
+    .map(p => {
       const lines = p.split(/\n/).map(l => l.trim()).filter(Boolean);
-      const inner = lines
-        .map((l, li) => (idx === 0 && li === 0 ? esc(l) : esc(EM + l)))
-        .join('<br/>\n');
+      const inner = lines.map(l => esc(EM + l)).join('<br/>\n');
       return `<p>${inner}</p>`;
     })
     .join('\n');
@@ -160,13 +159,6 @@ function romanHtmlDropCap(text: string): string {
 
 function monthCaps(label: string): string {
   return label.replace(/\b\w/g, c => c.toUpperCase());
-}
-
-function fmtDuration(sec: number | null | undefined): string {
-  if (!sec || sec <= 0) return '0:00';
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
-  return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
 function qrApiUrl(dataUrl: string): string {
@@ -268,7 +260,7 @@ function pagePhotoFull(
       <div class="pf-meta">${esc(dateWithAgeCaps(memoryBookDisplayDateIso(m), birthdate))}</div>
       ${locLabel ? `<div class="pf-meta pf-meta-loc">${esc(locLabel)}</div>` : ''}
     </div>
-    ${captionHtml ? `<div class="pf-caption body memory-text">${captionHtml}</div>` : ''}
+    <div class="pf-body-wrap">${captionHtml ? `<div class="pf-caption body text-memory-editorial">${captionHtml}</div>` : ''}</div>
   </div>
   <div class="folio">${pageNum}</div>
 </div>`;
@@ -296,7 +288,7 @@ function pagePhotoNote(
       <div class="label">${esc(dateWithAgeCaps(memoryBookDisplayDateIso(m), birthdate))}</div>
       ${locLabel ? `<div class="label pn-meta-loc">${esc(locLabel)}</div>` : ''}
     </div>
-    ${legend ? `<div class="body memory-text">${romanHtml(legend)}</div>` : ''}
+    <div class="pn-body-wrap">${legend ? `<div class="body text-memory-editorial">${romanHtml(legend)}</div>` : ''}</div>
   </div>
   <div class="folio">${pageNum}</div>
 </div>`;
@@ -364,7 +356,33 @@ function pageQuote(
 </div>`;
 }
 
-function pageAudio(
+function mediaQrVisualFallbackHtml(kind: 'audio' | 'video', memoryId: string): string {
+  const accent = kind === 'audio' ? '#5C8FA6' : '#6B8F7E';
+  const wave =
+    kind === 'audio'
+      ? `<div class="media-qr-fallback-wave">${audioWaveformSvg(memoryId)}</div>`
+      : '';
+  return `<div class="media-qr-visual-fallback">
+    <div class="media-qr-fallback-ring" style="border-color:${accent}73">
+      <span class="media-qr-fallback-play" style="color:${accent}">▶</span>
+    </div>
+    ${wave}
+  </div>`;
+}
+
+/** Pictogramme type média (haut-parleur / caméra) — tracé identique à la maquette (`MediaTypeIcon`). */
+function mediaTypeIconSvg(kind: 'audio' | 'video'): string {
+  const open =
+    '<svg class="media-qr-type-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">';
+  const paths =
+    kind === 'audio'
+      ? '<path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>'
+      : '<path d="M23 7 16 12 23 17Z"/><path d="M3 5h11a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/>';
+  return `${open}${paths}</svg>`;
+}
+
+function pageMediaQr(
+  kind: 'audio' | 'video',
   m: MemoryRow,
   qrUrl: string,
   pageNum: number,
@@ -372,45 +390,41 @@ function pageAudio(
   crop: PhotoCrop | undefined,
   birthdate: string | null | undefined
 ): string {
-  const titleRaw = clampAudioBookAnnotation(sanitizeText((m.content ?? '').trim()));
-  const dur = fmtDuration(m.duration);
-  const titleHtml = titleRaw ? romanHtml(titleRaw) : '';
-  const coverUrl = imgAttr(m.voice_cover_url);
+  const captionRaw = clampMediaBookCaption(sanitizeText((m.content ?? '').trim()));
+  const captionHtml = captionRaw ? romanHtml(captionRaw) : '';
+  const visualUrl =
+    kind === 'audio' ? imgAttr(m.voice_cover_url) : imgAttrFirst([m.thumbnail_url, m.poster_url]);
   const rotCss = rot ? `transform: rotate(${rot}deg); transform-origin: center;` : '';
   const locLabel = bookPdfLocationLabel(m.location);
-  return `<div class="page audio audio-note-layout">
+  const typeLabel = kind === 'audio' ? 'Audio' : 'Video';
+  const qrHint = kind === 'audio' ? 'Scanner pour écouter' : 'Scanner pour visionner';
+
+  const visualInner = visualUrl
+    ? kind === 'audio'
+      ? `<div class="crop-frame" style="width:100%;height:100%;"><img class="crop-img" src="${visualUrl}" alt="" style="${cropCss(crop)}${rotCss}" /></div>`
+      : `<img src="${visualUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;" />`
+    : mediaQrVisualFallbackHtml(kind, m.id);
+
+  return `<div class="page media-qr media-qr-${kind} audio-note-layout">
   <div class="pn-image">
-    ${
-      coverUrl
-        ? `<div class="crop-frame" style="width:100%;height:100%;"><img class="crop-img" src="${coverUrl}" alt="" style="${cropCss(crop)}${rotCss}" /></div>`
-        : '<div class="placeholder" style="width:100%;height:100%;"></div>'
-    }
+    ${visualInner}
   </div>
-  <div class="pn-text audio-below-photo">
-    <div class="audio-meta-row">
-      <div class="audio-type-pill">
-        <span class="dot vocal"></span>
-        <span class="label audio-type-label">Audio</span>
-      </div>
-      <div class="audio-meta-date-row">
-        <span class="label audio-meta-date">${esc(dateWithAgeCaps(memoryBookDisplayDateIso(m), birthdate))}</span>
-        ${locLabel ? `<span class="label audio-meta-loc">${esc(locLabel)}</span>` : ''}
-      </div>
+  <div class="pn-text media-qr-below">
+    <div class="media-qr-meta-row">
+      <span class="label media-qr-meta-date">${esc(dateWithAgeCaps(memoryBookDisplayDateIso(m), birthdate))}</span>
+      ${locLabel ? `<span class="label media-qr-meta-loc">${esc(locLabel)}</span>` : ''}
     </div>
-    ${titleHtml ? `<div class="audio-title-above-qr body memory-text">${titleHtml}</div>` : ''}
-    <div class="audio-qr-block">
-      ${qrImgTag(qrUrl)}
-      <div class="label audio-qr-hint">Scanner pour écouter</div>
-    </div>
-    <div class="audio-player-row">
-      <div class="audio-ring audio-ring-inline">
-        <div class="audio-play">▶</div>
-      </div>
-      <div class="audio-wave-col">
-        <div class="audio-wave-wrap audio-wave-inline">${audioWaveformSvg(m.id)}</div>
-        <div class="audio-dur-row audio-dur-inline">
-          <span class="label audio-dur-side">0:00</span>
-          <span class="label audio-dur-side">${esc(dur)}</span>
+    <div class="media-qr-sep"></div>
+    <div class="media-qr-body-wrap">
+      <div class="media-qr-body-row">
+        <div class="media-qr-caption text-memory-editorial">${captionHtml}</div>
+        <div class="media-qr-card">
+          <div class="label media-qr-card-hint">${qrHint}</div>
+          <div class="media-qr-card-qr">${qrImgTag(qrUrl)}</div>
+          <div class="media-qr-card-type">
+            <span class="label media-qr-card-type-label">${typeLabel}</span>
+            ${mediaTypeIconSvg(kind)}
+          </div>
         </div>
       </div>
     </div>
@@ -419,35 +433,24 @@ function pageAudio(
 </div>`;
 }
 
+function pageAudio(
+  m: MemoryRow,
+  qrUrl: string,
+  pageNum: number,
+  rot: number,
+  crop: PhotoCrop | undefined,
+  birthdate: string | null | undefined
+): string {
+  return pageMediaQr('audio', m, qrUrl, pageNum, rot, crop, birthdate);
+}
+
 function pageVideo(
   m: MemoryRow,
   qrUrl: string,
   pageNum: number,
   birthdate: string | null | undefined
 ): string {
-  const raw = sanitizeText((m.content ?? '').trim());
-  const vTitle = 'Vidéo';
-  const sub = raw || 'Regarde ce moment en vidéo.';
-  const thumbUrl = imgAttrFirst([m.thumbnail_url, m.poster_url]);
-  const locLabel = bookPdfLocationLabel(m.location);
-  return `<div class="page video">
-  <div class="video-thumb">
-    ${thumbUrl ? `<img src="${thumbUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;" />` : '<div class="placeholder" style="width:100%;height:100%;"></div>'}
-  </div>
-  <div class="inner video-text-block">
-    <div class="video-meta-row">
-      <div class="label">${esc(dateWithAgeCaps(memoryBookDisplayDateIso(m), birthdate))}</div>
-      ${locLabel ? `<div class="label video-meta-loc">${esc(locLabel)}</div>` : ''}
-    </div>
-    <div class="video-title-line">${esc(vTitle)}</div>
-    <div class="video-sub-line memory-text">${romanHtml(sub)}</div>
-    <div class="audio-qr video-qr-bottom">
-      ${qrImgTag(qrUrl)}
-      <div class="label" style="margin-top:3mm;">Scanner pour regarder</div>
-    </div>
-  </div>
-  <div class="folio">${pageNum}</div>
-</div>`;
+  return pageMediaQr('video', m, qrUrl, pageNum, 0, undefined, birthdate);
 }
 
 function pageBackCover(pageNum: number): string {
@@ -531,7 +534,6 @@ function buildHtmlDocument(
   const pnImgHmm = (PHOTO_NOTE_INNER_MM + 2 * BOOK_VISUAL_MARGIN_MM).toFixed(2);
   const coverPhotoHmm = (pageHmm * BOOK_COVER_PHOTO_HEIGHT_RATIO).toFixed(2);
   const pfImgHmm = (pageHmm * PHOTO_FULL_BAND_HEIGHT_RATIO).toFixed(2);
-  const videoThumbHmm = (pageHmm * 0.42).toFixed(2);
   const bodyClass = isPrint ? ' class="print-bleed"' : '';
   return `<!DOCTYPE html>
 <html lang="fr">
@@ -555,9 +557,10 @@ function buildHtmlDocument(
   --pf-img-h:${pfImgHmm}mm;
   --pf-fp-footer-h:${PHOTO_FULL_FP_FOOTER_MM}mm;
   --pf-fp-img-h:calc(var(--page-h) - var(--pf-fp-footer-h));
-  --video-thumb-h:${videoThumbHmm}mm;
   --pad-x:15mm;
   --pad-x-safe:calc(15mm + var(--bleed));
+  --media-pad-x:${PDF_MEDIA_TEXT_PAD_X_MM}mm;
+  --media-pad-x-safe:calc(${PDF_MEDIA_TEXT_PAD_X_MM}mm + var(--bleed));
   --visual-margin:${BOOK_VISUAL_MARGIN_MM}mm;
 }
 html { margin:0; padding:0; background:#fff; }
@@ -687,12 +690,17 @@ body.print-bleed .chapter-inner {
 }
 .pf-footer {
   overflow:hidden;
-  padding:3.7mm var(--pad-x) 10mm;
+  padding:3.7mm var(--media-pad-x) 10mm;
   display:flex; flex-direction:column;
   box-sizing:border-box;
 }
 .pf-variant-m .pf-footer {
   flex:1; min-height:0;
+  margin-top:-7mm; padding-top:0;
+}
+.pf-body-wrap {
+  flex:1; min-height:0;
+  display:flex; flex-direction:column; justify-content:center;
 }
 .pf-variant-fp .pf-footer {
   flex:0 0 var(--pf-fp-footer-h);
@@ -701,8 +709,8 @@ body.print-bleed .chapter-inner {
   max-height:var(--pf-fp-footer-h);
 }
 body.print-bleed .pf-footer {
-  padding-left:var(--pad-x-safe);
-  padding-right:var(--pad-x-safe);
+  padding-left:var(--media-pad-x-safe);
+  padding-right:var(--media-pad-x-safe);
 }
 .pf-meta {
   font-family:'DM Sans',sans-serif; font-size:7pt; font-weight:400;
@@ -717,8 +725,8 @@ body.print-bleed .pf-footer {
   color:#3A3A3C; letter-spacing:.15pt; text-transform:none; text-align:right;
   flex:1; min-width:0;
 }
-.pf-caption { margin-top:2.1mm; font-size:11.25pt; line-height:1.3; }
-.pf-caption.memory-text { font-size:11.25pt; line-height:1.3; }
+.pf-caption { margin-top:0; font-size:14pt; line-height:1.3; }
+.pf-caption.text-memory-editorial { font-size:14pt; line-height:1.3; text-align:justify; }
 .placeholder { background:#F2F2F7; }
 
 .photo-note { flex-direction:column; }
@@ -728,11 +736,19 @@ body.print-bleed .pf-footer {
 }
 .pn-text {
   flex:1; min-height:0; overflow:hidden;
-  padding:4mm var(--pad-x) 14mm;
+  padding:4mm var(--media-pad-x) 14mm;
+}
+.photo-note .pn-text {
+  display:flex; flex-direction:column;
+  margin-top:-7mm; padding-top:0;
+}
+.pn-body-wrap {
+  flex:1; min-height:0;
+  display:flex; flex-direction:column; justify-content:center;
 }
 body.print-bleed .pn-text {
-  padding-left:var(--pad-x-safe);
-  padding-right:var(--pad-x-safe);
+  padding-left:var(--media-pad-x-safe);
+  padding-right:var(--media-pad-x-safe);
 }
 .pn-meta-row {
   display:flex; justify-content:space-between; align-items:flex-start;
@@ -742,8 +758,8 @@ body.print-bleed .pn-text {
   font-weight:600; color:#3A3A3C; letter-spacing:.15pt; text-transform:none;
   text-align:right; flex:1; min-width:0;
 }
-.photo-note .pn-text .body.memory-text {
-  font-size:10pt; line-height:1.35;
+.photo-note .pn-text .body.text-memory-editorial {
+  font-size:14pt; line-height:1.35; text-align:justify;
 }
 
 body.print-bleed .bleed-x {
@@ -892,144 +908,120 @@ body.print-bleed .bleed-x {
 
 /* Audio : même squelette que photo-note (image bords + bandeau bas). */
 .audio-note-layout { flex-direction:column; }
-.audio-below-photo {
+.media-qr-below {
   display:flex;
   flex-direction:column;
   flex:1;
   min-height:0;
+  margin-top:-7mm;
+  padding-top:0;
 }
-.audio-meta-row {
-  display:flex;
-  flex-direction:column;
-  align-items:flex-start;
-  flex-shrink:0;
-  gap:2mm;
-  padding-bottom:3mm;
-  border-bottom:.3pt solid rgba(0,0,0,.08);
-}
-.audio-meta-date-row {
+.media-qr-meta-row {
   display:flex;
   flex-direction:row;
   justify-content:space-between;
   align-items:flex-start;
   width:100%;
   gap:3mm;
+  flex-shrink:0;
+  padding-bottom:2mm;
 }
-.audio-meta-date { flex-shrink:0; text-align:left; }
-.audio-meta-loc {
+.media-qr-meta-date { flex-shrink:0; text-align:left; }
+.media-qr-meta-loc {
   font-weight:600; color:#3A3A3C; letter-spacing:.15pt; text-transform:none;
   text-align:right; flex:1; min-width:0;
 }
-.audio-type-pill {
-  display:flex;
-  align-items:center;
-  gap:4pt;
-}
-.audio-type-label {
-  color:#5C8FA6;
-  text-transform:none;
-  letter-spacing:0;
-}
-.audio-title-above-qr {
-  margin-top:2mm;
+.media-qr-sep {
+  height:.3pt;
+  background:rgba(0,0,0,.12);
+  width:100%;
   flex-shrink:0;
 }
-.audio-qr-block {
+.media-qr-body-wrap {
+  flex:1;
+  min-height:0;
   display:flex;
-  flex-direction:column;
   align-items:center;
-  flex-shrink:0;
-  margin-top:2mm;
-  margin-bottom:2mm;
 }
-.page.audio .audio-qr-block .qr {
-  width:17mm;
-  height:17mm;
-}
-.audio-qr-hint {
-  margin-top:2.5mm;
-  text-align:center;
-}
-.audio-player-row {
+.media-qr-body-row {
   display:flex;
   flex-direction:row;
   align-items:center;
-  gap:2mm;
-  flex-shrink:0;
-  margin-top:auto;
-  padding-top:1mm;
+  gap:6mm;
+  width:100%;
 }
-.audio-ring {
-  width:14mm;
-  height:14mm;
+.media-qr-caption {
+  flex:1;
+  min-width:0;
+  font-family:'EB Garamond',serif;
+  font-style:normal;
+  font-weight:400;
+  font-size:14pt;
+  line-height:1.5;
+  color:#1C1C1E;
+  text-align:left;
+}
+.media-qr-caption p { margin:0; }
+.media-qr-card {
+  flex:0 0 auto;
+  width:38mm;
+  box-sizing:border-box;
+  padding:4mm;
+  border:.5pt solid #D8D8DD;
+  border-radius:0;
+  background:#FFFFFF;
+  display:flex;
+  flex-direction:column;
+}
+.media-qr-card-hint { color:#AEAEB2; text-align:left; }
+.media-qr-card-qr {
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  margin:4mm 0;
+}
+.media-qr-card .qr { width:18mm; height:18mm; display:block; }
+.media-qr-card-type {
+  display:flex;
+  flex-direction:row;
+  align-items:center;
+  justify-content:space-between;
+}
+.media-qr-card-type-label { color:#AEAEB2; }
+.media-qr-type-icon { width:4mm; height:4mm; color:#AEAEB2; }
+.media-qr-visual-fallback {
+  width:100%;
+  height:100%;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:4mm;
+  background:#F2F2F7;
+}
+.media-qr-fallback-ring {
+  width:22mm;
+  height:22mm;
   border-radius:50%;
   border:1.2pt solid rgba(92,143,166,.45);
   display:flex;
   align-items:center;
   justify-content:center;
-  flex-shrink:0;
+  background:#FFFFFF;
 }
-.audio-ring-inline { margin-bottom:0; }
-.audio-play { font-size:9pt; color:#5C8FA6; margin-left:1pt; }
-.audio-wave-col {
-  flex:1;
-  min-width:0;
-  display:flex;
-  flex-direction:column;
+.media-qr-fallback-play {
+  font-size:11pt;
+  margin-left:1pt;
 }
-.audio-wave-wrap {
+.media-qr-fallback-wave {
+  width:72%;
+  max-width:118mm;
+}
+.media-qr-fallback-wave .audio-wave-svg {
   width:100%;
-  max-width:none;
-  margin:0;
+  height:auto;
+  display:block;
 }
-.audio-wave-wrap .audio-wave-svg { width:100%; height:auto; display:block; }
-.audio-dur-row {
-  display:flex;
-  flex-direction:row;
-  justify-content:space-between;
-  width:100%;
-  margin-top:1.5mm;
-}
-.audio-dur-inline { max-width:none; }
-.audio-dur-side { font-size:7pt; text-transform:none; letter-spacing:0; }
-.audio-qr { display:flex; flex-direction:column; align-items:center; flex-shrink:0; position:relative; z-index:1; margin-top:auto; padding-bottom:3mm; }
-.qr { width:22mm; height:22mm; }
-
-.video { flex-direction:column; }
-.video-thumb {
-  width:var(--page-w); height:var(--video-thumb-h); flex-shrink:0; overflow:hidden;
-  box-sizing:border-box; padding:var(--visual-margin); background:#FFFFFF;
-}
-.video-text-block {
-  flex:1; min-height:0; display:flex; flex-direction:column;
-  padding:5.3mm var(--pad-x) 0;
-  overflow:hidden;
-}
-body.print-bleed .video-text-block {
-  padding-left:var(--pad-x-safe);
-  padding-right:var(--pad-x-safe);
-}
-.video-meta-row {
-  display:flex; justify-content:space-between; align-items:flex-start;
-  gap:3mm; flex-shrink:0;
-}
-.video-meta-loc {
-  font-weight:600; color:#3A3A3C; letter-spacing:.15pt; text-transform:none;
-  text-align:right; flex:1; min-width:0;
-}
-.video-title-line {
-  margin-top:2.6mm;
-  font-family:'EB Garamond',serif; font-style:italic; font-size:13.5pt; font-weight:400;
-  color:#1C1C1E;
-}
-.video-sub-line {
-  margin-top:2.6mm;
-  font-size:9.84pt; line-height:1.5;
-  color:#6B7280;
-}
-.video-sub-line.memory-text { color:#1C1C1E; }
-.video-sub-line p { margin:0 0 4pt; }
-.video-qr-bottom { margin-top:auto; padding-bottom:3mm; align-items:center; }
 
 .back-inner {
   flex:1; display:flex; flex-direction:column;

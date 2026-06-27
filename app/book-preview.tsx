@@ -90,7 +90,7 @@ import {
 import { runBookExportPrepInBackground } from '@/services/bookExportPrep';
 import { getBookExportPrepIssues } from '@/services/bookExportPrep';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
-import { MAX_BOOK_CAPTION_LINES, MAX_BOOK_LINES } from '@/utils/textLimits';
+import { bookLineBudgetForMemoryType, bookCharsPerLineForMemoryType } from '@/utils/textLimits';
 
 import type { Child, Memory } from '@/types/local';
 import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
@@ -1631,10 +1631,12 @@ export default function BookPreviewScreen() {
 
   const editModalLineBudget = useMemo(() => {
     if (!textEditTarget || textEditTarget.kind !== 'memory') return undefined;
-    const t = textEditTarget.memory.type;
-    if (t === 'text') return MAX_BOOK_LINES;
-    if (t === 'photo' || t === 'voice' || t === 'video') return MAX_BOOK_CAPTION_LINES;
-    return undefined;
+    return bookLineBudgetForMemoryType(textEditTarget.memory.type);
+  }, [textEditTarget]);
+
+  const editModalCharsPerLine = useMemo(() => {
+    if (!textEditTarget || textEditTarget.kind !== 'memory') return undefined;
+    return bookCharsPerLineForMemoryType(textEditTarget.memory.type);
   }, [textEditTarget]);
 
   const saveSingleEdit = useCallback(
@@ -2378,6 +2380,7 @@ export default function BookPreviewScreen() {
           initialText={editModalSingleInitial}
           previewVariant="book"
           bookLineBudget={editModalLineBudget}
+          bookCharsPerLine={editModalCharsPerLine}
           title={textEditTarget?.modalTitle ?? ''}
           onClose={() => setTextEditTarget(null)}
           onSave={saveSingleEdit}

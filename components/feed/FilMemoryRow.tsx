@@ -78,7 +78,10 @@ import {
   type Child,
 } from "@/utils/feedHelpers";
 import { styles, TEXT_POST_GUTTER } from "@/components/feed/feedStyles";
-import { useMemoryTextFont } from '@/contexts/MemoryTextFontContext';
+import {
+  useMemoryEditorialFont,
+  useMemoryEditorialBoldFont,
+} from '@/contexts/MemoryTextFontContext';
 import { ensurePlaybackAudioForListening } from '@/lib/playbackAudioMode';
 import { useIsFeedVideoAutoplay } from '@/lib/feedAutoplayStore';
 
@@ -230,7 +233,8 @@ function FilMemoryRow({
   isOptimisticFeedPending = false,
 }: FilMemoryRowProps) {
   const isFeedVideoAutoplay = useIsFeedVideoAutoplay(memory.id);
-  const memoryTextFont = useMemoryTextFont();
+  const memoryEditorialFont = useMemoryEditorialFont();
+  const memoryEditorialBoldFont = useMemoryEditorialBoldFont();
   const photoUrls = useFeedPhotoDisplayUrls(memory);
   const contentTextRaw = memory.content?.trim() || '';
   const contentText =
@@ -552,7 +556,7 @@ function FilMemoryRow({
                               source={{ uri: videoPosterUri }}
                               style={StyleSheet.absoluteFillObject}
                               contentFit="cover"
-                              cachePolicy="disk"
+                              cachePolicy="memory-disk"
                               recyclingKey={memory.id}
                             />
                           </Animated.View>
@@ -561,7 +565,7 @@ function FilMemoryRow({
                             source={{ uri: videoPosterUri }}
                             style={[StyleSheet.absoluteFillObject, { zIndex: 2 }]}
                             contentFit="cover"
-                            cachePolicy="disk"
+                            cachePolicy="memory-disk"
                             recyclingKey={memory.id}
                           />
                         )
@@ -572,7 +576,7 @@ function FilMemoryRow({
                       source={{ uri: videoPosterUri }}
                       style={styles.photoImage}
                       contentFit="cover"
-                      cachePolicy="disk"
+                      cachePolicy="memory-disk"
                       recyclingKey={memory.id}
                     />
                   ) : (
@@ -668,6 +672,7 @@ function FilMemoryRow({
                     controlIconColor={ACTION_ICON_INK}
                     coverFlushBottom={hasVoiceCover}
                     feedPlayDiscOutline
+                    disableBlurDisc
                   />
                 </View>
               </View>
@@ -680,7 +685,7 @@ function FilMemoryRow({
             <View style={styles.textBody}>
               {!!memory.text_title?.trim() && (
                 <Text
-                  style={[styles.textTitle, { fontFamily: memoryTextFont }]}
+                  style={[styles.textTitle, { fontFamily: memoryEditorialBoldFont }]}
                   {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
                 >
                   {memory.text_title.trim()}
@@ -692,7 +697,7 @@ function FilMemoryRow({
                     key={idx}
                     style={[
                       styles.textContent,
-                      { fontFamily: memoryTextFont },
+                      { fontFamily: memoryEditorialFont },
                       idx > 0 && styles.textBookParagraphSpacing,
                     ]}
                     {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
@@ -715,7 +720,7 @@ function FilMemoryRow({
                   key={idx}
                   style={[
                     styles.captionAnnotation,
-                    { fontFamily: memoryTextFont },
+                    { fontFamily: memoryEditorialFont },
                     idx > 0 && styles.textBookParagraphSpacing,
                   ]}
                   {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}

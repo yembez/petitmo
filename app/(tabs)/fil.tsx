@@ -18,6 +18,7 @@ import { useState, useCallback, useMemo, useRef, useEffect, type ReactNode } fro
 import { verticalScale } from '@/utils/responsive';
 import EditTextModal from '@/components/EditTextModal';
 import { feedMemoryTextEditPreviewVariant } from '@/utils/memoryTextEditStyles';
+import { bookLineBudgetForMemoryType, bookCharsPerLineForMemoryType } from '@/utils/textLimits';
 import { usePrefetchMemories } from '@/hooks/usePrefetchMemories';
 import { useFeedVideoAutoplay } from '@/hooks/useFeedVideoAutoplay';
 import { useStableViewabilityPairs } from '@/hooks/useStableViewabilityPairs';
@@ -362,6 +363,8 @@ function FilScreen() {
         visible={editModalVisible}
         initialText={editingMemory?.content?.trim() ?? ''}
         previewVariant={feedMemoryTextEditPreviewVariant(editingMemory?.type)}
+        bookLineBudget={bookLineBudgetForMemoryType(editingMemory?.type)}
+        bookCharsPerLine={bookCharsPerLineForMemoryType(editingMemory?.type)}
         title={
           !editingMemory
             ? 'Modifier le texte'

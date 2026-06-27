@@ -25,6 +25,7 @@ import {
 } from '@/utils/memoryTextEditStyles';
 import {
   MAX_BOOK_LINES,
+  BOOK_CHARS_PER_LINE,
   MAX_TEXT_MEMORY_TITLE_CHARS,
   estimateBookLines,
   clampText,
@@ -51,6 +52,8 @@ export type EditTextModalProps = {
   previewVariant?: MemoryTextEditPreviewVariant;
   /** Plafond lignes livre à la saisie (défaut : `MAX_BOOK_LINES`). */
   bookLineBudget?: number;
+  /** Largeur de ligne (caractères) pour l’estimation lignes livre (défaut : `BOOK_CHARS_PER_LINE`). */
+  bookCharsPerLine?: number;
 } & (
   | {
       initialText: string;
@@ -79,6 +82,7 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
   const useMemoryPreview = props.previewVariant != null;
 
   const lineBudget = props.bookLineBudget ?? MAX_BOOK_LINES;
+  const charsPerLine = props.bookCharsPerLine ?? BOOK_CHARS_PER_LINE;
 
   const [text, setText] = React.useState(
     props.variant === 'title-body' ? '' : props.initialText
@@ -95,6 +99,7 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
       prev,
       applyLeadingCapitalWhenStartingText(prev, next),
       lineBudget,
+      charsPerLine,
     );
 
   const handleSave = () => {
@@ -103,7 +108,7 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
       const finalBody =
         lineBudget === MAX_BOOK_LINES
           ? clampText(bodyRaw)
-          : clampTextToBookLineBudget(bodyRaw, lineBudget);
+          : clampTextToBookLineBudget(bodyRaw, lineBudget, charsPerLine);
       const titleRaw = fieldTitle.trim();
       const finalTitle = titleRaw.slice(0, MAX_TEXT_MEMORY_TITLE_CHARS);
 
@@ -128,7 +133,9 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
 
     const raw = text.trim();
     const finalText =
-      lineBudget === MAX_BOOK_LINES ? clampText(raw) : clampTextToBookLineBudget(raw, lineBudget);
+      lineBudget === MAX_BOOK_LINES
+        ? clampText(raw)
+        : clampTextToBookLineBudget(raw, lineBudget, charsPerLine);
 
     if (finalText !== raw) {
       Alert.alert(TEXT_TRUNCATION_ALERT_TITLE, TEXT_TRUNCATION_ALERT_MESSAGE, [
@@ -238,7 +245,7 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
                   Double saut de ligne = nouveau paragraphe (alinéa)
                 </Text>
                 <Text style={styles.charHint}>
-                  {estimateBookLines(fieldBody)}/{lineBudget} lignes · livre
+                  {estimateBookLines(fieldBody, charsPerLine)}/{lineBudget} lignes · livre
                 </Text>
               </View>
             </>
@@ -284,7 +291,7 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
                 autoCorrect
               />
               <Text style={styles.charHint}>
-                {estimateBookLines(fieldBody)}/{lineBudget} lignes · livre
+                {estimateBookLines(fieldBody, charsPerLine)}/{lineBudget} lignes · livre
               </Text>
             </>
           )
@@ -309,6 +316,7 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
                       prev,
                       applyLeadingCapitalWhenStartingText(prev, t),
                       lineBudget,
+                      charsPerLine,
                     )
                   )
                 }
@@ -330,7 +338,7 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
                 </Text>
               ) : null}
               <Text style={styles.charHint}>
-                {estimateBookLines(text)}/{lineBudget} lignes · livre
+                {estimateBookLines(text, charsPerLine)}/{lineBudget} lignes · livre
               </Text>
             </View>
           </>

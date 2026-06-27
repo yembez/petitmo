@@ -67,12 +67,42 @@ function memorySouvenirPt(basePt: number): number {
   return Math.round(basePt * MEMORY_TEXT_SCALE * 100) / 100;
 }
 
+/** QR dans la carte audio / vidéo — parité `.media-qr-card .qr`. */
+export const PDF_MEDIA_QR_QR_MM = 18;
+
+/** Carte QR (bordure grise, **angles carrés**) à droite de la légende audio / vidéo. */
+export const PDF_MEDIA_QR_CARD_W_MM = 38;
+export const PDF_MEDIA_QR_CARD_PAD_MM = 4;
+export const PDF_MEDIA_QR_CARD_RADIUS_MM = 0;
+/** Gouttière entre la colonne légende et la carte QR. */
+export const PDF_MEDIA_QR_GAP_MM = 6;
+/** Pictogramme type (haut-parleur / caméra) sous le QR. */
+export const PDF_MEDIA_QR_TYPE_ICON_MM = 4;
+/** Bordure carte + libellés gris (hint, type). */
+export const PDF_MEDIA_QR_CARD_BORDER_COLOR = '#D8D8DD';
+export const PDF_MEDIA_QR_MUTED_COLOR = '#AEAEB2';
+
+/** Légende audio / vidéo — EB Garamond droit, alignée sur le texte long (14 pt), ~50 car/ligne. */
+export const PDF_MEDIA_CAPTION_PT = 14;
+export const PDF_MEDIA_CAPTION_LH = 1.5;
+
+/** Remontée du bandeau bas (méta+légende) dans la marge blanche du visuel, pour coller la méta à la photo. */
+export const PDF_MEDIA_QR_PULL_UP_MM = 7;
+
+/**
+ * Marge horizontale dédiée aux **textes sous les médias** (photo pleine page, photo-note,
+ * audio/vidéo QR) — plus large que `--pad-x` (15 mm) des pages texte/chapitre/citation,
+ * pour aérer la colonne et laisser plus de blanc des deux côtés.
+ * Parité `--media-pad-x` dans `htmlBook.ts`.
+ */
+export const PDF_MEDIA_TEXT_PAD_X_MM = 22;
+
 /** Corps souvenir Roboto — 12 pt historique → 11.25 pt. */
 export const PDF_MEMORY_BODY_PT = memorySouvenirPt(12);
-/** Légende sous photo pleine page — 12 pt historique → 11.25 pt. */
-export const PDF_PHOTO_CAPTION_PT = memorySouvenirPt(12);
-/** Texte long sous photo (photo-note) — 10 pt net (pas de scale ×15/16). */
-export const PDF_PHOTO_NOTE_BODY_PT = 10;
+/** Légende sous photo pleine page — EB Garamond, alignée sur le texte long (14 pt). */
+export const PDF_PHOTO_CAPTION_PT = 14;
+/** Texte long sous photo (photo-note) — EB Garamond, aligné sur le texte long (14 pt). */
+export const PDF_PHOTO_NOTE_BODY_PT = 14;
 /** Description vidéo (corps souvenir) — 10.5 pt historique → ~9.85 pt. */
 export const PDF_VIDEO_SUB_PT = memorySouvenirPt(10.5);
 
@@ -244,6 +274,12 @@ export type QuotePdfFitLevel = 0 | 1 | 2;
 export function pdfMemoryTextBodyStyle(pageWidthPx: number): { fontSize: number; lineHeight: number } {
   const fs = Math.max(MIN_FS, pdfPtToPreviewPx(PDF_MEMORY_BODY_PT, pageWidthPx));
   return { fontSize: fs, lineHeight: pdfPtToPreviewPx(PDF_MEMORY_BODY_PT * 1.588, pageWidthPx) };
+}
+
+/** Légende audio / vidéo (EB Garamond) — parité `.media-qr-caption`. */
+export function pdfMediaCaptionStyle(pageWidthPx: number): { fontSize: number; lineHeight: number } {
+  const fs = Math.max(MIN_FS, pdfPtToPreviewPx(PDF_MEDIA_CAPTION_PT, pageWidthPx));
+  return { fontSize: fs, lineHeight: pdfPtToPreviewPx(PDF_MEDIA_CAPTION_PT * PDF_MEDIA_CAPTION_LH, pageWidthPx) };
 }
 
 /** `.quote-body` — palier typo lignes livre. */

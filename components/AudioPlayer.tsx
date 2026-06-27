@@ -37,6 +37,8 @@ interface AudioPlayerProps {
   coverFlushBottom?: boolean;
   /** Fil : liseré noir fin autour du disque play / pause. */
   feedPlayDiscOutline?: boolean;
+  /** Fil : désactive le flou temps réel (BlurView) du disque play pour un scroll fluide. */
+  disableBlurDisc?: boolean;
 }
 
 function GlassPlayDisc({
@@ -46,6 +48,7 @@ function GlassPlayDisc({
   controlIconColor,
   onPress,
   outline,
+  disableBlur,
 }: {
   size: number;
   iconSize: number;
@@ -53,6 +56,8 @@ function GlassPlayDisc({
   controlIconColor: string;
   onPress: () => void;
   outline?: boolean;
+  /** Fil : évite le flou temps réel (BlurView) qui saccade le scroll — fallback verre statique. */
+  disableBlur?: boolean;
 }) {
   const icon = isPlaying ? (
     <Pause size={iconSize} color={controlIconColor} fill={controlIconColor} strokeWidth={0} />
@@ -72,7 +77,7 @@ function GlassPlayDisc({
       onPress={onPress}
       activeOpacity={0.88}
     >
-      {Platform.OS === 'ios' ? (
+      {Platform.OS === 'ios' && !disableBlur ? (
         <BlurView intensity={72} tint="light" style={StyleSheet.absoluteFillObject}>
           <View style={styles.glassPlaySheen} />
           <View style={styles.glassPlayContent}>{icon}</View>
@@ -95,6 +100,7 @@ export default function AudioPlayer({
   controlIconColor = '#FFFFFF',
   coverFlushBottom = false,
   feedPlayDiscOutline = false,
+  disableBlurDisc = false,
 }: AudioPlayerProps) {
   const [sound, setSound] = useState<Audio.Sound | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -313,6 +319,7 @@ export default function AudioPlayer({
       controlIconColor={controlIconColor}
       onPress={togglePlayPause}
       outline={feedPlayDiscOutline}
+      disableBlur={disableBlurDisc}
     />
   );
 
@@ -347,6 +354,7 @@ export default function AudioPlayer({
           controlIconColor={controlIconColor}
           onPress={togglePlayPause}
           outline={feedPlayDiscOutline}
+          disableBlur={disableBlurDisc}
         />
       </View>
     </View>

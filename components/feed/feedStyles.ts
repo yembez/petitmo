@@ -28,7 +28,7 @@ const GREY_ACTIVE_BORDER = '#D1D5DB';
 const DAY_SEPARATOR_BLOCK_H = verticalScale(46);
 
 /** Interligne corps souvenir fil (~1,3× la taille — aligné livre `.memory-text`). */
-const FEED_TEXT_BODY_LINE_HEIGHT = scale(22);
+const FEED_TEXT_BODY_LINE_HEIGHT = scale(21);
 const FEED_CAPTION_LINE_HEIGHT = scale(21);
 
 const styles = StyleSheet.create({
@@ -617,18 +617,18 @@ const styles = StyleSheet.create({
   },
   textTitle: {
     width: '100%',
-    fontSize: scale(20),
-    fontWeight: '600',
+    fontSize: scale(18),
+    fontWeight: '700',
     color: '#1C1C1E',
-    lineHeight: scale(28),
+    lineHeight: scale(25),
     marginBottom: verticalScale(12),
-    textAlign: 'left',
+    textAlign: 'center',
   },
   /** `width: '100%'` : sans largeur explicite, le `Text` peut se comporter en shrink-wrap et la justification ne s’applique pas à chaque ligne après un `\n`. */
   textContent: {
     width: '100%',
     alignSelf: 'stretch',
-    fontSize: scale(17),
+    fontSize: scale(16),
     fontWeight: '400',
     color: '#1C1C1E',
     lineHeight: FEED_TEXT_BODY_LINE_HEIGHT,

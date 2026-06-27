@@ -25,6 +25,13 @@ export const BOOK_COVER_PHOTO_HEIGHT_RATIO = 142 / 216;
 
 /** Marge visuelle [M] — parité `pdfPreviewTypo.ts` / maquette app. */
 export const BOOK_VISUAL_MARGIN_MM = 12;
+
+/**
+ * Marge horizontale dédiée aux **textes sous les médias** (photo pleine page, photo-note,
+ * audio/vidéo QR) — plus large que `--pad-x` (15 mm). Parité `pdfPreviewTypo.ts`
+ * (`PDF_MEDIA_TEXT_PAD_X_MM`).
+ */
+export const PDF_MEDIA_TEXT_PAD_X_MM = 22;
 /** Hauteur bande `.pf-image` — 75 % de la page trim. */
 export const PHOTO_FULL_BAND_HEIGHT_RATIO = 0.75;
 /** Zone image utile photo-note (carré dans zone safe 186 mm). */

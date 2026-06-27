@@ -25,7 +25,7 @@ type Props = {
  */
 export default function PhotoMosaic({
   urls,
-  memoryId: _memoryId,
+  memoryId,
   favoritePhotoUrls: _favoritePhotoUrls,
   onFavoritePhotoUrlsUpdated: _onFavoritePhotoUrlsUpdated,
   onPhotoImmersive,
@@ -35,6 +35,11 @@ export default function PhotoMosaic({
   const { width: screenW } = useWindowDimensions();
   const W = Math.max(0, screenW - 2 * MEDIA_CARD_INSET);
   const n = urls.length;
+
+  const feedImageCache = (index: number) => ({
+    cachePolicy: 'memory-disk' as const,
+    ...(memoryId ? { recyclingKey: `${memoryId}-${index}` } : {}),
+  });
 
   const openImmersive = useCallback(
     (index: number) => {
@@ -74,7 +79,7 @@ export default function PhotoMosaic({
           source={{ uri: urls[0] }}
           style={styles.singleImg}
           contentFit="cover"
-          cachePolicy="disk"
+          {...feedImageCache(0)}
         />
       </Pressable>
     );
@@ -82,11 +87,11 @@ export default function PhotoMosaic({
     grid = (
       <View style={[styles.wrap, styles.row, { width: W, borderRadius: MEDIA_CARD_RADIUS }]}>
         <Pressable onPress={() => openImmersive(0)} style={[styles.fill, { width: cell, height: rowH }]}>
-          <Image source={{ uri: urls[0] }} style={StyleSheet.absoluteFillObject} contentFit="cover" cachePolicy="disk" />
+          <Image source={{ uri: urls[0] }} style={StyleSheet.absoluteFillObject} contentFit="cover" {...feedImageCache(0)} />
         </Pressable>
         <View style={{ width: GAP }} />
         <Pressable onPress={() => openImmersive(1)} style={[styles.fill, { width: cell, height: rowH }]}>
-          <Image source={{ uri: urls[1] }} style={StyleSheet.absoluteFillObject} contentFit="cover" cachePolicy="disk" />
+          <Image source={{ uri: urls[1] }} style={StyleSheet.absoluteFillObject} contentFit="cover" {...feedImageCache(1)} />
         </Pressable>
       </View>
     );
@@ -96,15 +101,15 @@ export default function PhotoMosaic({
     grid = (
       <View style={[styles.wrap, styles.row, { width: W, height: H, borderRadius: MEDIA_CARD_RADIUS }]}>
         <Pressable onPress={() => openImmersive(0)} style={[styles.fill, { width: cell, height: H }]}>
-          <Image source={{ uri: urls[0] }} style={StyleSheet.absoluteFillObject} contentFit="cover" cachePolicy="disk" />
+          <Image source={{ uri: urls[0] }} style={StyleSheet.absoluteFillObject} contentFit="cover" {...feedImageCache(0)} />
         </Pressable>
         <View style={{ width: GAP }} />
         <View style={{ width: cell, height: H }}>
           <Pressable onPress={() => openImmersive(1)} style={[styles.fill, { width: cell, height: halfH, marginBottom: GAP }]}>
-            <Image source={{ uri: urls[1] }} style={StyleSheet.absoluteFillObject} contentFit="cover" cachePolicy="disk" />
+            <Image source={{ uri: urls[1] }} style={StyleSheet.absoluteFillObject} contentFit="cover" {...feedImageCache(1)} />
           </Pressable>
           <Pressable onPress={() => openImmersive(2)} style={[styles.fill, { width: cell, height: halfH }]}>
-            <Image source={{ uri: urls[2] }} style={StyleSheet.absoluteFillObject} contentFit="cover" cachePolicy="disk" />
+            <Image source={{ uri: urls[2] }} style={StyleSheet.absoluteFillObject} contentFit="cover" {...feedImageCache(2)} />
           </Pressable>
         </View>
       </View>
@@ -114,16 +119,16 @@ export default function PhotoMosaic({
       <View style={[styles.wrap, { width: W, borderRadius: MEDIA_CARD_RADIUS }]}>
         <View style={[styles.row, { marginBottom: GAP }]}>
           <Pressable onPress={() => openImmersive(0)} style={[styles.fill, { width: cell, height: rowH }]}>
-            <Image source={{ uri: urls[0] }} style={StyleSheet.absoluteFillObject} contentFit="cover" cachePolicy="disk" />
+            <Image source={{ uri: urls[0] }} style={StyleSheet.absoluteFillObject} contentFit="cover" {...feedImageCache(0)} />
           </Pressable>
           <View style={{ width: GAP }} />
           <Pressable onPress={() => openImmersive(1)} style={[styles.fill, { width: cell, height: rowH }]}>
-            <Image source={{ uri: urls[1] }} style={StyleSheet.absoluteFillObject} contentFit="cover" cachePolicy="disk" />
+            <Image source={{ uri: urls[1] }} style={StyleSheet.absoluteFillObject} contentFit="cover" {...feedImageCache(1)} />
           </Pressable>
         </View>
         <View style={styles.row}>
           <Pressable onPress={() => openImmersive(2)} style={[styles.fill, { width: cell, height: rowH }]}>
-            <Image source={{ uri: urls[2] }} style={StyleSheet.absoluteFillObject} contentFit="cover" cachePolicy="disk" />
+            <Image source={{ uri: urls[2] }} style={StyleSheet.absoluteFillObject} contentFit="cover" {...feedImageCache(2)} />
           </Pressable>
           <View style={{ width: GAP }} />
           <Pressable
@@ -131,7 +136,7 @@ export default function PhotoMosaic({
             style={[styles.fill, { width: cell, height: rowH, position: 'relative' }]}
             accessibilityLabel={fourthOverlay > 0 ? `Voir les ${n} photos` : 'Ouvrir la photo en grand'}
           >
-            <Image source={{ uri: urls[3] }} style={[StyleSheet.absoluteFillObject, styles.fill]} contentFit="cover" cachePolicy="disk" />
+            <Image source={{ uri: urls[3] }} style={[StyleSheet.absoluteFillObject, styles.fill]} contentFit="cover" {...feedImageCache(3)} />
             {fourthOverlay > 0 ? (
               <View style={styles.overlay} pointerEvents="none">
                 <Text style={styles.overlayText}>+{fourthOverlay}</Text>

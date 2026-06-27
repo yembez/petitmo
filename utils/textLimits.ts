@@ -8,8 +8,37 @@
 /** Plafond de lignes sur la page « Petits mots » (fit level 2 inclus). Lignes vides comptées. */
 export const MAX_BOOK_LINES = 28;
 
-/** Plafond captions photo / audio / vidéo dans le livre (photo-full + photo-note). */
+/** Plafond captions photo dans le livre (photo-full + photo-note). */
 export const MAX_BOOK_CAPTION_LINES = 12;
+
+/**
+ * Légende audio / vidéo (visuel + carte QR) — gabarit maquette : **6 lignes** de
+ * ~70 caractères (typo EB Garamond, colonne ~134 mm à côté de la carte QR).
+ */
+export const MAX_MEDIA_CAPTION_LINES = 6;
+
+/** Largeur moyenne d’une ligne de légende média (à côté de la carte QR), EB Garamond 12 pt. */
+export const MEDIA_CAPTION_CHARS_PER_LINE = 50;
+
+/** @deprecated Préférer `MAX_MEDIA_CAPTION_LINES` */
+export const MAX_MEDIA_QR_CAPTION_LINES = MAX_MEDIA_CAPTION_LINES;
+
+/** @deprecated Préférer `MAX_MEDIA_CAPTION_LINES` */
+export const MAX_AUDIO_BOOK_ANNOTATION_LINES = MAX_MEDIA_CAPTION_LINES;
+
+/** Plafond lignes livre selon le type de souvenir (saisie modale). */
+export function bookLineBudgetForMemoryType(type: string | undefined): number {
+  if (type === 'text') return MAX_BOOK_LINES;
+  if (type === 'voice' || type === 'video') return MAX_MEDIA_CAPTION_LINES;
+  if (type === 'photo') return MAX_BOOK_CAPTION_LINES;
+  return MAX_BOOK_LINES;
+}
+
+/** Largeur de ligne (caractères) selon le type de souvenir — pour l’estimation lignes livre. */
+export function bookCharsPerLineForMemoryType(type: string | undefined): number {
+  if (type === 'voice' || type === 'video') return MEDIA_CAPTION_CHARS_PER_LINE;
+  return BOOK_CHARS_PER_LINE;
+}
 
 /** Titre optionnel sur un souvenir texte (fil). */
 export const MAX_TEXT_MEMORY_TITLE_CHARS = 100;
@@ -47,7 +76,10 @@ export const TEXT_SAVE_FAILED_ALERT_MESSAGE =
 /**
  * Compte les lignes « livre » : chaque `\n` (y compris ligne vide) + wrapping des lignes longues.
  */
-export function estimateBookLines(text: string): number {
+export function estimateBookLines(
+  text: string,
+  charsPerLine: number = BOOK_CHARS_PER_LINE,
+): number {
   if (!text) return 0;
 
   const physicalLines = text.split('\n');
@@ -59,7 +91,7 @@ export function estimateBookLines(text: string): number {
       continue;
     }
     // +1 pour l’alinéa (EM_QUAD) appliqué à chaque segment dans la maquette livre.
-    total += Math.max(1, Math.ceil((line.length + 1) / BOOK_CHARS_PER_LINE));
+    total += Math.max(1, Math.ceil((line.length + 1) / charsPerLine));
   }
 
   return total;
@@ -70,9 +102,13 @@ export function estimateVisualLines(text: string): number {
   return estimateBookLines(text);
 }
 
-function trimToLineBudget(text: string, maxLines: number): string {
+function trimToLineBudget(
+  text: string,
+  maxLines: number,
+  charsPerLine: number = BOOK_CHARS_PER_LINE,
+): string {
   let clamped = text;
-  while (clamped.length > 0 && estimateBookLines(clamped) > maxLines) {
+  while (clamped.length > 0 && estimateBookLines(clamped, charsPerLine) > maxLines) {
     const lastNewline = clamped.lastIndexOf('\n');
     if (lastNewline >= 0) {
       clamped = clamped.slice(0, lastNewline);
@@ -95,10 +131,11 @@ export function enforceTextBookLineBudgetOnInput(
   prev: string,
   next: string,
   maxLines: number,
+  charsPerLine: number = BOOK_CHARS_PER_LINE,
 ): string {
-  const maxChars = maxLines * BOOK_CHARS_PER_LINE;
+  const maxChars = maxLines * charsPerLine;
   if (next.length > maxChars) return prev;
-  if (estimateBookLines(next) > maxLines) return prev;
+  if (estimateBookLines(next, charsPerLine) > maxLines) return prev;
   return next;
 }
 
@@ -119,10 +156,14 @@ export function clampTextCaptionLineBudget(text: string): string {
 }
 
 /** Plafond lignes livre paramétrable (saisie). */
-export function clampTextToBookLineBudget(text: string, maxLines: number): string {
-  const maxChars = maxLines * BOOK_CHARS_PER_LINE;
+export function clampTextToBookLineBudget(
+  text: string,
+  maxLines: number,
+  charsPerLine: number = BOOK_CHARS_PER_LINE,
+): string {
+  const maxChars = maxLines * charsPerLine;
   let t = text.length > maxChars ? text.slice(0, maxChars) : text;
-  return trimToLineBudget(t, maxLines);
+  return trimToLineBudget(t, maxLines, charsPerLine);
 }
 
 /** @deprecated — utiliser `clampTextBookLineBudget` */

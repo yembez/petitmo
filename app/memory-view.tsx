@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -28,11 +28,19 @@ import PhotoMosaic from '@/components/PhotoMosaic';
 import AudioPlayer from '@/components/AudioPlayer';
 import EditTextModal from '@/components/EditTextModal';
 import { feedMemoryTextEditPreviewVariant } from '@/utils/memoryTextEditStyles';
+import { bookLineBudgetForMemoryType, bookCharsPerLineForMemoryType } from '@/utils/textLimits';
 import { getMemoryById, updateMemoryContent } from '@/services/media';
 import { resolveChildProfileImageDisplayUri } from '@/utils/childPhotoUri';
 import { getChildren } from '@/services/children';
-import { getAllPhotoUrlsForDisplay, parseFavoritePhotoUrls } from '@/utils/memoryPhotos';
-import { getSignedMediaDisplayUrl, useSignedMediaUrl } from '@/lib/mediaSignedUrl';
+import {
+  getVideoPosterUriForFeedAndViewer,
+  getVoiceCoverUriForFeedAndViewer,
+  normalizeMemoryMediaUriForDisplay,
+  parseFavoritePhotoUrls,
+} from '@/utils/memoryPhotos';
+import { useFeedPhotoDisplayUrls } from '@/hooks/useFeedPhotoDisplayUrls';
+import { useFeedVideoPlaybackUri } from '@/hooks/useFeedVideoPlaybackUri';
+import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import {
   formatDateLong,
   formatDuration,
@@ -214,57 +222,40 @@ export default function MemoryViewScreen() {
   };
 
   const signedChildRemote = useSignedMediaUrl(child?.photo_url ?? null);
-  const voiceCoverDetailUri =
-    useSignedMediaUrl(
-      memory?.type === 'voice' ? ((memory.voice_cover_path ?? memory.voice_cover_url) ?? null) : null
-    ) ?? '';
 
+  /** Stub pour hooks fil (rules of hooks) avant chargement ou hors type média). */
+  const feedMediaHookMemory = useMemo(
+    () => memory ?? ({ type: 'text', id: '__memory_view_stub__' } as Memory),
+    [memory],
+  );
+  const feedPhotoUrls = useFeedPhotoDisplayUrls(feedMediaHookMemory);
+  const videoPlaybackUri = useFeedVideoPlaybackUri(feedMediaHookMemory);
+
+  const videoPosterRaw =
+    memory?.type === 'video' ? getVideoPosterUriForFeedAndViewer(memory) : '';
+  const voiceCoverRaw =
+    memory?.type === 'voice' ? getVoiceCoverUriForFeedAndViewer(memory) : '';
+  const rawVoiceMedia =
+    memory?.type === 'voice'
+      ? [memory.local_media_path, memory.media_url].find(u => (u ?? '').trim())?.trim() ?? ''
+      : '';
+
+  const videoPosterSigned = useSignedMediaUrl(videoPosterRaw || null) ?? '';
+  const voiceCoverSigned = useSignedMediaUrl(voiceCoverRaw || null) ?? '';
+  const voiceMediaSigned = useSignedMediaUrl(rawVoiceMedia || null) ?? '';
+
+  const videoPosterUri = normalizeMemoryMediaUriForDisplay(
+    (videoPosterSigned || videoPosterRaw).trim(),
+  );
+  const voiceCoverDetailUri = normalizeMemoryMediaUriForDisplay(
+    (voiceCoverSigned || voiceCoverRaw).trim(),
+  );
+  const voicePlaybackUri = normalizeMemoryMediaUriForDisplay(
+    (voiceMediaSigned || rawVoiceMedia).trim(),
+  );
+
+  const photoUrls = memory?.type === 'photo' ? feedPhotoUrls : [];
   const contentText = memory?.content?.trim() || '';
-  const rawMediaUri = memory ? (memory.edited_media_url || memory.media_url || '').trim() : '';
-  const rawVideoPoster =
-    (memory?.poster_url?.trim() || memory?.thumbnail_url?.trim() || '') || '';
-  const rawPhotoUrls = memory?.type === 'photo' ? getAllPhotoUrlsForDisplay(memory) : [];
-
-  const [displayMediaUri, setDisplayMediaUri] = useState(rawMediaUri);
-  const [displayVideoPoster, setDisplayVideoPoster] = useState(rawVideoPoster);
-  const [displayPhotoUrls, setDisplayPhotoUrls] = useState<string[]>(rawPhotoUrls);
-
-  useEffect(() => {
-    const rawMu = memory ? (memory.edited_media_url || memory.media_url || '').trim() : '';
-    const rawVp =
-      (memory?.poster_url?.trim() || memory?.thumbnail_url?.trim() || '') || '';
-    const rawPh = memory?.type === 'photo' ? getAllPhotoUrlsForDisplay(memory) : [];
-    setDisplayMediaUri(rawMu);
-    setDisplayVideoPoster(rawVp);
-    setDisplayPhotoUrls(rawPh);
-    if (!memory) return;
-
-    let alive = true;
-    /** HTTP Storage **et** chemins bucket `uuid/...` (réinstall : URLs parfois vides). */
-    const resolveDetailDisplayUri = async (u: string) => {
-      const t = u.trim();
-      if (!t) return t;
-      return getSignedMediaDisplayUrl(t);
-    };
-    void (async () => {
-      const [mu, vp, ...rest] = await Promise.all([
-        resolveDetailDisplayUri(rawMu),
-        resolveDetailDisplayUri(rawVp),
-        ...rawPh.map(resolveDetailDisplayUri),
-      ]);
-      if (!alive) return;
-      setDisplayMediaUri(mu);
-      setDisplayVideoPoster(vp);
-      setDisplayPhotoUrls(rest);
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [memory]);
-
-  const mediaUri = displayMediaUri;
-  const videoPosterUri = displayVideoPoster;
-  const photoUrls = displayPhotoUrls;
   const ageAtMemory = memory ? formatFamilyAgesLine(familyChildren, memory.created_at) : '';
   const locationLineShort = memory ? formatBookLocationShort(memory.location) : '';
   const locationMeta = locationLineShort ? `à ${locationLineShort}` : '';
@@ -388,11 +379,11 @@ export default function MemoryViewScreen() {
               />
             )}
 
-            {memory.type === 'video' && (!!mediaUri || !!videoPosterUri) && (
+            {memory.type === 'video' && (!!videoPlaybackUri || !!videoPosterUri) && (
               <View style={[styles.mediaCard, styles.videoBody]}>
-                {isPlayingVideo && !!mediaUri ? (
+                {isPlayingVideo && !!videoPlaybackUri ? (
                   <Video
-                    source={{ uri: mediaUri }}
+                    source={{ uri: videoPlaybackUri }}
                     style={{ width: '100%', height: '100%' }}
                     useNativeControls
                     resizeMode={ResizeMode.CONTAIN}
@@ -407,7 +398,7 @@ export default function MemoryViewScreen() {
                 ) : (
                   <View style={{ width: '100%', height: '100%', backgroundColor: '#ECECEF' }} />
                 )}
-                {!!mediaUri ? (
+                {!!videoPlaybackUri ? (
                   <Pressable
                     onPress={() => setIsPlayingVideo(p => !p)}
                     style={StyleSheet.absoluteFillObject}
@@ -423,14 +414,14 @@ export default function MemoryViewScreen() {
               </View>
             )}
 
-            {memory.type === 'voice' && (!!memory.media_url || !!mediaUri) && (
+            {memory.type === 'voice' && !!voicePlaybackUri && (
               <View
                 style={[
                   styles.audioBody,
-                  (memory.voice_cover_path ?? memory.voice_cover_url) ? styles.audioBodyWithCover : null,
+                  voiceCoverDetailUri ? styles.audioBodyWithCover : null,
                 ]}
               >
-                {!!(memory.voice_cover_path ?? memory.voice_cover_url) && (
+                {!!voiceCoverDetailUri && (
                   <>
                     <Image
                       source={{ uri: voiceCoverDetailUri }}
@@ -443,20 +434,20 @@ export default function MemoryViewScreen() {
                 <View
                   style={[
                     styles.audioForeground,
-                    (memory.voice_cover_path ?? memory.voice_cover_url) ? styles.audioForegroundCover : null,
+                    voiceCoverDetailUri ? styles.audioForegroundCover : null,
                   ]}
                 >
                   <View
                     style={[
                       styles.audioPlayerWrap,
-                      (memory.voice_cover_path ?? memory.voice_cover_url) ? styles.audioPlayerWrapCover : null,
+                      voiceCoverDetailUri ? styles.audioPlayerWrapCover : null,
                     ]}
                   >
                     <AudioPlayer
-                      uri={mediaUri || (memory.media_url ?? '')}
+                      uri={voicePlaybackUri}
                       duration={memory.duration || 0}
                       playbackStartSec={memory.voice_playback_start_sec ?? null}
-                      variant={(memory.voice_cover_path ?? memory.voice_cover_url) ? 'coverBottom' : 'default'}
+                      variant={voiceCoverDetailUri ? 'coverBottom' : 'default'}
                     />
                   </View>
                 </View>
@@ -542,6 +533,8 @@ export default function MemoryViewScreen() {
         visible={editModalVisible}
         initialText={memory.content?.trim() ?? ''}
         previewVariant={feedMemoryTextEditPreviewVariant(memory.type)}
+        bookLineBudget={bookLineBudgetForMemoryType(memory.type)}
+        bookCharsPerLine={bookCharsPerLineForMemoryType(memory.type)}
         title={
           memory.type === 'text'
             ? 'Modifier le texte'
