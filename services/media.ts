@@ -178,16 +178,27 @@ async function uploadToMediaBucket(params: {
   filePath: string;
   bytes: Blob | Uint8Array;
   contentType: string;
+  upsert?: boolean;
 }): Promise<string> {
   const { error } = await supabase.storage.from('media').upload(params.filePath, params.bytes, {
     contentType: params.contentType,
-    upsert: false,
+    upsert: params.upsert ?? false,
   });
-  if (error) throw error;
+  if (error) {
+    const msg = error.message ?? '';
+    if (/already exists/i.test(msg)) {
+      return getSignedUrlAfterMediaUpload(params.filePath);
+    }
+    throw error;
+  }
   return getSignedUrlAfterMediaUpload(params.filePath);
 }
 
-export async function uploadFileToSupabase(localUri: string, storagePath: string): Promise<string> {
+export async function uploadFileToSupabase(
+  localUri: string,
+  storagePath: string,
+  opts?: { upsert?: boolean },
+): Promise<string> {
   const cleanPath = storagePath.replace(/^\/?media\//, '')
   const { bytes } = await readBytes(localUri)
   const ext = extensionFromUri(cleanPath, 'bin')
@@ -205,6 +216,7 @@ export async function uploadFileToSupabase(localUri: string, storagePath: string
     filePath: cleanPath,
     bytes,
     contentType,
+    upsert: opts?.upsert,
   })
 }
 
@@ -2030,24 +2042,35 @@ export async function getMemoryById(memoryId: string) {
   const id = memoryId?.trim();
   if (!id) return null;
 
-  try {
-    if ((await getCachedUserMode()) === 'local') {
-      return getLocalMemoryById(id);
-    }
+  const local = getLocalMemoryById(id);
 
+  if ((await getCachedUserMode()) === 'local') {
+    return local;
+  }
+
+  /** Cloud Petitmo+ : local-first — repli Supabase seulement si la ligne n’est pas en SQLite. */
+  if (local) {
+    return local;
+  }
+
+  try {
     const { data, error } = await supabase
       .from('memories')
       .select('*')
       .eq('id', id)
       .maybeSingle();
     if (error) throw error;
-    if (data) return mergeServerMemoryRowWithExistingLocal(data, getLocalMemoryById(id));
+    if (!data) return null;
 
-    // Le fil / Favoris lisent souvent SQLite en premier ; la ligne peut ne pas être (encore) lisible via PostgREST.
-    return getLocalMemoryById(id);
+    const merged: Memory = {
+      ...mergeServerMemoryRowWithExistingLocal(data, null),
+      sync_status: 'synced',
+    };
+    upsertLocalMemory(merged);
+    return merged;
   } catch (error) {
     console.error('getMemoryById error:', error);
-    return getLocalMemoryById(id);
+    return null;
   }
 }
 

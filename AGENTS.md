@@ -168,6 +168,14 @@ L’aperçu in-app (`MaquetteBookPages.tsx`) et le PDF serveur (`htmlBook.ts`) p
 - Checklist complète, fichiers couplés et règles typo (Roboto Flex souvenirs vs Garamond éditorial) : [`.cursor/rules/book-maquette-pdf-parity.mdc`](.cursor/rules/book-maquette-pdf-parity.mdc).
 - Après changement côté serveur : **redéployer** `server/` (Railway/VPS) — un reload Metro ne met pas à jour l’export PDF.
 
+### Local-first universel (gratuit et Petitmo+)
+
+- **Affichage** : SQLite + sandbox — jamais un `supabase.from(...).select` direct dans un composant UI.
+- **Cloud** : sync / pull / upload **en arrière-plan** ; merge via `mergeServerMemoryRowWithExistingLocal`.
+- **Bascule gratuit → payant** : données locales visibles tout de suite ; `upgradeToFullCloud` + `flushPendingCloudUploadsOnce` sans bloquer la navigation.
+- **Repli cloud** : seulement si local confirmé absent (fichier mort, réinstall, nouveau téléphone en restauration).
+- Référence : [`docs/specs/architecture-locale-cloud.md`](docs/specs/architecture-locale-cloud.md) §1.3, [`.cursor/rules/local-first-media.mdc`](.cursor/rules/local-first-media.mdc).
+
 ---
 
 ## Distinction critique : email de commande vs compte cloud Petitmo+

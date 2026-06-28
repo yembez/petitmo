@@ -19,6 +19,8 @@ export async function pullMemoriesFromRemoteToLocal(childId: string): Promise<Me
     return getLocalMemories(childId)
   }
 
+  const localBefore = getLocalMemories(childId)
+
   try {
     const { data, error } = await supabase
       .from('memories')
@@ -26,7 +28,12 @@ export async function pullMemoriesFromRemoteToLocal(childId: string): Promise<Me
       .eq('child_id', childId)
       .order('created_at', { ascending: false })
 
-    if (error || !data) return getLocalMemories(childId)
+    if (error || !data) return localBefore
+
+    /** Cloud vide mais souvenirs locaux présents (migration en cours) : ne pas masquer le fil. */
+    if (data.length === 0 && localBefore.length > 0) {
+      return localBefore
+    }
 
     const withLocal: Memory[] = data.map(row => {
       const existing = getLocalMemoryById(row.id)
@@ -36,9 +43,12 @@ export async function pullMemoriesFromRemoteToLocal(childId: string): Promise<Me
       }
     })
     upsertLocalMemories(withLocal, 'full')
-    return withLocal
+
+    const remoteIds = new Set(withLocal.map(m => m.id))
+    const localOnly = localBefore.filter(m => !remoteIds.has(m.id))
+    return localOnly.length > 0 ? [...withLocal, ...localOnly] : withLocal
   } catch {
-    return getLocalMemories(childId)
+    return localBefore
   }
 }
 

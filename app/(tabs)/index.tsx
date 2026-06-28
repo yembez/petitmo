@@ -46,7 +46,6 @@ import { scale, verticalScale } from '@/utils/responsive';
 import {
   CAPTURE_SCREEN_ACCENT,
   CAPTURE_SCREEN_BG,
-  CAPTURE_SCREEN_IMPORT_DISC,
   CAPTURE_SCREEN_RECORD_ACCENT,
 } from '@/constants/captureScreenPalette';
 import { THEME } from '@/constants/theme';
@@ -730,14 +729,12 @@ function CapturerScreen() {
               label="Importer"
               labelFontFamily={captureCtaLabelFont}
               accessibilityLabel="Importer des photos ou vidéos"
-              discColor={CAPTURE_SCREEN_IMPORT_DISC}
-              discBorderColor={CAPTURE_SCREEN_RECORD_ACCENT}
-              discBorderWidth={StyleSheet.hairlineWidth}
+              discColor={CAPTURE_SCREEN_ACCENT}
               haloColor={CAPTURE_SCREEN_ACCENT}
               icon={
                 <ImageImportIcon
                   size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
-                  color={THEME.accent}
+                  color="#FFFFFF"
                 />
               }
               onPress={() => handleCaptureCtaPress('/import-media')}

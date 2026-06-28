@@ -1,6 +1,8 @@
 # Fil familial unifié (Phase 1)
 
 > **Règle d'or** : lecture **SQLite locale** (`getAllLocalMemories`). En cloud Petitmo+, sync par enfant puis fusion locale — pas de nouveau fetch Supabase dans les composants UI.
+>
+> **Local-first universel** : même règle en payant. Cloud vide + local présent = afficher le local (migration, hors ligne). Hydratation cloud toujours non bloquante. Voir `architecture-locale-cloud.md` §1.3.
 
 ## Produit
 
@@ -16,6 +18,8 @@
 | `getAllLocalMemories()` | Tous les souvenirs SQLite, tri `COALESCE(inserted_at, created_at) DESC` |
 | `getFamilyMemories()` | Local → SQLite ; cloud → `pullFamilyMemoriesFromRemoteToLocal()` puis SQLite |
 | `pullFamilyMemoriesFromRemoteToLocal()` | Pull chaque enfant local, puis `getAllLocalMemories()` |
+| `getChildren()` (cloud) | Merge remote + SQLite ; repli SQLite si remote vide ou erreur |
+| Bascule gratuit → payant | `upgradeToFullCloud` (upload arrière-plan) ; UI inchangée tant que local présent |
 
 ## UI
 

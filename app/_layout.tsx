@@ -15,7 +15,8 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { THEME } from '@/constants/theme';
 import { ensurePlaybackAudioForListening } from '@/lib/playbackAudioMode';
-import { supabase, supabaseAnonKey, supabaseUrl } from '@/lib/supabase';
+import { ensureSupabaseSession } from '@/lib/ensureSupabaseSession';
+import { supabaseAnonKey, supabaseUrl } from '@/lib/supabase';
 import { PendingMediaUploadsProvider } from '@/contexts/PendingMediaUploadsContext';
 import { initLocalDb } from '@/lib/localDb';
 import { resetUserTierForTesting } from '@/lib/userTier';
@@ -70,7 +71,6 @@ export default function RootLayout() {
     initLocalDb();
     pruneOrphanEmptyBookDuplicates();
     hydrateTabScreensFromSqliteSync();
-    setIsAuthReady(true);
   }, []);
 
   useEffect(() => {
@@ -98,6 +98,33 @@ export default function RootLayout() {
     return () => sub.remove();
   }, []);
 
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        const session = await ensureSupabaseSession();
+        if (session.ok) {
+          console.log('User authenticated:', session.userId);
+          void hydrateTabScreensFromLocal();
+        } else {
+          console.error('[auth]', session.error);
+          if (!supabaseUrl || !supabaseAnonKey) {
+            console.error(
+              '[auth] Supabase non configuré (EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_ANON_KEY manquants).'
+            );
+          }
+          setFeedHydrationSnapshots(null, [], []);
+          setCaptureTabChildSnapshot(null);
+        }
+      } catch (error) {
+        console.error('Auth initialization error:', error);
+      } finally {
+        setIsAuthReady(true);
+      }
+    };
+
+    void initAuth();
+  }, []);
+
   async function runWeeklyCleanup(): Promise<void> {
     const CLEANUP_KEY = 'petitmo_last_cleanup'
     const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000
@@ -118,77 +145,6 @@ export default function RootLayout() {
       // Silencieux
     }
   }
-
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (!supabaseUrl || !supabaseAnonKey) {
-          console.error(
-            '[auth] Supabase non configuré (EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_ANON_KEY manquants).'
-          );
-          return;
-        }
-
-        const { data: { session } } = await supabase.auth.getSession();
-
-        if (!session) {
-          let deviceId = await AsyncStorage.getItem('@petitmo_device_id');
-
-          if (!deviceId) {
-            deviceId = `device_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-            await AsyncStorage.setItem('@petitmo_device_id', deviceId);
-          }
-
-          const apiUrl = `${supabaseUrl}/functions/v1/create-device-user`;
-
-          const response = await fetch(apiUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${supabaseAnonKey}`,
-              apikey: supabaseAnonKey,
-            },
-            body: JSON.stringify({ deviceId }),
-          });
-
-          const result = await response.json();
-
-          if (!response.ok) {
-            console.error('Failed to create device user:', result);
-          } else {
-            console.log('Device user created/verified:', result);
-          }
-
-          const email = `${deviceId}@petitmo.local`;
-          const password = deviceId;
-
-          const { error: signInError } = await supabase.auth.signInWithPassword({
-            email,
-            password,
-          });
-
-          if (signInError) {
-            console.error('Sign in error:', signInError);
-          }
-        }
-
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          console.log('User authenticated:', user.id);
-          /** SQLite sync déjà fait ; sync cloud / livres en arrière-plan sans bloquer l’UI. */
-          void hydrateTabScreensFromLocal();
-        } else {
-          console.error('No user after auth');
-          setFeedHydrationSnapshots(null, [], []);
-          setCaptureTabChildSnapshot(null);
-        }
-      } catch (error) {
-        console.error('Auth initialization error:', error);
-      }
-    };
-
-    void initAuth();
-  }, []);
 
   /** Retour au premier plan : réaligner cache onglets (robuste après sync / autre appareil). */
   useEffect(() => {

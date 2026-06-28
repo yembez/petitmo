@@ -48,7 +48,32 @@ Et active :
 - QR pérennes (audio **et** vidéo) ;
 - exports serveur (PDF haute qualité).
 
----
+### 1.3 Local-first universel (gratuit **et** payant)
+
+**Lecture UI** : SQLite + sandbox sont **toujours** la source affichée (fil, favoris, livres, détail souvenir, profils enfant). Le mode `cloud` (Petitmo+) ajoute sync / backup / restauration — il ne remplace pas le local comme source d’affichage.
+
+| Situation | Comportement |
+|---|---|
+| Affichage (tous écrans) | Lire d’abord SQLite (`getAllLocalMemories`, `listLocalChildren`, `getLocalMemoryById`…). |
+| Hydratation cloud | **Toujours en arrière-plan**, jamais bloquante pour l’UI. |
+| Pull cloud → local | Uniquement via `pullMemoriesFromRemoteToLocal` / `pullFamilyMemoriesFromRemoteToLocal` + `mergeServerMemoryRowWithExistingLocal` (préserve les `local_*`). |
+| Repli cloud (médias) | Uniquement si le fichier sandbox est **confirmé** absent (`isLocalMediaUriReadable` échoue) et qu’une URL cloud existe. |
+| Cloud vide, local présent | Garder le local (migration en cours, hors ligne, bascule gratuit → payant). **Ne jamais** afficher un état vide parce que Supabase n’a pas encore répondu. |
+| Bascule gratuit → payant | `upgradeToFullCloud` + upload en arrière-plan ; l’utilisatrice continue de voir ses données locales immédiatement. |
+| Réinstall / nouveau téléphone (payant) | Exception : restauration initiale depuis le cloud (§5.2) — puis retour au modèle local-first. |
+
+**Pointeurs code (lecture local-first en cloud)** :
+
+| Donnée | Entrée légitime |
+|---|---|
+| Fil / favoris | `getFamilyMemories()` → SQLite après pull optionnel |
+| Détail souvenir | `getMemoryById()` → SQLite ; repli Supabase + `upsertLocalMemory` si absent |
+| Enfants | `getChildren()` → merge local + remote ; repli SQLite si remote vide |
+| Hydratation onglets | `hydrateTabScreensFromSqliteSync()` puis `hydrateTabScreensFromLocal()` |
+| Migration post-paywall | `services/migration.ts` (`upgradeToFullCloud`), `pendingCloudFlush.ts` |
+
+Détail médias / merge : [`.cursor/rules/local-first-media.mdc`](../../.cursor/rules/local-first-media.mdc).
+
 
 ## 2. Diagramme de flux
 

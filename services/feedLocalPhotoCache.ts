@@ -185,3 +185,71 @@ export async function clearFeedLocalVideo(memoryId: string): Promise<void> {
     await deleteAsync(`${root}${id}.${ext}`, { idempotent: true }).catch(() => {});
   }
 }
+
+/** Chemins disque possibles pour une vignette fil (slot 0 + extras album). */
+export function feedLocalThumbnailPathCandidates(memoryId: string, maxExtras = 16): string[] {
+  const out: string[] = [];
+  const push = (p: string) => {
+    const t = p.trim();
+    if (t && !out.includes(t)) out.push(t);
+  };
+  push(filePathFor(memoryId, 0));
+  for (let i = 0; i < maxExtras; i++) {
+    push(filePathFor(memoryId, i + 1));
+  }
+  return out;
+}
+
+/** Chemins disque possibles pour une copie vidéo fil. */
+export function feedLocalVideoPathCandidates(memoryId: string): string[] {
+  const root = videoBaseDir();
+  if (!root) return [];
+  const id = memoryId.trim();
+  return VIDEO_FILE_EXTS.map(ext => `${root}${id}.${ext}`);
+}
+
+async function moveFileIfExists(from: string, to: string): Promise<boolean> {
+  if (!from.trim() || !to.trim() || from === to) return false;
+  try {
+    const info = await getInfoAsync(from);
+    if (!info.exists || info.isDirectory) return false;
+    await makeDirectoryAsync(to.slice(0, to.lastIndexOf('/') + 1), { intermediates: true }).catch(() => {});
+    const destInfo = await getInfoAsync(to);
+    if (destInfo.exists) {
+      await deleteAsync(to, { idempotent: true });
+    }
+    await copyAsync({ from, to });
+    await deleteAsync(from, { idempotent: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Lors du remapping `loc_*` → UUID : déplace aussi le cache fil (sinon le fil lit encore l’ancien id).
+ */
+export async function remapFeedLocalCacheForMemoryId(oldId: string, newId: string): Promise<void> {
+  if (Platform.OS === 'web' || !oldId.trim() || !newId.trim() || oldId === newId) return;
+
+  for (let slot = 0; slot < 17; slot++) {
+    await moveFileIfExists(filePathFor(oldId, slot), filePathFor(newId, slot));
+  }
+
+  for (const ext of VIDEO_FILE_EXTS) {
+    const root = videoBaseDir();
+    if (!root) continue;
+    await moveFileIfExists(`${root}${oldId}.${ext}`, `${root}${newId}.${ext}`);
+  }
+
+  const bootUrls = bootstrapDisplayUrlsByMemoryId.get(oldId);
+  if (bootUrls?.length) {
+    bootstrapDisplayUrlsByMemoryId.set(newId, bootUrls);
+    bootstrapDisplayUrlsByMemoryId.delete(oldId);
+  }
+  const bootVideo = bootstrapVideoUriByMemoryId.get(oldId);
+  if (bootVideo) {
+    bootstrapVideoUriByMemoryId.set(newId, bootVideo);
+    bootstrapVideoUriByMemoryId.delete(oldId);
+  }
+}

@@ -26,6 +26,8 @@ Le device-user Supabase auto-créé dans `app/_layout.tsx` est une **mécanique 
 
 L'abonnement (`lib/userTier.ts`) déverrouille : sync cloud, restauration, multi-device, QR vidéo, exports serveur.
 
+**Local-first conservé** : même en payant, l’UI lit **SQLite + sandbox** en premier ; le cloud hydrate en arrière-plan. Repli cloud (médias ou données) uniquement si le local est absent. Voir `docs/specs/architecture-locale-cloud.md` §1.3 et `local-first-media.mdc`.
+
 ## UX (conséquences non négociables)
 
 - On peut afficher **"J'ai déjà un compte"** (login classique).

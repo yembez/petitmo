@@ -707,7 +707,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(0, 0, 0, 0.28)',
   },
   feedFavoriteDiscCtaActive: {
-    backgroundColor: 'rgba(255, 127, 79, 0.1)',
+    backgroundColor: '#FFFFFF',
   },
   swipeDeleteContainer: {
     justifyContent: 'center',

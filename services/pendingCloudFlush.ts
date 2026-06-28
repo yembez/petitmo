@@ -1,8 +1,11 @@
 import { DeviceEventEmitter } from 'react-native';
 import { getLocalMemoriesPendingCloudSync } from '@/lib/localDb';
+import { ensureSupabaseSession } from '@/lib/ensureSupabaseSession';
 import { supabase } from '@/lib/supabase';
 import { getCachedUserMode } from '@/lib/userMode';
 import { getUserTier } from '@/lib/userTier';
+import { ensureLocalChildrenSyncedToSupabase } from '@/services/children';
+import { remapLegacyEntityIdsForCloudSync } from '@/services/cloudIdRemap';
 import { ensureMemoryUploadedForCloud } from '@/services/migration';
 import { resumePetitmoPlusCloudCaptureOrMerge } from '@/services/media';
 
@@ -17,6 +20,12 @@ export function flushPendingCloudUploadsOnce(): Promise<void> {
 
   const p = (async (): Promise<void> => {
     if ((await getCachedUserMode()) === 'local') return;
+
+    const session = await ensureSupabaseSession();
+    if (!session.ok) return;
+
+    await remapLegacyEntityIdsForCloudSync();
+    await ensureLocalChildrenSyncedToSupabase();
 
     const { data: { user } } = await supabase.auth.getUser();
     if (!user?.id) return;

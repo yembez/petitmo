@@ -8,6 +8,8 @@ alwaysApply: false
 
 ## Modèle mental
 
+**Local-first = règle pour les deux modes** (`local` gratuit et `cloud` Petitmo+). L’UI lit toujours SQLite + sandbox ; le cloud sert à synchroniser, sauvegarder et restaurer — pas à remplacer le local comme source d’affichage. Hydratation cloud **en arrière-plan** ; repli cloud **uniquement** si le local est absent (fichier confirmé mort, réinstall, restauration initiale). Voir `docs/specs/architecture-locale-cloud.md` §1.3.
+
 Un souvenir a **deux familles de pointeurs en parallèle**, dans la même ligne `memories` (le SQLite local et la table Supabase ont la même forme) :
 
 - **Locaux (sandbox du téléphone, `documentDirectory/petitmo_memories/{memoryId}/`)** :

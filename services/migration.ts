@@ -1,7 +1,10 @@
-import { getInfoAsync } from 'expo-file-system/legacy';
 import { getLocalMemoryById, getLocalMemoriesPendingCloudSync, upsertLocalMemory } from '@/lib/localDb';
 import { setUserTier } from '@/lib/userTier';
-import { ensureLocalChildrenSyncedToSupabase } from '@/services/children';
+import { remapLegacyEntityIdsForCloudSync, type LegacyIdRemapReport } from '@/services/cloudIdRemap';
+import {
+  ensureLocalChildrenSyncedToSupabase,
+  type ChildrenSyncReport,
+} from '@/services/children';
 import {
   persistVoiceCoverToCloudForPdfExport,
   pushPhotoAlbumMemoryToCloud,
@@ -11,11 +14,19 @@ import {
 } from '@/services/media';
 import { getUserMode } from '@/lib/userMode';
 import { getUserTier } from '@/lib/userTier';
+import { ensureSupabaseSession } from '@/lib/ensureSupabaseSession';
 import { supabase } from '@/lib/supabase';
 import type { Database } from '@/types/database';
 import type { Memory } from '@/types/local';
 import { withLocalFields } from '@/services/memoryRowMapping';
-import { getVoiceCoverUriForBookPreview } from '@/utils/memoryPhotos';
+import {
+  collectPhotoCloudSyncUriCandidates,
+  collectPhotoLocalUploadUriCandidates,
+  collectVideoCloudSyncUriCandidates,
+  collectVoiceCoverLocalUploadUriCandidates,
+  getVoiceCoverUriForBookPreview,
+} from '@/utils/memoryPhotos';
+import { pickFirstReadableLocalMediaUri } from '@/utils/localMediaReadable';
 
 export type MigrationProgress = {
   total: number;
@@ -34,21 +45,51 @@ function isDuplicateKeyError(error: unknown): boolean {
   return /duplicate key|unique constraint/i.test(msg);
 }
 
-function memoryHasAlbumExtras(memory: Memory): boolean {
-  if ((memory.extra_photo_paths?.length ?? 0) > 0) return true;
-  return (memory.extra_photo_urls ?? []).some(u => {
-    const t = (u ?? '').trim();
-    return t.length > 0 && !/^https?:\/\//i.test(t);
-  });
+function jsonStringArray(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((x): x is string => typeof x === 'string' && x.trim().length > 0);
 }
 
-async function fileExists(uri: string): Promise<boolean> {
-  try {
-    const info = await getInfoAsync(uri);
-    return info.exists && !info.isDirectory;
-  } catch {
-    return false;
+function memoryHasAlbumExtras(memory: Memory): boolean {
+  if (jsonStringArray(memory.extra_photo_paths).length > 0) return true;
+  return jsonStringArray(memory.extra_photo_urls).some(u => !/^https?:\/\//i.test(u));
+}
+
+async function resolveReadableLocalPath(
+  candidates: (string | null | undefined)[],
+): Promise<string | null> {
+  return pickFirstReadableLocalMediaUri(candidates);
+}
+
+async function describeUnsyncedReason(memory: Memory): Promise<string> {
+  const after = getLocalMemoryById(memory.id) ?? memory;
+  if (after.sync_status === 'synced' || /^https?:\/\//i.test((after.media_url ?? '').trim())) {
+    return '';
   }
+
+  let candidates: (string | null | undefined)[] = [];
+  if (memory.type === 'photo') {
+    candidates = collectPhotoCloudSyncUriCandidates(memory);
+  } else if (memory.type === 'video') {
+    candidates = collectVideoCloudSyncUriCandidates(memory);
+  } else if (memory.type === 'voice') {
+    candidates = [memory.local_original_path, memory.local_media_path];
+  }
+
+  if (candidates.some(c => (c ?? '').trim())) {
+    const readable = await pickFirstReadableLocalMediaUri(candidates);
+    if (!readable) {
+      const hint = candidates
+        .map(c => (c ?? '').trim())
+        .filter(Boolean)
+        .slice(0, 2)
+        .map(p => p.slice(-48))
+        .join(' | ');
+      return `fichier local introuvable (testé: ${hint || '—'})`;
+    }
+  }
+
+  return 'upload ou insert Supabase n’a pas abouti';
 }
 
 async function invokeProcessMemory(memoryId: string): Promise<void> {
@@ -59,15 +100,20 @@ async function invokeProcessMemory(memoryId: string): Promise<void> {
   }
 }
 
-async function insertOrMergeMemory(
+function isTextTitleSchemaError(error: unknown): boolean {
+  const msg = String(error instanceof Error ? error.message : error);
+  return /text_title/i.test(msg) && /schema cache|could not find the/i.test(msg);
+}
+
+async function insertOrMergeMemoryOnce(
   row: Database['public']['Tables']['memories']['Insert']
-): Promise<Memory | null> {
+): Promise<Memory> {
   const { data, error } = await supabase.from('memories').insert(row).select('*').single();
   if (!error && data) {
     return withLocalFields(data);
   }
   if (!isDuplicateKeyError(error) || !row.id) {
-    return null;
+    throw new Error(error?.message ?? 'insert memories a échoué');
   }
   const { id, ...patch } = row;
   const { data: updated, error: upErr } = await supabase
@@ -76,9 +122,28 @@ async function insertOrMergeMemory(
     .eq('id', id)
     .select('*')
     .single();
-  if (upErr || !updated) return null;
+  if (upErr || !updated) {
+    throw new Error(upErr?.message ?? 'update memories a échoué');
+  }
   return withLocalFields(updated);
 }
+
+async function insertOrMergeMemory(
+  row: Database['public']['Tables']['memories']['Insert']
+): Promise<Memory> {
+  try {
+    return await insertOrMergeMemoryOnce(row);
+  } catch (e) {
+    if (!('text_title' in row) || !isTextTitleSchemaError(e)) throw e;
+    const { text_title: _ignored, ...withoutTitle } = row;
+    if (__DEV__) {
+      console.warn('[migration] text_title absent côté Supabase — insert sans titre (migration SQL à appliquer)');
+    }
+    return await insertOrMergeMemoryOnce(withoutTitle);
+  }
+}
+
+const MIGRATION_UPLOAD_OPTS = { upsert: true } as const;
 
 async function migrateText(memory: Memory, userId: string): Promise<void> {
   const insert: Database['public']['Tables']['memories']['Insert'] = {
@@ -118,37 +183,49 @@ export async function ensureVoiceMemoryCloudForBookExport(memory: Memory, userId
   if ((memory.user_id ?? '').trim() && memory.user_id !== userId) return;
 
   if (!voiceMemoryHasCloudMedia(memory)) {
-    const audioUri = (memory.local_original_path ?? memory.local_media_path ?? '').trim();
-    if (!audioUri || !(await fileExists(audioUri))) return;
+    const audioUri = await resolveReadableLocalPath([
+      memory.local_original_path,
+      memory.local_media_path,
+    ]);
+    if (!audioUri) return;
     await migrateVoice(memory, userId);
   }
 
   const refreshed = getLocalMemoryById(memory.id) ?? memory;
   const cand = getVoiceCoverUriForBookPreview(refreshed).trim();
+  const coverReadable = await resolveReadableLocalPath([
+    cand,
+    ...collectVoiceCoverLocalUploadUriCandidates(refreshed),
+  ]);
   if (
-    cand &&
-    !/^https:\/\//i.test(cand) &&
-    !BARE_MEDIA_PATH_RE.test(cand) &&
-    (await fileExists(cand))
+    coverReadable &&
+    !/^https?:\/\//i.test(coverReadable) &&
+    !BARE_MEDIA_PATH_RE.test(coverReadable)
   ) {
-    await persistVoiceCoverToCloudForPdfExport(refreshed.id, refreshed.child_id, cand);
+    await persistVoiceCoverToCloudForPdfExport(refreshed.id, refreshed.child_id, coverReadable);
   }
 }
 
 async function migrateVoice(memory: Memory, userId: string): Promise<void> {
-  const audioUri = (memory.local_original_path ?? memory.local_media_path ?? '').trim();
-  if (!audioUri || !(await fileExists(audioUri))) return;
+  const audioUri = await resolveReadableLocalPath([
+    memory.local_original_path,
+    memory.local_media_path,
+  ]);
+  if (!audioUri) return;
 
   const noQuery = audioUri.split('?')[0] ?? '';
   const extFromUri = noQuery.includes('.') ? (noQuery.split('.').pop() ?? 'm4a').toLowerCase() : 'm4a';
   const ext = ['m4a', 'mp3', 'aac', 'wav', 'caf'].includes(extFromUri) ? extFromUri : 'm4a';
   const pathRel = `${userId}/${memory.child_id}/voice/${memory.id}.${ext}`;
-  const mediaUrl = await uploadFileToSupabase(audioUri, `media/${pathRel}`);
+  const mediaUrl = await uploadFileToSupabase(audioUri, `media/${pathRel}`, MIGRATION_UPLOAD_OPTS);
 
   let voiceCoverUrl: string | null = null;
   let voiceCoverPath: string | null = null;
-  const coverLocal = (memory.voice_cover_path ?? memory.voice_cover_url ?? '').trim();
-  if (coverLocal && !/^https?:\/\//i.test(coverLocal) && (await fileExists(coverLocal))) {
+  const coverLocal = await resolveReadableLocalPath([
+    memory.voice_cover_path,
+    ...collectVoiceCoverLocalUploadUriCandidates(memory),
+  ]);
+  if (coverLocal && !/^https?:\/\//i.test(coverLocal)) {
     try {
       const up = await uploadVoiceCoverToSupabaseFromLocal(userId, memory.child_id, coverLocal);
       voiceCoverUrl = up?.publicUrl ?? null;
@@ -188,19 +265,24 @@ async function migrateVoice(memory: Memory, userId: string): Promise<void> {
 }
 
 async function migratePhoto(memory: Memory, userId: string): Promise<void> {
-  const src = (memory.local_original_path ?? memory.local_print_path ?? memory.local_media_path ?? '').trim();
-  if (!src || !(await fileExists(src))) return;
+  const src = await resolveReadableLocalPath(collectPhotoCloudSyncUriCandidates(memory));
+  if (!src) {
+    throw new Error('aucun fichier photo local lisible');
+  }
 
   const storagePath = `${userId}/${memory.child_id}/photo/${memory.id}_migrate.jpg`;
-  const mediaUrl = await uploadFileToSupabase(src, `media/${storagePath}`);
+  const mediaUrl = await uploadFileToSupabase(src, `media/${storagePath}`, MIGRATION_UPLOAD_OPTS);
 
   let thumbUrl: string | null = null;
   let displayUrl: string | null = null;
-  const thumbLocal = (memory.local_thumb_path ?? '').trim();
-  if (thumbLocal && (await fileExists(thumbLocal))) {
+  const thumbLocal = await resolveReadableLocalPath([
+    memory.local_thumb_path,
+    memory.local_media_path,
+  ]);
+  if (thumbLocal) {
     const tPath = `${userId}/${memory.child_id}/photo/${memory.id}_thumb.jpg`;
     try {
-      thumbUrl = await uploadFileToSupabase(thumbLocal, `media/${tPath}`);
+      thumbUrl = await uploadFileToSupabase(thumbLocal, `media/${tPath}`, MIGRATION_UPLOAD_OPTS);
       displayUrl = thumbUrl;
     } catch {
       thumbUrl = null;
@@ -240,14 +322,16 @@ async function migratePhoto(memory: Memory, userId: string): Promise<void> {
 }
 
 async function migrateVideo(memory: Memory, userId: string): Promise<void> {
-  const src = (memory.local_original_path ?? memory.local_media_path ?? '').trim();
-  if (!src || !(await fileExists(src))) return;
+  const src = await resolveReadableLocalPath(collectVideoCloudSyncUriCandidates(memory));
+  if (!src) {
+    throw new Error('aucun fichier vidéo local lisible');
+  }
 
   const noQuery = src.split('?')[0] ?? '';
   const extFromUri = noQuery.includes('.') ? (noQuery.split('.').pop() ?? 'mp4').toLowerCase() : 'mp4';
   const ext = ['mp4', 'mov', 'm4v', 'webm'].includes(extFromUri) ? extFromUri : 'mp4';
   const storagePath = `${userId}/${memory.child_id}/video/${memory.id}.${ext}`;
-  const mediaUrl = await uploadFileToSupabase(src, `media/${storagePath}`);
+  const mediaUrl = await uploadFileToSupabase(src, `media/${storagePath}`, MIGRATION_UPLOAD_OPTS);
 
   const insert: Database['public']['Tables']['memories']['Insert'] = {
     id: memory.id,
@@ -286,14 +370,22 @@ function markSyncedIfRemote(memory: Memory): boolean {
 
 /** Ancien flux « pending » : ligne Supabase existante, compléter `media_url`. */
 async function legacyPatchMediaUrl(memory: Memory): Promise<void> {
-  const localPath = (memory.local_media_path ?? '').trim();
-  if (!localPath || !(await fileExists(localPath))) return;
+  const candidates =
+    memory.type === 'photo'
+      ? collectPhotoCloudSyncUriCandidates(memory)
+      : memory.type === 'video'
+        ? collectVideoCloudSyncUriCandidates(memory)
+        : [memory.local_media_path, memory.local_original_path];
+  const localPath = await resolveReadableLocalPath(candidates);
+  if (!localPath) {
+    throw new Error('aucun fichier local lisible pour legacyPatchMediaUrl');
+  }
 
   let mediaUrl: string | null = null;
   if (memory.type === 'photo') {
-    mediaUrl = await uploadFileToSupabase(localPath, `media/${memory.id}/original.jpg`);
+    mediaUrl = await uploadFileToSupabase(localPath, `media/${memory.id}/original.jpg`, MIGRATION_UPLOAD_OPTS);
   } else if (memory.type === 'video') {
-    mediaUrl = await uploadFileToSupabase(localPath, `media/${memory.id}/video.mp4`);
+    mediaUrl = await uploadFileToSupabase(localPath, `media/${memory.id}/video.mp4`, MIGRATION_UPLOAD_OPTS);
   } else {
     return;
   }
@@ -315,12 +407,21 @@ async function legacyPatchMediaUrl(memory: Memory): Promise<void> {
  * Pousse un souvenir local vers Supabase (insert/merge + upload Storage) au besoin.
  * Ne modifie pas le tier utilisateur : utile pour préparer un export livre.
  */
-export async function ensureMemoryUploadedForCloud(memory: Memory): Promise<void> {
+export async function ensureMemoryUploadedForCloud(
+  memory: Memory,
+  opts?: { forceCloud?: boolean },
+): Promise<void> {
+  const { data: { user: initialUser } } = await supabase.auth.getUser();
+  if (!initialUser) {
+    const session = await ensureSupabaseSession();
+    if (!session.ok) return;
+  }
+
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return;
 
   // Mode gratuit : souvenirs 100 % locaux — pas de push mémoires vers Supabase (règle d’or).
-  if ((await getUserMode()) === 'local') return;
+  if (!opts?.forceCloud && (await getUserMode()) === 'local') return;
 
   if (markSyncedIfRemote(memory)) return;
 
@@ -364,13 +465,46 @@ export async function ensureMemoryUploadedForCloud(memory: Memory): Promise<void
   await legacyPatchMediaUrl(memory);
 }
 
-export async function upgradeToFullCloud(onProgress?: ProgressCallback): Promise<void> {
+/** Compte-rendu diagnostic de la migration gratuit → cloud. */
+export type CloudMigrationReport = {
+  hasUser: boolean;
+  userId: string | null;
+  idRemap: LegacyIdRemapReport;
+  children: ChildrenSyncReport;
+  memTotal: number;
+  memUploaded: number;
+  memSkipped: number;
+  memErrors: string[];
+};
+
+/** Une ligne est-elle réellement montée côté cloud après tentative ? */
+function memoryLooksSynced(memory: Memory): boolean {
+  const after = getLocalMemoryById(memory.id) ?? memory;
+  if (after.sync_status === 'synced') return true;
+  return /^https?:\/\//i.test((after.media_url ?? '').trim());
+}
+
+export async function upgradeToFullCloud(onProgress?: ProgressCallback): Promise<CloudMigrationReport> {
   await setUserTier('paid');
-  await ensureLocalChildrenSyncedToSupabase();
+
+  const idRemap = await remapLegacyEntityIdsForCloudSync();
+  const childrenReport = await ensureLocalChildrenSyncedToSupabase();
+
+  const report: CloudMigrationReport = {
+    hasUser: childrenReport.hasUser,
+    userId: childrenReport.userId,
+    idRemap,
+    children: childrenReport,
+    memTotal: 0,
+    memUploaded: 0,
+    memSkipped: 0,
+    memErrors: [],
+  };
 
   const pending = getLocalMemoriesPendingCloudSync();
 
   const total = pending.length;
+  report.memTotal = total;
   onProgress?.({
     total,
     done: 0,
@@ -391,9 +525,20 @@ export async function upgradeToFullCloud(onProgress?: ProgressCallback): Promise
     });
 
     try {
-      await ensureMemoryUploadedForCloud(memory);
-    } catch {
-      /* on continue */
+      await ensureMemoryUploadedForCloud(memory, { forceCloud: true });
+      if (memoryLooksSynced(memory)) {
+        report.memUploaded += 1;
+      } else {
+        report.memSkipped += 1;
+        const reason = await describeUnsyncedReason(memory);
+        report.memErrors.push(
+          `${memory.type} ${memory.id.slice(0, 8)}: non synchronisé${reason ? ` (${reason})` : ''}.`,
+        );
+      }
+    } catch (e) {
+      report.memErrors.push(
+        `${memory.type} ${memory.id.slice(0, 8)}: ${e instanceof Error ? e.message : String(e)}`,
+      );
     }
 
     done += 1;
@@ -407,6 +552,12 @@ export async function upgradeToFullCloud(onProgress?: ProgressCallback): Promise
     current: null,
     status: 'done',
   });
+
+  if (__DEV__) {
+    console.log('[upgradeToFullCloud] report', JSON.stringify(report, null, 2));
+  }
+
+  return report;
 }
 
 export async function retryFailedMigrations(): Promise<void> {

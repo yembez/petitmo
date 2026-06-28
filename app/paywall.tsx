@@ -9,6 +9,7 @@ import {
   Alert,
   ScrollView,
   Platform,
+  DeviceEventEmitter,
 } from 'react-native'
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -25,8 +26,9 @@ import {
 } from '@expo-google-fonts/dm-sans'
 import { BookOpen, ChevronRight, Cloud, Heart, Lock, X } from 'lucide-react-native'
 import PetitmoLogoManuscrit, { PETITMO_LOGO_VIEWBOX } from '@/components/PetitmoLogoManuscrit'
-import { setUserTier } from '@/lib/userTier'
-import { ensureLocalChildrenSyncedToSupabase } from '@/services/children'
+import { upgradeToFullCloud } from '@/services/migration'
+import { flushPendingCloudUploadsOnce } from '@/services/pendingCloudFlush'
+import { hydrateTabScreensFromLocal } from '@/services/tabScreensHydrate'
 import { grantDigitalExportPurchase } from '@/lib/digitalExportPurchase'
 import { FREE_TIER_LIMIT } from '@/lib/limits'
 import { THEME } from '@/constants/theme'
@@ -206,12 +208,40 @@ export default function PaywallScreen() {
     setIsLoading(true)
     try {
       await new Promise(r => setTimeout(r, 1200))
-      await setUserTier('paid')
-      await ensureLocalChildrenSyncedToSupabase()
+      const report = await upgradeToFullCloud()
+      await flushPendingCloudUploadsOnce()
       await AsyncStorage.setItem('petitmo_subscribed_at', new Date().toISOString())
+      await hydrateTabScreensFromLocal()
+      DeviceEventEmitter.emit('petitmo:memories-invalidate')
+
+      if (__DEV__) {
+        const c = report.children
+        const r = report.idRemap
+        const lines = [
+          `Session Supabase : ${report.hasUser ? 'oui' : 'NON'}`,
+          report.userId ? `userId : ${report.userId.slice(0, 8)}…` : 'userId : —',
+          r.childrenRemapped + r.memoriesRemapped > 0
+            ? `IDs remappés : ${r.childrenRemapped} enfant(s), ${r.memoriesRemapped} souvenir(s)`
+            : null,
+          `Enfants : ${c.inserted} ajoutés / ${c.alreadyThere} déjà là / ${c.total} total`,
+          `Souvenirs : ${report.memUploaded} montés / ${report.memSkipped} ignorés / ${report.memTotal} total`,
+        ].filter((line): line is string => line != null)
+        const allErrors = [...c.errors, ...report.memErrors]
+        if (allErrors.length > 0) {
+          lines.push('', 'Erreurs :', ...allErrors.slice(0, 6))
+        }
+        Alert.alert('Migration cloud (dev)', lines.join('\n'), [
+          { text: 'OK', onPress: () => router.replace('/(tabs)') },
+        ])
+        return
+      }
+
       router.replace('/(tabs)')
-    } catch {
-      Alert.alert('Erreur', "Impossible de finaliser l'achat.")
+    } catch (e) {
+      Alert.alert(
+        'Erreur',
+        __DEV__ && e instanceof Error ? e.message : "Impossible de finaliser l'achat.",
+      )
     } finally {
       setIsLoading(false)
     }

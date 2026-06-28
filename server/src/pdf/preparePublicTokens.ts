@@ -3,6 +3,7 @@ import type { BookPageServer } from '../types/contracts';
 import type { MemoryRow } from './memoryRow';
 import { ensurePublicMediaToken } from '../publicMediaTokens';
 import { bookPublicMediaExpiresAtIso, FREE_TIER_QR_AV_MAX_PER_BOOK } from '../constants/spec';
+import { linkPublicMediaTokenToMemorySource } from './linkPublicMediaTokenSource';
 
 export type PrepareTokensResult =
   | { ok: true; tokensByMemoryId: Map<string, string> }
@@ -59,6 +60,7 @@ export async function preparePublicTokensForBook(params: {
       kind,
       expiresAtIso: bookPublicMediaExpiresAtIso(),
     });
+    await linkPublicMediaTokenToMemorySource(supabase, tok, m);
     tokensByMemoryId.set(memoryId, tok);
   }
 
@@ -110,6 +112,7 @@ export async function preparePublicTokensForExportRequest(params: {
       kind,
       expiresAtIso: bookPublicMediaExpiresAtIso(),
     });
+    await linkPublicMediaTokenToMemorySource(supabase, tok, m);
     tokensByMemoryId.set(memoryClientId, tok);
   }
   return { ok: true, tokensByMemoryId };

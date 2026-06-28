@@ -1,4 +1,6 @@
 import type { Memory } from '@/types/local';
+import { Platform } from 'react-native';
+import { documentDirectory } from 'expo-file-system/legacy';
 import { extractMediaBucketPath } from '@/lib/mediaSignedUrl';
 import { peekFeedBootstrapDisplayUrls } from '@/services/feedLocalPhotoCache';
 import { rebaseSandboxUriToCurrentContainer } from '@/utils/localMediaReadable';
@@ -125,6 +127,11 @@ export function inferLocalDisplayPathFromPrint(printPath: string): string {
   return guess !== p ? guess : '';
 }
 
+import {
+  feedLocalThumbnailPathCandidates,
+  feedLocalVideoPathCandidates,
+} from '@/services/feedLocalPhotoCache';
+
 /** Candidats locaux pour upload guest PDF — ordre qualité décroissante, sans doublons. */
 export function collectPhotoLocalUploadUriCandidates(memory: Memory): string[] {
   const seen = new Set<string>();
@@ -147,6 +154,90 @@ export function collectPhotoLocalUploadUriCandidates(memory: Memory): string[] {
   add(memory.local_original_path);
   add(memory.local_media_path);
   add(memory.local_thumb_path);
+  return out;
+}
+
+function sandboxPhotoFileCandidatesForMemoryId(memoryId: string): string[] {
+  if (Platform.OS === 'web' || !documentDirectory) return [];
+  const base = `${documentDirectory}petitmo_memories/${memoryId.trim()}/`;
+  return [
+    `${base}print.jpg`,
+    `${base}display.jpg`,
+    `${base}original.heic`,
+    `${base}original.jpg`,
+    `${base}original.png`,
+    `${base}original.webp`,
+    `${base}thumb.jpg`,
+  ];
+}
+
+/** Migration cloud / sync : sandbox mémoire + cache fil (`petitmo_feed_local_thumbs/`). */
+export function collectPhotoCloudSyncUriCandidates(memory: Memory): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (u: string | null | undefined) => {
+    const t = (u ?? '').trim();
+    if (!t || seen.has(t)) return;
+    seen.add(t);
+    out.push(t);
+  };
+  for (const u of collectPhotoLocalUploadUriCandidates(memory)) add(u);
+  for (const u of feedLocalThumbnailPathCandidates(memory.id)) add(u);
+  for (const u of sandboxPhotoFileCandidatesForMemoryId(memory.id)) add(u);
+  const legacyIds = new Set<string>();
+  const scanSandboxId = (p: string | null | undefined) => {
+    const m = (p ?? '').match(/petitmo_memories\/([^/]+)\//);
+    if (m?.[1]) legacyIds.add(m[1]);
+  };
+  scanSandboxId(memory.local_original_path);
+  scanSandboxId(memory.local_media_path);
+  scanSandboxId(memory.local_thumb_path);
+  scanSandboxId(memory.local_display_path);
+  scanSandboxId(memory.local_print_path);
+  for (const legacyId of legacyIds) {
+    if (legacyId === memory.id) continue;
+    for (const u of feedLocalThumbnailPathCandidates(legacyId)) add(u);
+    for (const u of sandboxPhotoFileCandidatesForMemoryId(legacyId)) add(u);
+  }
+  return out;
+}
+
+function sandboxVideoFileCandidatesForMemoryId(memoryId: string): string[] {
+  if (Platform.OS === 'web' || !documentDirectory) return [];
+  const base = `${documentDirectory}petitmo_memories/${memoryId.trim()}/`;
+  return [`${base}original.mp4`, `${base}original.mov`, `${base}original.m4v`, `${base}poster.jpg`];
+}
+
+/** Candidats vidéo pour sync cloud : sandbox + cache fil. */
+export function collectVideoCloudSyncUriCandidates(
+  memory: Pick<Memory, 'id' | 'edited_media_url' | 'media_url' | 'local_media_path' | 'local_original_path'>,
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (u: string | null | undefined) => {
+    const t = (u ?? '').trim();
+    if (!t || seen.has(t)) return;
+    seen.add(t);
+    out.push(t);
+  };
+  for (const u of feedLocalVideoPathCandidates(memory.id)) add(u);
+  for (const u of sandboxVideoFileCandidatesForMemoryId(memory.id)) add(u);
+  add(memory.edited_media_url);
+  add(memory.local_original_path);
+  add(memory.local_media_path);
+  add(memory.media_url);
+  const legacyIds = new Set<string>();
+  const scanSandboxId = (p: string | null | undefined) => {
+    const m = (p ?? '').match(/petitmo_memories\/([^/]+)\//);
+    if (m?.[1]) legacyIds.add(m[1]);
+  };
+  scanSandboxId(memory.local_original_path);
+  scanSandboxId(memory.local_media_path);
+  for (const legacyId of legacyIds) {
+    if (legacyId === memory.id) continue;
+    for (const u of feedLocalVideoPathCandidates(legacyId)) add(u);
+    for (const u of sandboxVideoFileCandidatesForMemoryId(legacyId)) add(u);
+  }
   return out;
 }
 

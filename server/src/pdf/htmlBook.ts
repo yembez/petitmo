@@ -722,7 +722,7 @@ body.print-bleed .pf-footer {
 }
 .pf-meta-loc {
   font-family:'DM Sans',sans-serif; font-size:7pt; font-weight:600;
-  color:#3A3A3C; letter-spacing:.15pt; text-transform:none; text-align:right;
+  color:#AEAEB2; letter-spacing:.15pt; text-transform:none; text-align:right;
   flex:1; min-width:0;
 }
 .pf-caption { margin-top:0; font-size:14pt; line-height:1.3; }
@@ -755,7 +755,7 @@ body.print-bleed .pn-text {
   gap:3mm; flex-shrink:0; margin-bottom:2mm;
 }
 .pn-meta-loc {
-  font-weight:600; color:#3A3A3C; letter-spacing:.15pt; text-transform:none;
+  font-weight:600; color:#AEAEB2; letter-spacing:.15pt; text-transform:none;
   text-align:right; flex:1; min-width:0;
 }
 .photo-note .pn-text .body.text-memory-editorial {
@@ -848,7 +848,7 @@ body.print-bleed .bleed-x {
   gap:3mm; margin-top:6pt; flex-shrink:0;
 }
 .quote-meta-loc {
-  font-weight:600; color:#3A3A3C; letter-spacing:.15pt; text-transform:none;
+  font-weight:600; color:#AEAEB2; letter-spacing:.15pt; text-transform:none;
   text-align:right; flex:1; min-width:0;
 }
 .quote-mark {
@@ -928,7 +928,7 @@ body.print-bleed .bleed-x {
 }
 .media-qr-meta-date { flex-shrink:0; text-align:left; }
 .media-qr-meta-loc {
-  font-weight:600; color:#3A3A3C; letter-spacing:.15pt; text-transform:none;
+  font-weight:600; color:#AEAEB2; letter-spacing:.15pt; text-transform:none;
   text-align:right; flex:1; min-width:0;
 }
 .media-qr-sep {

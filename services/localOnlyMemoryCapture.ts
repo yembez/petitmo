@@ -18,12 +18,10 @@ import * as VideoThumbnails from 'expo-video-thumbnails';
 
 export type LocalCaptureMediaType = 'photo' | 'video' | 'voice';
 
+import { newPetitmoEntityId } from '@/utils/petitmoEntityId';
+
 export function newLocalMemoryId(): string {
-  const c = globalThis.crypto;
-  if (c && typeof c.randomUUID === 'function') {
-    return c.randomUUID();
-  }
-  return `loc_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+  return newPetitmoEntityId();
 }
 
 async function readBytesSize(uri: string): Promise<number> {

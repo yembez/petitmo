@@ -1920,7 +1920,7 @@ const styles = StyleSheet.create({
   },
   photoLocationBook: {
     fontSize: 11,
-    color: '#3A3A3C',
+    color: '#636366',
     fontWeight: '600',
     textAlign: 'right',
     flex: 1,
@@ -1947,7 +1947,7 @@ const styles = StyleSheet.create({
   },
   noteMetaLocation: {
     fontSize: 11,
-    color: '#3A3A3C',
+    color: '#636366',
     fontWeight: '600',
     textAlign: 'right',
     flex: 1,

@@ -7,6 +7,7 @@ import { countRenderedBookPages } from '../pdf/bookPageCount';
 import { htmlToDigitalPdfBuffer, htmlToPdfBuffer } from '../pdf/renderPdf';
 import { saveBookPdfAndSign, saveBookPdfForExportRequest } from '../pdf/pdfStorage';
 import { preparePublicTokensForBook, preparePublicTokensForExportRequest } from '../pdf/preparePublicTokens';
+import { runPublicMediaWorkerBatch } from '../worker/publicMediaWorkerOnce';
 import type { MemoryRow, ChildRow } from '../pdf/memoryRow';
 import {
   signChildRowForPdfRender,
@@ -104,6 +105,18 @@ function mapGuestMemories(list: GuestMemoryForPdfPayload[], exportRequestId: str
     });
   }
   return map;
+}
+
+function countAvPages(pages: GenerateBookPdfPayload['pages']): number {
+  return pages.filter(p => p.type === 'audio' || p.type === 'video').length;
+}
+
+/** Lance le transcode QR en parallèle du rendu Playwright (ne bloque pas la réponse HTTP). */
+function kickPublicMediaWorkersInBackground(avCount: number): void {
+  if (avCount < 1) return;
+  void runPublicMediaWorkerBatch({ maxJobs: avCount }).catch(err => {
+    console.warn('[generate-pdf] public media worker batch', err);
+  });
 }
 
 export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient, supabaseProjectUrl: string): void {
@@ -235,6 +248,8 @@ export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient,
         res.status(qrResult.status).json({ error: qrResult.message });
         return;
       }
+
+      kickPublicMediaWorkersInBackground(countAvPages(body.pages));
 
       const expectedPages = countRenderedBookPages(body.pages, memoriesById);
       if (expectedPages < 1) {
@@ -424,6 +439,8 @@ async function handleTicketPdf(
       res.status(qrResult.status).json({ error: qrResult.message });
       return;
     }
+
+    kickPublicMediaWorkersInBackground(countAvPages(body.pages));
 
     const child: ChildRow = {
       id: body.childId,
@@ -617,6 +634,8 @@ async function handleTicketPrintPdf(
       res.status(qrResult.status).json({ error: qrResult.message });
       return;
     }
+
+    kickPublicMediaWorkersInBackground(countAvPages(body.pages));
 
     const child: ChildRow = {
       id: body.childId,

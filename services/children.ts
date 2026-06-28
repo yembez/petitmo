@@ -13,6 +13,8 @@ import { DeviceEventEmitter, Platform } from 'react-native';
 import type { Database } from '@/types/database';
 import type { Child as LocalChild } from '@/types/local';
 import { getCachedUserMode } from '@/lib/userMode';
+import { ensureSupabaseSession } from '@/lib/ensureSupabaseSession';
+import { newPetitmoEntityId } from '@/utils/petitmoEntityId';
 import {
   deleteLocalBook,
   deleteLocalChild,
@@ -387,11 +389,7 @@ export async function cacheRemoteChildProfilePhotoLocally(child: LocalChild): Pr
 }
 
 function newLocalChildId(): string {
-  const c = globalThis.crypto;
-  if (c && typeof c.randomUUID === 'function') {
-    return c.randomUUID();
-  }
-  return `ch_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+  return newPetitmoEntityId();
 }
 
 let captureTabChildSnapshotLocal: LocalChild | null = null;
@@ -418,12 +416,37 @@ export async function warmSelectedChildIdFromStorage(): Promise<void> {
   await getSelectedChild();
 }
 
+function mergeRemoteChildRowWithLocal(row: ChildRow): LocalChild {
+  const base = withLocalChildFields(row);
+  /** Copie sandbox déjà en SQLite (gratuit → payant, etc.) : affichage local-first si dispo. */
+  const local = getLocalChild(row.id);
+  const lp = (local?.local_photo_path ?? '').trim();
+
+  // Bounds visage : priorité local (plus récent), repli sur Supabase (nouveau téléphone).
+  const remoteFace = pickFaceBounds(base);
+  const localFace = pickFaceBounds(local);
+  const face = {
+    face_cx: localFace.face_cx ?? remoteFace.face_cx,
+    face_cy: localFace.face_cy ?? remoteFace.face_cy,
+    face_h: localFace.face_h ?? remoteFace.face_h,
+    face_img_aspect: localFace.face_img_aspect ?? remoteFace.face_img_aspect,
+  };
+
+  const merged: LocalChild = { ...base, local_photo_path: lp || null, ...face };
+
+  // Persister en SQLite pour que les lectures locales-first soient à jour.
+  upsertLocalChild(merged);
+
+  return merged;
+}
+
 export async function getChildren() {
+  const localChildren = listLocalChildren();
+
   try {
     if ((await getCachedUserMode()) === 'local') {
-      const list = listLocalChildren();
-      scheduleChildFaceBoundsBackfill(list);
-      return list;
+      scheduleChildFaceBoundsBackfill(localChildren);
+      return localChildren;
     }
 
     const { data, error } = await supabase
@@ -432,31 +455,32 @@ export async function getChildren() {
       .order('created_at', { ascending: false });
 
     if (error) throw error;
-    return (data || []).map(row => {
-      const base = withLocalChildFields(row);
-      /** Copie sandbox déjà en SQLite (gratuit → payant, etc.) : affichage local-first si dispo. */
-      const local = getLocalChild(row.id);
-      const lp = (local?.local_photo_path ?? '').trim();
 
-      // Bounds visage : priorité local (plus récent), repli sur Supabase (nouveau téléphone).
-      const remoteFace = pickFaceBounds(base)
-      const localFace = pickFaceBounds(local)
-      const face = {
-        face_cx: localFace.face_cx ?? remoteFace.face_cx,
-        face_cy: localFace.face_cy ?? remoteFace.face_cy,
-        face_h: localFace.face_h ?? remoteFace.face_h,
-        face_img_aspect: localFace.face_img_aspect ?? remoteFace.face_img_aspect,
-      }
+    const remoteRows = data ?? [];
 
-      const merged: LocalChild = { ...base, local_photo_path: lp || null, ...face }
+    /** Passage gratuit → payant : profils encore uniquement en SQLite tant que la sync n’a pas abouti. */
+    if (remoteRows.length === 0 && localChildren.length > 0) {
+      void ensureLocalChildrenSyncedToSupabase();
+      scheduleChildFaceBoundsBackfill(localChildren);
+      return localChildren;
+    }
 
-      // Persister en SQLite pour que les lectures locales-first soient à jour.
-      upsertLocalChild(merged)
+    const mergedRemote = remoteRows.map(row => mergeRemoteChildRowWithLocal(row));
+    const remoteIds = new Set(mergedRemote.map(c => c.id));
+    const localOnly = localChildren.filter(c => !remoteIds.has(c.id));
+    if (localOnly.length > 0) {
+      void ensureLocalChildrenSyncedToSupabase();
+    }
 
-      return merged
-    });
+    const out = [...mergedRemote, ...localOnly];
+    scheduleChildFaceBoundsBackfill(out);
+    return out;
   } catch (error) {
     console.error('Get children error:', error);
+    if (localChildren.length > 0) {
+      scheduleChildFaceBoundsBackfill(localChildren);
+      return localChildren;
+    }
     return [];
   }
 }
@@ -612,22 +636,68 @@ async function syncChildProfilePhotoFromLocalIfNeeded(child: LocalChild): Promis
   }
 }
 
+/** Compte-rendu diagnostic de la sync enfants gratuit → cloud. */
+export type ChildrenSyncReport = {
+  mode: 'local' | 'cloud';
+  hasUser: boolean;
+  userId: string | null;
+  total: number;
+  inserted: number;
+  alreadyThere: number;
+  errors: string[];
+};
+
 /**
  * Après passage en Petitmo+ : les profils enfants existent en SQLite (mode gratuit).
  * Les insère sur Supabase **avec le même `id`** pour que `memories.child_id` reste valide.
  * Idempotent si la ligne existe déjà (contrainte unique).
+ * Renvoie un compte-rendu pour diagnostic (callers existants peuvent ignorer la valeur).
  */
-export async function ensureLocalChildrenSyncedToSupabase(): Promise<void> {
-  if ((await getCachedUserMode()) !== 'cloud') return;
+export async function ensureLocalChildrenSyncedToSupabase(): Promise<ChildrenSyncReport> {
+  const mode = await getCachedUserMode();
+  const report: ChildrenSyncReport = {
+    mode,
+    hasUser: false,
+    userId: null,
+    total: 0,
+    inserted: 0,
+    alreadyThere: 0,
+    errors: [],
+  };
+
+  if (mode !== 'cloud') {
+    report.errors.push('Mode non cloud (tier pas "paid").');
+    return report;
+  }
+
+  const session = await ensureSupabaseSession();
+  if (!session.ok) {
+    report.errors.push(session.error);
+    return report;
+  }
 
   const { data: auth } = await supabase.auth.getUser();
   const user = auth.user;
-  if (!user) return;
+  report.hasUser = !!user;
+  report.userId = user?.id ?? session.userId;
+  if (!user) {
+    report.errors.push('Session Supabase introuvable après ensureSupabaseSession.');
+    return report;
+  }
 
   const locals = listLocalChildren();
-  if (locals.length === 0) return;
+  report.total = locals.length;
+  if (locals.length === 0) {
+    report.errors.push('Aucun enfant en local à synchroniser.');
+    return report;
+  }
 
   for (const child of locals) {
+    if (!child.birthdate) {
+      report.errors.push(`Enfant "${child.name ?? child.id}": date de naissance manquante (NOT NULL).`);
+      continue;
+    }
+
     const insert: Database['public']['Tables']['children']['Insert'] = {
       id: child.id,
       user_id: user.id,
@@ -641,15 +711,20 @@ export async function ensureLocalChildrenSyncedToSupabase(): Promise<void> {
     const { error } = await supabase.from('children').insert(insert);
     if (error) {
       if (isChildDuplicateKeyError(error)) {
+        report.alreadyThere += 1;
         await syncChildProfilePhotoFromLocalIfNeeded(child);
         continue;
       }
+      report.errors.push(`Enfant "${child.name ?? child.id}": ${error.message}`);
       console.warn('[children] ensureLocalChildrenSyncedToSupabase insert', child.id, error.message);
       continue;
     }
 
+    report.inserted += 1;
     await syncChildProfilePhotoFromLocalIfNeeded(child);
   }
+
+  return report;
 }
 
 /**

@@ -41,7 +41,11 @@ import {
   tabBarFloatingOverlapPad,
 } from '@/constants/tabBarLayout';
 import { SPACING, FONT_SIZES } from '@/constants/sizes';
-import { useMemoryTextFont } from '@/contexts/MemoryTextFontContext';
+import {
+  useMemoryTextFont,
+  useMemoryEditorialFont,
+  useMemoryEditorialBoldFont,
+} from '@/contexts/MemoryTextFontContext';
 import { getFamilyMemories, requestMissingMediaDerivatives } from '@/services/media';
 import { getOrSelectFirstChild } from '@/services/children';
 import { getLocalMemoryById, getLocalBook } from '@/lib/localDb';
@@ -700,6 +704,7 @@ function galleryTilePropsEqual(a: GalleryTileProps, b: GalleryTileProps): boolea
     a.item.memory.id === b.item.memory.id &&
     a.item.memory.type === b.item.memory.type &&
     a.item.memory.content === b.item.memory.content &&
+    (a.item.memory.text_title ?? '') === (b.item.memory.text_title ?? '') &&
     a.item.memory.thumb_url === b.item.memory.thumb_url &&
     a.item.memory.display_url === b.item.memory.display_url &&
     a.item.memory.poster_url === b.item.memory.poster_url &&
@@ -725,6 +730,8 @@ const GalleryTile = memo(function GalleryTile({
   onToggleSelect,
 }: GalleryTileProps) {
   const memoryTextFont = useMemoryTextFont();
+  const memoryEditorialFont = useMemoryEditorialFont();
+  const memoryEditorialBoldFont = useMemoryEditorialBoldFont();
   const { memory, thumbUrl } = item;
   const feedPhotoUrls = useFeedPhotoDisplayUrls(memory);
 
@@ -908,10 +915,19 @@ const GalleryTile = memo(function GalleryTile({
             ) : null}
           </View>
         ) : isText ? (
-          <View style={styles.galleryPh}>
+          <View style={[styles.galleryPh, styles.galleryTextTile]}>
+            {!!memory.text_title?.trim() ? (
+              <Text
+                style={[styles.galleryTextTitle, { fontFamily: memoryEditorialBoldFont }]}
+                numberOfLines={2}
+                ellipsizeMode="tail"
+              >
+                {memory.text_title.trim()}
+              </Text>
+            ) : null}
             <Text
-              style={[styles.galleryTextSnippet, { fontFamily: memoryTextFont }]}
-              numberOfLines={6}
+              style={[styles.galleryTextSnippet, { fontFamily: memoryEditorialFont }]}
+              numberOfLines={memory.text_title?.trim() ? 4 : 6}
             >
               {(memory.content ?? '').trim() || 'Petits mots'}
             </Text>
@@ -1868,9 +1884,20 @@ const styles = StyleSheet.create({
     borderRadius: scale(999),
     backgroundColor: 'rgba(255,255,255,0.92)',
   },
+  galleryTextTile: {
+    backgroundColor: '#FFFFFF',
+  },
+  galleryTextTitle: {
+    fontSize: scale(12),
+    lineHeight: scale(15),
+    fontWeight: '700',
+    color: INK,
+    textAlign: 'center',
+    marginBottom: verticalScale(4),
+  },
   galleryTextSnippet: {
-    fontSize: 12,
-    lineHeight: 16,
+    fontSize: scale(11),
+    lineHeight: scale(15),
     color: INK,
     textAlign: 'center',
   },

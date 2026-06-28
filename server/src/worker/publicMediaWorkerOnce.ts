@@ -136,10 +136,22 @@ export async function runPublicMediaWorkerOnce(): Promise<{ ok: boolean; process
     await supabase
       .from('public_media_tokens')
       .update({ status: 'failed', last_error: msg.slice(0, 2000), updated_at: new Date().toISOString() })
-      .eq('token', (row as any).token);
+      .eq('token', (row as PublicMediaTokenRow).token);
     throw e;
   } finally {
     await rm(tmp, { recursive: true, force: true });
   }
+}
+
+/** Traite jusqu’à `maxJobs` fichiers en attente (best-effort, ex. pendant le rendu PDF). */
+export async function runPublicMediaWorkerBatch(params?: { maxJobs?: number }): Promise<number> {
+  const maxJobs = Math.max(1, Math.min(params?.maxJobs ?? 8, 32));
+  let done = 0;
+  for (let i = 0; i < maxJobs; i++) {
+    const r = await runPublicMediaWorkerOnce();
+    if (!r.processed) break;
+    done += 1;
+  }
+  return done;
 }
 
