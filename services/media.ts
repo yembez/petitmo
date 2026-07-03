@@ -68,6 +68,8 @@ import { captureMemoryLocalOnly, capturePhotoAlbumLocalOnly } from '@/services/l
 import { getSignedUrlAfterMediaUpload } from '@/lib/mediaSignedUrl';
 import {
   collectVoiceCoverLocalUploadUriCandidates,
+  collectVideoCloudSyncUriCandidates,
+  collectVideoPosterLocalUploadUriCandidates,
   getAlbumCanonicalFavoriteUrls,
   isFeedMultiPhotoAlbum,
 } from '@/utils/memoryPhotos';
@@ -2425,6 +2427,86 @@ export async function persistVoiceCoverToCloudForPdfExport(
     return up.publicUrl;
   } catch (e) {
     console.error('persistVoiceCoverToCloudForPdfExport', e);
+    return null;
+  }
+}
+
+/**
+ * Export PDF serveur : envoie le poster vidéo local vers le bucket `media` et met à jour la ligne
+ * `memories` — Playwright lit Supabase, pas SQLite.
+ */
+export async function persistVideoPosterToCloudForPdfExport(
+  memoryId: string,
+  childId: string,
+  localPosterUri: string,
+): Promise<string | null> {
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return null;
+
+    const row = getLocalMemoryById(memoryId);
+    const existingHttps = [row?.poster_url, row?.thumbnail_url]
+      .map(u => (u ?? '').trim())
+      .find(u => /^https:\/\//i.test(u));
+    if (existingHttps) return existingHttps;
+
+    let publicUrl: string | null = null;
+    let storagePath: string | null = null;
+
+    const readablePoster =
+      (row
+        ? await pickFirstReadableLocalMediaUri(collectVideoPosterLocalUploadUriCandidates(row))
+        : null) ?? (localPosterUri.trim() ? localPosterUri.trim() : null);
+
+    if (readablePoster && !/^https?:\/\//i.test(readablePoster)) {
+      const ts = Date.now();
+      storagePath = `${user.id}/${childId}/derived/video_poster_${ts}.jpg`;
+      publicUrl = await uploadFileToSupabase(readablePoster, storagePath);
+    } else if (row) {
+      const videoUri = await pickFirstReadableLocalMediaUri(
+        collectVideoCloudSyncUriCandidates(row).filter(u => !u.endsWith('poster.jpg')),
+      );
+      if (videoUri) {
+        const up = await generateAndUploadVideoThumb({
+          userId: user.id,
+          childId,
+          localPath: videoUri,
+          durationSec: row.duration ?? undefined,
+        });
+        publicUrl = up?.url ?? null;
+        storagePath = up?.path ?? null;
+      }
+    }
+
+    if (!publicUrl) return null;
+
+    const { error } = await supabase
+      .from('memories')
+      .update({
+        poster_url: publicUrl,
+        thumbnail_url: publicUrl,
+      })
+      .eq('id', memoryId);
+
+    if (error) {
+      console.error('persistVideoPosterToCloudForPdfExport:', error);
+      return null;
+    }
+    const existing = getLocalMemoryById(memoryId);
+    if (existing) {
+      upsertLocalMemory({
+        ...existing,
+        poster_url: publicUrl,
+        thumbnail_url: publicUrl,
+        updated_at: new Date().toISOString(),
+      });
+    }
+    void triggerProcessMemory(memoryId);
+    return publicUrl;
+  } catch (e) {
+    console.error('persistVideoPosterToCloudForPdfExport', e);
     return null;
   }
 }

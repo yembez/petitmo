@@ -33,9 +33,9 @@ import CoverPageSpineOverlay from '@/components/CoverPageSpineOverlay';
 import { clampMediaBookCaption } from '@/lib/mediaBookCaption';
 import {
   getPrimaryPhotoUriForBookPreview,
-  getVideoPosterUriForBookPreview,
   getVoiceCoverUriForBookPreview,
 } from '@/utils/memoryPhotos';
+import { useFeedVideoPosterDisplayUrl } from '@/hooks/useFeedVideoPosterDisplayUrl';
 import { memoryBookDisplayDateIso } from '@/utils/memoryBookDisplayDate';
 import {
   resolveTextMemoryBookLayout,
@@ -1557,6 +1557,29 @@ function MediaTypeIcon({
   );
 }
 
+/** Poster vidéo signé (local-first + repli cloud) pour la bande visuelle livre. */
+function MaquetteVideoPosterVisual({
+  memory,
+  fallback,
+}: {
+  memory: Memory;
+  fallback: ReactNode;
+}) {
+  const uri = useFeedVideoPosterDisplayUrl(memory);
+  if (!uri.trim()) return <>{fallback}</>;
+  return (
+    <ExpoImage
+      source={{ uri }}
+      recyclingKey={uri}
+      cachePolicy="memory-disk"
+      transition={0}
+      priority="high"
+      style={StyleSheet.absoluteFillObject}
+      contentFit="cover"
+    />
+  );
+}
+
 /** Page audio / vidéo : visuel (optionnel) + méta + légende + carte QR (bordure grise). */
 function MaquetteMediaQr({
   kind,
@@ -1598,10 +1621,8 @@ function MaquetteMediaQr({
   const captionRaw = clampMediaBookCaption((memory.content ?? '').trim());
   const mediaPad = Math.round(pdfMmToPreviewPxW(PDF_MEDIA_TEXT_PAD_X_MM, width));
   const qrSize = Math.max(12, Math.round(pdfMmToPreviewPxW(PDF_MEDIA_QR_QR_MM, width)));
-  const visualUri =
-    kind === 'audio'
-      ? getVoiceCoverUriForBookPreview(memory)
-      : getVideoPosterUriForBookPreview(memory);
+  const voiceVisualUri =
+    kind === 'audio' ? getVoiceCoverUriForBookPreview(memory) : '';
   const imgH = pdfMmToPreviewPxH(PHOTO_NOTE_BAND_HEIGHT_MM, height);
   const bookLoc = bookMaquetteLocationLabel(memory);
   const photoInline = kind === 'audio' ? buildInlineCropProps(inlineCropConfig, memory.id) : undefined;
@@ -1616,11 +1637,24 @@ function MaquetteMediaQr({
   return (
     <View style={[styles.paper, { width, height }]}>
       <VisualBand width={width} height={height} bandH={imgH}>
-        {(fw, fh) =>
-          visualUri ? (
-            kind === 'audio' ? (
+        {(fw, fh) => {
+          const fallback = (
+            <MediaQrVisualFallback
+              kind={kind}
+              width={width}
+              frameW={fw}
+              frameH={fh}
+              memoryId={memory.id}
+              typoScale={typoScale}
+            />
+          );
+          if (kind === 'video') {
+            return <MaquetteVideoPosterVisual memory={memory} fallback={fallback} />;
+          }
+          if (voiceVisualUri) {
+            return (
               <BookPagePhotoFrame
-                uri={visualUri}
+                uri={voiceVisualUri}
                 frameW={fw}
                 frameH={fh}
                 crop={photoCrop}
@@ -1630,28 +1664,10 @@ function MaquetteMediaQr({
                 onRotate={onRotate}
                 typoScale={typoScale}
               />
-            ) : (
-              <ExpoImage
-                source={{ uri: visualUri }}
-                recyclingKey={visualUri}
-                cachePolicy="memory-disk"
-                transition={0}
-                priority="high"
-                style={StyleSheet.absoluteFillObject}
-                contentFit="cover"
-              />
-            )
-          ) : (
-            <MediaQrVisualFallback
-              kind={kind}
-              width={width}
-              frameW={fw}
-              frameH={fh}
-              memoryId={memory.id}
-              typoScale={typoScale}
-            />
-          )
-        }
+            );
+          }
+          return fallback;
+        }}
       </VisualBand>
       <View
         style={[

@@ -1,9 +1,15 @@
 import { DeviceEventEmitter, Platform, Image } from 'react-native';
 import { copyAsync, documentDirectory, makeDirectoryAsync } from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
+import * as VideoThumbnails from 'expo-video-thumbnails';
 import { getLocalMemoryById, upsertLocalMemory } from '@/lib/localDb';
 import { MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH } from '@/lib/limits';
 import type { Memory } from '@/types/local';
+import {
+  collectVideoCloudSyncUriCandidates,
+  collectVideoPosterLocalUploadUriCandidates,
+} from '@/utils/memoryPhotos';
+import { pickFirstReadableLocalMediaUri } from '@/utils/localMediaReadable';
 import {
   feedBooksHydrationSnapshot,
   feedChildHydrationSnapshot,
@@ -372,6 +378,65 @@ export async function awaitVoiceCoverPrintDerivativeForMemory(memoryId: string):
     return next;
   } catch (e) {
     console.warn('[memoryLocalStore] awaitVoiceCoverPrintDerivativeForMemory', id, e);
+    return cur;
+  }
+}
+
+/** Génère `poster.jpg` si absent — vignette vidéo livre / export PDF. */
+export async function awaitVideoPosterForBookMemory(memoryId: string): Promise<Memory | null> {
+  const id = memoryId.trim();
+  const cur = getLocalMemoryById(id);
+  if (!cur || cur.type !== 'video') return cur;
+
+  const readablePoster = await pickFirstReadableLocalMediaUri(
+    collectVideoPosterLocalUploadUriCandidates(cur),
+  );
+  if (readablePoster) return cur;
+
+  if (Platform.OS === 'web') return cur;
+
+  const videoCandidates = collectVideoCloudSyncUriCandidates(cur).filter(
+    u => !u.endsWith('poster.jpg'),
+  );
+  const videoUri = await pickFirstReadableLocalMediaUri(videoCandidates);
+  if (!videoUri) return cur;
+
+  try {
+    const { uri: thumbTmp } = await VideoThumbnails.getThumbnailAsync(videoUri, {
+      time: 0,
+      quality: 0.7,
+    });
+    if (!thumbTmp?.trim() || !documentDirectory) return cur;
+
+    const dir = `${documentDirectory}petitmo_memories/${id}/`;
+    await ensureDir(dir);
+    const thumbDest = `${dir}poster.jpg`;
+    await copyAsync({ from: thumbTmp, to: thumbDest });
+
+    const next: Memory = {
+      ...cur,
+      local_thumb_path: thumbDest,
+      poster_url: thumbDest,
+      thumbnail_url: thumbDest,
+      updated_at: new Date().toISOString(),
+    };
+    upsertLocalMemory(next);
+
+    const snapIdx = feedMemoriesHydrationSnapshot.findIndex(m => m.id === id);
+    if (snapIdx >= 0) {
+      const snapMemories = [...feedMemoriesHydrationSnapshot];
+      snapMemories[snapIdx] = next;
+      setFeedHydrationSnapshots(
+        feedChildHydrationSnapshot,
+        snapMemories,
+        feedBooksHydrationSnapshot,
+      );
+    }
+
+    DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId: id });
+    return next;
+  } catch (e) {
+    console.warn('[memoryLocalStore] awaitVideoPosterForBookMemory', id, e);
     return cur;
   }
 }

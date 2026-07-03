@@ -440,14 +440,29 @@ export function getVoiceCoverDisplayUriForFeedAndViewer(memory: Memory): string 
   return appendLocalMediaCacheBuster(raw, memory.updated_at);
 }
 
-/** Vignette / poster vidéo : fil, favoris, viewer immersif, maquette livre. */
-export function getVideoPosterUriForFeedAndViewer(memory: Memory): string {
-  const localPick = firstNonEmpty(memory.local_thumb_path);
-  const remotePick = firstNonEmpty(
-    memory.poster_print_url,
-    memory.poster_url,
-    memory.thumbnail_url,
+function isDeviceLocalMediaUri(u: string | null | undefined): boolean {
+  const t = (u ?? '').trim();
+  if (!t || /^https?:\/\//i.test(t) || t.startsWith('data:')) return false;
+  return (
+    t.startsWith('file:') ||
+    t.startsWith('content:') ||
+    t.startsWith('ph://') ||
+    t.startsWith('/') ||
+    t.includes('petitmo_memories/')
   );
+}
+
+/** Chemins sandbox / disque pour poster vidéo (`poster.jpg`, pas les URLs cloud). */
+function pickVideoPosterSandboxPath(memory: Memory): string {
+  for (const u of [memory.local_thumb_path, memory.poster_url, memory.thumbnail_url]) {
+    const t = (u ?? '').trim();
+    if (t && isDeviceLocalMediaUri(t)) return t;
+  }
+  if (Platform.OS === 'web' || !documentDirectory) return '';
+  return `${documentDirectory}petitmo_memories/${memory.id.trim()}/poster.jpg`;
+}
+
+function resolveVideoPosterUri(localPick: string, remotePick: string): string {
   const raw =
     localPick && remotePick && isProbablyStalePetitmoSandboxPath(localPick)
       ? remotePick
@@ -455,9 +470,47 @@ export function getVideoPosterUriForFeedAndViewer(memory: Memory): string {
   return raw ? normalizeMemoryMediaUriForDisplay(raw) : '';
 }
 
-/** @deprecated — `getVideoPosterUriForFeedAndViewer` */
+/** Candidats locaux poster vidéo pour upload PDF / cloud. */
+export function collectVideoPosterLocalUploadUriCandidates(memory: Memory): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (u: string | null | undefined) => {
+    const t = (u ?? '').trim();
+    if (!t || seen.has(t)) return;
+    seen.add(t);
+    out.push(t);
+  };
+  if (memory.type !== 'video') return out;
+  add(memory.local_thumb_path);
+  add(memory.poster_url);
+  add(memory.thumbnail_url);
+  add(pickVideoPosterSandboxPath(memory));
+  for (const u of sandboxVideoFileCandidatesForMemoryId(memory.id)) {
+    if (u.endsWith('poster.jpg')) add(u);
+  }
+  return out;
+}
+
+/** Vignette / poster vidéo : fil, favoris, viewer immersif. */
+export function getVideoPosterUriForFeedAndViewer(memory: Memory): string {
+  const localPick = pickVideoPosterSandboxPath(memory);
+  const remotePick = firstNonEmpty(
+    memory.poster_print_url,
+    memory.poster_url,
+    memory.thumbnail_url,
+  );
+  return resolveVideoPosterUri(localPick, remotePick);
+}
+
+/** Livre / PDF : poster local sandbox d’abord, puis colonnes cloud. */
 export function getVideoPosterUriForBookPreview(memory: Memory): string {
-  return getVideoPosterUriForFeedAndViewer(memory);
+  const localPick = pickVideoPosterSandboxPath(memory);
+  const remotePick = firstNonEmpty(
+    memory.poster_print_url,
+    memory.poster_url,
+    memory.thumbnail_url,
+  );
+  return resolveVideoPosterUri(localPick, remotePick);
 }
 
 /** Toutes les URLs d’un souvenir photo (1ère = version éditée si présente, puis `extra_photo_urls`). */

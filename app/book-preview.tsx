@@ -54,7 +54,7 @@ import { healDeadLocalMediaPointersForMemories } from '@/services/memoryDisplayH
 import { ensureVoiceMemoryCloudForBookExport } from '@/services/migration';
 import { supabase } from '@/lib/supabase';
 import { getLocalMemoryById, updateLocalMemoryContent } from '@/lib/localDb';
-import { awaitVoiceCoverPrintDerivativeForMemory } from '@/services/memoryLocalStore';
+import { awaitVideoPosterForBookMemory, awaitVoiceCoverPrintDerivativeForMemory } from '@/services/memoryLocalStore';
 import { loadBookSelectionKeys, memoryIdFromBookSelectionKey } from '@/services/bookSelection';
 import { setPendingFavorisAddToBookId } from '@/services/favorisBookAddFlow';
 import {
@@ -95,7 +95,8 @@ import {
 } from '@/utils/memoryPhotos';
 import { runBookExportPrepInBackground } from '@/services/bookExportPrep';
 import { getBookExportPrepIssues } from '@/services/bookExportPrep';
-import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
+import { useSignedMediaUrl, peekSignedMediaDisplayUrl } from '@/lib/mediaSignedUrl';
+import { isCloudMediaReference } from '@/utils/localMediaReadable';
 import { bookLineBudgetForMemoryType, bookCharsPerLineForMemoryType } from '@/utils/textLimits';
 
 import type { Child, Memory } from '@/types/local';
@@ -289,7 +290,12 @@ function bookPageMainImageUri(
 
 function prefetchBookPageImage(uri: string | null): void {
   if (!uri) return;
-  void ExpoImage.prefetch(uri, 'memory-disk').catch(() => {});
+  const trimmed = uri.trim();
+  if (!trimmed) return;
+  const cachedSigned =
+    isCloudMediaReference(trimmed) ? peekSignedMediaDisplayUrl(trimmed)?.trim() : null;
+  const target = cachedSigned || trimmed;
+  void ExpoImage.prefetch(target, 'memory-disk').catch(() => {});
 }
 
 function pageLabel(current: number, total: number): string {
@@ -715,6 +721,20 @@ export default function BookPreviewScreen() {
     }
   }, [bookMemories]);
 
+  const videoPosterBackfillRef = useRef(new Set<string>());
+  /** Souvenirs vidéo existants : génère `poster.jpg` si absent (vignette livre + export PDF). */
+  useEffect(() => {
+    for (const m of bookMemories) {
+      if (m.type !== 'video') continue;
+      if (videoPosterBackfillRef.current.has(m.id)) continue;
+      videoPosterBackfillRef.current.add(m.id);
+      void awaitVideoPosterForBookMemory(m.id).then(updated => {
+        if (!updated?.poster_url && !updated?.thumbnail_url && !updated?.local_thumb_path) return;
+        setBookMemories(prev => prev.map(x => (x.id === updated.id ? updated : x)));
+      });
+    }
+  }, [bookMemories]);
+
   useFocusEffect(
     useCallback(() => {
       if (!bookId) return;
@@ -1058,6 +1078,15 @@ export default function BookPreviewScreen() {
   }, [unlockAndBack]);
 
   const merge = useCallback((m: Memory) => m, []);
+
+  /** Prefetch couverture + vignettes des pages dès que les URIs sont connues. */
+  useEffect(() => {
+    if (loading) return;
+    prefetchBookPageImage(coverPhotoDisplayUri);
+    for (const row of pageRows) {
+      prefetchBookPageImage(bookPageMainImageUri(row, merge, coverPhotoDisplayUri));
+    }
+  }, [loading, coverPhotoDisplayUri, pageRows, merge]);
 
   const onRotateMemory = useCallback((memoryId: string) => {
     setRotations(prev => ({

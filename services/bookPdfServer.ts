@@ -28,10 +28,12 @@ import {
   ensureLocalChildrenSyncedToSupabase,
 } from '@/services/children';
 import { ensureVoiceMemoryCloudForBookExport } from '@/services/migration';
-import { persistVoiceCoverToCloudForPdfExport } from '@/services/media';
+import { persistVideoPosterToCloudForPdfExport, persistVoiceCoverToCloudForPdfExport } from '@/services/media';
 import {
   collectPhotoLocalUploadUriCandidates,
+  collectVideoPosterLocalUploadUriCandidates,
   collectVoiceCoverLocalUploadUriCandidates,
+  getVideoPosterUriForBookPreview,
   getVoiceCoverUriForBookPreview,
   inferLocalDisplayPathFromPrint,
 } from '@/utils/memoryPhotos';
@@ -145,6 +147,29 @@ function mergeMemoryWithLocalRowForVoiceCover(m: Memory): Memory {
   }
 }
 
+function mergeMemoryWithLocalRowForVideoPoster(m: Memory): Memory {
+  if (m.type !== 'video') return m;
+  if (Platform.OS === 'web') return m;
+  try {
+    const row = getLocalMemoryById(m.id);
+    if (!row) return m;
+    return {
+      ...m,
+      local_thumb_path: m.local_thumb_path ?? row.local_thumb_path ?? null,
+      poster_url: m.poster_url ?? row.poster_url ?? null,
+      thumbnail_url: m.thumbnail_url ?? row.thumbnail_url ?? null,
+      poster_print_url: m.poster_print_url ?? row.poster_print_url ?? null,
+      local_original_path: m.local_original_path ?? row.local_original_path ?? null,
+      local_media_path: m.local_media_path ?? row.local_media_path ?? null,
+      media_url: m.media_url ?? row.media_url ?? null,
+      edited_media_url: m.edited_media_url ?? row.edited_media_url ?? null,
+      duration: m.duration ?? row.duration ?? null,
+    };
+  } catch {
+    return m;
+  }
+}
+
 /** Vocal : chemins audio + cover depuis SQLite (export livre). */
 function mergeVoiceMemoryForBookExportFromSqlite(m: Memory): Memory {
   if (m.type !== 'voice') return m;
@@ -194,6 +219,41 @@ async function ensureVoiceCoversPersistedForServerPdf(
       }
     } catch (e) {
       console.warn('[bookPdfServer] ensureVoiceCoversPersistedForServerPdf', m.id, e);
+    }
+  }
+  return overrides;
+}
+
+/** Retourne des entrées `guestMemories` pour fusion côté serveur (poster vidéo HTTPS frais). */
+async function ensureVideoPostersPersistedForServerPdf(
+  pages: BookPage[],
+  localEdits: Record<string, Partial<Memory>>,
+  childId: string
+): Promise<GuestMemoryForPdfPayload[]> {
+  const overrides: GuestMemoryForPdfPayload[] = [];
+  const memories = collectMemoriesFromPagesForPdf(pages, localEdits);
+  for (const m of memories) {
+    if (m.type !== 'video') continue;
+    const ed = localEdits[m.id];
+    const merged = mergeMemoryWithLocalRowForVideoPoster(ed ? { ...m, ...ed } : m);
+    const existingHttps = [merged.poster_url, merged.thumbnail_url].find(u => isHttps((u ?? '').trim()));
+    if (existingHttps) continue;
+    const posterUri = getVideoPosterUriForBookPreview(merged).trim();
+    if (posterUri && isHttps(posterUri)) continue;
+    if (posterUri && isBareMediaBucketPath(posterUri)) continue;
+    try {
+      const url = await persistVideoPosterToCloudForPdfExport(m.id, childId, posterUri);
+      if (url) {
+        overrides.push({
+          id: m.id,
+          type: 'video',
+          poster_url: url,
+          thumbnail_url: url,
+          created_at: m.created_at,
+        });
+      }
+    } catch (e) {
+      console.warn('[bookPdfServer] ensureVideoPostersPersistedForServerPdf', m.id, e);
     }
   }
   return overrides;
@@ -732,6 +792,12 @@ export async function generateBookPdfViaServer(input: GenerateBookPdfServerInput
     input.localEdits,
     input.childId
   );
+  const videoPosterOverrides = await ensureVideoPostersPersistedForServerPdf(
+    input.pages,
+    input.localEdits,
+    input.childId
+  );
+  const guestMemoryOverrides = [...voiceCoverOverrides, ...videoPosterOverrides];
 
   const { subscriptionTier, digitalExportPaid } = await resolveServerPdfEntitlements();
 
@@ -755,7 +821,7 @@ export async function generateBookPdfViaServer(input: GenerateBookPdfServerInput
     ),
     subscriptionTier,
     ...(subscriptionTier === 'free' ? { digitalExportPaid } : {}),
-    ...(voiceCoverOverrides.length > 0 ? { guestMemories: voiceCoverOverrides } : {}),
+    ...(guestMemoryOverrides.length > 0 ? { guestMemories: guestMemoryOverrides } : {}),
   };
 
   const res = await fetch(`${base}/v1/books/generate-pdf`, {
@@ -950,13 +1016,14 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
         return { ...g, voice_cover_url: voiceCoverUrl };
       }
       if (m.type === 'video') {
-        const local = (m.local_original_path ?? m.local_media_path ?? '').trim();
+        const merged = mergeMemoryWithLocalRowForVideoPoster(m);
+        const local = (merged.local_original_path ?? merged.local_media_path ?? '').trim();
 
         // Thumbnail: générer si absent, puis upload (seul prérequis lourd acceptable avant PDF pour Playwright).
-        let thumbLocal = (m.thumbnail_url ?? m.poster_url ?? '').trim();
+        let thumbLocal = getVideoPosterUriForBookPreview(merged).trim();
         if (thumbLocal && isHttps(thumbLocal)) {
           // ok
-        } else if (Platform.OS !== 'web' && local) {
+        } else if (Platform.OS !== 'web' && local && !thumbLocal) {
           try {
             const { uri: t } = await VideoThumbnails.getThumbnailAsync(local, { time: 0, quality: 0.7 });
             thumbLocal = t;
@@ -968,7 +1035,10 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
         let thumbPublicUrl: string | null = isHttps(thumbLocal) ? thumbLocal : null;
         try {
           if (thumbLocal && !isHttps(thumbLocal)) {
-            const readableThumb = await pickFirstReadableLocalMediaUri([thumbLocal]);
+            const posterCandidates = collectVideoPosterLocalUploadUriCandidates(merged);
+            const readableThumb = await pickFirstReadableLocalMediaUri(
+              posterCandidates.length > 0 ? posterCandidates : [thumbLocal],
+            );
             if (!readableThumb) throw new Error('VIDEO_THUMB_NOT_READABLE');
             const compressed = await compressLocalJpegForGuestUpload(readableThumb);
             const { readUrl } = await guestUploadMediaImageThenReadUrl({

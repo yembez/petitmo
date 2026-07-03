@@ -218,10 +218,25 @@ export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient,
       if (body.guestMemories && isGuestMemoryList(body.guestMemories)) {
         for (const g of body.guestMemories) {
           const row = memoriesById.get(g.id);
-          if (!row || g.type !== 'voice') continue;
-          const vc = typeof g.voice_cover_url === 'string' ? g.voice_cover_url.trim() : '';
-          if (vc && /^https:\/\//i.test(vc)) {
-            row.voice_cover_url = vc;
+          if (!row) continue;
+          if (g.type === 'voice') {
+            const vc = typeof g.voice_cover_url === 'string' ? g.voice_cover_url.trim() : '';
+            if (vc && /^https:\/\//i.test(vc)) {
+              row.voice_cover_url = vc;
+            }
+            continue;
+          }
+          if (g.type === 'video') {
+            const poster = typeof g.poster_url === 'string' ? g.poster_url.trim() : '';
+            const thumb = typeof g.thumbnail_url === 'string' ? g.thumbnail_url.trim() : '';
+            if (poster && /^https:\/\//i.test(poster)) {
+              row.poster_url = poster;
+            }
+            if (thumb && /^https:\/\//i.test(thumb)) {
+              row.thumbnail_url = thumb;
+            } else if (poster && /^https:\/\//i.test(poster)) {
+              row.thumbnail_url = poster;
+            }
           }
         }
       }
