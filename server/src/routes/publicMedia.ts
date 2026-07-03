@@ -61,6 +61,50 @@ function htmlPage(title: string, body: string): string {
 </html>`;
 }
 
+function playerHtml(kind: TokenRow['kind'], src: string): string {
+  return kind === 'video'
+    ? `<div style="font-weight:700;font-size:18px">Souvenir vidéo</div>
+       <div class="muted" style="margin-top:6px">Bon visionnage.</div>
+       <video class="player" controls playsinline src="${src}"></video>`
+    : `<div style="font-weight:700;font-size:18px">Souvenir audio</div>
+       <div class="muted" style="margin-top:6px">Bonne écoute.</div>
+       <audio class="player" controls src="${src}"></audio>`;
+}
+
+function failedHtml(lastError: string | null, token?: string): string {
+  const msg = lastError ? `Détail: ${lastError}` : '';
+  const refresh = token
+    ? `<a class="btn" href="/m/${encodeURIComponent(token)}">Actualiser</a>`
+    : '';
+  return `<div style="font-weight:700;font-size:18px">Ce souvenir n’a pas pu être préparé</div>
+          <div class="muted" style="margin-top:6px">${msg || 'Réessaie plus tard.'}</div>
+          ${refresh}`;
+}
+
+async function signedPlayerResponse(
+  supabase: SupabaseClient,
+  row: TokenRow,
+  res: Response
+): Promise<boolean> {
+  if (row.status !== 'ready' || !row.ready_bucket || !row.ready_path) return false;
+
+  const { data: signed, error: signErr } = await supabase.storage
+    .from(row.ready_bucket)
+    .createSignedUrl(row.ready_path, 120);
+  if (signErr || !signed?.signedUrl) {
+    console.error('[m] sign', signErr?.message);
+    res.status(500).type('text/plain').send('Signing failed');
+    return true;
+  }
+
+  res
+    .status(200)
+    .set('Cache-Control', 'no-store')
+    .type('text/html')
+    .send(htmlPage('Petitmo · Souvenir', playerHtml(row.kind, signed.signedUrl)));
+  return true;
+}
+
 export function registerPublicMediaRoutes(app: Express, supabase: SupabaseClient): void {
   app.get('/m/:token', publicLimiter, async (req: Request, res: Response) => {
     const token = req.params.token ?? '';
@@ -92,46 +136,9 @@ export function registerPublicMediaRoutes(app: Express, supabase: SupabaseClient
       return;
     }
 
-    if (row.status === 'ready' && row.ready_bucket && row.ready_path) {
-      const { data: signed, error: signErr } = await supabase.storage
-        .from(row.ready_bucket)
-        .createSignedUrl(row.ready_path, 120);
-      if (signErr || !signed?.signedUrl) {
-        console.error('[m] sign', signErr?.message);
-        res.status(500).type('text/plain').send('Signing failed');
-        return;
-      }
+    if (await signedPlayerResponse(supabase, row, res)) return;
 
-      // Option 1: redirect direct vers la signed URL (lecteur natif du navigateur)
-      // Option 2: page HTML avec <audio>/<video>. On choisit 2 pour un rendu plus "Petitmo".
-      const src = signed.signedUrl;
-      const player =
-        row.kind === 'video'
-          ? `<div style="font-weight:700;font-size:18px">Souvenir vidéo</div>
-             <div class="muted" style="margin-top:6px">Bon visionnage.</div>
-             <video class="player" controls playsinline src="${src}"></video>`
-          : `<div style="font-weight:700;font-size:18px">Souvenir audio</div>
-             <div class="muted" style="margin-top:6px">Bonne écoute.</div>
-             <audio class="player" controls src="${src}"></audio>`;
-      res.status(200).type('text/html').send(htmlPage('Petitmo · Souvenir', player));
-      return;
-    }
-
-    if (row.status === 'failed') {
-      const msg = row.last_error ? `Détail: ${row.last_error}` : '';
-      res
-        .status(200)
-        .type('text/html')
-        .send(
-          htmlPage(
-            'Petitmo · Souvenir',
-            `<div style="font-weight:700;font-size:18px">Ce souvenir n’a pas pu être préparé</div>
-             <div class="muted" style="margin-top:6px">${msg || 'Réessaie plus tard.'}</div>`
-          )
-        );
-      return;
-    }
-
+    // failed / pending / uploaded : retenter le transcodage si le brut est encore là
     if (row.raw_bucket && row.raw_path) {
       await tryProcessPublicMediaTokenOnVisit(token);
       const { data: refreshed, error: refreshErr } = await supabase
@@ -141,44 +148,33 @@ export function registerPublicMediaRoutes(app: Express, supabase: SupabaseClient
         .maybeSingle();
       if (!refreshErr && refreshed) {
         const fresh = refreshed as TokenRow;
-        if (fresh.status === 'ready' && fresh.ready_bucket && fresh.ready_path) {
-          const { data: signed, error: signErr } = await supabase.storage
-            .from(fresh.ready_bucket)
-            .createSignedUrl(fresh.ready_path, 120);
-          if (!signErr && signed?.signedUrl) {
-            const src = signed.signedUrl;
-            const player =
-              fresh.kind === 'video'
-                ? `<div style="font-weight:700;font-size:18px">Souvenir vidéo</div>
-                   <div class="muted" style="margin-top:6px">Bon visionnage.</div>
-                   <video class="player" controls playsinline src="${src}"></video>`
-                : `<div style="font-weight:700;font-size:18px">Souvenir audio</div>
-                   <div class="muted" style="margin-top:6px">Bonne écoute.</div>
-                   <audio class="player" controls src="${src}"></audio>`;
-            res.status(200).type('text/html').send(htmlPage('Petitmo · Souvenir', player));
-            return;
-          }
-        }
+        if (await signedPlayerResponse(supabase, fresh, res)) return;
         if (fresh.status === 'failed') {
-          const msg = fresh.last_error ? `Détail: ${fresh.last_error}` : '';
           res
             .status(200)
+            .set('Cache-Control', 'no-store')
             .type('text/html')
             .send(
               htmlPage(
                 'Petitmo · Souvenir',
-                `<div style="font-weight:700;font-size:18px">Ce souvenir n’a pas pu être préparé</div>
-                 <div class="muted" style="margin-top:6px">${msg || 'Réessaie plus tard.'}</div>`
+                failedHtml(fresh.last_error, token)
               )
             );
           return;
         }
       }
+    } else if (row.status === 'failed') {
+      res
+        .status(200)
+        .set('Cache-Control', 'no-store')
+        .type('text/html')
+        .send(htmlPage('Petitmo · Souvenir', failedHtml(row.last_error, token)));
+      return;
     }
 
-    // pending_upload / uploaded / processing
     res
       .status(200)
+      .set('Cache-Control', 'no-store')
       .type('text/html')
       .send(
         htmlPage(
@@ -190,4 +186,3 @@ export function registerPublicMediaRoutes(app: Express, supabase: SupabaseClient
       );
   });
 }
-

@@ -47,7 +47,7 @@ function main(): void {
         printPageMm: [PRINT_PAGE_WIDTH_MM, PRINT_PAGE_HEIGHT_MM],
         bleedMm: PRINT_BLEED_MM,
       },
-      qrWorker: '2026-07-03-hevc-v2',
+      qrWorker: '2026-07-03-failed-retry',
     });
   });
 
