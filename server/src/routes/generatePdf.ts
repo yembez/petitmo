@@ -244,6 +244,7 @@ export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient,
         pages: body.pages,
         memoriesById,
         subscriptionTier: body.subscriptionTier,
+        childBirthdate: (child as ChildRow).birthdate ?? null,
       });
 
       if (!qrResult.ok) {
@@ -432,6 +433,7 @@ async function handleTicketPdf(
       pages: body.pages,
       memoriesById,
       subscriptionTier: qrTier,
+      childBirthdate: body.guestChild.birthdate ?? null,
     });
 
     if (!qrResult.ok) {
@@ -628,6 +630,7 @@ async function handleTicketPrintPdf(
       pages: body.pages,
       memoriesById,
       subscriptionTier: qrTier,
+      childBirthdate: body.guestChild.birthdate ?? null,
     });
 
     if (!qrResult.ok) {

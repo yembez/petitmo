@@ -4,6 +4,7 @@ import type { MemoryRow } from './memoryRow';
 import { ensurePublicMediaToken } from '../publicMediaTokens';
 import { bookPublicMediaExpiresAtIso, FREE_TIER_QR_AV_MAX_PER_BOOK } from '../constants/spec';
 import { linkPublicMediaTokenToMemorySource } from './linkPublicMediaTokenSource';
+import { syncPublicMediaTokenDisplayContext } from '../publicMediaDisplayContext';
 
 export type PrepareTokensResult =
   | { ok: true; tokensByMemoryId: Map<string, string> }
@@ -25,8 +26,9 @@ export async function preparePublicTokensForBook(params: {
   pages: BookPageServer[];
   memoriesById: Map<string, MemoryRow>;
   subscriptionTier: 'free' | 'premium';
+  childBirthdate?: string | null;
 }): Promise<PrepareTokensResult> {
-  const { supabase, pages, memoriesById, subscriptionTier } = params;
+  const { supabase, pages, memoriesById, subscriptionTier, childBirthdate } = params;
   const avCount = countAudioVideoPages(pages);
   if (subscriptionTier === 'free' && avCount > FREE_TIER_QR_AV_MAX_PER_BOOK) {
     return {
@@ -61,6 +63,7 @@ export async function preparePublicTokensForBook(params: {
       expiresAtIso: bookPublicMediaExpiresAtIso(),
     });
     await linkPublicMediaTokenToMemorySource(supabase, tok, m);
+    await syncPublicMediaTokenDisplayContext(supabase, tok, m, childBirthdate ?? null);
     tokensByMemoryId.set(memoryId, tok);
   }
 
@@ -77,8 +80,9 @@ export async function preparePublicTokensForExportRequest(params: {
   pages: BookPageServer[];
   memoriesById: Map<string, MemoryRow>;
   subscriptionTier: 'free' | 'premium';
+  childBirthdate?: string | null;
 }): Promise<PrepareTokensResult> {
-  const { supabase, pages, memoriesById, subscriptionTier } = params;
+  const { supabase, pages, memoriesById, subscriptionTier, childBirthdate } = params;
   const avCount = countAudioVideoPages(pages);
   if (subscriptionTier === 'free' && avCount > FREE_TIER_QR_AV_MAX_PER_BOOK) {
     return {
@@ -113,6 +117,7 @@ export async function preparePublicTokensForExportRequest(params: {
       expiresAtIso: bookPublicMediaExpiresAtIso(),
     });
     await linkPublicMediaTokenToMemorySource(supabase, tok, m);
+    await syncPublicMediaTokenDisplayContext(supabase, tok, m, childBirthdate ?? null);
     tokensByMemoryId.set(memoryClientId, tok);
   }
   return { ok: true, tokensByMemoryId };

@@ -51,7 +51,7 @@ export function registerResolvePublicMediaTokensRoute(app: Express, supabase: Su
     const { childId, pages } = body;
     const { data: child, error: childErr } = await supabase
       .from('children')
-      .select('id')
+      .select('id, birthdate')
       .eq('id', childId)
       .eq('user_id', userId)
       .maybeSingle();
@@ -104,6 +104,7 @@ export function registerResolvePublicMediaTokensRoute(app: Express, supabase: Su
       pages,
       memoriesById,
       subscriptionTier: 'premium',
+      childBirthdate: (child as { birthdate?: string | null }).birthdate ?? null,
     });
 
     if (!qrResult.ok) {

@@ -1,6 +1,12 @@
 import type { Express, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import {
+  petitmoLogoHtml,
+  publicMediaMetaHtml,
+  resolvePublicMediaDisplayContext,
+  type PublicMediaDisplayContext,
+} from '../publicMediaDisplayContext';
 import { tryProcessPublicMediaTokenOnVisit } from '../worker/publicMediaWorkerOnce';
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{20,200}$/;
@@ -16,6 +22,7 @@ const publicLimiter = rateLimit({
 
 type TokenRow = {
   token: string;
+  media_id: string;
   kind: 'audio' | 'video';
   status: 'pending_upload' | 'uploaded' | 'processing' | 'ready' | 'failed';
   raw_bucket: string | null;
@@ -24,6 +31,9 @@ type TokenRow = {
   ready_path: string | null;
   last_error: string | null;
   expires_at: string | null;
+  memory_created_at: string | null;
+  memory_location: string | null;
+  child_birthdate: string | null;
 };
 
 function isTokenExpired(iso: string | null | undefined): boolean {
@@ -48,7 +58,11 @@ function htmlPage(title: string, body: string, extraScript = ''): string {
     body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,sans-serif;background:#F6F4F1;margin:0;padding:0;color:#1C1C1E}
     .wrap{max-width:560px;margin:0 auto;padding:28px 18px}
     .card{background:#fff;border:1px solid rgba(0,0,0,.06);border-radius:16px;padding:18px 18px;box-shadow:0 6px 20px rgba(0,0,0,.06)}
-    .logo{font-weight:700;letter-spacing:.2px}
+    .logo{margin-bottom:2px}
+    .logo-svg{height:34px;width:auto;display:block}
+    .memory-meta{margin-top:8px}
+    .memory-meta-date{font-weight:700;font-size:15px;line-height:1.35;color:#1C1C1E}
+    .memory-meta-loc{font-size:14px;line-height:1.35;color:#6B7280;margin-top:4px}
     .muted{color:#6B7280;font-size:14px;line-height:1.45}
     .btn{display:inline-block;margin-top:14px;margin-right:8px;padding:10px 14px;border-radius:12px;background:#C4784A;color:#fff;text-decoration:none;font-weight:600;border:none;font-size:15px;cursor:pointer;font-family:inherit}
     .btn:disabled{opacity:.55;cursor:default}
@@ -60,7 +74,7 @@ function htmlPage(title: string, body: string, extraScript = ''): string {
 </head>
 <body>
   <div class="wrap">
-    <div class="logo">petitmo</div>
+    <div class="logo">${petitmoLogoHtml()}</div>
     <div class="card" style="margin-top:14px">
       ${body}
     </div>
@@ -163,16 +177,23 @@ function saveControlsHtml(token: string, kind: TokenRow['kind']): string {
     </script>`;
 }
 
-function playerHtml(token: string, kind: TokenRow['kind'], src: string): string {
+function playerHtml(
+  token: string,
+  kind: TokenRow['kind'],
+  src: string,
+  display: PublicMediaDisplayContext,
+): string {
   const saveBlock = saveControlsHtml(token, kind);
-  return kind === 'video'
-    ? `<div style="font-weight:700;font-size:18px">Souvenir vidéo</div>
-       <div class="muted" style="margin-top:6px">Bon visionnage.</div>
-       <video class="player" controls playsinline src="${src}"></video>
-       ${saveBlock}`
-    : `<div style="font-weight:700;font-size:18px">Souvenir audio</div>
-       <div class="muted" style="margin-top:6px">Bonne écoute.</div>
-       <audio class="player" controls src="${src}"></audio>
+  const meta = publicMediaMetaHtml(display);
+  const title = kind === 'video' ? 'Souvenir vidéo' : 'Souvenir audio';
+  const playerTag =
+    kind === 'video'
+      ? `<video class="player" controls playsinline src="${src}"></video>`
+      : `<audio class="player" controls src="${src}"></audio>`;
+
+  return `<div style="font-weight:700;font-size:18px">${title}</div>
+       ${meta}
+       ${playerTag}
        ${saveBlock}`;
 }
 
@@ -192,7 +213,9 @@ async function fetchTokenRow(
 ): Promise<{ row: TokenRow | null; error?: string }> {
   const { data, error } = await supabase
     .from('public_media_tokens')
-    .select('token, kind, status, raw_bucket, raw_path, ready_bucket, ready_path, last_error, expires_at')
+    .select(
+      'token, media_id, kind, status, raw_bucket, raw_path, ready_bucket, ready_path, last_error, expires_at, memory_created_at, memory_location, child_birthdate',
+    )
     .eq('token', token)
     .maybeSingle();
   if (error) return { row: null, error: error.message };
@@ -272,11 +295,13 @@ async function signedPlayerResponse(
     return true;
   }
 
+  const display = await resolvePublicMediaDisplayContext(supabase, row);
+
   res
     .status(200)
     .set('Cache-Control', 'no-store')
     .type('text/html')
-    .send(htmlPage('Petitmo · Souvenir', playerHtml(row.token, row.kind, signedUrl)));
+    .send(htmlPage('Petitmo · Souvenir', playerHtml(row.token, row.kind, signedUrl, display)));
   return true;
 }
 

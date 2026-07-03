@@ -18,5 +18,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
 COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
+COPY --from=build /app/src/brand ./dist/brand
 EXPOSE 8787
 CMD ["node", "dist/index.js"]
