@@ -28,10 +28,14 @@ load_env() {
   if [[ ! -f "$ENV_FILE" ]]; then
     die "Fichier $ENV_FILE absent. Copie scripts/qa/.env.qa.example → scripts/qa/.env.qa et remplis les valeurs."
   fi
+  local preset_email="${QA_TEST_EMAIL:-}"
   # shellcheck disable=SC1090
   set -a
   source "$ENV_FILE"
   set +a
+  if [[ -n "$preset_email" ]]; then
+    QA_TEST_EMAIL="$preset_email"
+  fi
 
   [[ -n "${PUBLIC_PDF_URL:-}" ]] || die "PUBLIC_PDF_URL manquant dans .env.qa"
   [[ -n "${SUPABASE_URL:-}" ]] || die "SUPABASE_URL manquant dans .env.qa"

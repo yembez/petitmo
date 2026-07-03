@@ -1,11 +1,8 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-
-const execFileAsync = promisify(execFile);
+import { transcodeAudioForQr, transcodeVideoForQr } from './ffmpegTranscode';
 
 export type WorkerOnceResult = { ok: boolean; processed: boolean };
 
@@ -26,56 +23,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function transcodeVideo(tmpDir: string, inputBuf: Buffer): Promise<Buffer> {
-  const inPath = path.join(tmpDir, 'in_vid');
-  const outPath = path.join(tmpDir, 'out.mp4');
-  await writeFile(inPath, inputBuf);
-  await execFileAsync('ffmpeg', [
-    '-y',
-    '-i',
-    inPath,
-    '-vf',
-    'scale=-2:720:force_original_aspect_ratio=decrease',
-    '-c:v',
-    'libx264',
-    '-preset',
-    'veryfast',
-    '-crf',
-    '23',
-    '-c:a',
-    'aac',
-    '-b:a',
-    '128k',
-    '-movflags',
-    '+faststart',
-    outPath,
-  ]);
-  return readFile(outPath);
-}
-
-async function transcodeAudio(tmpDir: string, inputBuf: Buffer): Promise<Buffer> {
-  const inPath = path.join(tmpDir, 'in_aud');
-  const outPath = path.join(tmpDir, 'out.m4a');
-  await writeFile(inPath, inputBuf);
-  await execFileAsync('ffmpeg', [
-    '-y',
-    '-i',
-    inPath,
-    '-ac',
-    '1',
-    '-c:a',
-    'aac',
-    '-ar',
-    '44100',
-    '-b:a',
-    '96k',
-    '-movflags',
-    '+faststart',
-    outPath,
-  ]);
-  return readFile(outPath);
-}
-
 function requireEnv(name: string): string {
   const v = process.env[name];
   if (!v?.trim()) throw new Error(`Missing env ${name}`);
@@ -92,10 +39,14 @@ async function fetchPendingRow(
   supabase: SupabaseClient,
   token?: string,
 ): Promise<PublicMediaTokenRow | null> {
+  const statuses = token
+    ? (['pending_upload', 'uploaded', 'failed'] as const)
+    : (['pending_upload', 'uploaded'] as const);
+
   let query = supabase
     .from('public_media_tokens')
     .select('token,media_id,kind,status,raw_bucket,raw_path,ready_bucket,ready_path,last_error,updated_at')
-    .in('status', ['pending_upload', 'uploaded'])
+    .in('status', [...statuses])
     .not('raw_bucket', 'is', null)
     .not('raw_path', 'is', null);
 
@@ -120,7 +71,7 @@ async function processTokenRow(
       .from('public_media_tokens')
       .update({ status: 'processing', last_error: null, updated_at: new Date().toISOString() })
       .eq('token', row.token)
-      .in('status', ['pending_upload', 'uploaded']);
+      .in('status', ['pending_upload', 'uploaded', 'failed']);
     if (lockErr) throw new Error(lockErr.message);
 
     const { data: dl, error: dlErr } = await supabase.storage.from(row.raw_bucket!).download(row.raw_path!);
@@ -128,7 +79,9 @@ async function processTokenRow(
     const inputBuf = Buffer.from(await dl.arrayBuffer());
 
     const outBytes =
-      row.kind === 'video' ? await transcodeVideo(tmp, inputBuf) : await transcodeAudio(tmp, inputBuf);
+      row.kind === 'video'
+        ? await transcodeVideoForQr(tmp, inputBuf, row.raw_path)
+        : await transcodeAudioForQr(tmp, inputBuf, row.raw_path);
 
     const readyBucket = 'qr-media';
     const readyPath = `ready/${row.token}.${row.kind === 'video' ? 'mp4' : 'm4a'}`;
@@ -225,9 +178,15 @@ export async function ensureQrTokensReady(params: {
         continue;
       }
       const status = (data as { status?: string } | null)?.status;
-      if (status === 'ready' || status === 'failed') {
+      if (status === 'ready') {
         pending.delete(token);
         continue;
+      }
+      if (status === 'failed') {
+        await params.supabase
+          .from('public_media_tokens')
+          .update({ status: 'pending_upload', last_error: null, updated_at: new Date().toISOString() })
+          .eq('token', token);
       }
       await runPublicMediaWorkerOnce({ token });
     }
@@ -243,5 +202,11 @@ export async function ensureQrTokensReady(params: {
 export async function tryProcessPublicMediaTokenOnVisit(token: string): Promise<void> {
   const trimmed = token.trim();
   if (!trimmed) return;
+  const supabase = createServiceClient();
+  await supabase
+    .from('public_media_tokens')
+    .update({ status: 'pending_upload', last_error: null, updated_at: new Date().toISOString() })
+    .eq('token', trimmed)
+    .eq('status', 'failed');
   await runPublicMediaWorkerOnce({ token: trimmed });
 }

@@ -279,19 +279,6 @@ function SlideshowSlideImage({
   const feedUrls = useFeedPhotoDisplayUrls(memory);
   const videoPosterUri = useFeedVideoPosterDisplayUrl(memory);
 
-  if (memory.type === 'video') {
-    return (
-      <View style={StyleSheet.absoluteFillObject}>
-        <FavorisVideoThumb
-          memory={memory}
-          recyclingKey={`slideshow|${item.key}|${memory.id}`}
-          posterUri={videoPosterUri}
-          onReady={onLoad}
-        />
-      </View>
-    );
-  }
-
   const rawPhoto =
     memory.type === 'photo' ? slideshowSlideRawUri(item, feedUrls).trim() : '';
   const rawVoice =
@@ -308,9 +295,22 @@ function SlideshowSlideImage({
   const uri = uriRaw ? normalizeMemoryMediaUriForDisplay(uriRaw) : '';
 
   useEffect(() => {
-    if (!uri) return;
+    if (memory.type === 'video' || !uri) return;
     void ExpoImage.prefetch(uri).catch(() => {});
-  }, [uri]);
+  }, [memory.type, uri]);
+
+  if (memory.type === 'video') {
+    return (
+      <View style={StyleSheet.absoluteFillObject}>
+        <FavorisVideoThumb
+          memory={memory}
+          recyclingKey={`slideshow|${item.key}|${memory.id}`}
+          posterUri={videoPosterUri}
+          onReady={onLoad}
+        />
+      </View>
+    );
+  }
 
   if (!uri) return null;
   return (

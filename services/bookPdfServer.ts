@@ -39,6 +39,7 @@ import { pickFirstReadableLocalMediaUri } from '@/utils/localMediaReadable';
 import { resolveServerPdfEntitlements } from '@/lib/digitalExportPurchase';
 import { MEDIA_BOOK_PRINT_MAX_WIDTH, MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH } from '@/lib/limits';
 import { isInitExportConfigured, postInitExport, postGuestUploadUrls } from '@/services/initExportApi';
+import { publicMediaBaseUrl } from '@/lib/publicMediaBaseUrl';
 
 /** Erreur HTTP / téléchargement après appel au service PDF. */
 export const EXPORT_SERVER_FAILED_CONTACT_MESSAGE =
@@ -54,7 +55,7 @@ function pdfServerBaseUrl(): string | null {
   return raw.replace(/\/$/, '');
 }
 
-import { publicMediaBaseUrl } from '@/lib/publicMediaBaseUrl';
+function errorMessageFromPdfServerJson(
   j: { error?: string; detail?: string },
   fallback: string
 ): string {

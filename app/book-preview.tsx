@@ -35,6 +35,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Image as ExpoImage } from 'expo-image';
+import { buildBookPages, type BookPage, type PhotoFullVariant } from '@/src/book/BookEngine';
 import { useBookQrTokenUrls } from '@/hooks/useBookQrTokenUrls';
 import { qrPreviewUrlForMemory } from '@/services/bookQrPreview';
 import MaquetteBookPages from '@/src/book/maquette/MaquetteBookPages';
@@ -64,6 +65,7 @@ import {
   getBook,
   healBookCoverIfNeeded,
   healBookMemoryIdsIfStale,
+  removeMemoriesFromBook,
   readBookPreviewLocalSnapshotSync,
   resolveBookCoverEditorUri,
   resolveBookCoverPrintUri,
@@ -625,7 +627,8 @@ export default function BookPreviewScreen() {
 
       const picked: Memory[] = [];
       for (const id of memoryIds) {
-        const row = (await getMemoryById(id)) as Memory | null;
+        let row = (await getMemoryById(id)) as Memory | null;
+        if (!row) row = getLocalMemoryById(id) as Memory | null;
         if (row) picked.push(row);
       }
       picked.sort(
@@ -678,7 +681,8 @@ export default function BookPreviewScreen() {
     const ids = dedupeMemoryIds(b.memoryIds ?? []);
     const picked: Memory[] = [];
     for (const id of ids) {
-      const row = (await getMemoryById(id)) as Memory | null;
+      let row = (await getMemoryById(id)) as Memory | null;
+      if (!row) row = getLocalMemoryById(id) as Memory | null;
       if (row) picked.push(row);
     }
     picked.sort(
@@ -688,7 +692,6 @@ export default function BookPreviewScreen() {
     setBookSelectionKeys(ids);
   }, [bookId]);
 
-  const bookScreenWasBlurredRef = useRef(false);
   const voiceCoverPrintBackfillRef = useRef(new Set<string>());
   useEffect(() => {
     void load({ silent: hadLocalSnapshotRef.current });
@@ -714,15 +717,7 @@ export default function BookPreviewScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      return () => {
-        bookScreenWasBlurredRef.current = true;
-      };
-    }, [])
-  );
-
-  useFocusEffect(
-    useCallback(() => {
-      if (!bookId || !bookScreenWasBlurredRef.current) return;
+      if (!bookId) return;
       void refreshBookMemoriesFromDb();
     }, [bookId, refreshBookMemoriesFromDb])
   );
@@ -738,11 +733,8 @@ export default function BookPreviewScreen() {
         if (!b) return;
         const hasRotations = Object.keys(rotations).some(k => rotations[k] !== 0);
         const hasCrops = Object.keys(photoCrops).length > 0;
-        const persistedIds = dedupeMemoryIds(b.memoryIds ?? []);
-        const resolvedIds = dedupeMemoryIds(bookMemories.map(m => m.id));
         await upsertBook({
           ...b,
-          memoryIds: resolvedIds.length > 0 ? resolvedIds : persistedIds,
           rotations: hasRotations ? rotations : undefined,
           photoCrops: hasCrops ? photoCrops : undefined,
           textEdits: undefined,
@@ -753,7 +745,7 @@ export default function BookPreviewScreen() {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [bookId, loading, rotations, photoCrops, chapterTitleLine, bookMemories]);
+  }, [bookId, loading, rotations, photoCrops, chapterTitleLine]);
 
   const upsertPhotoCrop = useCallback(
     (key: string, next: { xPct: number; yPct: number; scale: number }) => {
@@ -1217,6 +1209,8 @@ export default function BookPreviewScreen() {
       qrTokensByMemoryId,
     ]
   );
+
+  const favoriteCoverThumbs = useMemo(() => {
     const out: { thumb: string; source: string }[] = [];
     const seen = new Set<string>();
     for (const m of allMemories) {
@@ -1617,12 +1611,21 @@ export default function BookPreviewScreen() {
           text: 'Supprimer',
           style: 'destructive',
           onPress: () => {
-            setBookMemories(prev => prev.filter(mem => mem.id !== m.id));
+            if (!bookId) {
+              setBookMemories(prev => prev.filter(mem => mem.id !== m.id));
+              return;
+            }
+            void (async () => {
+              const updated = await removeMemoriesFromBook(bookId, [m.id]);
+              if (!updated) return;
+              setBookSelectionKeys(updated.memoryIds ?? []);
+              setBookMemories(prev => prev.filter(mem => mem.id !== m.id));
+            })();
           },
         },
       ]
     );
-  }, [canDeletePage, currentPage, merge]);
+  }, [bookId, canDeletePage, currentPage, merge]);
 
   const handleToolbarRotate = useCallback(() => {
     if (!currentPage || !photoOk) return;
