@@ -4,6 +4,7 @@ import { Image as ExpoImage } from 'expo-image';
 import { BookInlinePhotoCrop } from '@/components/BookInlinePhotoCrop';
 import type { PhotoCrop } from '@/src/book/photoCrop';
 import { bookPhotoCropImageRect } from '@/utils/bookPhotoCropLayout';
+import { useSignedMediaUrl, extractMediaBucketPath } from '@/lib/mediaSignedUrl';
 
 type CropDpiMeta = {
   imgPxW: number;
@@ -106,6 +107,16 @@ function BookPagePhotoFrame({
   imgPxW,
   imgPxH,
 }: Props) {
+  const rawUri = uri.trim();
+  const isDeviceLocal =
+    !!rawUri &&
+    (rawUri.startsWith('file:') ||
+      rawUri.startsWith('content:') ||
+      rawUri.startsWith('ph://') ||
+      (rawUri.startsWith('/') && !extractMediaBucketPath(rawUri)));
+  const signed = useSignedMediaUrl(!isDeviceLocal && rawUri ? rawUri : null);
+  const displayUri = (signed ?? rawUri).trim();
+
   const dpiMeta = inlineCrop?.dpiMeta;
   const cropPxW = imgPxW ?? dpiMeta?.imgPxW ?? 0;
   const cropPxH = imgPxH ?? dpiMeta?.imgPxH ?? 0;
@@ -119,7 +130,7 @@ function BookPagePhotoFrame({
       <View style={[styles.rot, { transform: [{ rotate: `${rotation}deg` }] }]}>
         {isInteractive && inlineCrop ? (
           <BookInlinePhotoCrop
-            uri={uri}
+            uri={displayUri}
             frameW={frameW}
             frameH={frameH}
             crop={crop}
@@ -134,7 +145,7 @@ function BookPagePhotoFrame({
           />
         ) : (
           <CroppedPhotoStatic
-            uri={uri}
+            uri={displayUri}
             width={frameW}
             height={frameH}
             crop={crop}

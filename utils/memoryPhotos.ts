@@ -3,7 +3,7 @@ import { Platform } from 'react-native';
 import { documentDirectory } from 'expo-file-system/legacy';
 import { extractMediaBucketPath } from '@/lib/mediaSignedUrl';
 import { peekFeedBootstrapDisplayUrls } from '@/services/feedLocalPhotoCache';
-import { rebaseSandboxUriToCurrentContainer } from '@/utils/localMediaReadable';
+import { rebaseSandboxUriToCurrentContainer, isProbablyStalePetitmoSandboxPath } from '@/utils/localMediaReadable';
 function asTrimmedStringArray(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -390,9 +390,14 @@ export function collectVoiceCoverLocalUploadUriCandidates(memory: Memory): strin
   return out;
 }
 
+/** Chemins sandbox uniquement — pas les colonnes cloud (`voice_cover_url`). */
+function pickVoiceCoverSandboxPath(memory: Memory): string {
+  return firstNonEmpty(memory.voice_cover_path);
+}
+
 /** Livre / PDF : dérivé print local (`local_print_path`), sinon cover d’origine. */
 export function getVoiceCoverUriForBookPreview(memory: Memory): string {
-  const localPick = firstNonEmpty(memory.local_print_path, memory.voice_cover_path);
+  const localPick = firstNonEmpty(memory.local_print_path, pickVoiceCoverSandboxPath(memory));
   const remotePick = firstNonEmpty(memory.voice_cover_url);
   const raw = localPick.trim() || remotePick.trim();
   return raw ? normalizeMemoryMediaUriForDisplay(raw) : '';
@@ -400,7 +405,7 @@ export function getVoiceCoverUriForBookPreview(memory: Memory): string {
 
 /** Fil / favoris / viewer : cover légère (pas le dérivé print livre). */
 export function getVoiceCoverUriForFeedAndViewer(memory: Memory): string {
-  const localPick = firstNonEmpty(memory.voice_cover_path);
+  const localPick = pickVoiceCoverSandboxPath(memory);
   const remotePick = firstNonEmpty(memory.voice_cover_url);
   const raw = localPick.trim() || remotePick.trim();
   return raw ? normalizeMemoryMediaUriForDisplay(raw) : '';
@@ -437,17 +442,16 @@ export function getVoiceCoverDisplayUriForFeedAndViewer(memory: Memory): string 
 
 /** Vignette / poster vidéo : fil, favoris, viewer immersif, maquette livre. */
 export function getVideoPosterUriForFeedAndViewer(memory: Memory): string {
-  const localPick = firstNonEmpty(
-    memory.local_thumb_path,
-    memory.thumbnail_url,
-    memory.poster_url,
-  );
+  const localPick = firstNonEmpty(memory.local_thumb_path);
   const remotePick = firstNonEmpty(
     memory.poster_print_url,
     memory.poster_url,
     memory.thumbnail_url,
   );
-  const raw = localPick.trim() || remotePick.trim();
+  const raw =
+    localPick && remotePick && isProbablyStalePetitmoSandboxPath(localPick)
+      ? remotePick
+      : localPick.trim() || remotePick.trim();
   return raw ? normalizeMemoryMediaUriForDisplay(raw) : '';
 }
 

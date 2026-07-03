@@ -536,6 +536,11 @@ export async function requestMissingMediaDerivatives(
     if (m.type === 'video') {
       const hasPoster = !!(m.poster_url ?? '').trim() || !!(m.thumbnail_url ?? '').trim();
       if (!hasPoster) ids.push(m.id);
+      continue;
+    }
+    if (m.type === 'voice') {
+      const hasCover = !!(m.voice_cover_url ?? '').trim();
+      if (!hasCover) ids.push(m.id);
     }
   }
 
@@ -2076,6 +2081,14 @@ export async function getMemoryById(memoryId: string) {
 
 const FETCH_MEMORIES_BY_IDS_CHUNK = 40;
 
+/** Télécharge les lignes absentes de SQLite (livre / couverture après migration cloud). */
+export async function hydrateMemoriesByIds(ids: readonly string[]): Promise<void> {
+  const unique = [...new Set(ids.map(id => id.trim()).filter(Boolean))];
+  const missing = unique.filter(id => !getLocalMemoryById(id));
+  if (missing.length === 0) return;
+  await fetchMemoriesByIds(missing);
+}
+
 /** Recharge uniquement des lignes par id (évite de remplacer tout le fil pour les dérivés worker). */
 export async function fetchMemoriesByIds(ids: string[]): Promise<MemoryRow[]> {
   const unique = [...new Set(ids.map(id => id.trim()).filter(Boolean))];
@@ -2095,12 +2108,20 @@ export async function fetchMemoriesByIds(ids: string[]): Promise<MemoryRow[]> {
       const { data, error } = await supabase.from('memories').select('*').in('id', chunk);
       if (error) throw error;
       if (data?.length) {
-        out.push(
-          ...data.map(row =>
-            mergeServerMemoryRowWithExistingLocal(row, getLocalMemoryById(row.id))
-          )
-        );
+        for (const row of data) {
+          const merged: Memory = {
+            ...mergeServerMemoryRowWithExistingLocal(row, getLocalMemoryById(row.id)),
+            sync_status: 'synced',
+          };
+          upsertLocalMemory(merged);
+          out.push(merged);
+        }
       }
+    }
+    for (const id of unique) {
+      if (out.some(m => m.id === id)) continue;
+      const row = getLocalMemoryById(id);
+      if (row) out.push(row);
     }
     return out;
   } catch (error) {
@@ -2143,8 +2164,13 @@ export async function toggleFavorite(memoryId: string, isFavorite: boolean) {
       .update(updateData)
       .eq('id', memoryId);
 
-    if (error) throw error;
-    // Après succès Supabase : touche le local (synced_at) sans changer le status
+    if (error) {
+      console.error('Toggle favorite error:', error);
+      // Local-first : SQLite déjà à jour ; retenter la sync cloud au prochain pull.
+      DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId });
+      return true;
+    }
+
     updateLocalMemoryUrls(memoryId, {
       upload_status: undefined,
     });

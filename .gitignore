@@ -30,6 +30,8 @@ yarn-error.*
 # local env files
 .env*.local
 .env
+scripts/qa/.env.qa
+scripts/qa/out/
 
 # local temp artifacts
 .tmp_maquette_*.png

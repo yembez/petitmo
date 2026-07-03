@@ -9,6 +9,10 @@ import {
 } from '@/lib/localDb'
 import type { Memory } from '@/types/local'
 import { mergeServerMemoryRowWithExistingLocal } from '@/services/memoryRowMapping'
+import {
+  healDeadLocalMediaPointersForMemories,
+  reconcileFavoritesAfterCloudSync,
+} from '@/services/memoryDisplayHeal'
 
 /**
  * Télécharge les souvenirs de l’enfant depuis Supabase et les enregistre dans le SQLite local.
@@ -43,6 +47,9 @@ export async function pullMemoriesFromRemoteToLocal(childId: string): Promise<Me
       }
     })
     upsertLocalMemories(withLocal, 'full')
+
+    await healDeadLocalMediaPointersForMemories(withLocal, { max: 64 })
+    await reconcileFavoritesAfterCloudSync()
 
     const remoteIds = new Set(withLocal.map(m => m.id))
     const localOnly = localBefore.filter(m => !remoteIds.has(m.id))

@@ -1,7 +1,6 @@
 import { memo } from 'react';
 import { View, Text, TouchableOpacity, Platform, StyleSheet } from 'react-native';
 import { BlurView } from 'expo-blur';
-import { Menu } from 'lucide-react-native';
 import { calculateAge } from '@/utils/date';
 import { scale, verticalScale } from '@/utils/responsive';
 import type { Child } from '@/utils/feedHelpers';
@@ -16,8 +15,6 @@ export type FeedHeaderProps = {
   paddingTop: number;
   /** Ouvre l’éditeur de profil de l’enfant dont l’avatar est tapé. */
   onPressChild: (child: Child) => void;
-  /** Ouvre l’espace parent (même entrée que le menu burger sur l’onglet Capturer). */
-  onMenuPress: () => void;
 };
 
 /** Aligné sur `styles.headerRow` + `styles.headerContent` (avatar agrandi + paddingBottom + bordure). */
@@ -97,7 +94,6 @@ export const FeedHeader = memo(function FeedHeader({
   familyChildren,
   paddingTop,
   onPressChild,
-  onMenuPress,
 }: FeedHeaderProps) {
   const sorted = sortChildrenByBirthdateAsc(familyChildren);
 
@@ -139,16 +135,6 @@ export const FeedHeader = memo(function FeedHeader({
           </View>
         )}
       </View>
-      <TouchableOpacity
-        style={styles.headerAddBtn}
-        onPress={onMenuPress}
-        activeOpacity={0.75}
-        accessibilityRole="button"
-        accessibilityLabel="Menu"
-        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-      >
-        <Menu size={scale(20)} color={THEME.textPrimary} strokeWidth={2} />
-      </TouchableOpacity>
     </View>
   );
 

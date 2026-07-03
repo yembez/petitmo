@@ -6,6 +6,7 @@ import { registerGeneratePdfRoute } from './routes/generatePdf';
 import { registerUploadGuestAssetsRoutes } from './routes/uploadGuestAssets';
 import { registerUploadGuestAssetRoute } from './routes/uploadGuestAsset';
 import { registerPublicMediaRoutes } from './routes/publicMedia';
+import { registerResolvePublicMediaTokensRoute } from './routes/resolvePublicMediaTokens';
 import {
   DIGITAL_PAGE_HEIGHT_MM,
   DIGITAL_PAGE_WIDTH_MM,
@@ -52,6 +53,7 @@ function main(): void {
   const supabase = createSupabaseAdmin(env.supabaseUrl, env.supabaseServiceRoleKey);
   registerQrRoutes(app, supabase);
   registerPublicMediaRoutes(app, supabase);
+  registerResolvePublicMediaTokensRoute(app, supabase);
   registerGeneratePdfRoute(app, supabase, env.supabaseUrl);
   registerUploadGuestAssetsRoutes(app, supabase);
   registerUploadGuestAssetRoute(app, supabase);

@@ -95,9 +95,6 @@ function FilScreen() {
     feedViewabilityConfig,
     onViewableItemsChanged,
   );
-  const onFeedHeaderMenuPress = useCallback(() => {
-    router.push('/parent-space');
-  }, [router]);
   const onFeedHeaderChildPress = useCallback(
     (target: Child) => {
       router.push(`/edit-child?childId=${target.id}`);
@@ -292,7 +289,6 @@ function FilScreen() {
           familyChildren={familyChildren}
           paddingTop={insets.top + verticalScale(6)}
           onPressChild={onFeedHeaderChildPress}
-          onMenuPress={onFeedHeaderMenuPress}
         />
       </View>
       <View style={[styles.feedViewport, { opacity: feedListOpacity }]}>

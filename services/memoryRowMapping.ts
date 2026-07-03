@@ -121,5 +121,18 @@ export function mergeServerMemoryRowWithExistingLocal(
     import_asset_id: existing.import_asset_id ?? base.import_asset_id,
     import_source_fingerprint: existing.import_source_fingerprint ?? base.import_source_fingerprint,
     extra_photo_paths: mergedExtraPaths,
+    /** Favori local optimiste ou pas encore poussé : ne pas l’effacer au pull cloud. */
+    is_favorite: existing.is_favorite || base.is_favorite,
+    favorite_photo_urls: (() => {
+      const ex = Array.isArray(existing.favorite_photo_urls)
+        ? existing.favorite_photo_urls.filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
+        : [];
+      const rem = Array.isArray(base.favorite_photo_urls)
+        ? base.favorite_photo_urls.filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
+        : [];
+      if (rem.length > 0) return base.favorite_photo_urls;
+      if (ex.length > 0) return existing.favorite_photo_urls;
+      return base.favorite_photo_urls;
+    })(),
   }
 }

@@ -3,11 +3,12 @@ import { useState, useSyncExternalStore } from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { PlatformPressable } from '@react-navigation/elements';
+import { useRouter } from 'expo-router';
 import type { LucideIcon } from 'lucide-react-native';
-import { BookOpenText, Heart, List, Plus } from 'lucide-react-native';
+import { BookOpenText, Heart, List, Plus, Settings } from 'lucide-react-native';
 import { CAPTURE_SCREEN_ACCENT } from '@/constants/captureScreenPalette';
 import {
-  contextualTabBarRoutes,
+  FIXED_TAB_BAR_SLOTS,
   normalizeMainTabRoute,
   type MainTabRoute,
 } from '@/constants/contextualTabBar';
@@ -149,10 +150,9 @@ export default function PetitmoContextTabBar({
   tabLabelFontRegular,
   tabLabelFontMedium,
 }: Props) {
+  const router = useRouter();
   const activeRoute = normalizeMainTabRoute(state.routes[state.index]?.name);
-  const visibleRoutes = contextualTabBarRoutes(activeRoute);
-  const showCaptureAppendage =
-    visibleRoutes.includes('index') && activeRoute !== 'index';
+  const showCaptureAppendage = activeRoute !== 'index';
   const favorisAddToBookSessionId = useSyncExternalStore(
     subscribeFavorisAddToBookSession,
     peekFavorisAddToBookSession,
@@ -191,7 +191,32 @@ export default function PetitmoContextTabBar({
         waveRise={showCaptureAppendage ? CAPTURE_TAB_WAVE_RISE : 0}
       />
       <View style={styles.tabBarRow}>
-        {visibleRoutes.map(routeName => {
+        {FIXED_TAB_BAR_SLOTS.map(slot => {
+          if (slot.kind === 'settings') {
+            const tint = THEME.tabBarInactiveTint;
+            return (
+              <PetitmoTabBarButton
+                key="settings"
+                accessibilityRole="button"
+                accessibilityLabel="Paramètres"
+                onPress={() => router.push('/parent-space')}
+              >
+                <TabBarGlyph Icon={Settings} focused={false} fillWhenFocused={false} color={tint} />
+                <Text
+                  style={[
+                    styles.tabLabel,
+                    tabLabelFontRegular ? { fontFamily: tabLabelFontRegular } : null,
+                    { color: tint },
+                  ]}
+                  numberOfLines={1}
+                >
+                  Paramètres
+                </Text>
+              </PetitmoTabBarButton>
+            );
+          }
+
+          const routeName = slot.route;
           const routeIndex = state.routes.findIndex(r => r.name === routeName);
           if (routeIndex < 0) return null;
 
@@ -309,7 +334,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  /** Bas du disque = bas de la ligne icônes ; le cercle déborde vers le haut. */
   captureIconWrap: {
     height: TAB_ICON_ROW_H,
     alignItems: 'center',
@@ -338,9 +362,9 @@ const styles = StyleSheet.create({
   tabLabel: {
     marginTop: TAB_ICON_LABEL_GAP,
     marginBottom: 0,
-    fontSize: scale(10),
+    fontSize: scale(9),
     lineHeight: TAB_LABEL_LINE_H,
-    letterSpacing: 0.15,
+    letterSpacing: 0.1,
     textAlign: 'center',
     ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
   },

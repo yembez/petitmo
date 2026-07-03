@@ -7,7 +7,7 @@ import { countRenderedBookPages } from '../pdf/bookPageCount';
 import { htmlToDigitalPdfBuffer, htmlToPdfBuffer } from '../pdf/renderPdf';
 import { saveBookPdfAndSign, saveBookPdfForExportRequest } from '../pdf/pdfStorage';
 import { preparePublicTokensForBook, preparePublicTokensForExportRequest } from '../pdf/preparePublicTokens';
-import { runPublicMediaWorkerBatch } from '../worker/publicMediaWorkerOnce';
+import { ensureQrTokensReady } from '../worker/publicMediaWorkerOnce';
 import type { MemoryRow, ChildRow } from '../pdf/memoryRow';
 import {
   signChildRowForPdfRender,
@@ -107,16 +107,18 @@ function mapGuestMemories(list: GuestMemoryForPdfPayload[], exportRequestId: str
   return map;
 }
 
-function countAvPages(pages: GenerateBookPdfPayload['pages']): number {
-  return pages.filter(p => p.type === 'audio' || p.type === 'video').length;
+
+function qrTokenList(tokensByMemoryId: Map<string, string>): string[] {
+  return [...new Set([...tokensByMemoryId.values()].map(t => t.trim()).filter(Boolean))];
 }
 
-/** Lance le transcode QR en parallèle du rendu Playwright (ne bloque pas la réponse HTTP). */
-function kickPublicMediaWorkersInBackground(avCount: number): void {
-  if (avCount < 1) return;
-  void runPublicMediaWorkerBatch({ maxJobs: avCount }).catch(err => {
-    console.warn('[generate-pdf] public media worker batch', err);
-  });
+function startBookQrWorkers(
+  supabase: SupabaseClient,
+  tokensByMemoryId: Map<string, string>,
+): Promise<void> {
+  const tokens = qrTokenList(tokensByMemoryId);
+  if (tokens.length === 0) return Promise.resolve();
+  return ensureQrTokensReady({ supabase, tokens, timeoutMs: 120_000 });
 }
 
 export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient, supabaseProjectUrl: string): void {
@@ -249,7 +251,7 @@ export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient,
         return;
       }
 
-      kickPublicMediaWorkersInBackground(countAvPages(body.pages));
+      const qrWorkerPromise = startBookQrWorkers(supabase, qrResult.tokensByMemoryId);
 
       const expectedPages = countRenderedBookPages(body.pages, memoriesById);
       if (expectedPages < 1) {
@@ -281,6 +283,7 @@ export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient,
       });
 
       const pdf = await htmlToDigitalPdfBuffer(html, expectedPages);
+      await qrWorkerPromise;
       const saved = await saveBookPdfAndSign(supabase, {
         userId,
         childId,
@@ -440,7 +443,7 @@ async function handleTicketPdf(
       return;
     }
 
-    kickPublicMediaWorkersInBackground(countAvPages(body.pages));
+    const qrWorkerPromise = startBookQrWorkers(supabase, qrResult.tokensByMemoryId);
 
     const child: ChildRow = {
       id: body.childId,
@@ -477,6 +480,7 @@ async function handleTicketPdf(
       body.exportMode === 'digital'
         ? await htmlToDigitalPdfBuffer(html, expectedPagesTicket)
         : await htmlToPdfBuffer(html);
+    await qrWorkerPromise;
     const saved = await saveBookPdfForExportRequest(supabase, {
       exportRequestId: ticket.export_request_id,
       bookId: body.bookId,
@@ -635,7 +639,7 @@ async function handleTicketPrintPdf(
       return;
     }
 
-    kickPublicMediaWorkersInBackground(countAvPages(body.pages));
+    const qrWorkerPromise = startBookQrWorkers(supabase, qrResult.tokensByMemoryId);
 
     const child: ChildRow = {
       id: body.childId,
@@ -669,6 +673,7 @@ async function handleTicketPrintPdf(
     });
 
     const pdf = await htmlToPdfBuffer(html);
+    await qrWorkerPromise;
     const saved = await saveBookPdfForExportRequest(supabase, {
       exportRequestId: ticket.export_request_id,
       bookId: body.bookId,

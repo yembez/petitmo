@@ -35,7 +35,8 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Image as ExpoImage } from 'expo-image';
-import { buildBookPages, type BookPage, type PhotoFullVariant } from '@/src/book/BookEngine';
+import { useBookQrTokenUrls } from '@/hooks/useBookQrTokenUrls';
+import { qrPreviewUrlForMemory } from '@/services/bookQrPreview';
 import MaquetteBookPages from '@/src/book/maquette/MaquetteBookPages';
 import EditTextModal from '@/components/EditTextModal';
 import { BookPreviewZoomWrap } from '@/components/BookPreviewZoomWrap';
@@ -47,7 +48,10 @@ import {
   type BookPhotoPageType,
 } from '@/utils/bookPhotoPrintDpi';
 import { getChildren, getOrSelectFirstChild } from '@/services/children';
-import { getFamilyMemories, updateMemoryContent } from '@/services/media';
+import { getFamilyMemories, getMemoryById, updateMemoryContent } from '@/services/media';
+import { healDeadLocalMediaPointersForMemories } from '@/services/memoryDisplayHeal';
+import { ensureVoiceMemoryCloudForBookExport } from '@/services/migration';
+import { supabase } from '@/lib/supabase';
 import { getLocalMemoryById, updateLocalMemoryContent } from '@/lib/localDb';
 import { awaitVoiceCoverPrintDerivativeForMemory } from '@/services/memoryLocalStore';
 import { loadBookSelectionKeys, memoryIdFromBookSelectionKey } from '@/services/bookSelection';
@@ -59,7 +63,7 @@ import {
   findBookCoverMemory,
   getBook,
   healBookCoverIfNeeded,
-  healBookMemoryIdsIfWiped,
+  healBookMemoryIdsIfStale,
   readBookPreviewLocalSnapshotSync,
   resolveBookCoverEditorUri,
   resolveBookCoverPrintUri,
@@ -97,7 +101,6 @@ import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 import { canExportBookPdfViaServer } from '@/lib/digitalExportPurchase';
 import { setLastGuestExportEmail } from '@/lib/guestExportPrefs';
 import { setPendingBookOrderPdfPayload } from '@/lib/pendingBookOrderPdf';
-import { supabase } from '@/lib/supabase';
 import { THEME } from '@/constants/theme';
 
 const HEADER_H = 44;
@@ -113,7 +116,6 @@ const BROWSE_ROW_GAP = 24;
 const BROWSE_SPINE_W = 16;
 /** Fond du viewer livre — blanc cassé charte (`THEME.bg`). */
 const BROWSE_BG = THEME.bg;
-const QR_BASE = 'https://petitmo.app/m';
 const MIN_BOOK_SELECTION_KEYS = 5;
 const MAX_BOOK_SELECTION_KEYS = 80;
 
@@ -404,6 +406,8 @@ export default function BookPreviewScreen() {
     return buildBookPages(child, bookMemories);
   }, [child, bookMemories]);
 
+  const qrTokensByMemoryId = useBookQrTokenUrls(child?.id, pages);
+
   // Préparation best-effort en fond: pousse les médias nécessaires + déclenche les dérivés pour l’export serveur.
   const exportPrepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
@@ -589,7 +593,7 @@ export default function BookPreviewScreen() {
           setBookSelectionKeys([]);
           return;
         }
-        b = await healBookMemoryIdsIfWiped(b);
+        b = await healBookMemoryIdsIfStale(b);
         if (b.textEdits && Object.keys(b.textEdits).length > 0) {
           for (const [id, e] of Object.entries(b.textEdits)) {
             if (e.content !== undefined) {
@@ -621,13 +625,29 @@ export default function BookPreviewScreen() {
 
       const picked: Memory[] = [];
       for (const id of memoryIds) {
-        const row = getLocalMemoryById(id);
-        if (row) picked.push(row as Memory);
+        const row = (await getMemoryById(id)) as Memory | null;
+        if (row) picked.push(row);
       }
       picked.sort(
         (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
       );
       setBookMemories(picked);
+
+      InteractionManager.runAfterInteractions(() => {
+        void (async () => {
+          await healDeadLocalMediaPointersForMemories(picked, { max: 32 });
+          const { data: auth } = await supabase.auth.getUser();
+          const userId = auth.user?.id;
+          if (userId) {
+            for (const m of picked) {
+              if (m.type === 'voice') {
+                await ensureVoiceMemoryCloudForBookExport(m, userId).catch(() => {});
+              }
+            }
+          }
+          await refreshBookMemoriesFromDb();
+        })();
+      });
 
       if (bookForHeal) {
         const snapshotId = bookForHeal.id;
@@ -658,8 +678,8 @@ export default function BookPreviewScreen() {
     const ids = dedupeMemoryIds(b.memoryIds ?? []);
     const picked: Memory[] = [];
     for (const id of ids) {
-      const row = getLocalMemoryById(id);
-      if (row) picked.push(row as Memory);
+      const row = (await getMemoryById(id)) as Memory | null;
+      if (row) picked.push(row);
     }
     picked.sort(
       (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
@@ -1137,7 +1157,7 @@ export default function BookPreviewScreen() {
       const { page, pageNum } = row;
       const m = memoryForMaquette(page, merge);
       const rot = m ? rotations[m.id] ?? 0 : 0;
-      const qrUrl = m ? `${QR_BASE}/${m.id}` : '';
+      const qrUrl = qrPreviewUrlForMemory(m?.id, qrTokensByMemoryId);
 
       const coverDisplayTitle = coverTitleLine ?? `Journal de ${child!.name}`;
 
@@ -1194,10 +1214,9 @@ export default function BookPreviewScreen() {
       openCoverPicker,
       openTextEditForPage,
       upsertPhotoCrop,
+      qrTokensByMemoryId,
     ]
   );
-
-  const favoriteCoverThumbs = useMemo(() => {
     const out: { thumb: string; source: string }[] = [];
     const seen = new Set<string>();
     for (const m of allMemories) {
@@ -1332,8 +1351,8 @@ export default function BookPreviewScreen() {
 
       const leftMem = left ? memoryForMaquette(left.page, merge) : null;
       const rightMem = right ? memoryForMaquette(right.page, merge) : null;
-      const qrUrlLeft = leftMem ? `${QR_BASE}/${leftMem.id}` : '';
-      const qrUrlRight = rightMem ? `${QR_BASE}/${rightMem.id}` : '';
+      const qrUrlLeft = qrPreviewUrlForMemory(leftMem?.id, qrTokensByMemoryId);
+      const qrUrlRight = qrPreviewUrlForMemory(rightMem?.id, qrTokensByMemoryId);
 
       const renderSpreadMaquette = (
         row: PageRow,
@@ -1432,6 +1451,7 @@ export default function BookPreviewScreen() {
       photoCrops,
       rotations,
       screenWidth,
+      qrTokensByMemoryId,
     ]
   );
 
@@ -1439,7 +1459,7 @@ export default function BookPreviewScreen() {
   const renderBrowseLeaf = useCallback(
     (row: PageRow, w: number, h: number) => {
       const mem = memoryForMaquette(row.page, merge);
-      const qrUrl = mem ? `${QR_BASE}/${mem.id}` : '';
+      const qrUrl = qrPreviewUrlForMemory(mem?.id, qrTokensByMemoryId);
       const showFolio = row.page.type !== 'cover' && row.page.type !== 'back-cover';
       return (
         <View style={styles.browseLeafCol}>
@@ -1502,6 +1522,7 @@ export default function BookPreviewScreen() {
       openEditor,
       photoCrops,
       rotations,
+      qrTokensByMemoryId,
     ]
   );
 

@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { tryProcessPublicMediaTokenOnVisit } from '../worker/publicMediaWorkerOnce';
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{20,200}$/;
 
@@ -16,6 +17,8 @@ type TokenRow = {
   token: string;
   kind: 'audio' | 'video';
   status: 'pending_upload' | 'uploaded' | 'processing' | 'ready' | 'failed';
+  raw_bucket: string | null;
+  raw_path: string | null;
   ready_bucket: string | null;
   ready_path: string | null;
   last_error: string | null;
@@ -68,7 +71,7 @@ export function registerPublicMediaRoutes(app: Express, supabase: SupabaseClient
 
     const { data, error } = await supabase
       .from('public_media_tokens')
-      .select('token, kind, status, ready_bucket, ready_path, last_error, expires_at')
+      .select('token, kind, status, raw_bucket, raw_path, ready_bucket, ready_path, last_error, expires_at')
       .eq('token', token)
       .maybeSingle();
 
@@ -127,6 +130,50 @@ export function registerPublicMediaRoutes(app: Express, supabase: SupabaseClient
           )
         );
       return;
+    }
+
+    if (row.raw_bucket && row.raw_path) {
+      await tryProcessPublicMediaTokenOnVisit(token);
+      const { data: refreshed, error: refreshErr } = await supabase
+        .from('public_media_tokens')
+        .select('token, kind, status, raw_bucket, raw_path, ready_bucket, ready_path, last_error, expires_at')
+        .eq('token', token)
+        .maybeSingle();
+      if (!refreshErr && refreshed) {
+        const fresh = refreshed as TokenRow;
+        if (fresh.status === 'ready' && fresh.ready_bucket && fresh.ready_path) {
+          const { data: signed, error: signErr } = await supabase.storage
+            .from(fresh.ready_bucket)
+            .createSignedUrl(fresh.ready_path, 120);
+          if (!signErr && signed?.signedUrl) {
+            const src = signed.signedUrl;
+            const player =
+              fresh.kind === 'video'
+                ? `<div style="font-weight:700;font-size:18px">Souvenir vidéo</div>
+                   <div class="muted" style="margin-top:6px">Bon visionnage.</div>
+                   <video class="player" controls playsinline src="${src}"></video>`
+                : `<div style="font-weight:700;font-size:18px">Souvenir audio</div>
+                   <div class="muted" style="margin-top:6px">Bonne écoute.</div>
+                   <audio class="player" controls src="${src}"></audio>`;
+            res.status(200).type('text/html').send(htmlPage('Petitmo · Souvenir', player));
+            return;
+          }
+        }
+        if (fresh.status === 'failed') {
+          const msg = fresh.last_error ? `Détail: ${fresh.last_error}` : '';
+          res
+            .status(200)
+            .type('text/html')
+            .send(
+              htmlPage(
+                'Petitmo · Souvenir',
+                `<div style="font-weight:700;font-size:18px">Ce souvenir n’a pas pu être préparé</div>
+                 <div class="muted" style="margin-top:6px">${msg || 'Réessaie plus tard.'}</div>`
+              )
+            );
+          return;
+        }
+      }
     }
 
     // pending_upload / uploaded / processing

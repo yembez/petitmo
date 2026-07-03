@@ -54,13 +54,7 @@ function pdfServerBaseUrl(): string | null {
   return raw.replace(/\/$/, '');
 }
 
-function publicMediaBaseUrl(): string {
-  const raw = process.env.EXPO_PUBLIC_PUBLIC_MEDIA_BASE_URL?.trim();
-  const base = raw ? raw.replace(/\/$/, '') : 'https://petitmo.app/m';
-  return base;
-}
-
-function errorMessageFromPdfServerJson(
+import { publicMediaBaseUrl } from '@/lib/publicMediaBaseUrl';
   j: { error?: string; detail?: string },
   fallback: string
 ): string {

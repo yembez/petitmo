@@ -20,7 +20,7 @@ import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { Image as ExpoImage } from 'expo-image';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Heart, Menu } from 'lucide-react-native';
+import { Heart } from 'lucide-react-native';
 import ImageImportIcon from '@/components/ImageImportIcon';
 import MicIcon from '@/components/MicIcon';
 import PenIcon from '@/components/PenIcon';
@@ -490,7 +490,6 @@ function CapturerScreen() {
     );
   }
 
-  const headerMenuIconSize = scale(22);
   const captureHeaderDate = formatCaptureHeaderDate();
   const captureBottomReserve = tabBarFloatingOverlapPad(insets.bottom);
   const childGivenName = childDisplayGivenName(child.name);
@@ -532,16 +531,7 @@ function CapturerScreen() {
                   {captureHeaderDate}
                 </Text>
               </View>
-              <TouchableOpacity
-                style={styles.captureHeaderMenuHit}
-                onPress={() => router.push('/parent-space')}
-                activeOpacity={0.72}
-                accessibilityRole="button"
-                accessibilityLabel="Menu"
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <Menu size={headerMenuIconSize} color={THEME.textPrimary} strokeWidth={2} />
-              </TouchableOpacity>
+              <View style={styles.captureHeaderTrailingSpacer} />
               <View style={styles.captureHeaderLogoAbsolute} pointerEvents="none">
                 <Text
                   style={[
@@ -811,14 +801,10 @@ const styles = StyleSheet.create({
     letterSpacing: -0.3,
     ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
   },
-  captureHeaderMenuHit: {
-    zIndex: 1,
+  captureHeaderTrailingSpacer: {
     width: CAPTURE_HEADER_ROW_H,
     height: CAPTURE_HEADER_ROW_H,
-    borderRadius: scale(20),
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.06)',
+    zIndex: 1,
   },
   capturePhotoBleed: {
     width: SCREEN_W,

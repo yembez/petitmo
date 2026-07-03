@@ -51,10 +51,10 @@ function TabLayoutInner() {
         freezeOnBlur: false,
         sceneStyle: { backgroundColor: THEME.bg },
       }}>
+      <Tabs.Screen name="fil" options={{ title: 'Journal' }} />
+      <Tabs.Screen name="index" options={{ title: 'Capturer' }} />
       <Tabs.Screen name="favoris" options={{ title: 'Favoris' }} />
       <Tabs.Screen name="livres" options={{ title: 'Livres' }} />
-      <Tabs.Screen name="index" options={{ title: 'Capturer' }} />
-      <Tabs.Screen name="fil" options={{ title: 'Journal' }} />
     </Tabs>
   );
 }

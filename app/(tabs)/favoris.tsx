@@ -46,7 +46,13 @@ import {
   useMemoryEditorialFont,
   useMemoryEditorialBoldFont,
 } from '@/contexts/MemoryTextFontContext';
-import { getFamilyMemories, requestMissingMediaDerivatives } from '@/services/media';
+import { loadMemoriesForFavorisTab, memoryShouldAppearInFavoris } from '@/services/favorisMemories';
+import { requestMissingMediaDerivatives } from '@/services/media';
+import { healDeadLocalMediaPointersForMemories } from '@/services/memoryDisplayHeal';
+import FavorisVideoThumb from '@/components/feed/FavorisVideoThumb';
+import { useFeedVideoPosterDisplayUrl } from '@/hooks/useFeedVideoPosterDisplayUrl';
+import { useFeedVideoPlaybackUri } from '@/hooks/useFeedVideoPlaybackUri';
+import { normalizeVideoPlaybackUri } from '@/utils/videoMediaUri';
 import { getOrSelectFirstChild } from '@/services/children';
 import { getLocalMemoryById, getLocalBook } from '@/lib/localDb';
 import {
@@ -69,6 +75,7 @@ import {
   canonicalBookCoverPhotoRef,
 } from '@/utils/memoryPhotos';
 import { useFeedPhotoDisplayUrls } from '@/hooks/useFeedPhotoDisplayUrls';
+import { useFeedRasterMediaUrl } from '@/hooks/useFeedRasterMediaUrl';
 import { clampAudioBookAnnotation } from '@/lib/audioBookAnnotation';
 import { AddToBookModal } from '@/components/AddToBookModal';
 import {
@@ -135,8 +142,16 @@ function buildFavoriteItems(memories: Memory[]): FavListItem[] {
   const items: FavListItem[] = [];
   for (const m of memories) {
     const primary = primaryDisplayThumb(m);
+    const listed = memoryShouldAppearInFavoris(m);
 
-    if (m.is_favorite) {
+    if (listed && m.type !== 'photo') {
+      items.push({
+        key: `${m.id}-whole`,
+        memory: m,
+        thumbUrl: primary,
+        kind: 'whole',
+      });
+    } else if (m.is_favorite && m.type === 'photo') {
       items.push({
         key: `${m.id}-whole`,
         memory: m,
@@ -176,7 +191,7 @@ function buildSlideshowItems(items: FavListItem[]): FavListItem[] {
       continue;
     }
     if (t === 'video') {
-      if (feedVideoPosterRaw(it.memory) || it.thumbUrl.trim()) out.push(it);
+      out.push(it);
       continue;
     }
     if (t === 'voice') {
@@ -262,25 +277,34 @@ function SlideshowSlideImage({
 }) {
   const memory = item.memory;
   const feedUrls = useFeedPhotoDisplayUrls(memory);
+  const videoPosterUri = useFeedVideoPosterDisplayUrl(memory);
+
+  if (memory.type === 'video') {
+    return (
+      <View style={StyleSheet.absoluteFillObject}>
+        <FavorisVideoThumb
+          memory={memory}
+          recyclingKey={`slideshow|${item.key}|${memory.id}`}
+          posterUri={videoPosterUri}
+          onReady={onLoad}
+        />
+      </View>
+    );
+  }
 
   const rawPhoto =
     memory.type === 'photo' ? slideshowSlideRawUri(item, feedUrls).trim() : '';
-  const rawVideo =
-    memory.type === 'video' ? (feedVideoPosterRaw(memory) || item.thumbUrl.trim()).trim() : '';
   const rawVoice =
     memory.type === 'voice' ? (feedVoiceCoverRaw(memory) || item.thumbUrl.trim()).trim() : '';
 
-  const signedVideo = useSignedMediaUrl(memory.type === 'video' ? rawVideo || null : null);
   const signedVoice = useSignedMediaUrl(memory.type === 'voice' ? rawVoice || null : null);
 
   const uriRaw =
     memory.type === 'photo'
       ? rawPhoto
-      : memory.type === 'video'
-        ? (signedVideo ?? rawVideo).trim()
-        : memory.type === 'voice'
-          ? (signedVoice ?? rawVoice).trim()
-          : '';
+      : memory.type === 'voice'
+        ? (signedVoice ?? rawVoice).trim()
+        : '';
   const uri = uriRaw ? normalizeMemoryMediaUriForDisplay(uriRaw) : '';
 
   useEffect(() => {
@@ -749,22 +773,23 @@ const GalleryTile = memo(function GalleryTile({
     }
   }
 
-  const videoPosterRaw = memory.type === 'video' ? feedVideoPosterRaw(memory) : '';
-  const voiceCoverRaw = memory.type === 'voice' ? feedVoiceCoverRaw(memory) : '';
+  const videoPosterUri = useFeedVideoPosterDisplayUrl(memory);
+  const videoPlaybackUri = normalizeVideoPlaybackUri(useFeedVideoPlaybackUri(memory)).trim();
+  const voiceCoverRaster = useFeedRasterMediaUrl(memory, 'voice-cover');
 
-  const videoPosterSigned = useSignedMediaUrl(memory.type === 'video' ? videoPosterRaw || null : null);
-  const voiceCoverSigned = useSignedMediaUrl(memory.type === 'voice' ? voiceCoverRaw || null : null);
+  const voiceCoverRaw = memory.type === 'voice' ? voiceCoverRaster : '';
 
-  const videoPosterUri =
-    memory.type === 'video'
-      ? normalizeMemoryMediaUriForDisplay((videoPosterSigned ?? videoPosterRaw).trim())
-      : '';
+  const voiceCoverSigned = useSignedMediaUrl(
+    memory.type === 'voice' && voiceCoverRaw && !voiceCoverRaw.startsWith('file:')
+      ? voiceCoverRaw
+      : null,
+  );
+
   const voiceCoverUri =
     memory.type === 'voice'
       ? normalizeMemoryMediaUriForDisplay((voiceCoverSigned ?? voiceCoverRaw).trim())
       : '';
 
-  /** Comme `PhotoMosaic` / `FilMemoryRow` : pas de seconde signature sur les URLs déjà résolues par le hook photo. */
   const uri =
     memory.type === 'photo'
       ? normalizeMemoryMediaUriForDisplay(photoUri)
@@ -774,11 +799,13 @@ const GalleryTile = memo(function GalleryTile({
           ? voiceCoverUri
           : normalizeMemoryMediaUriForDisplay(thumbUrl.trim());
 
+  const hasVideoThumb =
+    memory.type === 'video' && (!!videoPosterUri.trim() || !!videoPlaybackUri);
+
   const showRasterThumb =
-    !!uri &&
-    (memory.type === 'photo' ||
-      memory.type === 'video' ||
-      memory.type === 'voice');
+    (memory.type === 'photo' && !!uri) ||
+    (memory.type === 'voice' && !!uri) ||
+    hasVideoThumb;
 
   const isMedia = memory.type === 'photo' || memory.type === 'video';
   const isText = memory.type === 'text';
@@ -823,7 +850,15 @@ const GalleryTile = memo(function GalleryTile({
       }
     >
       <Reanimated.View style={[styles.galleryTileInner, animStyle]}>
-        {isMedia && showRasterThumb ? (
+        {memory.type === 'video' ? (
+          <View style={[styles.galleryPh, styles.galleryVideoPlaceholder]}>
+            <FavorisVideoThumb
+              memory={memory}
+              recyclingKey={`${item.key}|video|${memory.id}`}
+              posterUri={videoPosterUri}
+            />
+          </View>
+        ) : isMedia && showRasterThumb ? (
           <>
             <ExpoImage
               source={{ uri }}
@@ -1003,22 +1038,27 @@ function FavorisScreen() {
     }
     setHasChild(true);
 
-    const list = await getFamilyMemories();
+    const list = await loadMemoriesForFavorisTab();
+    await healDeadLocalMediaPointersForMemories(
+      list.filter(m => memoryShouldAppearInFavoris(m)),
+      { max: 64 },
+    );
+    const refreshed = await loadMemoriesForFavorisTab();
     setMemories(prev => {
       if (
-        prev.length === list.length &&
+        prev.length === refreshed.length &&
         prev.every(
           (m, i) =>
-            m.id === list[i]?.id &&
-            m.updated_at === list[i]?.updated_at &&
-            m.is_favorite === list[i]?.is_favorite,
+            m.id === refreshed[i]?.id &&
+            m.updated_at === refreshed[i]?.updated_at &&
+            m.is_favorite === refreshed[i]?.is_favorite,
         )
       ) {
         return prev;
       }
-      return list;
+      return refreshed;
     });
-    void requestMissingMediaDerivatives(list);
+    void requestMissingMediaDerivatives(refreshed);
     setLoading(false);
   }, []);
 
@@ -1131,7 +1171,7 @@ function FavorisScreen() {
         if (row) {
           setMemories(prev => {
             const idx = prev.findIndex(m => m.id === memoryId);
-            if (idx < 0) return prev;
+            if (idx < 0) return [...prev, row];
             const next = [...prev];
             next[idx] = row;
             return next;
@@ -1830,6 +1870,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: SPACING.sm,
+  },
+  galleryVideoPlaceholder: {
+    backgroundColor: '#E5E7EB',
+  },
+  galleryVideoPlaceholderInner: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   audioThumb: {
     ...StyleSheet.absoluteFillObject,

@@ -1,24 +1,21 @@
-/** Routes principales des onglets `(tabs)`. `index` = Capturer. */
+/** Routes des onglets `(tabs)`. `index` = Capturer (+). */
 export type MainTabRoute = 'fil' | 'favoris' | 'livres' | 'index';
 
+export type TabBarSlot =
+  | { kind: 'settings' }
+  | { kind: 'tab'; route: MainTabRoute };
+
 /**
- * 3 CTA visibles : l’onglet actif est retiré.
- * Fil actif : Favoris · + · Livres. Capturer actif : Favoris · Journal · Livres.
+ * Barre fixe (5 emplacements) : Paramètres · Livres · + · Favoris · Journal.
+ * L’onglet actif reste visible (plus de barre « contextuelle » à 3 CTA).
  */
-export function contextualTabBarRoutes(active: MainTabRoute): MainTabRoute[] {
-  switch (active) {
-    case 'fil':
-      return ['favoris', 'index', 'livres'];
-    case 'favoris':
-      return ['livres', 'index', 'fil'];
-    case 'livres':
-      return ['favoris', 'index', 'fil'];
-    case 'index':
-      return ['favoris', 'fil', 'livres'];
-    default:
-      return ['livres', 'index', 'favoris'];
-  }
-}
+export const FIXED_TAB_BAR_SLOTS: TabBarSlot[] = [
+  { kind: 'settings' },
+  { kind: 'tab', route: 'fil' },
+  { kind: 'tab', route: 'index' },
+  { kind: 'tab', route: 'favoris' },
+  { kind: 'tab', route: 'livres' },
+];
 
 export function normalizeMainTabRoute(name: string | undefined): MainTabRoute {
   if (name === 'fil' || name === 'favoris' || name === 'livres' || name === 'index') {
