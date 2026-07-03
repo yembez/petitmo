@@ -117,7 +117,12 @@ let cachedLogoSvg: string | null = null;
 export function petitmoLogoHtml(): string {
   if (!cachedLogoSvg) {
     const raw = readFileSync(join(__dirname, 'brand', 'petitmo-logo-manuscrit.svg'), 'utf8');
-    cachedLogoSvg = raw.replace('<svg', '<svg class="logo-svg"');
+    cachedLogoSvg = raw
+      .replace(/<\?xml[^?]*\?>\s*/i, '')
+      .replace(
+        '<svg',
+        '<svg class="logo-svg" preserveAspectRatio="xMinYMid meet" role="img" aria-label="Petitmo"',
+      );
   }
   return cachedLogoSvg;
 }

@@ -58,8 +58,8 @@ function htmlPage(title: string, body: string, extraScript = ''): string {
     body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,sans-serif;background:#F6F4F1;margin:0;padding:0;color:#1C1C1E}
     .wrap{max-width:560px;margin:0 auto;padding:28px 18px}
     .card{background:#fff;border:1px solid rgba(0,0,0,.06);border-radius:16px;padding:18px 18px;box-shadow:0 6px 20px rgba(0,0,0,.06)}
-    .logo{margin-bottom:2px}
-    .logo-svg{height:34px;width:auto;display:block}
+    .logo{margin-bottom:6px;overflow:visible}
+    .logo-svg{height:38px;width:auto;max-width:min(220px,100%);display:block;overflow:visible}
     .memory-meta{margin-top:8px}
     .memory-meta-date{font-weight:700;font-size:15px;line-height:1.35;color:#1C1C1E}
     .memory-meta-loc{font-size:14px;line-height:1.35;color:#6B7280;margin-top:4px}
