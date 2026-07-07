@@ -31,11 +31,14 @@ import { bookPhotoCropImageRect } from '@/utils/bookPhotoCropLayout';
 import BookPagePhotoFrame from '@/components/BookPagePhotoFrame';
 import CoverPageSpineOverlay from '@/components/CoverPageSpineOverlay';
 import { clampMediaBookCaption } from '@/lib/mediaBookCaption';
+import { useBookVideoPosterDisplayUrl } from '@/hooks/useBookVideoPosterDisplayUrl';
 import {
-  getPrimaryPhotoUriForBookPreview,
+  getPrimaryPhotoUriForBookMaquetteDisplay,
+  getVoiceCoverUriForBookEditorDisplay,
   getVoiceCoverUriForBookPreview,
+  isDeviceLocalMediaUri,
 } from '@/utils/memoryPhotos';
-import { useFeedVideoPosterDisplayUrl } from '@/hooks/useFeedVideoPosterDisplayUrl';
+import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { memoryBookDisplayDateIso } from '@/utils/memoryBookDisplayDate';
 import {
   resolveTextMemoryBookLayout,
@@ -1013,6 +1016,7 @@ function MaquetteCover({
               coverMode
               imgPxW={coverImgPxW}
               imgPxH={coverImgPxH}
+              recyclingKey="book-cover"
             />
           ) : canPickCover ? (
             <Pressable
@@ -1110,7 +1114,7 @@ function MaquettePhotoSimple({
   garamond?: string;
   variant: PhotoFullVariant;
 }) {
-  const uri = getPrimaryPhotoUriForBookPreview(memory);
+  const uri = getPrimaryPhotoUriForBookMaquetteDisplay(memory);
   const caption = (memory.content ?? '').trim();
   const mediaPad = Math.round(pdfMmToPreviewPxW(PDF_MEDIA_TEXT_PAD_X_MM, width));
   const isFp = variant === 'FP';
@@ -1135,6 +1139,7 @@ function MaquettePhotoSimple({
             showRotateButton={!!photoInline}
             onRotate={onRotate}
             typoScale={typoScale}
+            recyclingKey={`book-photo-${memory.id}`}
           />
         ) : null
       }
@@ -1153,6 +1158,7 @@ function MaquettePhotoSimple({
             showRotateButton={!!photoInline}
             onRotate={onRotate}
             typoScale={typoScale}
+            recyclingKey={`book-photo-${memory.id}`}
           />
         ) : null
       }
@@ -1253,7 +1259,7 @@ function MaquettePhotoNote({
   memoryTextFont: string;
   garamond?: string;
 }) {
-  const uri = getPrimaryPhotoUriForBookPreview(memory);
+  const uri = getPrimaryPhotoUriForBookMaquetteDisplay(memory);
   const legend = (memory.content ?? '').trim();
   const mediaPad = Math.round(pdfMmToPreviewPxW(PDF_MEDIA_TEXT_PAD_X_MM, width));
   const imgH = pdfMmToPreviewPxH(PHOTO_NOTE_BAND_HEIGHT_MM, height);
@@ -1275,6 +1281,7 @@ function MaquettePhotoNote({
               showRotateButton={!!photoInline}
               onRotate={onRotate}
               typoScale={typoScale}
+              recyclingKey={`book-photo-${memory.id}`}
             />
           ) : null
         }
@@ -1557,25 +1564,63 @@ function MediaTypeIcon({
   );
 }
 
-/** Poster vidéo signé (local-first + repli cloud) pour la bande visuelle livre. */
+/** Poster vidéo — local-first : pas de signature cloud si fichier sandbox. */
 function MaquetteVideoPosterVisual({
   memory,
+  frameW,
+  frameH,
   fallback,
 }: {
   memory: Memory;
+  frameW: number;
+  frameH: number;
   fallback: ReactNode;
 }) {
-  const uri = useFeedVideoPosterDisplayUrl(memory);
-  if (!uri.trim()) return <>{fallback}</>;
+  const raw = useBookVideoPosterDisplayUrl(memory).trim();
+  if (!raw) return <>{fallback}</>;
+  if (isDeviceLocalMediaUri(raw)) {
+    return (
+      <BookPagePhotoFrame
+        uri={raw}
+        frameW={frameW}
+        frameH={frameH}
+        recyclingKey={`book-video-poster-${memory.id}`}
+      />
+    );
+  }
   return (
-    <ExpoImage
-      source={{ uri }}
-      recyclingKey={uri}
-      cachePolicy="memory-disk"
-      transition={0}
-      priority="high"
-      style={StyleSheet.absoluteFillObject}
-      contentFit="cover"
+    <MaquetteVideoPosterCloudFrame
+      memoryId={memory.id}
+      raw={raw}
+      frameW={frameW}
+      frameH={frameH}
+      fallback={fallback}
+    />
+  );
+}
+
+function MaquetteVideoPosterCloudFrame({
+  memoryId,
+  raw,
+  frameW,
+  frameH,
+  fallback,
+}: {
+  memoryId: string;
+  raw: string;
+  frameW: number;
+  frameH: number;
+  fallback: ReactNode;
+}) {
+  const signed = useSignedMediaUrl(raw);
+  const uri = (signed ?? raw).trim();
+  if (!uri) return <>{fallback}</>;
+  return (
+    <BookPagePhotoFrame
+      uri={uri}
+      frameW={frameW}
+      frameH={frameH}
+      recyclingKey={`book-video-poster-${memoryId}`}
     />
   );
 }
@@ -1621,11 +1666,15 @@ function MaquetteMediaQr({
   const captionRaw = clampMediaBookCaption((memory.content ?? '').trim());
   const mediaPad = Math.round(pdfMmToPreviewPxW(PDF_MEDIA_TEXT_PAD_X_MM, width));
   const qrSize = Math.max(12, Math.round(pdfMmToPreviewPxW(PDF_MEDIA_QR_QR_MM, width)));
+  const photoInline = kind === 'audio' ? buildInlineCropProps(inlineCropConfig, memory.id) : undefined;
   const voiceVisualUri =
-    kind === 'audio' ? getVoiceCoverUriForBookPreview(memory) : '';
+    kind === 'audio'
+      ? photoInline
+        ? getVoiceCoverUriForBookEditorDisplay(memory)
+        : getVoiceCoverUriForBookPreview(memory)
+      : '';
   const imgH = pdfMmToPreviewPxH(PHOTO_NOTE_BAND_HEIGHT_MM, height);
   const bookLoc = bookMaquetteLocationLabel(memory);
-  const photoInline = kind === 'audio' ? buildInlineCropProps(inlineCropConfig, memory.id) : undefined;
   const cardW = Math.round(pdfMmToPreviewPxW(PDF_MEDIA_QR_CARD_W_MM, width));
   const cardPad = Math.max(4, Math.round(pdfMmToPreviewPxW(PDF_MEDIA_QR_CARD_PAD_MM, width)));
   const cardRadius = Math.round(pdfMmToPreviewPxW(PDF_MEDIA_QR_CARD_RADIUS_MM, width));
@@ -1649,7 +1698,14 @@ function MaquetteMediaQr({
             />
           );
           if (kind === 'video') {
-            return <MaquetteVideoPosterVisual memory={memory} fallback={fallback} />;
+            return (
+              <MaquetteVideoPosterVisual
+                memory={memory}
+                frameW={fw}
+                frameH={fh}
+                fallback={fallback}
+              />
+            );
           }
           if (voiceVisualUri) {
             return (
@@ -1663,6 +1719,7 @@ function MaquetteMediaQr({
                 showRotateButton={!!photoInline}
                 onRotate={onRotate}
                 typoScale={typoScale}
+                recyclingKey={`book-voice-${memory.id}`}
               />
             );
           }

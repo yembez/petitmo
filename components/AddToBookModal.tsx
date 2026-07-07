@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -16,7 +15,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BookOpen, Check, Plus, X } from 'lucide-react-native';
+import { Check, Plus, X } from 'lucide-react-native';
 import { scale, verticalScale } from '@/utils/responsive';
 import type { Book } from '@/services/books';
 import {
@@ -31,6 +30,7 @@ import {
 import { getLocalMemoryById } from '@/lib/localDb';
 import { canonicalBookCoverPhotoRef } from '@/utils/memoryPhotos';
 import { THEME } from '@/constants/theme';
+import { ModalBookCoverThumb } from '@/components/ModalBookCoverThumb';
 
 const INK = '#1C1C1E';
 
@@ -115,16 +115,6 @@ export function AddToBookModal({
       ]
     );
   }, [closeModal, router]);
-
-  const coverUriForBook = useCallback(
-    (b: Book): string | null => {
-      const direct = (b.coverPhotoUrl ?? '').trim();
-      if (direct) return direct;
-      const fb = coverFallbackUrl.trim();
-      return fb || null;
-    },
-    [coverFallbackUrl]
-  );
 
   /** Ids distincts : le check vert ne s’affiche que si chacun est déjà dans le livre (pas de cas partiel). */
   const selectionMemoryIds = useMemo(() => dedupeMemoryIds(memoryIds), [memoryIds]);
@@ -334,7 +324,6 @@ export function AddToBookModal({
                         {books.map(b => {
                           const justAdded = addedBookIds.includes(b.id);
                           const has = allSelectionAlreadyInBook(b);
-                          const coverUri = coverUriForBook(b);
                           return (
                             <View key={b.id} style={[styles.modalBookRow, (has || justAdded) && styles.modalBookRowActive]}>
                               <Pressable
@@ -346,19 +335,7 @@ export function AddToBookModal({
                                 accessibilityRole="button"
                                 accessibilityLabel={`Éditer le livre ${b.title}`}
                               >
-                                <View style={styles.modalThumb}>
-                                  {coverUri ? (
-                                    <Image
-                                      source={{ uri: coverUri }}
-                                      style={StyleSheet.absoluteFillObject}
-                                      resizeMode="cover"
-                                    />
-                                  ) : (
-                                    <View style={styles.modalThumbPh}>
-                                      <BookOpen size={scale(18)} color="#FFFFFF" strokeWidth={2.2} />
-                                    </View>
-                                  )}
-                                </View>
+                                <ModalBookCoverThumb book={b} fallbackUri={coverFallbackUrl} />
                                 {has ? (
                                   <View style={styles.modalThumbCheck} pointerEvents="none">
                                     <Check size={scale(14)} color="#FFFFFF" strokeWidth={3.2} />
@@ -530,11 +507,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: 'rgba(0,0,0,0.10)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalThumbPh: {
-    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },

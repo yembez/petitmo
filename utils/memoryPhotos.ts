@@ -3,7 +3,7 @@ import { Platform } from 'react-native';
 import { documentDirectory } from 'expo-file-system/legacy';
 import { extractMediaBucketPath } from '@/lib/mediaSignedUrl';
 import { peekFeedBootstrapDisplayUrls } from '@/services/feedLocalPhotoCache';
-import { rebaseSandboxUriToCurrentContainer, isProbablyStalePetitmoSandboxPath } from '@/utils/localMediaReadable';
+import { rebaseSandboxUriToCurrentContainer } from '@/utils/localMediaReadable';
 function asTrimmedStringArray(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -362,6 +362,44 @@ export function getPrimaryPhotoUriForBookPreview(memory: Memory): string {
   return getBookPhotoPrintUri(memory);
 }
 
+/**
+ * Aperçu livre à l’écran : display / thumb (léger) — le print reste pour l’export PDF.
+ */
+export function getPrimaryPhotoUriForBookMaquetteDisplay(memory: Memory): string {
+  if (memory.type !== 'photo') return '';
+  const light = pickPhotoUriForOverlayPalette(memory).trim();
+  if (light) return light;
+  return pickPrimaryPhotoNormalizedForFeedAndViewer(memory);
+}
+
+/** Collecte les refs cloud à pré-signer avant affichage maquette livre. */
+export function collectBookMaquetteCloudMediaRefs(
+  memories: readonly Memory[],
+  coverUri?: string | null,
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (u: string | null | undefined) => {
+    const t = (u ?? '').trim();
+    if (!t || seen.has(t)) return;
+    if (isDeviceLocalMediaUri(t)) return;
+    if (!extractMediaBucketPath(t) && !/^https:\/\//i.test(t)) return;
+    seen.add(t);
+    out.push(t);
+  };
+  add(coverUri);
+  for (const m of memories) {
+    if (m.type === 'photo') {
+      add(getPrimaryPhotoUriForBookMaquetteDisplay(m));
+    } else if (m.type === 'video') {
+      add(getVideoPosterUriForBookPreview(m));
+    } else if (m.type === 'voice') {
+      add(getVoiceCoverUriForBookPreview(m));
+    }
+  }
+  return out;
+}
+
 /** Chemin sandbox `voice_cover_print.jpg` (parité `print.jpg` des photos). */
 export function inferLocalVoiceCoverPrintPath(coverPath: string): string {
   const c = coverPath.trim();
@@ -390,9 +428,48 @@ export function collectVoiceCoverLocalUploadUriCandidates(memory: Memory): strin
   return out;
 }
 
+/** Ancien cache ImagePicker (`…/voice/cover_*.jpg`) — souvent mort après redémarrage. */
+function isStaleVoicePickerCachePath(uri: string | null | undefined): boolean {
+  const t = (uri ?? '').trim();
+  return t.includes('/voice/cover_') && !t.includes('petitmo_memories');
+}
+
+function voiceCoverSandboxFileCandidates(memoryId: string): string[] {
+  if (Platform.OS === 'web' || !documentDirectory) return [];
+  const base = `${documentDirectory}petitmo_memories/${memoryId.trim()}/`;
+  return [
+    `${base}voice_cover.jpg`,
+    `${base}voice_cover.jpeg`,
+    `${base}voice_cover.png`,
+    `${base}voice_cover.webp`,
+  ];
+}
+
+/** Candidats locaux lisibles pour générer `voice_cover_print.jpg`. */
+export function collectVoiceCoverReadableSourceCandidates(memory: Memory): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (u: string | null | undefined) => {
+    const t = (u ?? '').trim();
+    if (!t || seen.has(t) || /^https?:\/\//i.test(t)) return;
+    seen.add(t);
+    out.push(t);
+  };
+  if (memory.type !== 'voice') return out;
+  const stored = (memory.voice_cover_path ?? '').trim();
+  if (stored && !isStaleVoicePickerCachePath(stored)) add(stored);
+  for (const p of voiceCoverSandboxFileCandidates(memory.id)) add(p);
+  return out;
+}
+
 /** Chemins sandbox uniquement — pas les colonnes cloud (`voice_cover_url`). */
 function pickVoiceCoverSandboxPath(memory: Memory): string {
-  return firstNonEmpty(memory.voice_cover_path);
+  const stored = (memory.voice_cover_path ?? '').trim();
+  if (stored && !isStaleVoicePickerCachePath(stored)) return stored;
+  for (const p of voiceCoverSandboxFileCandidates(memory.id)) {
+    if (p.trim()) return p;
+  }
+  return '';
 }
 
 /** Livre / PDF : dérivé print local (`local_print_path`), sinon cover d’origine. */
@@ -409,6 +486,17 @@ export function getVoiceCoverUriForFeedAndViewer(memory: Memory): string {
   const remotePick = firstNonEmpty(memory.voice_cover_url);
   const raw = localPick.trim() || remotePick.trim();
   return raw ? normalizeMemoryMediaUriForDisplay(raw) : '';
+}
+
+/**
+ * Éditeur livre (recadrage inline) : cover d’origine pour le pinch/pan ;
+ * le badge DPI utilise le dérivé print via `collectBookPhotoDpiUriCandidates`.
+ */
+export function getVoiceCoverUriForBookEditorDisplay(memory: Memory): string {
+  if (memory.type !== 'voice') return '';
+  const display = getVoiceCoverUriForFeedAndViewer(memory).trim();
+  if (display) return display;
+  return getVoiceCoverUriForBookPreview(memory);
 }
 
 /**
@@ -440,7 +528,7 @@ export function getVoiceCoverDisplayUriForFeedAndViewer(memory: Memory): string 
   return appendLocalMediaCacheBuster(raw, memory.updated_at);
 }
 
-function isDeviceLocalMediaUri(u: string | null | undefined): boolean {
+export function isDeviceLocalMediaUri(u: string | null | undefined): boolean {
   const t = (u ?? '').trim();
   if (!t || /^https?:\/\//i.test(t) || t.startsWith('data:')) return false;
   return (
@@ -452,21 +540,25 @@ function isDeviceLocalMediaUri(u: string | null | undefined): boolean {
   );
 }
 
-/** Chemins sandbox / disque pour poster vidéo (`poster.jpg`, pas les URLs cloud). */
+/** Chemins sandbox / disque pour poster vidéo — uniquement les refs locales en base (pas de `poster.jpg` deviné). */
 function pickVideoPosterSandboxPath(memory: Memory): string {
   for (const u of [memory.local_thumb_path, memory.poster_url, memory.thumbnail_url]) {
     const t = (u ?? '').trim();
     if (t && isDeviceLocalMediaUri(t)) return t;
   }
-  if (Platform.OS === 'web' || !documentDirectory) return '';
-  return `${documentDirectory}petitmo_memories/${memory.id.trim()}/poster.jpg`;
+  return '';
+}
+
+function remoteVideoPosterColumns(memory: Memory): string {
+  for (const u of [memory.poster_print_url, memory.poster_url, memory.thumbnail_url]) {
+    const t = (u ?? '').trim();
+    if (t && !isDeviceLocalMediaUri(t)) return t;
+  }
+  return '';
 }
 
 function resolveVideoPosterUri(localPick: string, remotePick: string): string {
-  const raw =
-    localPick && remotePick && isProbablyStalePetitmoSandboxPath(localPick)
-      ? remotePick
-      : localPick.trim() || remotePick.trim();
+  const raw = localPick.trim() || remotePick.trim();
   return raw ? normalizeMemoryMediaUriForDisplay(raw) : '';
 }
 
@@ -494,22 +586,14 @@ export function collectVideoPosterLocalUploadUriCandidates(memory: Memory): stri
 /** Vignette / poster vidéo : fil, favoris, viewer immersif. */
 export function getVideoPosterUriForFeedAndViewer(memory: Memory): string {
   const localPick = pickVideoPosterSandboxPath(memory);
-  const remotePick = firstNonEmpty(
-    memory.poster_print_url,
-    memory.poster_url,
-    memory.thumbnail_url,
-  );
+  const remotePick = remoteVideoPosterColumns(memory);
   return resolveVideoPosterUri(localPick, remotePick);
 }
 
 /** Livre / PDF : poster local sandbox d’abord, puis colonnes cloud. */
 export function getVideoPosterUriForBookPreview(memory: Memory): string {
   const localPick = pickVideoPosterSandboxPath(memory);
-  const remotePick = firstNonEmpty(
-    memory.poster_print_url,
-    memory.poster_url,
-    memory.thumbnail_url,
-  );
+  const remotePick = remoteVideoPosterColumns(memory);
   return resolveVideoPosterUri(localPick, remotePick);
 }
 

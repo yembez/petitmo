@@ -8,6 +8,7 @@ import type { Memory } from '@/types/local';
 import {
   collectVideoCloudSyncUriCandidates,
   collectVideoPosterLocalUploadUriCandidates,
+  collectVoiceCoverReadableSourceCandidates,
 } from '@/utils/memoryPhotos';
 import { pickFirstReadableLocalMediaUri } from '@/utils/localMediaReadable';
 import {
@@ -16,6 +17,7 @@ import {
   feedMemoriesHydrationSnapshot,
   setFeedHydrationSnapshots,
 } from '@/services/tabScreensCache';
+import { peekFeedBootstrapVideoUri } from '@/services/feedLocalPhotoCache';
 
 function safeExtFromUri(uri: string, fallback: string): string {
   const clean = uri.split('?')[0];
@@ -345,12 +347,18 @@ export async function awaitVoiceCoverPrintDerivativeForMemory(memoryId: string):
   const id = memoryId.trim();
   const cur = getLocalMemoryById(id);
   if (!cur || cur.type !== 'voice') return cur;
-  const cover = (cur.voice_cover_path ?? cur.voice_cover_url ?? '').trim();
-  if (!cover) return cur;
   if (cur.local_print_path?.trim() && cur.print_px_w && cur.print_px_h) return cur;
 
+  const readableCover = await pickFirstReadableLocalMediaUri(
+    collectVoiceCoverReadableSourceCandidates(cur),
+  );
+  if (!readableCover) return cur;
+
   try {
-    const heavy = await ensureLocalVoiceCoverPrintDerivative({ memoryId: id, sourceCoverUri: cover });
+    const heavy = await ensureLocalVoiceCoverPrintDerivative({
+      memoryId: id,
+      sourceCoverUri: readableCover,
+    });
     const print = heavy.localPrintUri?.trim() || null;
     if (!print) return cur;
 
@@ -391,13 +399,32 @@ export async function awaitVideoPosterForBookMemory(memoryId: string): Promise<M
   const readablePoster = await pickFirstReadableLocalMediaUri(
     collectVideoPosterLocalUploadUriCandidates(cur),
   );
-  if (readablePoster) return cur;
+  if (readablePoster) {
+    const posterNorm = readablePoster.trim();
+    const dbHasSameLocal = [cur.local_thumb_path, cur.poster_url, cur.thumbnail_url]
+      .map(u => (u ?? '').trim())
+      .includes(posterNorm);
+    if (!dbHasSameLocal) {
+      const next: Memory = {
+        ...cur,
+        local_thumb_path: readablePoster,
+        poster_url: readablePoster,
+        thumbnail_url: readablePoster,
+        updated_at: new Date().toISOString(),
+      };
+      upsertLocalMemory(next);
+      DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId: id });
+      return next;
+    }
+    return cur;
+  }
 
   if (Platform.OS === 'web') return cur;
 
-  const videoCandidates = collectVideoCloudSyncUriCandidates(cur).filter(
-    u => !u.endsWith('poster.jpg'),
-  );
+  const videoCandidates = [
+    ...collectVideoCloudSyncUriCandidates(cur).filter(u => !u.endsWith('poster.jpg')),
+    peekFeedBootstrapVideoUri(id) ?? '',
+  ].filter(Boolean);
   const videoUri = await pickFirstReadableLocalMediaUri(videoCandidates);
   if (!videoUri) return cur;
 

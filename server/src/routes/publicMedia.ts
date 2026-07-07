@@ -3,7 +3,7 @@ import rateLimit from 'express-rate-limit';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   petitmoLogoHtml,
-  publicMediaMetaHtml,
+  publicMediaPageHeaderHtml,
   resolvePublicMediaDisplayContext,
   type PublicMediaDisplayContext,
 } from '../publicMediaDisplayContext';
@@ -47,7 +47,7 @@ function downloadFilename(kind: TokenRow['kind']): string {
   return kind === 'video' ? 'petitmo-souvenir.mp4' : 'petitmo-souvenir.m4a';
 }
 
-function htmlPage(title: string, body: string, extraScript = ''): string {
+function htmlPage(title: string, cardBody: string, extraScript = '', pageHeaderText = ''): string {
   return `<!doctype html>
 <html lang="fr">
 <head>
@@ -57,26 +57,31 @@ function htmlPage(title: string, body: string, extraScript = ''): string {
   <style>
     body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,sans-serif;background:#F6F4F1;margin:0;padding:0;color:#1C1C1E}
     .wrap{max-width:560px;margin:0 auto;padding:28px 18px}
+    .page-top{display:flex;align-items:flex-start;gap:14px;margin-bottom:14px}
+    .page-top-logo{flex:0 0 auto;overflow:visible}
+    .logo-svg{height:38px;width:auto;max-width:min(160px,42vw);display:block;overflow:visible}
+    .page-header-text{flex:1;min-width:0;padding-top:2px}
+    .page-header-kind{font-size:14px;font-weight:500;line-height:1.3;color:#1C1C1E}
+    .page-header-date{margin-top:3px;font-size:12px;font-weight:400;line-height:1.35;color:#6B7280}
+    .page-header-age{margin-top:1px;font-size:12px;font-weight:400;line-height:1.35;color:#6B7280}
+    .page-header-loc{margin-top:3px;font-size:12px;font-weight:400;line-height:1.35;color:#9CA3AF}
     .card{background:#fff;border:1px solid rgba(0,0,0,.06);border-radius:16px;padding:18px 18px;box-shadow:0 6px 20px rgba(0,0,0,.06)}
-    .logo{margin-bottom:6px;overflow:visible}
-    .logo-svg{height:38px;width:auto;max-width:min(220px,100%);display:block;overflow:visible}
-    .memory-meta{margin-top:8px}
-    .memory-meta-date{font-weight:700;font-size:15px;line-height:1.35;color:#1C1C1E}
-    .memory-meta-loc{font-size:14px;line-height:1.35;color:#6B7280;margin-top:4px}
     .muted{color:#6B7280;font-size:14px;line-height:1.45}
     .btn{display:inline-block;margin-top:14px;margin-right:8px;padding:10px 14px;border-radius:12px;background:#C4784A;color:#fff;text-decoration:none;font-weight:600;border:none;font-size:15px;cursor:pointer;font-family:inherit}
-    .btn:disabled{opacity:.55;cursor:default}
     .btn-secondary{background:#fff;color:#C4784A;border:1.5px solid #C4784A}
-    .player{width:100%;margin-top:12px;border-radius:10px}
-    .save-hint{margin-top:10px;font-size:12px;line-height:1.4}
-    .save-status{margin-top:8px;font-size:13px;color:#059669;font-weight:600;display:none}
+    .player{width:100%;margin-top:0;border-radius:10px}
+    .save-hint{margin-top:10px;font-size:12px;line-height:1.45;color:#6B7280}
+    .save-status{margin-top:8px;font-size:12px;line-height:1.45;color:#6B7280;display:none}
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="logo">${petitmoLogoHtml()}</div>
-    <div class="card" style="margin-top:14px">
-      ${body}
+    <div class="page-top">
+      <div class="page-top-logo">${petitmoLogoHtml()}</div>
+      ${pageHeaderText}
+    </div>
+    <div class="card">
+      ${cardBody}
     </div>
     <div class="muted" style="margin-top:14px;font-size:12px">Si ce souvenir ne se lance pas, réessaie dans quelques instants.</div>
   </div>
@@ -86,18 +91,19 @@ function htmlPage(title: string, body: string, extraScript = ''): string {
 }
 
 function saveControlsHtml(token: string, kind: TokenRow['kind']): string {
-  const label = kind === 'video' ? 'Enregistrer la vidéo' : 'Télécharger l’audio';
+  const primaryLabel = kind === 'video' ? 'Enregistrer la vidéo' : 'Télécharger l’audio';
+  const againLabel = 'Télécharger à nouveau';
   const iosHint =
     kind === 'video'
-      ? `<div id="save-hint" class="save-hint muted">Sur iPhone : touchez « Partager », puis « Enregistrer la vidéo » si le téléchargement direct ne propose pas Photos.</div>`
-      : `<div id="save-hint" class="save-hint muted">Le fichier audio s’enregistre dans Fichiers ou via le menu Partager.</div>`;
+      ? `<div id="save-hint" class="save-hint">Sur iPhone : touchez le bouton, puis « Partager » → « Enregistrer la vidéo » pour l’ajouter à Photos. Sinon, cherchez le fichier dans Fichiers → Téléchargements (<strong>petitmo-souvenir.mp4</strong>).</div>`
+      : `<div id="save-hint" class="save-hint">Le fichier audio s’enregistre dans Fichiers ou via le menu Partager (<strong>petitmo-souvenir.m4a</strong>).</div>`;
   const safeToken = token.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
   const safeKind = kind === 'video' ? 'video' : 'audio';
   const filename = downloadFilename(kind);
 
   return `<div style="margin-top:16px">
-      <button type="button" id="save-btn" class="btn btn-secondary">${label}</button>
-      <div id="save-status" class="save-status">Déjà enregistré sur cet appareil</div>
+      <button type="button" id="save-btn" class="btn btn-secondary">${primaryLabel}</button>
+      <div id="save-status" class="save-status"></div>
       ${iosHint}
     </div>
     <script>
@@ -108,27 +114,35 @@ function saveControlsHtml(token: string, kind: TokenRow['kind']): string {
       var storageKey = 'petitmo_saved_' + token;
       var btn = document.getElementById('save-btn');
       var status = document.getElementById('save-status');
-      var hint = document.getElementById('save-hint');
       var downloadUrl = '/m/' + encodeURIComponent(token) + '/download';
+      var primaryLabel = ${JSON.stringify(primaryLabel)};
+      var againLabel = ${JSON.stringify(againLabel)};
+      var statusAgain =
+        kind === 'video'
+          ? 'Vous avez déjà téléchargé depuis ce navigateur. Si la vidéo n’est pas dans Photos, touchez « Télécharger à nouveau ».'
+          : 'Vous avez déjà téléchargé depuis ce navigateur. Si le fichier est introuvable, touchez « Télécharger à nouveau ».';
+
+      function applySavedUi() {
+        if (btn) btn.textContent = againLabel;
+        if (status) {
+          status.textContent = statusAgain;
+          status.style.display = 'block';
+        }
+      }
 
       function markSaved() {
         try { localStorage.setItem(storageKey, String(Date.now())); } catch (e) {}
-        if (btn) {
-          btn.disabled = true;
-          btn.textContent = kind === 'video' ? 'Vidéo enregistrée ici' : 'Audio téléchargé ici';
-        }
-        if (status) status.style.display = 'block';
-        if (hint) hint.style.display = 'none';
+        applySavedUi();
       }
 
       function alreadySaved() {
         try { return !!localStorage.getItem(storageKey); } catch (e) { return false; }
       }
 
-      if (alreadySaved()) markSaved();
+      if (alreadySaved()) applySavedUi();
 
       async function saveMedia() {
-        if (!btn || btn.disabled) return;
+        if (!btn) return;
         btn.disabled = true;
         var prev = btn.textContent;
         btn.textContent = 'Préparation…';
@@ -166,9 +180,10 @@ function saveControlsHtml(token: string, kind: TokenRow['kind']): string {
           setTimeout(function () { URL.revokeObjectURL(objectUrl); }, 4000);
           markSaved();
         } catch (err) {
-          btn.disabled = false;
           btn.textContent = prev;
           window.location.href = downloadUrl;
+        } finally {
+          btn.disabled = false;
         }
       }
 
@@ -182,19 +197,18 @@ function playerHtml(
   kind: TokenRow['kind'],
   src: string,
   display: PublicMediaDisplayContext,
-): string {
+): { cardBody: string; pageHeaderText: string } {
   const saveBlock = saveControlsHtml(token, kind);
-  const meta = publicMediaMetaHtml(display);
-  const title = kind === 'video' ? 'Souvenir vidéo' : 'Souvenir audio';
+  const pageHeaderText = publicMediaPageHeaderHtml(kind, display);
   const playerTag =
     kind === 'video'
       ? `<video class="player" controls playsinline src="${src}"></video>`
       : `<audio class="player" controls src="${src}"></audio>`;
 
-  return `<div style="font-weight:700;font-size:18px">${title}</div>
-       ${meta}
-       ${playerTag}
-       ${saveBlock}`;
+  return {
+    pageHeaderText,
+    cardBody: `${playerTag}${saveBlock}`,
+  };
 }
 
 function failedHtml(lastError: string | null, token?: string): string {
@@ -297,11 +311,13 @@ async function signedPlayerResponse(
 
   const display = await resolvePublicMediaDisplayContext(supabase, row);
 
+  const { cardBody, pageHeaderText } = playerHtml(row.token, row.kind, signedUrl, display);
+
   res
     .status(200)
     .set('Cache-Control', 'no-store')
     .type('text/html')
-    .send(htmlPage('Petitmo · Souvenir', playerHtml(row.token, row.kind, signedUrl, display)));
+    .send(htmlPage('Petitmo · Souvenir', cardBody, '', pageHeaderText));
   return true;
 }
 

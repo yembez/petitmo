@@ -27,6 +27,7 @@ import { MEDIA_CARD_INSET, MEDIA_CARD_RADIUS } from '@/constants/feedLayout';
 import PhotoMosaic from '@/components/PhotoMosaic';
 import AudioPlayer from '@/components/AudioPlayer';
 import EditTextModal from '@/components/EditTextModal';
+import { ModalBookCoverThumb } from '@/components/ModalBookCoverThumb';
 import { feedMemoryTextEditPreviewVariant } from '@/utils/memoryTextEditStyles';
 import { bookLineBudgetForMemoryType, bookCharsPerLineForMemoryType } from '@/utils/textLimits';
 import { getMemoryById, updateMemoryContent } from '@/services/media';
@@ -260,19 +261,16 @@ export default function MemoryViewScreen() {
   const locationLineShort = memory ? formatBookLocationShort(memory.location) : '';
   const locationMeta = locationLineShort ? `à ${locationLineShort}` : '';
 
-  const coverUriForBook = useCallback(
-    (b: Book): string | null => {
-      const direct = typeof b.coverPhotoUrl === 'string' ? b.coverPhotoUrl.trim() : '';
-      if (direct) return direct;
-      if (!child) return null;
-      return resolveChildProfileImageDisplayUri(
+  const bookCoverFallbackUri = useMemo(() => {
+    if (!child) return '';
+    return (
+      resolveChildProfileImageDisplayUri(
         child.local_photo_path,
         signedChildRemote ?? child.photo_url,
         child.updated_at,
-      );
-    },
-    [child, signedChildRemote]
-  );
+      ) ?? ''
+    );
+  }, [child, signedChildRemote]);
 
   const bookParagraphs = (() => {
     if (!memory || memory.type !== 'text') return [] as string[];
@@ -651,7 +649,6 @@ export default function MemoryViewScreen() {
                           </TouchableOpacity>
                           {books.map(b => {
                             const has = memoryId ? b.memoryIds.includes(memoryId) : false;
-                            const coverUri = coverUriForBook(b);
                             return (
                               <View key={b.id} style={[styles.modalBookRow, has && styles.modalBookRowActive]}>
                                 <Pressable
@@ -663,19 +660,7 @@ export default function MemoryViewScreen() {
                                   accessibilityRole="button"
                                   accessibilityLabel={`Éditer le livre ${b.title}`}
                                 >
-                                  <View style={styles.modalThumb}>
-                                    {coverUri ? (
-                                      <Image
-                                        source={{ uri: coverUri }}
-                                        style={StyleSheet.absoluteFillObject}
-                                        resizeMode="cover"
-                                      />
-                                    ) : (
-                                      <View style={styles.modalThumbPh}>
-                                        <BookOpen size={scale(18)} color="#FFFFFF" strokeWidth={2.2} />
-                                      </View>
-                                    )}
-                                  </View>
+                                  <ModalBookCoverThumb book={b} fallbackUri={bookCoverFallbackUri} />
                                   {has ? (
                                     <View style={styles.modalThumbCheck} pointerEvents="none">
                                       <Check size={scale(14)} color="#FFFFFF" strokeWidth={3.2} />
@@ -1095,11 +1080,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: 'rgba(0,0,0,0.10)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalThumbPh: {
-    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },

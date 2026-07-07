@@ -45,6 +45,18 @@ export function rebaseSandboxUriToCurrentContainer(uriOrPath: string | null | un
   return t;
 }
 
+/** iOS : le chemin SQLite pointe encore vers un ancien UUID de container (fichier mort après build/réinstall). */
+export function isSandboxUriFromForeignContainer(uriOrPath: string | null | undefined): boolean {
+  if (Platform.OS === 'web') return false;
+  const doc = documentDirectory;
+  if (!doc) return false;
+  const t = (uriOrPath ?? '').trim();
+  if (!t.includes('/Application/')) return false;
+  const docUuid = doc.match(/Application\/([^/]+)\//)?.[1];
+  const uriUuid = t.match(/Application\/([^/]+)\//)?.[1];
+  return !!(docUuid && uriUuid && docUuid !== uriUuid);
+}
+
 /** Réinstall / purge sandbox : SQLite conserve encore ces préfixes alors que les fichiers sont absents. */
 export function isProbablyStalePetitmoSandboxPath(uriOrPath: string): boolean {
   const s = uriOrPath.trim();

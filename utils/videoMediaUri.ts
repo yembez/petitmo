@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import type { Memory } from '@/types/local';
+import { peekFeedBootstrapVideoUri } from '@/services/feedLocalPhotoCache';
 import {
   isLocalMediaUriReadable,
   rebaseSandboxUriToCurrentContainer,
@@ -101,6 +102,16 @@ export async function resolveReadableVideoPlaybackUri(
   return '';
 }
 
+/** URI locale synchronisable pour autoplay fil — bootstrap / copie fil uniquement (pas de chemins SQLite morts). */
+export function syncFeedLocalVideoPlaybackUri(
+  m: Pick<Memory, 'id' | 'type' | 'edited_media_url' | 'media_url' | 'local_media_path' | 'local_original_path'>,
+): string {
+  if (m.type !== 'video') return '';
+  const boot = peekFeedBootstrapVideoUri(m.id)?.trim();
+  if (boot && isFeedLocalVideoPlaybackUri(boot)) return normalizeVideoPlaybackUri(boot);
+  return '';
+}
+
 /** URI exploitable par `expo-av` `Video` (préfixe `file://` si chemin absolu). */
 export function normalizeVideoPlaybackUri(raw: string): string {
   const input = raw.trim();
@@ -118,4 +129,18 @@ export function normalizeVideoPlaybackUri(raw: string): string {
   }
   if (t.startsWith('/')) return `file://${t}`;
   return t;
+}
+
+/** URI de lecture fil autoplay-safe : sandbox ou copie fil — jamais une URL cloud signée. */
+export function isFeedLocalVideoPlaybackUri(uri: string): boolean {
+  const t = uri.trim();
+  if (!t || /^https?:\/\//i.test(t)) return false;
+  return (
+    t.includes('petitmo_memories/') ||
+    t.includes('petitmo_feed_local_videos/') ||
+    t.startsWith('file:') ||
+    t.startsWith('content:') ||
+    t.startsWith('/') ||
+    t.startsWith('ph://')
+  );
 }

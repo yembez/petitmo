@@ -2,10 +2,11 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { MemoryRow } from './pdf/memoryRow';
-import { bookPdfLocationLabel, dateWithAgeCaps } from './pdf/maquetteAlign';
+import { bookPdfLocationLabel, dateFrCaps, formatAgeAtMemory } from './pdf/maquetteAlign';
 
 export type PublicMediaDisplayContext = {
-  dateAgeLine: string;
+  dateLine: string;
+  ageLine: string;
   locationLine: string;
 };
 
@@ -30,9 +31,10 @@ export function formatPublicMediaDisplayContext(
 ): PublicMediaDisplayContext {
   const iso = trimOrNull(createdAt ?? null);
   const birth = trimOrNull(childBirthdate ?? null);
-  const dateAgeLine = iso ? dateWithAgeCaps(iso, birth) : '';
+  const dateLine = iso ? dateFrCaps(iso) : '';
+  const ageLine = iso ? formatAgeAtMemory(birth, iso) : '';
   const locationLine = bookPdfLocationLabel(location);
-  return { dateAgeLine, locationLine };
+  return { dateLine, ageLine, locationLine };
 }
 
 export async function syncPublicMediaTokenDisplayContext(
@@ -127,14 +129,23 @@ export function petitmoLogoHtml(): string {
   return cachedLogoSvg;
 }
 
-export function publicMediaMetaHtml(ctx: PublicMediaDisplayContext): string {
-  const lines: string[] = [];
-  if (ctx.dateAgeLine) {
-    lines.push(`<div class="memory-meta-date">${escapePublicMediaHtml(ctx.dateAgeLine)}</div>`);
+/** Titre + date / âge hors carte — aligné sur la ligne du logo Petitmo. */
+export function publicMediaPageHeaderHtml(
+  kind: 'audio' | 'video',
+  ctx: PublicMediaDisplayContext,
+): string {
+  const kindLabel = kind === 'video' ? 'Souvenir vidéo' : 'Souvenir audio';
+  const lines: string[] = [
+    `<div class="page-header-kind">${escapePublicMediaHtml(kindLabel)}</div>`,
+  ];
+  if (ctx.dateLine) {
+    lines.push(`<div class="page-header-date">${escapePublicMediaHtml(ctx.dateLine)}</div>`);
+  }
+  if (ctx.ageLine) {
+    lines.push(`<div class="page-header-age">${escapePublicMediaHtml(ctx.ageLine)}</div>`);
   }
   if (ctx.locationLine) {
-    lines.push(`<div class="memory-meta-loc">${escapePublicMediaHtml(ctx.locationLine)}</div>`);
+    lines.push(`<div class="page-header-loc">${escapePublicMediaHtml(ctx.locationLine)}</div>`);
   }
-  if (!lines.length) return '';
-  return `<div class="memory-meta">${lines.join('')}</div>`;
+  return `<div class="page-header-text">${lines.join('')}</div>`;
 }
