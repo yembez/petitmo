@@ -2,35 +2,38 @@ import { useEffect, useState } from 'react';
 import { InteractionManager, Platform } from 'react-native';
 import type { Memory } from '@/types/local';
 import {
+  getCachedFeedVideoPlaybackUri,
+  setCachedFeedVideoPlaybackUri,
+} from '@/hooks/feedVideoPlaybackUriCache';
+import {
   getFeedLocalVideoPath,
   peekFeedBootstrapVideoUri,
   persistFeedLocalVideo,
   takeFeedBootstrapVideoUri,
 } from '@/services/feedLocalPhotoCache';
-import { getSignedMediaDisplayUrl } from '@/lib/mediaSignedUrl';
 import {
+  isFeedLocalVideoPlaybackUri,
   normalizeVideoPlaybackUri,
   resolveReadableVideoPlaybackUri,
+  syncFeedLocalVideoPlaybackUri,
 } from '@/utils/videoMediaUri';
 
-async function resolveRemoteVideoUri(raw: string): Promise<string> {
-  const t = raw.trim();
-  if (!t || !/^https?:\/\//i.test(t)) return normalizeVideoPlaybackUri(t);
-  return getSignedMediaDisplayUrl(t);
-}
-
-function initialPlaybackUri(memory: Memory): string {
-  if (memory.type !== 'video') return '';
-  const boot = peekFeedBootstrapVideoUri(memory.id);
-  return boot ? normalizeVideoPlaybackUri(boot) : '';
+/** Autoplay fil = local-first strict : aucune URL cloud (le viewer immersif gère le distant). */
+async function noRemoteForFeedAutoplay(): Promise<string> {
+  return '';
 }
 
 /**
- * URI de lecture vidéo dans le fil : copie fil si présente, sinon sandbox `original.*`,
- * sinon distant signé. Vérifie l’existence disque (chemins SQLite périmés ignorés).
+ * URI de lecture vidéo dans le fil : copie fil si présente, sinon sandbox `original.*`.
+ * Autoplay : ne retourne jamais une URL cloud — la résolution distante sert au viewer immersif.
  */
-export function useFeedVideoPlaybackUri(memory: Memory): string {
-  const [uri, setUri] = useState<string>(() => initialPlaybackUri(memory));
+export function useFeedVideoPlaybackUri(
+  memory: Memory,
+  resolveEnabled = true,
+): string {
+  const [uri, setUri] = useState(
+    () => syncFeedLocalVideoPlaybackUri(memory) || getCachedFeedVideoPlaybackUri(memory.id),
+  );
 
   useEffect(() => {
     if (memory.type !== 'video') {
@@ -38,36 +41,57 @@ export function useFeedVideoPlaybackUri(memory: Memory): string {
       return;
     }
 
+    // Seed immédiat depuis le cache (dernière URI file:// résolue) → pas de fenêtre vide au remontage.
+    const cached = getCachedFeedVideoPlaybackUri(memory.id);
+    if (cached) setUri(prev => (prev ? prev : cached));
+
+    const sync = syncFeedLocalVideoPlaybackUri(memory);
+    if (sync) {
+      setCachedFeedVideoPlaybackUri(memory.id, sync);
+      // Garder la 1ʳᵉ URI locale valide : l’effet se relance à chaque patch cloud (memory.updated_at),
+      // et la résolution peut renvoyer un chemin équivalent mais différent (copie‑fil vs sandbox).
+      // Écraser ferait « clignoter » la source → remontage <Video> + reset état = flash. On fige.
+      setUri(prev => (prev ? prev : sync));
+    }
+
+    if (!resolveEnabled) return;
+
     let alive = true;
     const task = InteractionManager.runAfterInteractions(() => {
       void (async () => {
-      const feedCopy =
-        Platform.OS === 'web' ? null : ((await getFeedLocalVideoPath(memory.id))?.trim() ?? '');
-      const boot = peekFeedBootstrapVideoUri(memory.id)?.trim() ?? '';
+        const feedCopy =
+          Platform.OS === 'web' ? null : ((await getFeedLocalVideoPath(memory.id))?.trim() ?? '');
+        const boot = peekFeedBootstrapVideoUri(memory.id)?.trim() ?? '';
 
-      const chosen = await resolveReadableVideoPlaybackUri(memory, {
-        feedCopy,
-        bootstrap: boot,
-        resolveRemote: resolveRemoteVideoUri,
-      });
+        const chosen = await resolveReadableVideoPlaybackUri(memory, {
+          feedCopy,
+          bootstrap: boot,
+          resolveRemote: noRemoteForFeedAutoplay,
+        });
 
-      if (!alive) return;
+        if (!alive) return;
 
-      setUri(chosen);
+        const localOnly =
+          chosen && isFeedLocalVideoPlaybackUri(chosen) ? normalizeVideoPlaybackUri(chosen) : sync;
+        if (localOnly) {
+          setCachedFeedVideoPlaybackUri(memory.id, localOnly);
+          // Idem : figer la 1ʳᵉ URI locale valide (résolution déjà vérifiée lisible sur disque).
+          setUri(prev => (prev ? prev : localOnly));
+        }
 
-      if (chosen && boot) takeFeedBootstrapVideoUri(memory.id);
+        if (chosen && boot) takeFeedBootstrapVideoUri(memory.id);
 
-      if (
-        Platform.OS !== 'web' &&
-        !feedCopy &&
-        chosen &&
-        memory.id &&
-        chosen.includes('petitmo_memories/')
-      ) {
-        const sourcePath = chosen.replace(/^file:\/\//, '');
-        void persistFeedLocalVideo(memory.id, sourcePath);
-      }
-    })();
+        if (
+          Platform.OS !== 'web' &&
+          !feedCopy &&
+          localOnly &&
+          memory.id &&
+          localOnly.includes('petitmo_memories/')
+        ) {
+          const sourcePath = localOnly.replace(/^file:\/\//, '');
+          void persistFeedLocalVideo(memory.id, sourcePath);
+        }
+      })();
     });
 
     return () => {
@@ -81,6 +105,8 @@ export function useFeedVideoPlaybackUri(memory: Memory): string {
     memory.edited_media_url,
     memory.local_media_path,
     memory.local_original_path,
+    memory.updated_at,
+    resolveEnabled,
   ]);
 
   return uri;

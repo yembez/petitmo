@@ -17,6 +17,8 @@ import {
   fetchMemoriesByIds,
   requestMissingMediaDerivatives,
 } from '@/services/media';
+import { materializeCloudMediaForMemories } from '@/services/memoryCloudMaterialize';
+import { primeFeedVideoPosterStableCache } from '@/services/feedVideoPosterPrime';
 import {
   getChildren,
   getOrSelectFirstChild,
@@ -93,6 +95,8 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
   const memoryFlatListKeyByIdRef = useRef<Map<string, string>>(new Map());
   const loadDataSeqRef = useRef(0);
   const silentReloadDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingMemoryPatchRef = useRef<Map<string, Memory>>(new Map());
+  const flushMemoryPatchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadData = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent === true;
@@ -173,7 +177,13 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
       if (seq !== loadDataSeqRef.current) return;
       setMemories(prev => mergeMemoriesListPreservingVisualRowRefs(prev, memoriesData));
       setBooks(loadedBooks);
-      void requestMissingMediaDerivatives(memoriesData);
+      void primeFeedVideoPosterStableCache(memoriesData);
+      // Materialisation cloud→sandbox différée après les interactions (scroll/anim) et concurrence
+      // réduite : sur un fil riche en anciennes vidéos, la rafale de téléchargements saccadait le scroll.
+      InteractionManager.runAfterInteractions(() => {
+        void materializeCloudMediaForMemories(memoriesData, { max: 16, batchSize: 2 });
+        void requestMissingMediaDerivatives(memoriesData);
+      });
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
@@ -226,13 +236,29 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
       if (memoryId) {
         const row = getLocalMemoryById(memoryId);
         if (row) {
-          setMemories(prev => {
-            const idx = prev.findIndex(m => m.id === memoryId);
-            if (idx < 0) return prev;
-            const next = [...prev];
-            next[idx] = row;
-            return next;
-          });
+          pendingMemoryPatchRef.current.set(memoryId, row);
+          if (flushMemoryPatchTimerRef.current) {
+            clearTimeout(flushMemoryPatchTimerRef.current);
+          }
+          flushMemoryPatchTimerRef.current = setTimeout(() => {
+            flushMemoryPatchTimerRef.current = null;
+            const batch = new Map(pendingMemoryPatchRef.current);
+            pendingMemoryPatchRef.current.clear();
+            // Patch ciblé : on remplace uniquement les lignes concernées, sans re-tri ni
+            // `JSON.stringify` de toute la liste (materialisation en rafale = sinon grosses saccades).
+            setMemories(prev => {
+              let changed = false;
+              const next = prev.map(m => {
+                const patched = batch.get(m.id);
+                if (patched && patched !== m) {
+                  changed = true;
+                  return patched;
+                }
+                return m;
+              });
+              return changed ? next : prev;
+            });
+          }, 450);
           return;
         }
       }
@@ -315,6 +341,7 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
           const idSet = new Set(ordered.map(r => r.id));
           return [...ordered, ...prev.filter(m => !idSet.has(m.id))];
         });
+        void materializeCloudMediaForMemories(ordered, { max: 16, batchSize: 4 });
         void requestMissingMediaDerivatives(ordered);
       }
     );
@@ -327,6 +354,11 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
         clearTimeout(silentReloadDebounceRef.current);
         silentReloadDebounceRef.current = null;
       }
+      if (flushMemoryPatchTimerRef.current) {
+        clearTimeout(flushMemoryPatchTimerRef.current);
+        flushMemoryPatchTimerRef.current = null;
+      }
+      pendingMemoryPatchRef.current.clear();
     };
   }, [loadData, scheduleSilentReload]);
 
@@ -345,6 +377,7 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
       /** Onglet remonté après longue absence : resync légère seulement si le fil est vide. */
       if (memoriesRef.current.length === 0 && feedMemoriesHydrationSnapshot.length > 0) {
         setMemories([...feedMemoriesHydrationSnapshot]);
+        void primeFeedVideoPosterStableCache(feedMemoriesHydrationSnapshot);
         if (feedChildHydrationSnapshot) {
           void ensureChildFaceBounds(feedChildHydrationSnapshot).then(refreshed => {
             setChild(refreshed);
@@ -387,22 +420,11 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
       const fresh = await fetchMemoriesByIds(ids);
       if (cancelled || fresh.length === 0) return;
 
-      setMemories(prev => {
-        const next = prev.map(m => {
+      setMemories(prev => mergeMemoriesListPreservingVisualRowRefs(prev, prev.map(m => {
           const u = fresh.find(f => f.id === m.id);
-          if (!u) return m;
-          const sameDisplay =
-            (m.thumb_url ?? '') === (u.thumb_url ?? '') &&
-            (m.display_url ?? '') === (u.display_url ?? '') &&
-            (m.poster_url ?? '') === (u.poster_url ?? '') &&
-            (m.thumbnail_url ?? '') === (u.thumbnail_url ?? '') &&
-            JSON.stringify(m.extra_thumb_urls ?? []) === JSON.stringify(u.extra_thumb_urls ?? []) &&
-            JSON.stringify(m.extra_display_urls ?? []) === JSON.stringify(u.extra_display_urls ?? []);
-          return sameDisplay ? m : u;
-        });
-        const changed = next.some((m, i) => m !== prev[i]);
-        return changed ? next : prev;
-      });
+          return u ?? m;
+        })));
+      void materializeCloudMediaForMemories(fresh, { max: 16, batchSize: 4 });
       void requestMissingMediaDerivatives(fresh);
 
       if (cancelled || tries >= 6) return;

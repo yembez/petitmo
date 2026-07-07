@@ -1,6 +1,6 @@
 ---
 description: Local-first média — comment lire et écrire les souvenirs/photos sans casser les écrans.
-globs: services/memory*.ts,services/media.ts,services/localOnlyMemoryCapture.ts,services/memoriesLocalSync.ts,services/memoryRowMapping.ts,services/feedLocalPhotoCache.ts,services/tabScreens*.ts,services/pendingCloudFlush.ts,services/pendingRawGuestUploads.ts,utils/memoryPhotos.ts,utils/mediaExif.ts,utils/feedHelpers.ts,utils/feedCaptureOverlay.ts,utils/localMediaReadable.ts,utils/childPhotoUri.ts,constants/importPicker.ts,hooks/useFeed*.ts,hooks/useFil*.ts,hooks/useMigrationProgress.ts,lib/localDb.ts,app/(tabs)/fil.tsx,app/(tabs)/favoris.tsx,app/(tabs)/livres.tsx,app/(tabs)/index.tsx,app/memory-view*.tsx,app/book-*.tsx,app/import-media.tsx,components/feed/**
+globs: services/memory*.ts,services/media.ts,services/memoryCloudMaterialize.ts,services/localOnlyMemoryCapture.ts,services/memoriesLocalSync.ts,services/memoryRowMapping.ts,services/feedLocalPhotoCache.ts,services/tabScreens*.ts,services/pendingCloudFlush.ts,services/pendingRawGuestUploads.ts,utils/memoryPhotos.ts,utils/mediaExif.ts,utils/feedHelpers.ts,utils/feedCaptureOverlay.ts,utils/localMediaReadable.ts,utils/childPhotoUri.ts,constants/importPicker.ts,hooks/useFeed*.ts,hooks/useFil*.ts,hooks/useMigrationProgress.ts,lib/localDb.ts,app/(tabs)/fil.tsx,app/(tabs)/favoris.tsx,app/(tabs)/livres.tsx,app/(tabs)/index.tsx,app/memory-view*.tsx,app/book-*.tsx,app/import-media.tsx,components/feed/**
 alwaysApply: false
 ---
 
@@ -8,7 +8,7 @@ alwaysApply: false
 
 ## Modèle mental
 
-**Local-first = règle pour les deux modes** (`local` gratuit et `cloud` Petitmo+). L’UI lit toujours SQLite + sandbox ; le cloud sert à synchroniser, sauvegarder et restaurer — pas à remplacer le local comme source d’affichage. Hydratation cloud **en arrière-plan** ; repli cloud **uniquement** si le local est absent (fichier confirmé mort, réinstall, restauration initiale). Voir `docs/specs/architecture-locale-cloud.md` §1.3.
+**Local-first = règle pour les deux modes** (`local` gratuit et `cloud` Petitmo+). L’UI lit toujours SQLite + sandbox ; le cloud sert à synchroniser, sauvegarder et restaurer — pas à remplacer le local comme source d’affichage. Hydratation cloud **en arrière-plan** ; **materialisation** (`memoryCloudMaterialize.ts`) recopie les médias en sandbox après chaque pull ; repli cloud **uniquement** pendant la materialisation ou hors ligne. Voir `docs/specs/architecture-locale-cloud.md` §1.3 et §1.3.3.
 
 Un souvenir a **deux familles de pointeurs en parallèle**, dans la même ligne `memories` (le SQLite local et la table Supabase ont la même forme) :
 
@@ -50,6 +50,15 @@ La normalisation (`file://`, `content://`, `ph://`, `assets-library://`, `data:`
 
 Tout mapping ad hoc (style `data.map(row => row)`) sur des données serveur écrase les `local_*` à `null` → **les photos disparaissent du fil après le moindre refresh**. C'est la cause racine n°1 des bugs "souvenirs perdus dans tel onglet".
 
+### 3b. Materialisation cloud → sandbox (Petitmo+ uniquement)
+
+Après pull / fil / restauration, **`materializeCloudMediaForMemories`** (`services/memoryCloudMaterialize.ts`) doit recopier originaux + dérivés manquants dans `petitmo_memories/{id}/` et mettre à jour SQLite (`local_*`, `poster_url` sandbox).
+
+- **Ordre** : `healDeadLocalMediaPointersForMemories` → materialisation → affichage stable.
+- **Ne pas** laisser un souvenir en état cloud-only pour le fil une fois la materialisation terminée.
+- `requestMissingMediaDerivatives` complète les refs **cloud** (worker / export PDF) — ce n’est **pas** un substitut à la materialisation locale.
+- Déclencheurs : `pullMemoriesFromRemoteToLocal`, `useFeedData`, `getMemoryById` (repli Supabase).
+
 ### 4. Sandbox fantôme (post-réinstall) — fichier **confirmé** absent uniquement
 
 `isProbablyStalePetitmoSandboxPath` signifie seulement « chemin sous `petitmo_memories/` / `petitmo_feed_local_*` » — **pas** « fichier mort ». Un chemin sandbox **valide** ne doit jamais être ignoré ni remplacé par une URL cloud expirée.
@@ -84,6 +93,7 @@ Même URI affichable sur **fil, favoris, viewer immersif, liste livres, aperçu 
 | Cover vocal | `getVoiceCoverUriForFeedAndViewer` |
 | Couverture liste livres | `resolveBookListCoverDisplayUri` (`services/books.ts`) |
 | Comparer / indexer favoris par photo | `normalizePhotoUrlForCompare` (rebase sandbox) + `mapPhotoUrlToThumb` |
+| Aperçu livre / maquette in-app | `getPrimaryPhotoUriForBookMaquetteDisplay`, `getVideoPosterUriForBookPreview`, `getVoiceCoverUriForBookEditorDisplay` ; §1.3.1 spec architecture |
 
 Pas de variante « favoris lit `voice_cover_path` brut » ou « livres lit `coverPhotoUrl` sans rebase ».
 
@@ -125,3 +135,13 @@ Bug type "la photo ne s'affiche plus dans tel onglet" → vérifier d'abord, dan
 - L’UUID du container a-t-il changé ? Comparer un `local_thumb_path` en base avec `documentDirectory` courant — si les UUID diffèrent, appliquer §4b avant de conclure à une perte de fichier.
 - Le fichier existe-t-il **après rebase** (`rebaseSandboxUriToCurrentContainer`) ? (point 4)
 - L’écran utilise-t-il le **même helper** que le fil ? (point 4c)
+
+## Aperçu livre in-app (`app/book-preview.tsx`, `MaquetteBookPages.tsx`)
+
+Spec complète : `docs/specs/architecture-locale-cloud.md` §1.3.1–1.3.2.
+
+- Chargement : `getLocalMemoryById` **avant** `getMemoryById` ; pas de `supabase.from` dans l’UI maquette.
+- Affichage : helpers §4c (maquette) — sandbox / dérivés locaux **avant** URL cloud ; `BookPagePhotoFrame` skip signing si `isDeviceLocalMediaUri`.
+- `primeSignedMediaDisplayUrls` : uniquement refs sans local (`collectBookMaquetteCloudMediaRefs`).
+- Upload cloud pour export PDF (`ensureVoiceMemoryCloudForBookExport`, `bookPdfServer.ts`) = arrière-plan ; **ne remplace pas** l’URI affichée si local lisible.
+- **Aperçu in-app ≠ PDF serveur** : la maquette reste local-first ; l’export envoie un payload séparé à Railway.

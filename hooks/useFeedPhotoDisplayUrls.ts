@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { InteractionManager, Platform } from 'react-native';
 import type { Memory } from '@/types/local';
+import { resolveFeedPhotoStableCache } from '@/hooks/feedPhotoStableCache';
 import {
   getAllPhotoUrlsForFeed,
   getAllPhotoUrlsForFeedRemoteOnly,
@@ -241,5 +242,5 @@ export function useFeedPhotoDisplayUrls(memory: Memory): string[] {
     memory.media_path,
   ]);
 
-  return merged;
+  return merged.map((u, i) => resolveFeedPhotoStableCache(`${memory.id}:${i}`, u));
 }

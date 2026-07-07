@@ -13,6 +13,7 @@ import {
   StyleSheet,
   FlatList,
   Pressable,
+  DeviceEventEmitter,
   TouchableOpacity,
   useWindowDimensions,
   ActivityIndicator,
@@ -30,7 +31,6 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -67,6 +67,7 @@ import {
   healBookMemoryIdsIfStale,
   removeMemoriesFromBook,
   readBookPreviewLocalSnapshotSync,
+  resolveBookCoverDisplayUri,
   resolveBookCoverEditorUri,
   resolveBookCoverPrintUri,
   upsertBook,
@@ -89,14 +90,17 @@ import {
   normalizeMemoryMediaUriForDisplay,
   collectBookPhotoDpiUriCandidates,
   getBookPhotoPrintPixelSize,
+  collectBookMaquetteCloudMediaRefs,
+  getPrimaryPhotoUriForBookMaquetteDisplay,
   getPrimaryPhotoUriForBookPreview,
+  getVoiceCoverUriForBookEditorDisplay,
   getVoiceCoverUriForBookPreview,
   getVideoPosterUriForBookPreview,
 } from '@/utils/memoryPhotos';
 import { runBookExportPrepInBackground } from '@/services/bookExportPrep';
 import { getBookExportPrepIssues } from '@/services/bookExportPrep';
-import { useSignedMediaUrl, peekSignedMediaDisplayUrl } from '@/lib/mediaSignedUrl';
-import { isCloudMediaReference } from '@/utils/localMediaReadable';
+import { useSignedMediaUrl, peekSignedMediaDisplayUrl, primeSignedMediaDisplayUrls } from '@/lib/mediaSignedUrl';
+import { isDeviceLocalMediaUri } from '@/utils/memoryPhotos';
 import { bookLineBudgetForMemoryType, bookCharsPerLineForMemoryType } from '@/utils/textLimits';
 
 import type { Child, Memory } from '@/types/local';
@@ -281,7 +285,7 @@ function bookPageMainImageUri(
   const m = memoryForMaquette(page, merge);
   if (!m) return null;
   if (page.type === 'photo-full' || page.type === 'photo-note') {
-    return getPrimaryPhotoUriForBookPreview(m).trim() || null;
+    return getPrimaryPhotoUriForBookMaquetteDisplay(m).trim() || null;
   }
   if (page.type === 'audio') return getVoiceCoverUriForBookPreview(m).trim() || null;
   if (page.type === 'video') return getVideoPosterUriForBookPreview(m).trim() || null;
@@ -293,7 +297,7 @@ function prefetchBookPageImage(uri: string | null): void {
   const trimmed = uri.trim();
   if (!trimmed) return;
   const cachedSigned =
-    isCloudMediaReference(trimmed) ? peekSignedMediaDisplayUrl(trimmed)?.trim() : null;
+    !isDeviceLocalMediaUri(trimmed) ? peekSignedMediaDisplayUrl(trimmed)?.trim() : null;
   const target = cachedSigned || trimmed;
   void ExpoImage.prefetch(target, 'memory-disk').catch(() => {});
 }
@@ -539,6 +543,16 @@ export default function BookPreviewScreen() {
     ? normalizeMemoryMediaUriForDisplay(coverPhotoDisplayUriRaw)
     : null;
 
+  const coverPhotoBrowseUriRaw = useMemo(
+    () => (bookSnapshot ? resolveBookCoverDisplayUri(bookSnapshot, { variant: 'list' }) : null),
+    [bookSnapshot],
+  );
+  const signedCoverBrowseUrl = useSignedMediaUrl(coverPhotoBrowseUriRaw);
+  const coverPhotoBrowseUri = useMemo(() => {
+    const raw = (signedCoverBrowseUrl ?? coverPhotoBrowseUriRaw ?? null)?.trim();
+    return raw ? normalizeMemoryMediaUriForDisplay(raw) : null;
+  }, [signedCoverBrowseUrl, coverPhotoBrowseUriRaw]);
+
   const coverPhotoPrintUri = useMemo(
     () => (bookSnapshot ? resolveBookCoverPrintUri(bookSnapshot) : null),
     [bookSnapshot]
@@ -633,13 +647,31 @@ export default function BookPreviewScreen() {
 
       const picked: Memory[] = [];
       for (const id of memoryIds) {
-        let row = (await getMemoryById(id)) as Memory | null;
-        if (!row) row = getLocalMemoryById(id) as Memory | null;
+        let row = getLocalMemoryById(id) as Memory | null;
+        if (!row) row = (await getMemoryById(id)) as Memory | null;
+        if (row?.type === 'video') {
+          row = (await awaitVideoPosterForBookMemory(id)) ?? row;
+        }
+        if (
+          row?.type === 'voice' &&
+          (row.voice_cover_path ?? row.voice_cover_url ?? '').trim()
+        ) {
+          row = (await awaitVoiceCoverPrintDerivativeForMemory(id)) ?? row;
+        }
         if (row) picked.push(row);
       }
       picked.sort(
         (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
       );
+
+      const coverBrowseForPrime = bookForHeal
+        ? resolveBookCoverDisplayUri(bookForHeal, { variant: 'list' })
+        : null;
+      const cloudRefs = collectBookMaquetteCloudMediaRefs(picked, coverBrowseForPrime);
+      if (cloudRefs.length > 0) {
+        await primeSignedMediaDisplayUrls(cloudRefs);
+      }
+
       setBookMemories(picked);
 
       InteractionManager.runAfterInteractions(() => {
@@ -654,7 +686,6 @@ export default function BookPreviewScreen() {
               }
             }
           }
-          await refreshBookMemoriesFromDb();
         })();
       });
 
@@ -678,24 +709,6 @@ export default function BookPreviewScreen() {
     } finally {
       setLoading(false);
     }
-  }, [bookId]);
-
-  const refreshBookMemoriesFromDb = useCallback(async () => {
-    if (!bookId) return;
-    const b = await getBook(bookId);
-    if (!b) return;
-    const ids = dedupeMemoryIds(b.memoryIds ?? []);
-    const picked: Memory[] = [];
-    for (const id of ids) {
-      let row = (await getMemoryById(id)) as Memory | null;
-      if (!row) row = getLocalMemoryById(id) as Memory | null;
-      if (row) picked.push(row);
-    }
-    picked.sort(
-      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-    );
-    setBookMemories(picked);
-    setBookSelectionKeys(ids);
   }, [bookId]);
 
   const voiceCoverPrintBackfillRef = useRef(new Set<string>());
@@ -735,12 +748,34 @@ export default function BookPreviewScreen() {
     }
   }, [bookMemories]);
 
-  useFocusEffect(
-    useCallback(() => {
-      if (!bookId) return;
-      void refreshBookMemoriesFromDb();
-    }, [bookId, refreshBookMemoriesFromDb])
-  );
+  /** Local-first : patch SQLite → state sans re-fetch cloud au focus. */
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener(
+      'petitmo:memories-updated',
+      (payload: { memoryId?: string }) => {
+        const memoryId = payload?.memoryId?.trim();
+        if (!memoryId) return;
+        const local = getLocalMemoryById(memoryId) as Memory | null;
+        if (!local) return;
+        setBookMemories(prev => {
+          const idx = prev.findIndex(m => m.id === memoryId);
+          if (idx < 0) return prev;
+          if (prev[idx] === local) return prev;
+          const next = [...prev];
+          next[idx] = local;
+          return next;
+        });
+        if (local.type === 'voice') {
+          setCropDpiMetaByKey(prev => {
+            if (!prev[memoryId]) return prev;
+            const { [memoryId]: _drop, ...rest } = prev;
+            return rest;
+          });
+        }
+      },
+    );
+    return () => sub.remove();
+  }, []);
 
   // Auto-save customizations to AsyncStorage when they change
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -848,22 +883,6 @@ export default function BookPreviewScreen() {
         return null;
       };
 
-      let displayW = 0;
-      let displayH = 0;
-      try {
-        const px = await getImagePx(payload.uri);
-        displayW = px.w;
-        displayH = px.h;
-      } catch {
-        const mem = memoryForPayload();
-        const ow = mem?.original_px_w;
-        const oh = mem?.original_px_h;
-        if (typeof ow === 'number' && typeof oh === 'number' && ow > 0 && oh > 0) {
-          displayW = ow;
-          displayH = oh;
-        }
-      }
-
       const coverRef =
         payload.pageType === 'cover' && bookSnapshot
           ? (bookSnapshot.coverPhotoUrl ?? '').trim()
@@ -880,6 +899,34 @@ export default function BookPreviewScreen() {
         displayUri: payload.uri,
         bookPrintUri,
       });
+
+      let displayW = 0;
+      let displayH = 0;
+      const displayUriCandidates = [
+        payload.uri,
+        ...dpiUriCandidates.filter(u => u.trim() !== payload.uri.trim()),
+      ];
+      for (const candidate of displayUriCandidates) {
+        try {
+          const px = await getImagePx(candidate);
+          if (px.w > 0 && px.h > 0) {
+            displayW = px.w;
+            displayH = px.h;
+            break;
+          }
+        } catch {
+          /* essai suivant */
+        }
+      }
+
+      if (!(displayW > 0 && displayH > 0) && mem) {
+        const ow = mem.original_px_w;
+        const oh = mem.original_px_h;
+        if (typeof ow === 'number' && typeof oh === 'number' && ow > 0 && oh > 0) {
+          displayW = ow;
+          displayH = oh;
+        }
+      }
 
       let dpiW = 0;
       let dpiH = 0;
@@ -919,6 +966,11 @@ export default function BookPreviewScreen() {
         dpiH = displayH;
       }
 
+      if (!(displayW > 0 && displayH > 0) && dpiW > 0 && dpiH > 0) {
+        displayW = dpiW;
+        displayH = dpiH;
+      }
+
       return finish({ w: displayW, h: displayH }, { w: dpiW, h: dpiH });
     },
     [bookMemories, bookSnapshot, getImagePx]
@@ -940,7 +992,9 @@ export default function BookPreviewScreen() {
               cur.dpiPxW > 0 &&
               cur.imgPxW > 0 &&
               cur.dpiPxW <= cur.imgPxW;
-            if (!(payload.pageType === 'cover' && dpiLooksDisplayOnly)) alreadyCached = true;
+            if (!(payload.pageType === 'cover' && dpiLooksDisplayOnly)) {
+              alreadyCached = true;
+            }
           }
           return prev;
         });
@@ -950,7 +1004,7 @@ export default function BookPreviewScreen() {
           const cur = prev[payload.storageKey];
           if (cur?.imgPxW > 0 && cur?.sourceUri === payload.uri) {
             const dpiStale =
-              payload.pageType === 'cover' &&
+              (payload.pageType === 'cover' || payload.pageType === 'audio') &&
               meta.dpiPxW > 0 &&
               cur.dpiPxW > 0 &&
               meta.dpiPxW > cur.dpiPxW;
@@ -1082,11 +1136,11 @@ export default function BookPreviewScreen() {
   /** Prefetch couverture + vignettes des pages dès que les URIs sont connues. */
   useEffect(() => {
     if (loading) return;
-    prefetchBookPageImage(coverPhotoDisplayUri);
+    prefetchBookPageImage(coverPhotoBrowseUri);
     for (const row of pageRows) {
-      prefetchBookPageImage(bookPageMainImageUri(row, merge, coverPhotoDisplayUri));
+      prefetchBookPageImage(bookPageMainImageUri(row, merge, coverPhotoBrowseUri));
     }
-  }, [loading, coverPhotoDisplayUri, pageRows, merge]);
+  }, [loading, coverPhotoBrowseUri, pageRows, merge]);
 
   const onRotateMemory = useCallback((memoryId: string) => {
     setRotations(prev => ({
@@ -1143,8 +1197,9 @@ export default function BookPreviewScreen() {
         if (!uri) return null;
         return { storageKey: 'cover', uri, pageType: 'cover' as const };
       }
-      const m = memoryForMaquette(page, merge);
-      if (!m) return null;
+      const mFromPage = memoryForMaquette(page, merge);
+      if (!mFromPage) return null;
+      const m = bookMemories.find(x => x.id === mFromPage.id) ?? mFromPage;
       if (page.type === 'photo-full' || page.type === 'photo-note') {
         const uri = getPrimaryPhotoUriForBookPreview(m).trim();
         if (!uri) return null;
@@ -1156,13 +1211,13 @@ export default function BookPreviewScreen() {
         };
       }
       if (page.type === 'audio') {
-        const uri = getVoiceCoverUriForBookPreview(m).trim();
+        const uri = getVoiceCoverUriForBookEditorDisplay(m).trim();
         if (!uri) return null;
         return { storageKey: m.id, uri, pageType: 'audio' as const };
       }
       return null;
     },
-    [coverPhotoDisplayUri, merge]
+    [coverPhotoDisplayUri, merge, bookMemories]
   );
 
   useEffect(() => {
@@ -1405,7 +1460,7 @@ export default function BookPreviewScreen() {
               truncated={false}
               coverYearLabel={coverYearLabel}
               coverDisplayTitle={row.page.type === 'cover' ? (coverTitleLine ?? `Journal de ${child!.name}`) : undefined}
-              coverPhotoUri={row.page.type === 'cover' ? coverPhotoDisplayUri : null}
+              coverPhotoUri={row.page.type === 'cover' ? coverPhotoBrowseUri : null}
               coverPhotoCrop={photoCrops.cover}
               coverPhotoImgPxW={row.page.type === 'cover' ? cropDpiMetaByKey.cover?.imgPxW : undefined}
               coverPhotoImgPxH={row.page.type === 'cover' ? cropDpiMetaByKey.cover?.imgPxH : undefined}
@@ -1465,7 +1520,7 @@ export default function BookPreviewScreen() {
       availHLandscape,
       child,
       chapterTitleLine,
-      coverPhotoDisplayUri,
+      coverPhotoBrowseUri,
       coverTitleLine,
       coverYearLabel,
       cropDpiMetaByKey,
@@ -1489,7 +1544,7 @@ export default function BookPreviewScreen() {
           <View style={[styles.browseLeafShadow, { width: w, height: h }]}>
             <Pressable
               onPressIn={() =>
-                prefetchBookPageImage(bookPageMainImageUri(row, merge, coverPhotoDisplayUri))
+                prefetchBookPageImage(bookPageMainImageUri(row, merge, coverPhotoBrowseUri))
               }
               onPress={() => openEditor(row.pageNum - 1)}
               style={[styles.browseLeafCard, { width: w, height: h }]}
@@ -1516,7 +1571,7 @@ export default function BookPreviewScreen() {
               truncated={false}
               coverYearLabel={coverYearLabel}
               coverDisplayTitle={row.page.type === 'cover' ? (coverTitleLine ?? `Journal de ${child!.name}`) : undefined}
-              coverPhotoUri={row.page.type === 'cover' ? coverPhotoDisplayUri : null}
+              coverPhotoUri={row.page.type === 'cover' ? coverPhotoBrowseUri : null}
               coverPhotoCrop={photoCrops.cover}
               coverPhotoImgPxW={row.page.type === 'cover' ? cropDpiMetaByKey.cover?.imgPxW : undefined}
               coverPhotoImgPxH={row.page.type === 'cover' ? cropDpiMetaByKey.cover?.imgPxH : undefined}
@@ -1536,7 +1591,7 @@ export default function BookPreviewScreen() {
     [
       child,
       chapterTitleLine,
-      coverPhotoDisplayUri,
+      coverPhotoBrowseUri,
       coverTitleLine,
       coverYearLabel,
       cropDpiMetaByKey,
@@ -1791,7 +1846,8 @@ export default function BookPreviewScreen() {
           const uri = printUriForMemory(p.memory);
           if (!uri) continue;
           try {
-            const { w, h } = await getImagePx(uri);
+            const printPx = getBookPhotoPrintPixelSize(p.memory);
+            const { w, h } = printPx ?? (await getImagePx(uri));
             const cropScale = Math.max(1, photoCrops[p.memory.id]?.scale ?? 1);
             const { w: mmW, h: mmH } = bookPrintFrameMmFor(
               p.type,
@@ -1805,6 +1861,32 @@ export default function BookPreviewScreen() {
               scale: cropScale,
             });
             const label = `${p.type === 'photo-full' ? 'Photo pleine page' : 'Photo + texte'} (${dpi} DPI)`;
+            if (dpi > 0 && dpi < 200) blocks.push(label);
+            else if (dpi > 0 && dpi < 240) warns.push(label);
+          } catch {
+            // ignore
+          }
+        }
+
+        for (const p of pages) {
+          if (p.type !== 'audio') continue;
+          const m = p.memory;
+          if (m.type !== 'voice') continue;
+          const coverUri = getVoiceCoverUriForBookPreview(m).trim();
+          if (!coverUri) continue;
+          try {
+            const printPx = getBookPhotoPrintPixelSize(m);
+            const { w, h } = printPx ?? (await getImagePx(coverUri));
+            const cropScale = Math.max(1, photoCrops[m.id]?.scale ?? 1);
+            const { w: mmW, h: mmH } = bookPrintFrameMmFor('audio');
+            const dpi = effectiveBookPhotoPrintDpi({
+              imgPxW: w,
+              imgPxH: h,
+              printMmW: mmW,
+              printMmH: mmH,
+              scale: cropScale,
+            });
+            const label = `Audio — illustration (${dpi} DPI)`;
             if (dpi > 0 && dpi < 200) blocks.push(label);
             else if (dpi > 0 && dpi < 240) warns.push(label);
           } catch {

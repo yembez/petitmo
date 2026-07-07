@@ -3,13 +3,13 @@ import { Image } from 'expo-image';
 import type { ViewToken } from 'react-native';
 import type { Memory as MemoryRow } from '@/types/local';
 import { getAllPhotoUrlsForFeed } from '@/utils/memoryPhotos';
-import { isFeedScrollIdle } from '@/lib/feedAutoplayStore';
 import { getSignedMediaDisplayUrl, primeSignedMediaDisplayUrls } from '@/lib/mediaSignedUrl';
+import { primeFeedVideoPosterForMemory } from '@/services/feedVideoPosterPrime';
 
 /** Limite le travail réseau / disque quand beaucoup de lignes sont « viewables ». */
 const PREFETCH_MAX_HTTPS_URLS = 40;
-/** Regroupe les prefetch pendant un scroll rapide (ex. remontée depuis le bas du fil). */
-const PREFETCH_DEBOUNCE_MS = 150;
+/** Regroupe les prefetch pendant un scroll rapide (haut ou bas). */
+const PREFETCH_DEBOUNCE_MS = 80;
 
 type FeedListItemForPrefetch =
   | { rowKind: 'memory'; memory: MemoryRow }
@@ -29,8 +29,10 @@ function urisFromMemory(m: MemoryRow): string[] {
       pushHttpsUrl(acc, u);
     }
   }
-  pushHttpsUrl(acc, m.poster_url);
-  pushHttpsUrl(acc, m.thumbnail_url);
+  if (m.type !== 'video') {
+    pushHttpsUrl(acc, m.poster_url);
+    pushHttpsUrl(acc, m.thumbnail_url);
+  }
   pushHttpsUrl(acc, m.voice_cover_url);
   return [...new Set(acc)];
 }
@@ -61,6 +63,10 @@ export function usePrefetchMemories(): {
     for (const t of viewableItems) {
       const m = memoryFromViewTokenItem(t.item);
       if (!m) continue;
+      if (m.type === 'video') {
+        void primeFeedVideoPosterForMemory(m);
+        continue;
+      }
       for (const u of urisFromMemory(m)) {
         all.add(u);
       }
@@ -80,11 +86,9 @@ export function usePrefetchMemories(): {
   const onViewableItemsChanged = useCallback(
     (info: { viewableItems: ViewToken[]; changed: ViewToken[] }) => {
       latestViewableRef.current = info.viewableItems;
-      if (!isFeedScrollIdle()) return;
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
         debounceRef.current = null;
-        if (!isFeedScrollIdle()) return;
         runPrefetch(latestViewableRef.current);
       }, PREFETCH_DEBOUNCE_MS);
     },

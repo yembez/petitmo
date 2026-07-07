@@ -5,6 +5,7 @@ import { getAllLocalMemories, getLocalMemoryById, updateLocalMemoryFavorite, ups
 import type { Memory } from '@/types/local';
 import { mergeServerMemoryRowWithExistingLocal } from '@/services/memoryRowMapping';
 import { feedMemoriesHydrationSnapshot } from '@/services/tabScreensCache';
+import { isDeviceLocalMediaUri } from '@/utils/memoryPhotos';
 import {
   isCloudMediaReference,
   isLocalMediaUriReadable,
@@ -19,6 +20,9 @@ async function clearDeadSandboxPointer(
   if (typeof raw !== 'string' || !raw.trim()) return false;
   const val = raw.trim();
   if (isCloudMediaReference(val)) return false;
+  if (field === 'poster_url' || field === 'thumbnail_url') {
+    if (!isDeviceLocalMediaUri(val)) return false;
+  }
   if (!isProbablyStalePetitmoSandboxPath(val)) return false;
   if (await isLocalMediaUriReadable(val)) return false;
   upsertLocalMemory({ ...memory, [field]: null });
@@ -26,7 +30,7 @@ async function clearDeadSandboxPointer(
 }
 
 /**
- * Efface les pointeurs sandbox morts pour laisser les colonnes cloud / signature reprendre l’affichage.
+ * Efface les pointeurs sandbox morts, puis la materialisation cloud→sandbox reprend l’affichage local-first.
  */
 export async function healDeadLocalMediaPointersForMemory(memory: Memory): Promise<Memory> {
   let current = getLocalMemoryById(memory.id) ?? memory;
@@ -45,8 +49,12 @@ export async function healDeadLocalMediaPointersForMemory(memory: Memory): Promi
       current = getLocalMemoryById(memory.id) ?? current;
     }
   }
+  /** Vidéo pré-Petitmo+ : ne pas effacer poster_url / thumbnail_url — materialisation remplace en une fois. */
   if (changed) {
-    DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId: memory.id });
+    DeviceEventEmitter.emit('petitmo:memories-updated', {
+      memoryId: memory.id,
+      silent: true,
+    });
   }
   return getLocalMemoryById(memory.id) ?? current;
 }

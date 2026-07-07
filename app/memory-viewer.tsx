@@ -37,7 +37,7 @@ import {
 } from '@/utils/memoryPhotos';
 import { toggleFavoritePhotoUrl } from '@/services/media';
 import { extractMediaBucketPath } from '@/lib/mediaSignedUrl';
-import { formatDateLong } from '@/utils/date';
+import { formatDateLong, formatDuration } from '@/utils/date';
 import { formatFamilyAgesLine, sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 import { useFeedMetaFonts } from '@/hooks/useFeedMetaFonts';
 import { useFeedVideoPlaybackUri } from '@/hooks/useFeedVideoPlaybackUri';
@@ -94,6 +94,120 @@ function immersiveOverlayBottomInset(safeBottom: number): number {
 
 function immersiveTopFadeHeight(pageHeight: number): number {
   return Math.max(verticalScale(96), Math.round(pageHeight * 0.24));
+}
+
+/** Hauteur réservée sous la vidéo pour le curseur + labels temps (relevé du cœur favori). */
+const IMMERSIVE_VIDEO_SCRUBBER_RESERVE = verticalScale(44);
+
+function immersiveVideoSeekFraction(locationX: number, trackWidth: number): number {
+  if (trackWidth <= 0) return 0;
+  return Math.max(0, Math.min(1, locationX / trackWidth));
+}
+
+function ImmersiveVideoSeekBar({
+  positionMillis,
+  durationMillis,
+  bottomInset,
+  onSeekStart,
+  onSeek,
+  onSeekEnd,
+}: {
+  positionMillis: number;
+  durationMillis: number;
+  bottomInset: number;
+  onSeekStart: () => void;
+  onSeek: (positionMillis: number) => void;
+  onSeekEnd: () => void;
+}) {
+  const trackWidthRef = useRef(0);
+  const progress =
+    durationMillis > 0
+      ? Math.max(0, Math.min(1, positionMillis / durationMillis))
+      : 0;
+
+  const applySeek = useCallback(
+    (locationX: number) => {
+      const w = trackWidthRef.current;
+      if (w <= 0 || durationMillis <= 0) return;
+      const frac = immersiveVideoSeekFraction(locationX, w);
+      onSeek(Math.round(frac * durationMillis));
+    },
+    [durationMillis, onSeek],
+  );
+
+  const pan = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderGrant: e => {
+          onSeekStart();
+          applySeek(e.nativeEvent.locationX);
+        },
+        onPanResponderMove: e => {
+          applySeek(e.nativeEvent.locationX);
+        },
+        onPanResponderRelease: () => {
+          onSeekEnd();
+        },
+        onPanResponderTerminate: () => {
+          onSeekEnd();
+        },
+      }),
+    [applySeek, onSeekEnd, onSeekStart],
+  );
+
+  const posSec = Math.floor(positionMillis / 1000);
+  const durSec = Math.max(0, Math.floor(durationMillis / 1000));
+  const thumbSize = scale(14);
+  const thumbRadius = thumbSize / 2;
+
+  return (
+    <View
+      style={[styles.immersiveVideoScrubberHost, { bottom: bottomInset }]}
+      pointerEvents="box-none"
+    >
+      <View style={styles.immersiveVideoScrubberTimeRow} pointerEvents="none">
+        <Text style={styles.immersiveVideoScrubberTime}>{formatDuration(posSec)}</Text>
+        <Text style={styles.immersiveVideoScrubberTime}>{formatDuration(durSec)}</Text>
+      </View>
+      <View
+        style={styles.immersiveVideoScrubberTrackHit}
+        onLayout={e => {
+          trackWidthRef.current = e.nativeEvent.layout.width;
+        }}
+        accessibilityRole="adjustable"
+        accessibilityLabel="Position dans la vidéo"
+        accessibilityValue={{
+          min: 0,
+          max: durSec,
+          now: posSec,
+          text: `${formatDuration(posSec)} sur ${formatDuration(durSec)}`,
+        }}
+        {...pan.panHandlers}
+      >
+        <View style={styles.immersiveVideoScrubberTrack} pointerEvents="none">
+          <View
+            style={[styles.immersiveVideoScrubberFill, { width: `${progress * 100}%` }]}
+          />
+        </View>
+        <View
+          style={[
+            styles.immersiveVideoScrubberThumb,
+            {
+              width: thumbSize,
+              height: thumbSize,
+              borderRadius: thumbRadius,
+              left: `${progress * 100}%`,
+              marginLeft: -thumbRadius,
+              marginTop: -thumbRadius,
+            },
+          ]}
+          pointerEvents="none"
+        />
+      </View>
+    </View>
+  );
 }
 
 function isImmersiveMediaType(type: Memory['type']): boolean {
@@ -773,6 +887,11 @@ function ImmersiveVideo({
 
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(seedNatural);
   const [videoReady, setVideoReady] = useState(false);
+  const [positionMillis, setPositionMillis] = useState(0);
+  const [durationMillis, setDurationMillis] = useState(() =>
+    memory.duration && memory.duration > 0 ? Math.round(memory.duration * 1000) : 0,
+  );
+  const scrubbingRef = useRef(false);
   const immersiveVideoRef = useRef<Video | null>(null);
   const posterFade = useRef(new Animated.Value(1)).current;
 
@@ -792,7 +911,11 @@ function ImmersiveVideo({
     setNatural(w > 0 && h > 0 ? { w, h } : null);
     posterFade.setValue(1);
     setVideoReady(false);
-  }, [memory.id, memory.original_px_w, memory.original_px_h, trimmedUri, posterFade]);
+    setPositionMillis(0);
+    setDurationMillis(
+      memory.duration && memory.duration > 0 ? Math.round(memory.duration * 1000) : 0,
+    );
+  }, [memory.id, memory.original_px_w, memory.original_px_h, memory.duration, trimmedUri, posterFade]);
 
   useEffect(() => {
     if (!videoReady || !isActive || !posterUri.trim()) return;
@@ -825,6 +948,15 @@ function ImmersiveVideo({
   const onPlaybackStatusUpdate = useCallback(
     (status: AVPlaybackStatus) => {
       if (!status.isLoaded) return;
+      const dur = status.durationMillis ?? 0;
+      if (dur > 0) {
+        setDurationMillis(dur);
+      } else if (memory.duration && memory.duration > 0) {
+        setDurationMillis(Math.round(memory.duration * 1000));
+      }
+      if (!scrubbingRef.current) {
+        setPositionMillis(status.positionMillis ?? 0);
+      }
       if (
         status.isPlaying ||
         (typeof status.positionMillis === 'number' && status.positionMillis > 40)
@@ -832,8 +964,25 @@ function ImmersiveVideo({
         markVideoReady();
       }
     },
-    [markVideoReady],
+    [markVideoReady, memory.duration],
   );
+
+  const handleSeekStart = useCallback(() => {
+    scrubbingRef.current = true;
+    void immersiveVideoRef.current?.pauseAsync().catch(() => {});
+  }, []);
+
+  const handleSeek = useCallback((ms: number) => {
+    setPositionMillis(ms);
+    void immersiveVideoRef.current?.setPositionAsync(ms).catch(() => {});
+  }, []);
+
+  const handleSeekEnd = useCallback(() => {
+    scrubbingRef.current = false;
+    if (isActive) {
+      void immersiveVideoRef.current?.playAsync().catch(() => {});
+    }
+  }, [isActive]);
 
   const onPosterLoad = useCallback((e: { source: { width?: number; height?: number } }) => {
     const w = e.source.width ?? 0;
@@ -848,13 +997,15 @@ function ImmersiveVideo({
   const posterFit = resizeMode === ResizeMode.CONTAIN ? ('contain' as const) : ('cover' as const);
 
   const videoUriForOverlay = posterUri.trim();
+  const showSeekBar = isActive && !!trimmedUri && durationMillis > 0;
+  const favoriteBottomInset = overlayBottomInset + (showSeekBar ? IMMERSIVE_VIDEO_SCRUBBER_RESERVE : 0);
 
   const favoriteOverlay = (
     <FeedPhotoFavoriteOverlay
       isFavorite={!!memory.is_favorite}
       inkOverride={memory.captured_overlay_ink}
       onPress={() => void onToggleFavorite(memory.id)}
-      bottomInset={overlayBottomInset}
+      bottomInset={favoriteBottomInset}
     />
   );
 
@@ -864,7 +1015,7 @@ function ImmersiveVideo({
         uriForAnalysis={videoUriForOverlay}
         label={capturedOverlayLabel}
         inkOverride={memory.captured_overlay_ink}
-        bottomInset={overlayBottomInset}
+        bottomInset={favoriteBottomInset}
       />
     ) : null;
 
@@ -934,6 +1085,17 @@ function ImmersiveVideo({
       ) : null}
 
       {mediaOverlays}
+
+      {showSeekBar ? (
+        <ImmersiveVideoSeekBar
+          positionMillis={positionMillis}
+          durationMillis={durationMillis}
+          bottomInset={overlayBottomInset}
+          onSeekStart={handleSeekStart}
+          onSeek={handleSeek}
+          onSeekEnd={handleSeekEnd}
+        />
+      ) : null}
     </View>
   );
 }
@@ -1325,6 +1487,55 @@ const styles = StyleSheet.create({
   },
   immersiveVideoLayer: {
     zIndex: 1,
+  },
+  immersiveVideoScrubberHost: {
+    position: 'absolute',
+    left: scale(16),
+    right: scale(16),
+    zIndex: 9,
+  },
+  immersiveVideoScrubberTimeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: verticalScale(6),
+  },
+  immersiveVideoScrubberTime: {
+    color: 'rgba(255, 255, 255, 0.92)',
+    fontSize: scale(11),
+    fontWeight: '500',
+    fontVariant: ['tabular-nums'],
+  },
+  immersiveVideoScrubberTrackHit: {
+    height: verticalScale(28),
+    justifyContent: 'center',
+  },
+  immersiveVideoScrubberTrack: {
+    height: scale(3),
+    borderRadius: scale(999),
+    backgroundColor: 'rgba(255, 255, 255, 0.28)',
+    overflow: 'hidden',
+  },
+  immersiveVideoScrubberFill: {
+    height: '100%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: scale(999),
+  },
+  immersiveVideoScrubberThumb: {
+    position: 'absolute',
+    top: '50%',
+    backgroundColor: '#FFFFFF',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000000',
+        shadowOpacity: 0.22,
+        shadowRadius: 3,
+        shadowOffset: { width: 0, height: 1 },
+      },
+      android: {
+        elevation: 3,
+      },
+      default: {},
+    }),
   },
   fullBleed: {
     width: '100%',

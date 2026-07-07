@@ -18,19 +18,21 @@ Référence technique du service : [`server/README.md`](server/README.md).
 
 | Option | Quand l’utiliser | Guide |
 |--------|------------------|--------|
-| **Railway** | Déploiement Git, healthcheck, peu d’ops sur la machine | [**server/DEPLOY_RAILWAY.md**](server/DEPLOY_RAILWAY.md) |
+| **Railway** | Déploiement Git, healthcheck, peu d’ops sur la machine | PDF : [**server/DEPLOY_RAILWAY.md**](server/DEPLOY_RAILWAY.md) · Médias : [**server/media-worker/DEPLOY_RAILWAY.md**](server/media-worker/DEPLOY_RAILWAY.md) |
 | **VPS Hetzner** (ou autre VPS) | Docker maison, script de déploiement existant, forfait serveur fixe | [**server/DEPLOY_HETZNER.md**](server/DEPLOY_HETZNER.md) |
 
-Les deux utilisent le **même** `server/Dockerfile` (image Playwright + Node). Ne pas faire tourner **deux** instances publiques pointées par la même app sans savoir laquelle est canonique.
+Le **PDF** utilise `server/Dockerfile` (Playwright). Le **media worker** utilise `server/media-worker/Dockerfile` (Node + sharp + ffmpeg). **Production Petitmo+** : deux services Railway + secrets Supabase `MEDIA_WORKER_URL` / `MEDIA_WORKER_SECRET`.
 
 ---
 
 ## Après migration (ex. Hetzner → Railway)
 
-1. Déployer le nouveau service et vérifier `GET /health`.
-2. Mettre à jour **`EXPO_PUBLIC_PDF_SERVER_URL`** (`.env` local, EAS secrets, etc.).
-3. Désactiver l’ancien conteneur / VPS pour éviter confusion et coûts doubles.
-4. Checklist smoke test : [`server/PROD_CHECKLIST.md`](server/PROD_CHECKLIST.md) (adapter l’URL au fournisseur choisi).
+1. Déployer le nouveau service PDF et vérifier `GET /health`.
+2. Déployer le **media worker** (`server/media-worker/`) et vérifier son `GET /health`.
+3. Mettre à jour **`EXPO_PUBLIC_PDF_SERVER_URL`** (`.env` local, EAS secrets, etc.).
+4. Mettre à jour **Supabase Edge Functions secrets** : `MEDIA_WORKER_URL`, `MEDIA_WORKER_SECRET`.
+5. Désactiver l’ancien conteneur / VPS / tunnel ngrok pour éviter confusion.
+6. Checklist smoke test : [`server/PROD_CHECKLIST.md`](server/PROD_CHECKLIST.md) (adapter l’URL au fournisseur choisi).
 
 ---
 

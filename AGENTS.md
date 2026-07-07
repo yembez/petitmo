@@ -140,6 +140,7 @@ Aucune autre écriture cloud n'est permise en gratuit. Pas de "petite sync genti
 | Limites plan gratuit (souvenirs, audio, vidéo) | [`lib/limits.ts`](lib/limits.ts) |
 | Capture 100% locale (gratuit) | [`services/localOnlyMemoryCapture.ts`](services/localOnlyMemoryCapture.ts) |
 | Garde-fou livre gratuit + erreur upgrade | [`services/books.ts`](services/books.ts) |
+| Materialisation cloud → sandbox (Petitmo+) | [`services/memoryCloudMaterialize.ts`](services/memoryCloudMaterialize.ts) |
 | Création device-user Supabase (mécanique technique) | [`app/_layout.tsx`](app/_layout.tsx) |
 | Écran d'accueil | [`app/onboarding.tsx`](app/onboarding.tsx) |
 | Paywall (contexte hero, `GENERAL` / `LIMIT_REACHED`…) | [`app/paywall.tsx`](app/paywall.tsx) |
@@ -170,11 +171,13 @@ L’aperçu in-app (`MaquetteBookPages.tsx`) et le PDF serveur (`htmlBook.ts`) p
 
 ### Local-first universel (gratuit et Petitmo+)
 
-- **Affichage** : SQLite + sandbox — jamais un `supabase.from(...).select` direct dans un composant UI.
+- **Affichage** : SQLite + sandbox — jamais un `supabase.from(...).select` direct dans un composant UI — **y compris aperçu livre / maquette in-app** (`app/book-preview.tsx`, `MaquetteBookPages.tsx`).
+- **Cycle Petitmo+** : hydratation cloud → merge SQLite → **materialisation sandbox** (`services/memoryCloudMaterialize.ts`) → affichage 100 % local ; repli URL signée **uniquement pendant** la materialisation ou hors ligne.
 - **Cloud** : sync / pull / upload **en arrière-plan** ; merge via `mergeServerMemoryRowWithExistingLocal`.
 - **Bascule gratuit → payant** : données locales visibles tout de suite ; `upgradeToFullCloud` + `flushPendingCloudUploadsOnce` sans bloquer la navigation.
-- **Repli cloud** : seulement si local confirmé absent (fichier mort, réinstall, nouveau téléphone en restauration).
-- Référence : [`docs/specs/architecture-locale-cloud.md`](docs/specs/architecture-locale-cloud.md) §1.3, [`.cursor/rules/local-first-media.mdc`](.cursor/rules/local-first-media.mdc).
+- **Repli cloud** : transitoire (materialisation en cours) ou si cloud injoignable — **pas** comme état stable d’un souvenir hydraté.
+- **Aperçu livre ≠ export PDF** : la maquette in-app reste local-first ; l’export serveur (`bookPdfServer.ts`) envoie un payload séparé — voir §1.3.1 dans la spec architecture.
+- Référence : [`docs/specs/architecture-locale-cloud.md`](docs/specs/architecture-locale-cloud.md) §1.3–1.3.3, [`.cursor/rules/local-first-media.mdc`](.cursor/rules/local-first-media.mdc).
 
 ---
 

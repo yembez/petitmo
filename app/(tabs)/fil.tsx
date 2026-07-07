@@ -87,12 +87,8 @@ function FilScreen() {
     onFeedScrollBegin,
     onFeedScrollIdle,
   } = useFeedVideoAutoplay(onPrefetchViewable);
-  const feedViewabilityConfig = useMemo(
-    () => ({ itemVisiblePercentThreshold: 55, minimumViewTime: 120 }),
-    [],
-  );
   const feedViewabilityPairs = useStableViewabilityPairs(
-    feedViewabilityConfig,
+    { itemVisiblePercentThreshold: 50 },
     onViewableItemsChanged,
   );
   const onFeedHeaderChildPress = useCallback(
@@ -167,9 +163,14 @@ function FilScreen() {
     () => [styles.scrollContent, { paddingBottom: listBottomPad }],
     [listBottomPad],
   );
-  const onFeedScroll = useCallback((e: { nativeEvent: { contentOffset: { y: number } } }) => {
-    feedScrollOffsetRef.current = e.nativeEvent.contentOffset.y;
-  }, []);
+  const onFeedScroll = useCallback(
+    (e: { nativeEvent: { contentOffset: { y: number } } }) => {
+      feedScrollOffsetRef.current = e.nativeEvent.contentOffset.y;
+      onFeedScrollBegin();
+      onFeedScrollIdle();
+    },
+    [onFeedScrollBegin, onFeedScrollIdle],
+  );
   const keyExtractor = useCallback(
     (item: FeedListItem) =>
       item.rowKind === 'pending'
@@ -300,9 +301,6 @@ function FilScreen() {
           CellRendererComponent={renderFilListCell}
           viewabilityConfigCallbackPairs={feedViewabilityPairs}
           onScroll={onFeedScroll}
-          onScrollBeginDrag={onFeedScrollBegin}
-          onScrollEndDrag={onFeedScrollIdle}
-          onMomentumScrollEnd={onFeedScrollIdle}
           scrollEventThrottle={16}
           onContentSizeChange={onFeedContentSizeChange}
           bounces={false}
@@ -324,17 +322,22 @@ function FilScreen() {
             ) : null
           }
           removeClippedSubviews={false}
-          {...(pendingUploads.length > 0
-            ? {
-                maintainVisibleContentPosition: {
-                  minIndexForVisible: 0,
-                  autoscrollToTopThreshold: Math.round(verticalScale(80)),
-                },
-              }
-            : {})}
+          // Ancre le contenu visible quand des cellules au-dessus du viewport se re-mesurent
+          // (virtualisation, hauteurs variables sans getItemLayout) : sans ça, chaque re-mesure
+          // décale tout le fil → sauts/flashs pendant le scroll, y compris « avant d'arriver »
+          // sur une vidéo. L'autoscroll top reste réservé aux uploads en cours.
+          maintainVisibleContentPosition={{
+            minIndexForVisible: 0,
+            ...(pendingUploads.length > 0
+              ? { autoscrollToTopThreshold: Math.round(verticalScale(80)) }
+              : {}),
+          }}
           initialNumToRender={6}
-          maxToRenderPerBatch={8}
-          windowSize={11}
+          // Lots plus petits + fenêtre plus étroite : chaque FilMemoryRow est lourd (Swipeable,
+          // mosaïque, overlays, éventuel <Video>) — monter 4 lignes d'un coup gelait le JS pendant le scroll.
+          maxToRenderPerBatch={2}
+          updateCellsBatchingPeriod={40}
+          windowSize={7}
         />
       </View>
       {timingNudge && (

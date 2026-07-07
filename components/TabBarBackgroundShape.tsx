@@ -6,16 +6,17 @@ import {
   TAB_BAR_CONTAINER_BORDER,
   TAB_BAR_CORNER_RADIUS,
 } from '@/constants/tabBarLayout';
-import { scale } from '@/utils/responsive';
+
+const CIRCLE_KAPPA = 0.5522847498;
 
 type Props = {
   width: number;
   height: number;
-  showCenterWave: boolean;
-  /** Largeur horizontale de la vague (bords plats en dehors). */
-  waveWidth: number;
-  /** Hauteur de la montée centrale — douce, pas une bosse. */
-  waveRise: number;
+  showCenterDip: boolean;
+  /** Demi-largeur horizontale de l’encoche (rayon disque + marge). */
+  notchRadius: number;
+  /** Profondeur verticale du fond de l’encoche (peut être < notchRadius). */
+  notchDepth: number;
 };
 
 /** Rectangle pleine largeur ; bords latéraux droits (r = 0). */
@@ -39,55 +40,49 @@ function buildFlatRectPath(width: number, height: number, r: number): string {
 }
 
 /**
- * Bandeau bord à bord, bord supérieur quasi plat ;
- * au centre, deux cubiques symétriques (tangentes horizontales).
+ * Encoche elliptique concentrique au CTA : largeur = 2×notchRadius, profondeur = notchDepth.
+ * Cubiques κ → tangente horizontale, courbe douce autour du disque.
  */
 function buildTabBarPath(
   width: number,
   height: number,
   cornerRadius: number,
-  showCenterWave: boolean,
-  waveWidth: number,
-  waveRise: number,
+  showCenterDip: boolean,
+  notchRadius: number,
+  notchDepth: number,
 ): string {
   const r = Math.min(cornerRadius, width / 2, height / 2);
   const cx = width / 2;
+  const depth = Math.max(0, Math.min(notchDepth, notchRadius));
 
-  if (!showCenterWave || waveRise <= 0 || waveWidth <= 0) {
+  if (!showCenterDip || notchRadius <= 0 || depth <= 0) {
     return buildFlatRectPath(width, height, r);
   }
 
-  const halfWave = waveWidth / 2;
-  const waveInset = scale(6);
-  const waveLeft = Math.max(r + waveInset, cx - halfWave);
-  const waveRight = Math.min(width - r - waveInset, cx + halfWave);
+  const notchLeft = Math.max(r, cx - notchRadius);
+  const notchRight = Math.min(width - r, cx + notchRadius);
 
-  if (waveRight - waveLeft < waveWidth * 0.4) {
+  if (notchRight - notchLeft <= 0) {
     return buildFlatRectPath(width, height, r);
   }
 
-  const span = waveRight - waveLeft;
-  const handle = span * 0.38;
+  const kx = notchRadius * CIRCLE_KAPPA;
+  const ky = depth * CIRCLE_KAPPA;
+
+  const topEdge = [
+    `M ${r > 0 ? r : 0} 0`,
+    `H ${notchLeft}`,
+    `C ${notchLeft + kx} 0 ${cx - kx} ${depth} ${cx} ${depth}`,
+    `C ${cx + kx} ${depth} ${notchRight - kx} 0 ${notchRight} 0`,
+    `H ${width - r}`,
+  ];
 
   if (r <= 0) {
-    return [
-      `M 0 0`,
-      `H ${waveLeft}`,
-      `C ${waveLeft + handle * 0.4} 0 ${cx - handle * 0.62} ${-waveRise} ${cx} ${-waveRise}`,
-      `C ${cx + handle * 0.62} ${-waveRise} ${waveRight - handle * 0.4} 0 ${waveRight} 0`,
-      `H ${width}`,
-      `V ${height}`,
-      `H 0`,
-      'Z',
-    ].join(' ');
+    return [...topEdge, `V ${height}`, `H 0`, 'Z'].join(' ');
   }
 
   return [
-    `M ${r} 0`,
-    `H ${waveLeft}`,
-    `C ${waveLeft + handle * 0.4} 0 ${cx - handle * 0.62} ${-waveRise} ${cx} ${-waveRise}`,
-    `C ${cx + handle * 0.62} ${-waveRise} ${waveRight - handle * 0.4} 0 ${waveRight} 0`,
-    `H ${width - r}`,
+    ...topEdge,
     `A ${r} ${r} 0 0 1 ${width} ${r}`,
     `V ${height - r}`,
     `A ${r} ${r} 0 0 1 ${width - r} ${height}`,
@@ -102,9 +97,9 @@ function buildTabBarPath(
 export default function TabBarBackgroundShape({
   width,
   height,
-  showCenterWave,
-  waveWidth,
-  waveRise,
+  showCenterDip,
+  notchRadius,
+  notchDepth,
 }: Props) {
   const path = useMemo(
     () =>
@@ -112,30 +107,27 @@ export default function TabBarBackgroundShape({
         width,
         height,
         TAB_BAR_CORNER_RADIUS,
-        showCenterWave,
-        waveWidth,
-        waveRise,
+        showCenterDip,
+        notchRadius,
+        notchDepth,
       ),
-    [width, height, showCenterWave, waveWidth, waveRise],
+    [width, height, showCenterDip, notchRadius, notchDepth],
   );
 
   if (width <= 0 || height <= 0) return null;
-
-  const crestPadding = showCenterWave ? waveRise : 0;
-  const svgHeight = height + crestPadding;
 
   return (
     <Svg
       pointerEvents="none"
       width={width}
-      height={svgHeight}
-      viewBox={`0 ${-crestPadding} ${width} ${svgHeight}`}
+      height={height}
+      viewBox={`0 0 ${width} ${height}`}
       style={{
         position: 'absolute',
         left: 0,
-        top: crestPadding > 0 ? -crestPadding : 0,
+        top: 0,
         width,
-        height: svgHeight,
+        height,
         zIndex: 0,
       }}
     >
@@ -148,4 +140,9 @@ export default function TabBarBackgroundShape({
       />
     </Svg>
   );
+}
+
+/** Demi-largeur horizontale = rayon disque + marge autour du CTA. */
+export function captureTabNotchRadius(discRadius: number, gap: number): number {
+  return discRadius + gap;
 }

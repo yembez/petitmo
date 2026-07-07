@@ -4,6 +4,7 @@ import * as FileSystem from 'expo-file-system';
 import {
   copyAsync,
   documentDirectory,
+  downloadAsync,
   getInfoAsync,
   makeDirectoryAsync,
 } from 'expo-file-system/legacy';
@@ -20,6 +21,7 @@ import {
   persistOriginalToSandbox,
   scheduleLocalPhotoHeavyDerivatives,
   scheduleLocalVoiceCoverPrintDerivative,
+  awaitVideoPosterForBookMemory,
 } from '@/services/memoryLocalStore';
 import {
   mergeServerMemoryRowWithExistingLocal,
@@ -30,6 +32,10 @@ import {
   pullFamilyMemoriesFromRemoteToLocal,
   pullMemoriesFromRemoteToLocal,
 } from '@/services/memoriesLocalSync';
+import {
+  downloadCloudOriginalToSandbox,
+  materializeCloudMediaToSandboxForMemory,
+} from '@/services/memoryCloudMaterialize';
 import {
   checkMemoryLimit,
   checkVideoLimit,
@@ -65,12 +71,19 @@ import {
   upsertLocalMemory,
 } from '@/lib/localDb';
 import { captureMemoryLocalOnly, capturePhotoAlbumLocalOnly } from '@/services/localOnlyMemoryCapture';
-import { getSignedUrlAfterMediaUpload } from '@/lib/mediaSignedUrl';
 import {
+  extractMediaBucketPath,
+  getSignedUrlAfterMediaUpload,
+  getSignedMediaDisplayUrl,
+} from '@/lib/mediaSignedUrl';
+import {
+  collectPhotoLocalUploadUriCandidates,
   collectVoiceCoverLocalUploadUriCandidates,
   collectVideoCloudSyncUriCandidates,
   collectVideoPosterLocalUploadUriCandidates,
   getAlbumCanonicalFavoriteUrls,
+  getVideoPosterUriForBookPreview,
+  getVoiceCoverUriForBookPreview,
   isFeedMultiPhotoAlbum,
 } from '@/utils/memoryPhotos';
 import {
@@ -453,6 +466,184 @@ export async function uploadVoiceCoverToSupabaseFromLocal(
 const processMemoryLastInvoke = new Map<string, number>();
 /** Anti-spam par souvenir ; assez court pour ne pas bloquer les retries après backfill parallèle. */
 const PROCESS_MEMORY_THROTTLE_MS = 3500;
+const processMemoryDeviceFallbackInFlight = new Set<string>();
+
+function isProcessMemoryWorkerUnreachable(status: number | undefined, body: string): boolean {
+  if (status === 404 || status === 502 || status === 503) return true;
+  if (/<!DOCTYPE html/i.test(body)) return true;
+  if (/ngrok/i.test(body)) return true;
+  if (/Worker not configured|Media worker unreachable/i.test(body)) return true;
+  return false;
+}
+
+function logProcessMemoryDeviceFallbackFailed(
+  memoryId: string,
+  row: Memory,
+  reason: string,
+): void {
+  console.warn('[media] process-memory device fallback failed', memoryId, {
+    type: row.type,
+    reason,
+    hasMediaPath: !!(row.media_path ?? '').trim(),
+    hasLocalOriginal: !!(row.local_original_path ?? '').trim(),
+  });
+}
+
+/**
+ * Repli Petitmo+ quand le media worker distant est injoignable (ngrok expiré, Railway down…).
+ * Génère thumb/display/poster/cover depuis le sandbox local et pousse vers Storage + `memories`.
+ */
+async function processMemoryDerivativesOnDeviceFallback(memoryId: string): Promise<boolean> {
+  if (Platform.OS === 'web') return false;
+  const id = memoryId.trim();
+  if (!id || processMemoryDeviceFallbackInFlight.has(id)) return false;
+  processMemoryDeviceFallbackInFlight.add(id);
+
+  try {
+    let row = getLocalMemoryById(id) as Memory | null;
+    if (!row) {
+      row = (await getMemoryById(id)) as Memory | null;
+    }
+    if (!row) return false;
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      logProcessMemoryDeviceFallbackFailed(id, row, 'no_auth_user');
+      return false;
+    }
+
+    if (row.type === 'photo') {
+      const hasThumb = !!(row.thumb_url ?? '').trim();
+      const hasDisplay = !!(row.display_url ?? '').trim();
+      if (hasThumb && hasDisplay) return true;
+
+      let localOriginal = await pickFirstReadableLocalMediaUri(
+        collectPhotoLocalUploadUriCandidates(row),
+      );
+      if (!localOriginal) {
+        localOriginal = await downloadCloudOriginalToSandbox(row, 'photo');
+      }
+      if (!localOriginal) {
+        logProcessMemoryDeviceFallbackFailed(id, row, 'no_readable_photo_source');
+        return false;
+      }
+
+      const d = await ensureLocalPhotoDerivatives({
+        memoryId: id,
+        localOriginalUri: localOriginal,
+      });
+
+      const baseDir = `${user.id}/${row.child_id}/derived/${id}`;
+      const patch: Record<string, string> = {};
+      const localPatch: Partial<Memory> = {
+        local_thumb_path: d.localThumbUri ?? row.local_thumb_path,
+        local_display_path: d.localDisplayUri ?? row.local_display_path,
+        local_print_path: d.localPrintUri ?? row.local_print_path,
+        print_px_w: d.printPx?.w ?? row.print_px_w,
+        print_px_h: d.printPx?.h ?? row.print_px_h,
+      };
+
+      if (!hasThumb && d.localThumbUri) {
+        const url = await uploadFileToSupabase(d.localThumbUri, `${baseDir}/thumb.jpg`, {
+          upsert: true,
+        });
+        patch.thumb_url = url;
+        localPatch.thumb_url = url;
+      }
+      if (!hasDisplay && d.localDisplayUri) {
+        const url = await uploadFileToSupabase(d.localDisplayUri, `${baseDir}/display.jpg`, {
+          upsert: true,
+        });
+        patch.display_url = url;
+        localPatch.display_url = url;
+      }
+      if (!(row.print_url ?? '').trim() && d.localPrintUri) {
+        const url = await uploadFileToSupabase(d.localPrintUri, `${baseDir}/print.jpg`, {
+          upsert: true,
+        });
+        patch.print_url = url;
+        localPatch.print_url = url;
+      }
+
+      if (Object.keys(patch).length === 0) {
+        logProcessMemoryDeviceFallbackFailed(id, row, 'photo_derivatives_empty');
+        return false;
+      }
+
+      const updatedAt = new Date().toISOString();
+      patch.updated_at = updatedAt;
+      const { error } = await supabase.from('memories').update(patch).eq('id', id);
+      if (error) {
+        console.warn('[media] process-memory device fallback photo', id, error);
+        return false;
+      }
+      upsertLocalMemory({ ...row, ...localPatch, updated_at: updatedAt });
+      DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId: id });
+      return true;
+    }
+
+    if (row.type === 'video') {
+      const hasPoster =
+        !!(row.poster_url ?? '').trim() || !!(row.thumbnail_url ?? '').trim();
+      if (hasPoster) return true;
+
+      let refreshed = await awaitVideoPosterForBookMemory(id);
+      let base = refreshed ?? row;
+      let posterUri = getVideoPosterUriForBookPreview(base).trim();
+
+      if (!posterUri || /^https?:\/\//i.test(posterUri)) {
+        const localVideo = await downloadCloudOriginalToSandbox(row, 'video');
+        if (localVideo) {
+          refreshed = await awaitVideoPosterForBookMemory(id);
+          base = refreshed ?? getLocalMemoryById(id) ?? row;
+          posterUri = getVideoPosterUriForBookPreview(base).trim();
+        }
+      }
+
+      if (!posterUri || /^https?:\/\//i.test(posterUri)) {
+        logProcessMemoryDeviceFallbackFailed(id, row, 'no_local_video_poster');
+        return hasPoster;
+      }
+      const url = await persistVideoPosterToCloudForPdfExport(id, row.child_id, posterUri, {
+        retriggerProcessMemory: false,
+      });
+      if (!url) {
+        logProcessMemoryDeviceFallbackFailed(id, row, 'video_poster_upload_failed');
+      }
+      return !!url;
+    }
+
+    if (row.type === 'voice') {
+      const coverPath = (row.voice_cover_path ?? '').trim();
+      if (!coverPath) return true; // cover optionnelle — rien à dériver
+
+      const hasCover = !!(row.voice_cover_url ?? '').trim();
+      if (hasCover) return true;
+      const coverUri = getVoiceCoverUriForBookPreview(row).trim();
+      if (!coverUri || /^https?:\/\//i.test(coverUri)) {
+        logProcessMemoryDeviceFallbackFailed(id, row, 'no_local_voice_cover');
+        return false;
+      }
+      const url = await persistVoiceCoverToCloudForPdfExport(id, row.child_id, coverUri, {
+        retriggerProcessMemory: false,
+      });
+      if (!url) {
+        logProcessMemoryDeviceFallbackFailed(id, row, 'voice_cover_upload_failed');
+      }
+      return !!url;
+    }
+
+    logProcessMemoryDeviceFallbackFailed(id, row, `unsupported_type_${row.type}`);
+    return false;
+  } catch (e) {
+    console.warn('[media] process-memory device fallback exception', memoryId, e);
+    return false;
+  } finally {
+    processMemoryDeviceFallbackInFlight.delete(id);
+  }
+}
 
 function functionsHttpErrorStatus(error: unknown): number | undefined {
   if (!error || typeof error !== 'object') return undefined;
@@ -485,8 +676,21 @@ async function triggerProcessMemory(memoryId: string): Promise<void> {
     if (error) {
       const status = functionsHttpErrorStatus(error);
       const body = await functionsHttpErrorBodyPreview(error);
+      const workerDown = isProcessMemoryWorkerUnreachable(status, body);
+      if (workerDown) {
+        const ok = await processMemoryDerivativesOnDeviceFallback(memoryId);
+        if (ok) {
+          console.warn(
+            '[media] process-memory worker injoignable → dérivés générés sur l’appareil',
+            memoryId,
+          );
+          return;
+        }
+      }
       const hint =
-        status === 500 && /Worker not configured|worker/i.test(body)
+        workerDown
+          ? ' → media worker injoignable (MEDIA_WORKER_URL / ngrok ?) ; fallback appareil échoué aussi'
+          : status === 500 && /Worker not configured|worker/i.test(body)
           ? ' → vérifier secrets Supabase MEDIA_WORKER_URL + MEDIA_WORKER_SECRET'
           : body.includes('UNAUTHORIZED_UNSUPPORTED_TOKEN_ALGORITHM')
             ? ' → JWT ES256: supabase/config.toml verify_jwt = false sur la function puis supabase functions deploy'
@@ -515,6 +719,13 @@ async function triggerProcessMemory(memoryId: string): Promise<void> {
  * Le fil n’affiche pas `media_url` : sans dérivés, l’utilisateur voit un placeholder alors que Favoris
  * pouvait encore retomber sur l’original via `thumbUri`.
  */
+/**
+ * Souvenirs pour lesquels le worker a déjà été sollicité cette session : chaque reload silencieux
+ * du fil re-déclenchait `process-memory` pour les mêmes souvenirs (ex. ancienne vidéo sans poster
+ * que le worker ne complète jamais) → appels cloud en boucle pendant le scroll.
+ */
+const derivativesRequestedThisSession = new Set<string>();
+
 export async function requestMissingMediaDerivatives(
   rows: MemoryRow[],
   options?: { max?: number; batchSize?: number }
@@ -526,6 +737,7 @@ export async function requestMissingMediaDerivatives(
   const ids: string[] = [];
 
   for (const m of rows) {
+    if (derivativesRequestedThisSession.has(m.id)) continue;
     const path = (m.media_path ?? '').trim();
     if (!path) continue;
 
@@ -541,14 +753,18 @@ export async function requestMissingMediaDerivatives(
       continue;
     }
     if (m.type === 'voice') {
-      const hasCover = !!(m.voice_cover_url ?? '').trim();
-      if (!hasCover) ids.push(m.id);
+      // Cover audio **optionnelle** — ne pas appeler le worker si aucune image n’a été ajoutée.
+      const coverPath = (m.voice_cover_path ?? '').trim();
+      const hasCoverUrl = !!(m.voice_cover_url ?? '').trim();
+      if (coverPath && !hasCoverUrl) ids.push(m.id);
+      continue;
     }
   }
 
   const slice = ids.slice(0, max);
   for (let i = 0; i < slice.length; i += batchSize) {
     const batch = slice.slice(i, i + batchSize);
+    for (const id of batch) derivativesRequestedThisSession.add(id);
     await Promise.all(batch.map(id => triggerProcessMemory(id)));
   }
 }
@@ -2074,6 +2290,7 @@ export async function getMemoryById(memoryId: string) {
       sync_status: 'synced',
     };
     upsertLocalMemory(merged);
+    void materializeCloudMediaToSandboxForMemory(id);
     return merged;
   } catch (error) {
     console.error('getMemoryById error:', error);
@@ -2387,7 +2604,8 @@ export async function deleteMemory(memoryId: string) {
 export async function persistVoiceCoverToCloudForPdfExport(
   memoryId: string,
   childId: string,
-  localCoverUri: string
+  localCoverUri: string,
+  opts?: { retriggerProcessMemory?: boolean },
 ): Promise<string | null> {
   try {
     const {
@@ -2423,7 +2641,9 @@ export async function persistVoiceCoverToCloudForPdfExport(
         updated_at: new Date().toISOString(),
       });
     }
-    void triggerProcessMemory(memoryId);
+    if (opts?.retriggerProcessMemory !== false) {
+      void triggerProcessMemory(memoryId);
+    }
     return up.publicUrl;
   } catch (e) {
     console.error('persistVoiceCoverToCloudForPdfExport', e);
@@ -2439,6 +2659,7 @@ export async function persistVideoPosterToCloudForPdfExport(
   memoryId: string,
   childId: string,
   localPosterUri: string,
+  opts?: { retriggerProcessMemory?: boolean },
 ): Promise<string | null> {
   try {
     const {
@@ -2503,7 +2724,9 @@ export async function persistVideoPosterToCloudForPdfExport(
         updated_at: new Date().toISOString(),
       });
     }
-    void triggerProcessMemory(memoryId);
+    if (opts?.retriggerProcessMemory !== false) {
+      void triggerProcessMemory(memoryId);
+    }
     return publicUrl;
   } catch (e) {
     console.error('persistVideoPosterToCloudForPdfExport', e);

@@ -1,98 +1,49 @@
-import { useLayoutEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Memory } from '@/types/local';
-import { getVideoPosterUriForFeedAndViewer, normalizeMemoryMediaUriForDisplay } from '@/utils/memoryPhotos';
+import { peekFeedVideoPosterStableCache } from '@/hooks/feedVideoPosterStableCache';
 import {
-  isCloudMediaReference,
-  isLocalMediaUriReadable,
-  isProbablyStalePetitmoSandboxPath,
-} from '@/utils/localMediaReadable';
-import {
-  extractMediaBucketPath,
-  getSignedMediaDisplayUrl,
-  peekSignedMediaDisplayUrl,
-  useSignedMediaUrl,
-} from '@/lib/mediaSignedUrl';
+  peekSyncFeedVideoPosterDisplayUri,
+  resolveFeedVideoPosterDisplayUri,
+} from '@/utils/feedVideoPosterUri';
 
-function isHttpUrl(u: string): boolean {
-  return /^https?:\/\//i.test(u.trim());
-}
-
-function isLikelyDeviceLocalAsset(u: string): boolean {
-  const t = u.trim();
-  if (!t || isHttpUrl(t) || t.startsWith('data:')) return false;
-  return (
-    t.startsWith('file:') ||
-    t.startsWith('content:') ||
-    t.startsWith('ph://') ||
-    t.startsWith('assets-library://') ||
-    t.startsWith('/')
-  );
-}
-
-function remoteVideoPosterCandidates(memory: Memory): string {
-  return [memory.poster_print_url, memory.poster_url, memory.thumbnail_url]
-    .map(u => (u ?? '').trim())
-    .find(Boolean) ?? '';
-}
-
-async function resolveFeedPosterRemoteUrl(remote: string): Promise<string> {
-  const r = remote.trim();
-  if (!r || isLikelyDeviceLocalAsset(r)) return r;
-  if (isHttpUrl(r) || extractMediaBucketPath(r)) {
-    return getSignedMediaDisplayUrl(r);
-  }
-  return r;
-}
-
-async function maybeSwapDeadSandboxForCloud(raw: string, cloudFallback: string): Promise<string> {
-  const t = raw.trim();
-  const cloud = cloudFallback.trim();
-  if (!t || !isLikelyDeviceLocalAsset(t)) return t;
-  if (!isProbablyStalePetitmoSandboxPath(t)) return t;
-  if (await isLocalMediaUriReadable(t)) return t;
-  if (cloud && isCloudMediaReference(cloud)) return cloud;
-  return t;
-}
-
-function initialPosterUri(memory: Memory, remote: string): string {
-  const cached = remote ? peekSignedMediaDisplayUrl(remote) : null;
-  if (cached?.trim()) return cached.trim();
-  const sync = getVideoPosterUriForFeedAndViewer(memory).trim();
-  if (sync) return sync;
-  return remote.trim();
+function stickyPosterUri(prev: string, next: string): string {
+  const n = next.trim();
+  if (n) return n;
+  return prev.trim();
 }
 
 /**
- * Poster vidéo affichable (fil, favoris, viewer) — parité `useFeedPhotoDisplayUrls` :
- * sandbox lisible d’abord, sinon repli cloud signé.
+ * Poster vidéo fil — résolu une fois par souvenir, jamais démonté au scroll.
+ * Chemins sandbox morts (pré-Petitmo+) ignorés ; cache session stable.
  */
 export function useFeedVideoPosterDisplayUrl(memory: Memory): string {
-  const remote = remoteVideoPosterCandidates(memory);
-  const syncRaw = getVideoPosterUriForFeedAndViewer(memory);
+  const [uri, setUri] = useState(() => peekSyncFeedVideoPosterDisplayUri(memory));
 
-  const [resolved, setResolved] = useState(() => initialPosterUri(memory, remote));
+  useEffect(() => {
+    if (memory.type !== 'video') {
+      setUri('');
+      return;
+    }
 
-  useLayoutEffect(() => {
-    if (memory.type !== 'video') return;
-    let cancelled = false;
+    const cached = peekFeedVideoPosterStableCache(memory.id);
+    if (cached) {
+      setUri(prev => stickyPosterUri(prev, cached));
+      return;
+    }
+
+    let alive = true;
     void (async () => {
-      const swapped = await maybeSwapDeadSandboxForCloud(syncRaw, remote);
-      const picked = (swapped.trim() || remote.trim()).trim();
-      if (!picked) return;
-      const signed = await resolveFeedPosterRemoteUrl(picked);
-      if (!cancelled && signed.trim()) {
-        setResolved(prev => (prev === signed.trim() ? prev : signed.trim()));
-      }
+      const resolved = await resolveFeedVideoPosterDisplayUri(memory);
+      if (!alive || !resolved.trim()) return;
+      setUri(prev => stickyPosterUri(prev, resolved));
     })();
+
     return () => {
-      cancelled = true;
+      alive = false;
     };
-  }, [memory.id, memory.type, memory.updated_at, syncRaw, remote]);
+  }, [memory.id, memory.type]);
 
-  const hookSigned = useSignedMediaUrl(
-    memory.type === 'video' && (resolved || remote) ? resolved || remote : null,
-  );
-
-  const raw = (hookSigned ?? resolved ?? remote).trim();
-  return raw ? normalizeMemoryMediaUriForDisplay(raw) : '';
+  if (memory.type !== 'video') return '';
+  const cachedLive = peekFeedVideoPosterStableCache(memory.id);
+  return uri.trim() || (cachedLive?.trim() ?? '');
 }

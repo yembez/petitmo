@@ -5,13 +5,13 @@ import { THEME } from '@/constants/theme';
 /**
  * Hauteur utile **icône + libellé** (zone onglets au-dessus du remplissage safe area).
  */
-export const TAB_BAR_CONTENT_HEIGHT = verticalScale(26 + 1 + 11);
+export const TAB_BAR_CONTENT_HEIGHT = verticalScale(28 + 3 + 12);
 
-/** Padding au-dessus des onglets (dans le bandeau) — vide en haut, CTA calés vers le bas. */
-export const TAB_BAR_PADDING_TOP = verticalScale(2);
+/** Padding au-dessus des onglets — laisse respirer l’encoche + CTA flottant. */
+export const TAB_BAR_PADDING_TOP = verticalScale(6);
 
 /** Espace sous les libellés dans la zone onglets (au-dessus du bandeau safe). */
-export const TAB_BAR_PADDING_BOTTOM_GAP = verticalScale(2);
+export const TAB_BAR_PADDING_BOTTOM_GAP = verticalScale(4);
 
 /** Fond tab bar — beige écran Capturer (`THEME.tabBarBackground`). */
 export const TAB_BAR_BACKGROUND = THEME.tabBarBackground;
