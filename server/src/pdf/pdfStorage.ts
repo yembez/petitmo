@@ -14,6 +14,8 @@ export type SaveBookPdfParams = {
 export type SaveBookPdfResult = {
   pdfUrlSigned: string;
   pdfStoragePath: string | null;
+  /** Chemin réel dans le bucket (pour Gelato), même si `pdfStoragePath` est null (export temporaire). */
+  uploadedStoragePath: string;
 };
 
 /**
@@ -57,7 +59,26 @@ export async function saveBookPdfAndSign(
   return {
     pdfUrlSigned: signed.signedUrl,
     pdfStoragePath: persistentPath,
+    uploadedStoragePath: storagePath,
   };
+}
+
+/** URL signée longue durée pour téléchargement imprimeur (Gelato). */
+export async function createSignedBooksPdfUrl(
+  supabase: SupabaseClient,
+  storagePath: string,
+  ttlSeconds: number,
+): Promise<string> {
+  const path = storagePath.trim();
+  if (!path) throw new Error('pdf storage path empty');
+  const ttl = Math.max(3600, Math.floor(ttlSeconds));
+  const { data: signed, error: signErr } = await supabase.storage
+    .from('books-pdf')
+    .createSignedUrl(path, ttl);
+  if (signErr || !signed?.signedUrl) {
+    throw new Error(signErr?.message ?? 'sign pdf failed');
+  }
+  return signed.signedUrl;
 }
 
 export type SaveExportRequestPdfParams = {
@@ -112,5 +133,6 @@ export async function saveBookPdfForExportRequest(
   return {
     pdfUrlSigned: signed.signedUrl,
     pdfStoragePath: persistentPath,
+    uploadedStoragePath: storagePath,
   };
 }

@@ -64,8 +64,8 @@ Créer le bucket privé **`qr-media`** (si absent) ; les lignes `qr_links` et `q
 1. Déployer l’Edge Function `init-export` et définir le secret **`EXPORT_PDF_JWT_SECRET`** (identique sur le serveur PDF déployé — Railway, VPS, etc.).
 2. `POST .../functions/v1/init-export` :
    - **`type: "pdf_export"`** : `export_mode` (`digital`|`print`), `book_id`, `email`, `gdpr_consent_at`, `subscription_tier` (`free`|`paid`), `audio_video_page_count`, etc. → réponse `pdfTicket`, `exportRequestId`, `flow: "pdf_export"`.
-   - **`type: "print_order"`** : mêmes champs communs + `export_mode: "print"`, `shipping_name`, `shipping_address_json` (`line1`, `city`, `zip`, `country`, `line2?`), `page_count` (20 \| 40 \| 60), `price_cents`, optionnel `discount_percent` (0 \| 20), `printer_name`. → réponse `exportRequestId`, `flow: "print_order"` (**pas** de `pdfTicket` ; paiement / PDF impression à brancher ensuite).
-3. `POST /v1/books/generate-pdf` avec `Authorization: Bearer <pdfTicket>` (PDF seulement) et payload incluant **`guestChild`**, **`guestMemories`** (souvenirs avec URLs / chemins accessibles au service role), alignés sur `export_requests` (même `bookId`, `exportMode`, `subscriptionTier` free↔premium selon paid).
+   - **`type: "print_order"`** : … → réponse `exportRequestId`, `exportTicket`, `flow: "print_order"`.
+3. `POST /v1/books/generate-pdf` avec `Authorization: Bearer <pdfTicket|exportTicket>` …
 
 ### App — commande livre imprimé
 

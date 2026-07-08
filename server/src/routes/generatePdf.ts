@@ -14,6 +14,7 @@ import {
   signMemoriesMapForPdfRender,
   signUrlForPdfRender,
 } from '../pdf/signSupabaseMediaForPdf';
+import { submitGelatoPrintOrder } from '../gelato/placePrintOrder';
 import type {
   GenerateBookPdfPayload,
   GenerateBookPdfResponse,
@@ -153,17 +154,9 @@ export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient,
       return;
     }
     const userId = userData.user.id;
+    const isPrint = body.exportMode === 'print';
 
-    if (body.exportMode === 'print') {
-      res.status(400).json({
-        error:
-          'Le mode impression (Gelato 210×280 mm + fond perdu 4 mm) n’est pas encore pris en charge sur cette route avec session. Utilise le flux commande imprimé (ticket export_print).',
-        code: 'PRINT_MODE_NOT_SUPPORTED_SESSION',
-      });
-      return;
-    }
-
-    if (body.subscriptionTier === 'free' && !body.digitalExportPaid) {
+    if (!isPrint && body.subscriptionTier === 'free' && !body.digitalExportPaid) {
       res.status(402).json({
         error: 'Export digital : Petitmo+ ou achat à l’acte requis.',
         code: 'EXPORT_PAYMENT_REQUIRED',
@@ -288,7 +281,7 @@ export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient,
         coverYearLabel: body.coverYearLabel,
         chapterTitle: body.chapterTitle,
         qrBaseUrl: body.qrBaseUrl,
-        exportMode: 'digital',
+        exportMode: isPrint ? 'print' : 'digital',
         pages: body.pages,
         child: childForHtml,
         coverPhotoUrl: coverForHtml,
@@ -298,13 +291,15 @@ export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient,
         qrTokensByMemoryId: qrResult.tokensByMemoryId,
       });
 
-      const pdf = await htmlToDigitalPdfBuffer(html, expectedPages);
+      const pdf = isPrint
+        ? await htmlToPdfBuffer(html)
+        : await htmlToDigitalPdfBuffer(html, expectedPages);
       await qrWorkerPromise;
       const saved = await saveBookPdfAndSign(supabase, {
         userId,
         childId,
         bookId: body.bookId,
-        exportMode: 'digital',
+        exportMode: isPrint ? 'print' : 'digital',
         subscriptionTier: body.subscriptionTier,
         pdfBytes: pdf,
       });
@@ -708,6 +703,18 @@ async function handleTicketPrintPdf(
         last_error: null,
       })
       .eq('id', ticket.export_request_id);
+
+    void submitGelatoPrintOrder(supabase, {
+      exportRequestId: ticket.export_request_id,
+      bookId: body.bookId,
+      pdfStoragePath: saved.uploadedStoragePath,
+    }).then(result => {
+      if (!result.ok) {
+        console.error('[generate-pdf] gelato', ticket.export_request_id, result.message);
+      } else if (!result.skipped) {
+        console.log('[generate-pdf] gelato ok', ticket.export_request_id, result.gelatoOrderId);
+      }
+    });
 
     const out: GenerateBookPdfResponse = {
       pdfUrlSigned: saved.pdfUrlSigned,

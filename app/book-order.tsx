@@ -27,6 +27,7 @@ import { initPrintOrderExport } from '@/services/printBookOrder';
 import { fetchCrmPrefillByEmail } from '@/services/crmEdge';
 import {
   generateBookPdfViaServerAsGuest,
+  generateBookPdfWithExportTicket,
   collectMemoriesFromPagesForPdf,
 } from '@/services/bookPdfServer';
 import { BookPdfGeneratingOverlay } from '@/components/BookPdfGeneratingOverlay';
@@ -348,6 +349,19 @@ export default function BookOrderScreen() {
       if (!isInitExportConfigured()) return;
       setSubmitting(true);
       try {
+        const payload = pendingPayload;
+        if (!payload) {
+          setFieldErrors({ submit: 'Aucun aperçu de livre chargé. Repasse par l’aperçu du livre.' });
+          return;
+        }
+
+        void getBookExportPrepIssues({
+          pages: payload.pages,
+          localEdits: payload.localEdits,
+          coverPhotoUrl: payload.coverPhotoUrl,
+          child: payload.child,
+        });
+
         const res = await initPrintOrderExport({
           bookId,
           childLocalId: childId,
@@ -367,37 +381,56 @@ export default function BookOrderScreen() {
           },
           billablePages: Math.min(200, billablePages),
           discountPercent,
-          printerName: null,
+          printerName: 'gelato',
         });
+
+        const subscriptionTierPdf = subscriptionDb === 'paid' ? 'premium' : 'free';
+        const { localUri } = await generateBookPdfWithExportTicket({
+          ...payload,
+          exportMode: 'print',
+          exportTicket: res.exportTicket,
+          subscriptionTier: subscriptionTierPdf,
+        });
+
+        await setBookOrderResultPdfUri(localUri);
         await setLastGuestExportEmail(mail);
+        await clearPendingBookOrderPdfPayload();
         const pricePaid = res.priceCents / 100;
-        // Plan gratuit uniquement : on affiche la finalisation uniquement si au moins 1 AV du livre est encore local/pending.
+
         if (subscriptionDb === 'free') {
-          const payload = pendingPayload;
-          if (payload) {
-            const memories = collectMemoriesFromPagesForPdf(payload.pages, payload.localEdits ?? {});
-            const av = memories.filter(m => m.type === 'voice');
-            const keys = av.map(m => `audio:${m.id}`);
+          const memories = collectMemoriesFromPagesForPdf(payload.pages, payload.localEdits ?? {});
+          const av = memories.filter(m => m.type === 'voice');
+          const keys = av.map(m => `audio:${m.id}`);
 
-            const hasPending = (await getPendingGuestRawUploadsCountForKeys(keys)) > 0;
-            const hasLocalOrMissingCloud = av.some(m => {
-              const local = localUriForAvRawUpload(m);
-              if (local) return true;
-              // Si ce n’est pas local mais pas en https non plus, on ne considère pas “sécurisé”.
-              const main = (m.media_url ?? m.edited_media_url ?? '').trim();
-              return main ? !isHttps(main) : true;
-            });
+          const hasPending = (await getPendingGuestRawUploadsCountForKeys(keys)) > 0;
+          const hasLocalOrMissingCloud = av.some(m => {
+            const local = localUriForAvRawUpload(m);
+            if (local) return true;
+            const main = (m.media_url ?? m.edited_media_url ?? '').trim();
+            return main ? !isHttps(main) : true;
+          });
 
-            if (hasPending || hasLocalOrMissingCloud) {
-              navigateToFinalizeMedia({ pricePaidEuros: pricePaid, emailNorm: mail, exportTicket: res.exportTicket });
-              return;
-            }
+          if (hasPending || hasLocalOrMissingCloud) {
+            navigateToFinalizeMedia({ pricePaidEuros: pricePaid, emailNorm: mail, exportTicket: res.exportTicket });
+            return;
           }
         }
 
         navigateToConfirmation({ pricePaidEuros: pricePaid, emailNorm: mail });
       } catch (e) {
-        setFieldErrors({ submit: e instanceof Error ? e.message : 'Échec de la commande.' });
+        if (e instanceof Error && (e.message === 'PREP_NOT_READY' || e.message.startsWith('PREP_NOT_READY:'))) {
+          setFieldErrors({ submit: 'Préparation des médias en cours. Attends quelques secondes puis réessaie.' });
+        } else if (
+          e instanceof Error &&
+          (e.message.includes('not readable') || e.message.includes('renderAsync'))
+        ) {
+          setFieldErrors({
+            submit:
+              'Une photo du livre est introuvable sur cet appareil. Rouvre l’aperçu du livre, attends quelques secondes, puis réessaie.',
+          });
+        } else {
+          setFieldErrors({ submit: e instanceof Error ? e.message : 'Échec de la commande.' });
+        }
       } finally {
         setSubmitting(false);
       }
@@ -725,7 +758,7 @@ export default function BookOrderScreen() {
         </Pressable>
       </ScrollView>
 
-      <BookPdfGeneratingOverlay visible={submitting && exportMode === 'pdf'} />
+      <BookPdfGeneratingOverlay visible={submitting && (exportMode === 'pdf' || exportMode === 'print')} />
     </KeyboardAvoidingView>
   );
 }

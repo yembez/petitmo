@@ -892,62 +892,37 @@ export type GenerateBookPdfViaGuestInput = GenerateBookPdfServerInput & {
   consent: GuestPdfExportConsent;
 };
 
+export type GenerateBookPdfWithExportTicketInput = GenerateBookPdfServerInput & {
+  exportTicket: string;
+  subscriptionTier: 'free' | 'premium';
+  /** Export PDF numérique gratuit : achat IAP à l’acte. Ignoré pour `print_order`. */
+  digitalExportPaid?: boolean;
+};
+
 /**
- * Export serveur **sans session Supabase** : `init-export` (ticket) puis `generate-pdf` avec médias inline.
- * Exige des URLs **https** pour couverture / photos / vignettes vidéo (Playwright sur Railway).
+ * `generate-pdf` avec un ticket JWT existant (`export_pdf` ou `export_print`).
+ * Upload médias invité + téléchargement PDF local.
  */
-export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaGuestInput): Promise<{
-  localUri: string;
-  response: GenerateBookPdfResponse;
-  init: InitExportPdfResponse;
-}> {
+export async function generateBookPdfWithExportTicket(
+  input: GenerateBookPdfWithExportTicketInput,
+): Promise<{ localUri: string; response: GenerateBookPdfResponse }> {
   const base = pdfServerBaseUrl();
   if (!base) {
     throw new Error('Service PDF non configuré (EXPO_PUBLIC_PDF_SERVER_URL).');
   }
-  if (!isInitExportConfigured()) {
-    throw new Error('init-export indisponible (EXPO_PUBLIC_SUPABASE_URL / ANON_KEY).');
+
+  const pdfTicket = input.exportTicket.trim();
+  if (!pdfTicket) {
+    throw new Error('Ticket export manquant.');
   }
 
-  const { subscriptionTier, digitalExportPaid } = await resolveServerPdfEntitlements();
-  if (subscriptionTier === 'free' && !digitalExportPaid) {
-    throw new Error('EXPORT_PAYMENT_REQUIRED');
-  }
-
-  const subscriptionTierInit = subscriptionTier === 'premium' || digitalExportPaid ? 'paid' : 'free';
-  const avCount = countAudioVideoPages(input.pages);
+  const { subscriptionTier, digitalExportPaid = false } = input;
   const memories = collectMemoriesFromPagesForPdf(input.pages, input.localEdits);
 
-  const email = input.consent.email.trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    throw new Error('Adresse e-mail invalide.');
-  }
-
-  const init = await callInitExportPdf({
-    type: 'pdf_export',
-    export_mode: input.exportMode === 'print' ? 'print' : 'digital',
-    book_id: input.bookId,
-    child_local_id: input.childId,
-    subscription_tier: subscriptionTierInit,
-    audio_video_page_count: avCount,
-    email,
-    gdpr_consent_at: input.consent.gdprConsentAtIso,
-    full_name: input.consent.fullName ?? null,
-    marketing_opt_in: input.consent.marketingOptIn === true,
-  });
-
-  const pdfTicket = init.pdfTicket;
-  if (!pdfTicket) {
-    throw new Error('Réponse init-export invalide (ticket manquant).');
-  }
-
-  // Cover: si locale, upload direct Supabase (`media`) via signed URL et injecter l'URL de lecture signée.
   let coverPhotoUrlOut: string | null = input.coverPhotoUrl ?? null;
   const coverLocal = (coverPhotoUrlOut ?? '').trim();
   if (coverLocal && !isHttps(coverLocal) && Platform.OS !== 'web') {
     try {
-      // Cover = page la plus exposée à l'impression : on privilégie la source la plus haute
-      // résolution disponible (original/print) et on garde le display (basse réso) en dernier recours.
       const coverHighRes: string[] = [coverLocal];
       for (const m of memories) {
         if (m.type !== 'photo') continue;
@@ -960,7 +935,6 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
       const coverCandidates = [...coverHighRes, ...coverFallback].filter(u => u.trim().length > 0);
       const readableCover = await pickFirstReadableLocalMediaUri(coverCandidates);
       if (!readableCover) throw new Error('COVER_NOT_READABLE');
-      // Pleine définition livre (3200 px ≈ 370 DPI sur cover 210 mm), pas la compression photo (1600 px).
       const compressedCover = await compressLocalJpegForGuestUpload(readableCover, {
         maxWidth: MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH,
         quality: 0.9,
@@ -973,20 +947,15 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
       });
       coverPhotoUrlOut = readUrl;
     } catch {
-      // fallback: pas de cover (placeholder)
       coverPhotoUrlOut = null;
     }
   }
 
-  // Guest: si des photos sont encore locales, on les uploade via le serveur PDF (ticket) puis on remplace les URLs.
-  // Cela évite de dépendre d'une session Supabase pour obtenir des URLs https.
   const guestMemories = await Promise.all(
     memories.map(async m => {
       const merged = m.type === 'voice' ? mergeMemoryWithLocalRowForVoiceCover(m) : m;
       const g = memoryToGuestPayload(merged);
       if (merged.type === 'voice') {
-        // PDF immédiat : pas d’upload du fichier audio avant generate-pdf.
-        // Photo de fond vocal (voice_cover) : même besoin que la vignette vidéo — petite image HTTPS pour Playwright.
         const coverUri = getVoiceCoverUriForBookPreview(merged).trim();
         let voiceCoverUrl: string | null = httpsOrNull(merged.voice_cover_url);
         if (
@@ -1016,13 +985,12 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
         return { ...g, voice_cover_url: voiceCoverUrl };
       }
       if (m.type === 'video') {
-        const merged = mergeMemoryWithLocalRowForVideoPoster(m);
-        const local = (merged.local_original_path ?? merged.local_media_path ?? '').trim();
+        const mergedVideo = mergeMemoryWithLocalRowForVideoPoster(m);
+        const local = (mergedVideo.local_original_path ?? mergedVideo.local_media_path ?? '').trim();
 
-        // Thumbnail: générer si absent, puis upload (seul prérequis lourd acceptable avant PDF pour Playwright).
-        let thumbLocal = getVideoPosterUriForBookPreview(merged).trim();
+        let thumbLocal = getVideoPosterUriForBookPreview(mergedVideo).trim();
         if (thumbLocal && isHttps(thumbLocal)) {
-          // ok
+          /* ok */
         } else if (Platform.OS !== 'web' && local && !thumbLocal) {
           try {
             const { uri: t } = await VideoThumbnails.getThumbnailAsync(local, { time: 0, quality: 0.7 });
@@ -1035,7 +1003,7 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
         let thumbPublicUrl: string | null = isHttps(thumbLocal) ? thumbLocal : null;
         try {
           if (thumbLocal && !isHttps(thumbLocal)) {
-            const posterCandidates = collectVideoPosterLocalUploadUriCandidates(merged);
+            const posterCandidates = collectVideoPosterLocalUploadUriCandidates(mergedVideo);
             const readableThumb = await pickFirstReadableLocalMediaUri(
               posterCandidates.length > 0 ? posterCandidates : [thumbLocal],
             );
@@ -1075,8 +1043,9 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
         mimeType: 'image/jpeg',
       });
       return { ...g, print_url: readUrl, display_url: readUrl, media_url: readUrl, media_path: path };
-    })
+    }),
   );
+
   const payload: GenerateBookPdfPayload = {
     bookId: input.bookId,
     childId: input.childId,
@@ -1092,7 +1061,7 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
       input.pages,
       input.rotations,
       input.photoCrops,
-      input.localEdits
+      input.localEdits,
     ),
     subscriptionTier,
     ...(subscriptionTier === 'free' ? { digitalExportPaid } : {}),
@@ -1119,7 +1088,7 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
 
   if (!res.ok) {
     const detail = await parseGeneratePdfErrorBody(res);
-    logPdfExportFailure('generate-pdf (guest ticket)', {
+    logPdfExportFailure('generate-pdf (export ticket)', {
       httpStatus: res.status,
       detailPreview: detail.slice(0, 400),
       pdfServerHost: base.replace(/^https?:\/\//i, '').split('/')[0],
@@ -1130,9 +1099,9 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
 
   const json = (await res.json()) as GenerateBookPdfResponse;
   if (!json.pdfUrlSigned?.trim()) {
-    logPdfExportFailure('generate-pdf (guest) réponse 200 sans pdfUrlSigned', {
+    logPdfExportFailure('generate-pdf (export ticket) réponse 200 sans pdfUrlSigned', {
       keys: json && typeof json === 'object' ? Object.keys(json) : [],
-      exportRequestId: init.exportRequestId,
+      bookId: input.bookId,
     });
     throw new Error(
       appendDevExportHint(
@@ -1142,8 +1111,6 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
     );
   }
 
-  // Upload AV brut après succès PDF : lancé tout de suite pour chevaucher le téléchargement du PDF,
-  // puis on attend la fin avant de retourner — sinon `void` laisse souvent la vidéo inachevée (raw vide).
   const avUploadPromise = guestAvRawUploadAfterPdf({ pdfTicket, memories });
 
   const safeBook = input.bookId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
@@ -1159,10 +1126,10 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
 
   const dl = await downloadAsync(json.pdfUrlSigned, dest);
   if (dl.status !== 200) {
-    logPdfExportFailure('téléchargement pdfUrlSigned (guest)', {
+    logPdfExportFailure('téléchargement pdfUrlSigned (export ticket)', {
       downloadStatus: dl.status,
       urlHost: json.pdfUrlSigned.replace(/^https?:\/\//i, '').split('/')[0],
-      exportRequestId: init.exportRequestId,
+      bookId: input.bookId,
     });
     throw new Error(
       appendDevExportHint(
@@ -1174,5 +1141,63 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
 
   await avUploadPromise;
 
-  return { localUri: dl.uri, response: json, init };
+  return { localUri: dl.uri, response: json };
+}
+
+/**
+ * Export serveur **sans session Supabase** : `init-export` (ticket) puis `generate-pdf` avec médias inline.
+ * Exige des URLs **https** pour couverture / photos / vignettes vidéo (Playwright sur Railway).
+ */
+export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaGuestInput): Promise<{
+  localUri: string;
+  response: GenerateBookPdfResponse;
+  init: InitExportPdfResponse;
+}> {
+  const base = pdfServerBaseUrl();
+  if (!base) {
+    throw new Error('Service PDF non configuré (EXPO_PUBLIC_PDF_SERVER_URL).');
+  }
+  if (!isInitExportConfigured()) {
+    throw new Error('init-export indisponible (EXPO_PUBLIC_SUPABASE_URL / ANON_KEY).');
+  }
+
+  const { subscriptionTier, digitalExportPaid } = await resolveServerPdfEntitlements();
+  if (subscriptionTier === 'free' && !digitalExportPaid) {
+    throw new Error('EXPORT_PAYMENT_REQUIRED');
+  }
+
+  const subscriptionTierInit = subscriptionTier === 'premium' || digitalExportPaid ? 'paid' : 'free';
+  const avCount = countAudioVideoPages(input.pages);
+
+  const email = input.consent.email.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error('Adresse e-mail invalide.');
+  }
+
+  const init = await callInitExportPdf({
+    type: 'pdf_export',
+    export_mode: input.exportMode === 'print' ? 'print' : 'digital',
+    book_id: input.bookId,
+    child_local_id: input.childId,
+    subscription_tier: subscriptionTierInit,
+    audio_video_page_count: avCount,
+    email,
+    gdpr_consent_at: input.consent.gdprConsentAtIso,
+    full_name: input.consent.fullName ?? null,
+    marketing_opt_in: input.consent.marketingOptIn === true,
+  });
+
+  const pdfTicket = init.pdfTicket;
+  if (!pdfTicket) {
+    throw new Error('Réponse init-export invalide (ticket manquant).');
+  }
+
+  const result = await generateBookPdfWithExportTicket({
+    ...input,
+    exportTicket: pdfTicket,
+    subscriptionTier,
+    digitalExportPaid,
+  });
+
+  return { ...result, init };
 }

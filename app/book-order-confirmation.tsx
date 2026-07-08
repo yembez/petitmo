@@ -103,7 +103,9 @@ export default function BookOrderConfirmationScreen() {
   const showMarketingBlock = !marketingFromForm && !optInDone;
   const subtitle =
     exportMode === 'print'
-      ? "Ton livre est en cours d'impression. Tu recevras un email de suivi."
+      ? resultPdfUri
+        ? "Ton livre part à l'impression. Tu peux aussi ouvrir le PDF impression (fond perdu Gelato) pour contrôle qualité."
+        : "Ton livre est en cours d'impression. Tu recevras un email de suivi."
       : resultPdfUri
         ? 'Le PDF a été généré. Tu peux le partager maintenant, ou le retrouver dans l’app.'
         : 'Ton PDF arrive dans quelques instants.';
@@ -125,14 +127,14 @@ export default function BookOrderConfirmationScreen() {
       </Text>
       <Text style={[styles.sub, dm400 && { fontFamily: dm400 }]}>{subtitle}</Text>
 
-      {exportMode === 'pdf' && resultPdfUri ? (
+      {resultPdfUri ? (
         <Pressable
           style={styles.terracottaCta}
           onPress={onSharePdf}
           disabled={!resultPdfUri}
         >
           <Text style={[styles.terracottaCtaText, dm500 && { fontFamily: dm500 }]}>
-            Partager le PDF
+            {exportMode === 'print' ? 'Ouvrir le PDF impression' : 'Partager le PDF'}
           </Text>
         </Pressable>
       ) : null}

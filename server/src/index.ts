@@ -7,6 +7,7 @@ import { registerUploadGuestAssetsRoutes } from './routes/uploadGuestAssets';
 import { registerUploadGuestAssetRoute } from './routes/uploadGuestAsset';
 import { registerPublicMediaRoutes } from './routes/publicMedia';
 import { registerResolvePublicMediaTokensRoute } from './routes/resolvePublicMediaTokens';
+import { registerGelatoWebhookRoute } from './routes/gelatoWebhook';
 import {
   DIGITAL_PAGE_HEIGHT_MM,
   DIGITAL_PAGE_WIDTH_MM,
@@ -56,6 +57,7 @@ function main(): void {
   registerPublicMediaRoutes(app, supabase);
   registerResolvePublicMediaTokensRoute(app, supabase);
   registerGeneratePdfRoute(app, supabase, env.supabaseUrl);
+  registerGelatoWebhookRoute(app, supabase);
   registerUploadGuestAssetsRoutes(app, supabase);
   registerUploadGuestAssetRoute(app, supabase);
 

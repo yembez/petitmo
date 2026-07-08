@@ -1980,7 +1980,7 @@ export default function BookPreviewScreen() {
       if (accessToken) {
         setExporting(true);
         try {
-          const { localUri } = await generateBookPdfViaServer({
+          const pdfInput = {
             bookId: bookId ?? `draft-${child.id}`,
             childId: child.id,
             child,
@@ -1994,8 +1994,31 @@ export default function BookPreviewScreen() {
             rotations,
             photoCrops,
             localEdits: EMPTY_MEMORY_EDITS,
-            exportMode,
-          });
+          };
+
+          let localUri: string;
+          if (exportMode === 'print') {
+            // Route session serveur : print via ticket init-export (compatible prod actuelle).
+            const sessionEmail = sessData.session?.user?.email?.trim().toLowerCase() ?? '';
+            if (!sessionEmail) {
+              Alert.alert('Erreur', 'Adresse e-mail du compte introuvable pour l’export impression.');
+              return;
+            }
+            ({ localUri } = await generateBookPdfViaServerAsGuest({
+              ...pdfInput,
+              exportMode: 'print',
+              consent: {
+                email: sessionEmail,
+                gdprConsentAtIso: new Date().toISOString(),
+                marketingOptIn: false,
+              },
+            }));
+          } else {
+            ({ localUri } = await generateBookPdfViaServer({
+              ...pdfInput,
+              exportMode,
+            }));
+          }
           await shareBookPdf(localUri);
         } catch (e) {
           Alert.alert('Erreur', e instanceof Error ? e.message : 'Export impossible');
@@ -2144,9 +2167,13 @@ export default function BookPreviewScreen() {
     Alert.alert('Exporter', 'Choisis un format.', [
       { text: 'Annuler', style: 'cancel' },
       { text: 'Livre PDF', onPress: () => goToBookOrderPdf() },
+      {
+        text: 'Aperçu PDF impression',
+        onPress: () => void doExportPdf('print'),
+      },
       { text: 'Livre imprimé', onPress: () => goToBookOrderPrint() },
     ]);
-  }, [child, exporting, goToBookOrderPdf, goToBookOrderPrint, guestExportSubmitting]);
+  }, [child, doExportPdf, exporting, goToBookOrderPdf, goToBookOrderPrint, guestExportSubmitting]);
 
   const onGuestExportSubmit = useCallback(
     async ({ email, marketingOptIn }: { email: string; marketingOptIn: boolean }) => {
