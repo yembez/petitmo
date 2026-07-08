@@ -39,7 +39,7 @@ async function resolveRasterUri(raw: string, cloudFallback: string): Promise<str
 }
 
 function remoteVideoPosterCandidates(memory: Memory): string {
-  return [memory.poster_print_url, memory.poster_url, memory.thumbnail_url]
+  return [memory.poster_url, memory.thumbnail_url]
     .map(u => (u ?? '').trim())
     .find(Boolean) ?? '';
 }

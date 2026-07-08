@@ -129,7 +129,7 @@ export function petitmoLogoHtml(): string {
   return cachedLogoSvg;
 }
 
-/** Titre + date / âge hors carte — aligné sur la ligne du logo Petitmo. */
+/** Titre + date / âge hors carte — aligné à droite, sur la ligne du logo Petitmo. */
 export function publicMediaPageHeaderHtml(
   kind: 'audio' | 'video',
   ctx: PublicMediaDisplayContext,

@@ -1,19 +1,26 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Platform } from 'react-native';
 import type { ViewToken } from 'react-native';
 import type { Memory } from '@/types/local';
 import type { FeedListItem } from '@/components/feed/FilMemoryRow';
 import {
   getFeedAutoplayActiveMemoryId,
-  isFeedScrollIdle,
   setFeedAutoplayActiveMemoryId,
+  setFeedOnScreenVideoIds,
   setFeedScrollIdle,
 } from '@/lib/feedAutoplayStore';
 import { peekFeedBootstrapVideoUri } from '@/services/feedLocalPhotoCache';
 import { videoPlaybackCandidateFromMemory } from '@/utils/videoMediaUri';
+import { useStableViewabilityPairsMulti } from '@/hooks/useStableViewabilityPairs';
 
-/** Délai après l’arrêt du scroll avant autoplay (évite montage vidéo pendant l’inertie). */
-const FEED_SCROLL_IDLE_MS = 220;
+/** Backup après fin de scroll si la viewability n’a pas re-tiré (immédiat). */
+const FEED_SCROLL_IDLE_MS = 0;
+
+/** Présence à l’écran : arrêt lecture quand la vidéo sort complètement du viewport. */
+export const FEED_VIDEO_ON_SCREEN_VISIBLE_PCT = 1;
+
+/** Déclenchement lecture : au moins 25 % de la vignette visible. */
+export const FEED_VIDEO_AUTOPLAY_START_VISIBLE_PCT = 25;
 
 function memoryFromFeedListItem(item: ViewToken['item']): Memory | null {
   if (!item || typeof item !== 'object') return null;
@@ -30,20 +37,58 @@ function hasLikelyPlayableVideoUri(m: Memory): boolean {
   return !!peekFeedBootstrapVideoUri(m.id)?.trim();
 }
 
+function collectVideoIdsFromViewable(viewableItems: ViewToken[]): Set<string> {
+  const out = new Set<string>();
+  for (const t of viewableItems) {
+    if (!t.isViewable) continue;
+    const m = memoryFromFeedListItem(t.item);
+    if (m && hasLikelyPlayableVideoUri(m)) out.add(m.id);
+  }
+  return out;
+}
+
+function collectEligibleVideos(
+  viewableItems: ViewToken[],
+): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const t of viewableItems) {
+    if (!t.isViewable) continue;
+    const m = memoryFromFeedListItem(t.item);
+    if (!m || !hasLikelyPlayableVideoUri(m)) continue;
+    const idx = typeof t.index === 'number' ? t.index : 999999;
+    out.set(m.id, idx);
+  }
+  return out;
+}
+
+function pickBestVideoId(eligible: Map<string, number>): string | null {
+  let bestId: string | null = null;
+  let bestIdx = Number.POSITIVE_INFINITY;
+  for (const [id, idx] of eligible) {
+    if (idx < bestIdx) {
+      bestIdx = idx;
+      bestId = id;
+    }
+  }
+  return bestId;
+}
+
 /**
  * Prefetch médias + sélection d’**une** vidéo « active » dans le fil (lecture auto muette).
- * L’état autoplay vit dans `feedAutoplayStore` — pas de re-render de la liste entière.
+ * Lecture à ≥25 % visible ; arrêt uniquement quand la vidéo n’est plus du tout à l’écran.
  */
 export function useFeedVideoAutoplay(
   onPrefetchViewable: (info: { viewableItems: ViewToken[]; changed: ViewToken[] }) => void,
 ): {
-  onViewableItemsChanged: (info: { viewableItems: ViewToken[]; changed: ViewToken[] }) => void;
+  feedViewabilityPairs: ReturnType<typeof useStableViewabilityPairsMulti>;
   refreshFeedVideoAutoplay: () => void;
   suspendFeedInlineVideo: () => void;
   onFeedScrollBegin: () => void;
   onFeedScrollIdle: () => void;
 } {
-  const lastViewableRef = useRef<ViewToken[]>([]);
+  const onScreenVideoIdsRef = useRef(new Set<string>());
+  const eligibleVideosRef = useRef(new Map<string, number>());
+  const lastEligibleViewableRef = useRef<ViewToken[]>([]);
   const scrollIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearScrollIdleTimer = useCallback(() => {
@@ -59,41 +104,72 @@ export function useFeedVideoAutoplay(
     setFeedAutoplayActiveMemoryId(null);
   }, []);
 
-  const applyViewableItems = useCallback((viewableItems: ViewToken[]) => {
-    let bestId: string | null = null;
-    let bestIdx = Number.POSITIVE_INFINITY;
-    for (const t of viewableItems) {
-      if (!t.isViewable) continue;
-      const m = memoryFromFeedListItem(t.item);
-      if (!m || !hasLikelyPlayableVideoUri(m)) continue;
-      const idx = typeof t.index === 'number' ? t.index : 999999;
-      if (idx < bestIdx) {
-        bestIdx = idx;
-        bestId = m.id;
-      }
+  const reconcileAutoplay = useCallback((allowNewPick: boolean) => {
+    const current = getFeedAutoplayActiveMemoryId();
+    const onScreen = onScreenVideoIdsRef.current;
+    const eligible = eligibleVideosRef.current;
+
+    if (current && !onScreen.has(current)) {
+      setFeedAutoplayActiveMemoryId(null);
+      return;
     }
-    setFeedAutoplayActiveMemoryId(bestId);
+
+    if (current && eligible.has(current)) {
+      return;
+    }
+
+    if (!allowNewPick) return;
+
+    setFeedAutoplayActiveMemoryId(pickBestVideoId(eligible));
   }, []);
 
-  const onViewableItemsChanged = useCallback(
+  const onOnScreenViewableChanged = useCallback(
+    (info: { viewableItems: ViewToken[]; changed: ViewToken[] }) => {
+      onScreenVideoIdsRef.current = collectVideoIdsFromViewable(info.viewableItems);
+      setFeedOnScreenVideoIds(onScreenVideoIdsRef.current);
+      reconcileAutoplay(false);
+    },
+    [reconcileAutoplay],
+  );
+
+  const onEligibleViewableChanged = useCallback(
     (info: { viewableItems: ViewToken[]; changed: ViewToken[] }) => {
       onPrefetchViewable(info);
-      lastViewableRef.current = info.viewableItems;
-      if (!isFeedScrollIdle()) return;
-      applyViewableItems(info.viewableItems);
+      lastEligibleViewableRef.current = info.viewableItems;
+      eligibleVideosRef.current = collectEligibleVideos(info.viewableItems);
+      reconcileAutoplay(true);
     },
-    [onPrefetchViewable, applyViewableItems],
+    [onPrefetchViewable, reconcileAutoplay],
+  );
+
+  const feedViewabilityPairs = useStableViewabilityPairsMulti(
+    useMemo(
+      () => [
+        {
+          viewabilityConfig: {
+            itemVisiblePercentThreshold: FEED_VIDEO_ON_SCREEN_VISIBLE_PCT,
+            minimumViewTime: 0,
+            waitForInteraction: false,
+          },
+          onViewableItemsChanged: onOnScreenViewableChanged,
+        },
+        {
+          viewabilityConfig: {
+            itemVisiblePercentThreshold: FEED_VIDEO_AUTOPLAY_START_VISIBLE_PCT,
+            minimumViewTime: 0,
+            waitForInteraction: false,
+          },
+          onViewableItemsChanged: onEligibleViewableChanged,
+        },
+      ],
+      [onEligibleViewableChanged, onOnScreenViewableChanged],
+    ),
   );
 
   const refreshFeedVideoAutoplay = useCallback(() => {
-    if (lastViewableRef.current.length > 0) {
-      applyViewableItems(lastViewableRef.current);
-      return;
-    }
-    if (getFeedAutoplayActiveMemoryId() !== null) {
-      setFeedAutoplayActiveMemoryId(null);
-    }
-  }, [applyViewableItems]);
+    eligibleVideosRef.current = collectEligibleVideos(lastEligibleViewableRef.current);
+    reconcileAutoplay(true);
+  }, [reconcileAutoplay]);
 
   const onFeedScrollBegin = useCallback(() => {
     setFeedScrollIdle(false);
@@ -110,7 +186,7 @@ export function useFeedVideoAutoplay(
   }, [clearScrollIdleTimer, refreshFeedVideoAutoplay]);
 
   return {
-    onViewableItemsChanged,
+    feedViewabilityPairs,
     refreshFeedVideoAutoplay,
     suspendFeedInlineVideo,
     onFeedScrollBegin,

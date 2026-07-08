@@ -6,7 +6,7 @@ import { setFeedVideoPosterStableCache } from '@/hooks/feedVideoPosterStableCach
 import { resolveFeedVideoPosterDisplayUri } from '@/utils/feedVideoPosterUri';
 
 function remoteVideoPosterRef(memory: Memory): string {
-  for (const u of [memory.poster_print_url, memory.poster_url, memory.thumbnail_url]) {
+  for (const u of [memory.poster_url, memory.thumbnail_url]) {
     const t = (u ?? '').trim();
     if (t && !isDeviceLocalMediaUri(t)) return t;
   }

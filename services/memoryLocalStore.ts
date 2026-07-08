@@ -7,7 +7,7 @@ import { MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH } from '@/lib/limits';
 import type { Memory } from '@/types/local';
 import {
   collectVideoCloudSyncUriCandidates,
-  collectVideoPosterLocalUploadUriCandidates,
+  collectVideoFeedPosterLocalUriCandidates,
   collectVoiceCoverReadableSourceCandidates,
 } from '@/utils/memoryPhotos';
 import { pickFirstReadableLocalMediaUri } from '@/utils/localMediaReadable';
@@ -397,7 +397,7 @@ export async function awaitVideoPosterForBookMemory(memoryId: string): Promise<M
   if (!cur || cur.type !== 'video') return cur;
 
   const readablePoster = await pickFirstReadableLocalMediaUri(
-    collectVideoPosterLocalUploadUriCandidates(cur),
+    collectVideoFeedPosterLocalUriCandidates(cur),
   );
   if (readablePoster) {
     const posterNorm = readablePoster.trim();

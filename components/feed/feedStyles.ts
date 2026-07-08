@@ -372,16 +372,16 @@ const styles = StyleSheet.create({
     paddingVertical: verticalScale(3),
     borderRadius: scale(6),
   },
-  /** Vidéo fil : durée en bas à droite (pilule meta en haut). */
-  videoDurationBadgeBottomRight: {
+  /** Vidéo fil : son + durée en bas à droite (pilules verre alignées sur feedMetaPill). */
+  videoBottomControlsBar: {
     position: 'absolute',
     right: scale(12),
     bottom: verticalScale(12),
-    zIndex: 4,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    paddingHorizontal: scale(7),
-    paddingVertical: verticalScale(3),
-    borderRadius: scale(6),
+    zIndex: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: scale(8),
   },
   /** Barre overlay : date + âge à gauche, lieu à droite. */
   feedMetaPillBar: {
@@ -464,19 +464,6 @@ const styles = StyleSheet.create({
   },
   feedMetaPillLocationPlaceholder: {
     color: 'rgba(255, 255, 255, 0.78)',
-  },
-  /** Vidéo autoplay fil : activer / couper le son (sous la pilule meta). */
-  videoSoundToggleTopLeft: {
-    position: 'absolute',
-    left: scale(12),
-    top: verticalScale(58),
-    zIndex: 8,
-    width: scale(36),
-    height: scale(36),
-    borderRadius: scale(18),
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.55)',
   },
   feedPhotoFavoriteOverlay: {
     position: 'absolute',

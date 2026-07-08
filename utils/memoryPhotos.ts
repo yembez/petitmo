@@ -205,7 +205,7 @@ export function collectPhotoCloudSyncUriCandidates(memory: Memory): string[] {
 function sandboxVideoFileCandidatesForMemoryId(memoryId: string): string[] {
   if (Platform.OS === 'web' || !documentDirectory) return [];
   const base = `${documentDirectory}petitmo_memories/${memoryId.trim()}/`;
-  return [`${base}original.mp4`, `${base}original.mov`, `${base}original.m4v`, `${base}poster.jpg`];
+  return [`${base}original.mp4`, `${base}original.mov`, `${base}original.m4v`, `${base}poster.jpg`, `${base}poster_print.jpg`];
 }
 
 /** Candidats vidéo pour sync cloud : sandbox + cache fil. */
@@ -540,20 +540,38 @@ export function isDeviceLocalMediaUri(u: string | null | undefined): boolean {
   );
 }
 
-/** Chemins sandbox / disque pour poster vidéo — uniquement les refs locales en base (pas de `poster.jpg` deviné). */
+/** Chemins sandbox poster fil (`poster.jpg`) — pas `poster_print.jpg`. */
 function pickVideoPosterSandboxPath(memory: Memory): string {
   for (const u of [memory.local_thumb_path, memory.poster_url, memory.thumbnail_url]) {
     const t = (u ?? '').trim();
+    if (t && isDeviceLocalMediaUri(t) && !t.endsWith('poster_print.jpg')) return t;
+  }
+  return '';
+}
+
+/** Poster impression livre (`poster_print.jpg`) — local sandbox uniquement. */
+function pickVideoPosterPrintSandboxPath(memory: Memory): string {
+  for (const u of [memory.local_poster_print_path, memory.poster_print_url]) {
+    const t = (u ?? '').trim();
     if (t && isDeviceLocalMediaUri(t)) return t;
+  }
+  for (const u of sandboxVideoFileCandidatesForMemoryId(memory.id)) {
+    if (u.endsWith('poster_print.jpg')) return u;
   }
   return '';
 }
 
 function remoteVideoPosterColumns(memory: Memory): string {
-  for (const u of [memory.poster_print_url, memory.poster_url, memory.thumbnail_url]) {
+  for (const u of [memory.poster_url, memory.thumbnail_url]) {
     const t = (u ?? '').trim();
     if (t && !isDeviceLocalMediaUri(t)) return t;
   }
+  return '';
+}
+
+function remoteVideoPosterPrintColumns(memory: Memory): string {
+  const t = (memory.poster_print_url ?? '').trim();
+  if (t && !isDeviceLocalMediaUri(t)) return t;
   return '';
 }
 
@@ -562,13 +580,13 @@ function resolveVideoPosterUri(localPick: string, remotePick: string): string {
   return raw ? normalizeMemoryMediaUriForDisplay(raw) : '';
 }
 
-/** Candidats locaux poster vidéo pour upload PDF / cloud. */
-export function collectVideoPosterLocalUploadUriCandidates(memory: Memory): string[] {
+/** Candidats poster fil uniquement (`poster.jpg`, pas `poster_print.jpg`). */
+export function collectVideoFeedPosterLocalUriCandidates(memory: Memory): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   const add = (u: string | null | undefined) => {
     const t = (u ?? '').trim();
-    if (!t || seen.has(t)) return;
+    if (!t || seen.has(t) || t.endsWith('poster_print.jpg')) return;
     seen.add(t);
     out.push(t);
   };
@@ -583,6 +601,50 @@ export function collectVideoPosterLocalUploadUriCandidates(memory: Memory): stri
   return out;
 }
 
+/** Candidats locaux poster vidéo pour upload PDF / cloud. */
+export function collectVideoPosterLocalUploadUriCandidates(memory: Memory): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (u: string | null | undefined) => {
+    const t = (u ?? '').trim();
+    if (!t || seen.has(t)) return;
+    seen.add(t);
+    out.push(t);
+  };
+  if (memory.type !== 'video') return out;
+  add(memory.local_poster_print_path);
+  const printLocal = pickVideoPosterPrintSandboxPath(memory);
+  if (printLocal) add(printLocal);
+  add(memory.local_thumb_path);
+  add(memory.poster_url);
+  add(memory.thumbnail_url);
+  add(pickVideoPosterSandboxPath(memory));
+  for (const u of sandboxVideoFileCandidatesForMemoryId(memory.id)) {
+    if (u.endsWith('poster.jpg') || u.endsWith('poster_print.jpg')) add(u);
+  }
+  return out;
+}
+
+/** True si l'utilisatrice a choisi une image d'illustration livre (`poster_print`). */
+export function hasCustomVideoPrintPoster(memory: Memory): boolean {
+  if (memory.type !== 'video') return false;
+  if ((memory.local_poster_print_path ?? '').trim()) return true;
+  const pp = (memory.poster_print_url ?? '').trim();
+  if (!pp) return false;
+  if (!isDeviceLocalMediaUri(pp)) return true;
+  return pp.includes('poster_print');
+}
+
+/** Poster impression livre : `poster_print` d’abord, repli `poster` fil. */
+export function getVideoPosterPrintUriForBookPreview(memory: Memory): string {
+  if (memory.type !== 'video' || !hasCustomVideoPrintPoster(memory)) return '';
+  const printLocal = pickVideoPosterPrintSandboxPath(memory);
+  if (printLocal.trim()) return resolveVideoPosterUri(printLocal, '');
+  const printRemote = remoteVideoPosterPrintColumns(memory);
+  if (printRemote.trim()) return resolveVideoPosterUri('', printRemote);
+  return '';
+}
+
 /** Vignette / poster vidéo : fil, favoris, viewer immersif. */
 export function getVideoPosterUriForFeedAndViewer(memory: Memory): string {
   const localPick = pickVideoPosterSandboxPath(memory);
@@ -590,11 +652,40 @@ export function getVideoPosterUriForFeedAndViewer(memory: Memory): string {
   return resolveVideoPosterUri(localPick, remotePick);
 }
 
-/** Livre / PDF : poster local sandbox d’abord, puis colonnes cloud. */
+/** Livre / PDF : illustration custom si choisie, sinon poster fil par défaut (t≈0). */
 export function getVideoPosterUriForBookPreview(memory: Memory): string {
-  const localPick = pickVideoPosterSandboxPath(memory);
-  const remotePick = remoteVideoPosterColumns(memory);
-  return resolveVideoPosterUri(localPick, remotePick);
+  if (memory.type !== 'video') return '';
+  if (hasCustomVideoPrintPoster(memory)) {
+    const custom = getVideoPosterPrintUriForBookPreview(memory);
+    if (custom.trim()) return custom;
+  }
+  const defaultPoster = getVideoPosterUriForFeedAndViewer(memory);
+  if (defaultPoster.trim()) return defaultPoster;
+  const remotePick = remoteVideoPosterPrintColumns(memory) || remoteVideoPosterColumns(memory);
+  return resolveVideoPosterUri('', remotePick);
+}
+
+/** URI affichage maquette livre — bust cache si `poster_print.jpg` réécrit au même chemin. */
+export function getBookVideoPosterDisplayUri(memory: Memory): string {
+  const raw = getVideoPosterUriForBookPreview(memory).trim();
+  if (!raw) return '';
+  if (hasCustomVideoPrintPoster(memory) && isDeviceLocalMediaUri(raw)) {
+    return appendLocalMediaCacheBuster(raw, memory.updated_at);
+  }
+  return raw;
+}
+
+/**
+ * Poster vidéo livre pour le premier paint.
+ * Illustration custom si choisie, sinon poster fil par défaut (`poster.jpg` t≈0).
+ */
+export function getBookVideoPosterSyncDisplayUri(memory: Memory): string {
+  if (memory.type !== 'video') return '';
+  if (hasCustomVideoPrintPoster(memory)) {
+    const custom = getBookVideoPosterDisplayUri(memory).trim();
+    if (custom) return custom;
+  }
+  return getVideoPosterUriForFeedAndViewer(memory).trim();
 }
 
 /** Toutes les URLs d’un souvenir photo (1ère = version éditée si présente, puis `extra_photo_urls`). */

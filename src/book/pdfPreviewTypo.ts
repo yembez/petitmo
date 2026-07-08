@@ -53,6 +53,26 @@ export function pdfMmToPreviewPxH(mm: number, pageHeightPx: number): number {
 }
 
 /**
+ * Échelle mm→px unique pour une page (carrés QR, bande 186×186, marges [M]).
+ * Utilise min(largeur, hauteur) pour éviter l’écrasement si les px arrondis dérivent du ratio 210:280.
+ */
+export function pdfPageUniformScalePx(pageWidthPx: number, pageHeightPx: number): number {
+  const sw = pageWidthPx / BOOK_DIGITAL_PAGE_WIDTH_MM;
+  const sh = pageHeightPx / BOOK_DIGITAL_PAGE_HEIGHT_MM;
+  if (!Number.isFinite(sw) || !Number.isFinite(sh) || sw <= 0 || sh <= 0) return 1;
+  return Math.min(sw, sh);
+}
+
+/** mm → px avec la même échelle sur les deux axes (parité spread + PDF). */
+export function pdfMmToPreviewPxUniform(
+  mm: number,
+  pageWidthPx: number,
+  pageHeightPx: number,
+): number {
+  return mm * pdfPageUniformScalePx(pageWidthPx, pageHeightPx);
+}
+
+/**
  * Garde minimal anti sous-pixel. Volontairement très bas : la maquette doit rester
  * STRICTEMENT proportionnelle à la largeur de page, y compris en vue spread (vignettes
  * ~moitié de page). À pleine largeur (éditeur) ces tailles dépassent largement ce garde,
@@ -78,6 +98,8 @@ export const PDF_MEDIA_QR_CARD_RADIUS_MM = 0;
 export const PDF_MEDIA_QR_GAP_MM = 6;
 /** Pictogramme type (haut-parleur / caméra) sous le QR. */
 export const PDF_MEDIA_QR_TYPE_ICON_MM = 4;
+/** Libellés carte (hint + type) — parité `.label` 7 pt. */
+export const PDF_MEDIA_QR_CARD_LABEL_PT = 7;
 /** Bordure carte + libellés gris (hint, type). */
 export const PDF_MEDIA_QR_CARD_BORDER_COLOR = '#D8D8DD';
 export const PDF_MEDIA_QR_MUTED_COLOR = '#AEAEB2';
@@ -237,6 +259,58 @@ export const PDF_QUOTE_BODY_FIT_PT = {
 /** PDF `.label` — 7 pt (méta date/lieu, folio, pastilles). */
 export function pdfLabelStyle(pageWidthPx: number): { fontSize: number } {
   return { fontSize: Math.max(MIN_FS, pdfPtToPreviewPx(7, pageWidthPx)) };
+}
+
+/** Dimensions carte QR audio/vidéo — parité `htmlBook.ts` `.media-qr-card` (hauteur figée, QR 18×18 mm). */
+export type PdfMediaQrCardLayoutPx = {
+  cardW: number;
+  cardH: number;
+  cardPad: number;
+  cardRadius: number;
+  qrSize: number;
+  qrMarginV: number;
+  typeIconSize: number;
+  typeRowH: number;
+  hintFontSize: number;
+  hintLineH: number;
+  typeLabelFontSize: number;
+};
+
+export function pdfMediaQrCardLayoutPx(
+  pageWidthPx: number,
+  pageHeightPx: number,
+): PdfMediaQrCardLayoutPx {
+  const u = (mm: number) =>
+    Math.max(1, Math.round(pdfMmToPreviewPxUniform(mm, pageWidthPx, pageHeightPx)));
+  const cardW = u(PDF_MEDIA_QR_CARD_W_MM);
+  const cardPad = u(PDF_MEDIA_QR_CARD_PAD_MM);
+  const cardRadius = u(PDF_MEDIA_QR_CARD_RADIUS_MM);
+  const qrSize = u(PDF_MEDIA_QR_QR_MM);
+  const qrMarginV = cardPad;
+  const typeIconSize = u(PDF_MEDIA_QR_TYPE_ICON_MM);
+  const typeRowH = typeIconSize;
+  const hintFontSize = Math.max(
+    MIN_FS,
+    pdfPtToPreviewPx(PDF_MEDIA_QR_CARD_LABEL_PT, pageWidthPx),
+  );
+  const hintLineH = Math.max(hintFontSize, u(2.5));
+  const typeLabelFontSize = hintFontSize;
+  const cardH = Math.round(
+    cardPad + hintLineH + qrMarginV + qrSize + qrMarginV + typeRowH + cardPad,
+  );
+  return {
+    cardW,
+    cardH,
+    cardPad,
+    cardRadius,
+    qrSize,
+    qrMarginV,
+    typeIconSize,
+    typeRowH,
+    hintFontSize,
+    hintLineH,
+    typeLabelFontSize,
+  };
 }
 
 /** PDF `.body` (citation niveau 0) — 11 pt, interligne 1.65 */

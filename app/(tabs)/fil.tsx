@@ -19,9 +19,8 @@ import { verticalScale } from '@/utils/responsive';
 import EditTextModal from '@/components/EditTextModal';
 import { feedMemoryTextEditPreviewVariant } from '@/utils/memoryTextEditStyles';
 import { bookLineBudgetForMemoryType, bookCharsPerLineForMemoryType } from '@/utils/textLimits';
-import { usePrefetchMemories } from '@/hooks/usePrefetchMemories';
 import { useFeedVideoAutoplay } from '@/hooks/useFeedVideoAutoplay';
-import { useStableViewabilityPairs } from '@/hooks/useStableViewabilityPairs';
+import { usePrefetchMemories } from '@/hooks/usePrefetchMemories';
 import { usePendingMediaUploads } from '@/contexts/PendingMediaUploadsContext';
 import { useFeedData } from '@/hooks/useFeedData';
 import { useToggleFavorite } from '@/hooks/useToggleFavorite';
@@ -81,16 +80,12 @@ function FilScreen() {
 
   const { onViewableItemsChanged: onPrefetchViewable } = usePrefetchMemories();
   const {
-    onViewableItemsChanged,
+    feedViewabilityPairs,
     refreshFeedVideoAutoplay,
     suspendFeedInlineVideo,
     onFeedScrollBegin,
     onFeedScrollIdle,
   } = useFeedVideoAutoplay(onPrefetchViewable);
-  const feedViewabilityPairs = useStableViewabilityPairs(
-    { itemVisiblePercentThreshold: 50 },
-    onViewableItemsChanged,
-  );
   const onFeedHeaderChildPress = useCallback(
     (target: Child) => {
       router.push(`/edit-child?childId=${target.id}`);
@@ -166,11 +161,17 @@ function FilScreen() {
   const onFeedScroll = useCallback(
     (e: { nativeEvent: { contentOffset: { y: number } } }) => {
       feedScrollOffsetRef.current = e.nativeEvent.contentOffset.y;
-      onFeedScrollBegin();
-      onFeedScrollIdle();
     },
-    [onFeedScrollBegin, onFeedScrollIdle],
+    [],
   );
+
+  const onFeedScrollActive = useCallback(() => {
+    onFeedScrollBegin();
+  }, [onFeedScrollBegin]);
+
+  const onFeedScrollStopped = useCallback(() => {
+    onFeedScrollIdle();
+  }, [onFeedScrollIdle]);
   const keyExtractor = useCallback(
     (item: FeedListItem) =>
       item.rowKind === 'pending'
@@ -301,6 +302,10 @@ function FilScreen() {
           CellRendererComponent={renderFilListCell}
           viewabilityConfigCallbackPairs={feedViewabilityPairs}
           onScroll={onFeedScroll}
+          onScrollBeginDrag={onFeedScrollActive}
+          onMomentumScrollBegin={onFeedScrollActive}
+          onScrollEndDrag={onFeedScrollStopped}
+          onMomentumScrollEnd={onFeedScrollStopped}
           scrollEventThrottle={16}
           onContentSizeChange={onFeedContentSizeChange}
           bounces={false}

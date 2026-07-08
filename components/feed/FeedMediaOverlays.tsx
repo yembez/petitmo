@@ -8,7 +8,7 @@ import {
 } from 'react-native';
 import type { ReactNode } from 'react';
 import { BlurView } from 'expo-blur';
-import { Heart, MapPin } from 'lucide-react-native';
+import { Heart, MapPin, Volume2, VolumeX } from 'lucide-react-native';
 import { THEME } from '@/constants/theme';
 import { scale } from '@/utils/responsive';
 import { styles } from '@/components/feed/feedStyles';
@@ -31,11 +31,14 @@ function FeedMetaGlassPill({
   onPress,
   accessibilityLabel,
   align = 'left',
+  bare = false,
 }: {
   children: ReactNode;
   onPress?: () => void;
   accessibilityLabel?: string;
   align?: 'left' | 'right';
+  /** Sans wrap largeur max (barre bas vidéo, etc.). */
+  bare?: boolean;
 }) {
   const pill = (
     <View
@@ -52,14 +55,18 @@ function FeedMetaGlassPill({
     </View>
   );
 
+  const wrapStyle =
+    align === 'right' ? styles.feedMetaPillWrapRight : styles.feedMetaPillWrapLeft;
+
   if (onPress) {
     return (
       <Pressable
         onPress={onPress}
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         style={({ pressed }) => [
-          align === 'right' ? styles.feedMetaPillWrapRight : styles.feedMetaPillWrapLeft,
+          bare ? undefined : wrapStyle,
           pressed && { opacity: 0.88 },
         ]}
       >
@@ -68,9 +75,48 @@ function FeedMetaGlassPill({
     );
   }
 
+  if (bare) return pill;
+
+  return <View style={wrapStyle}>{pill}</View>;
+}
+
+/** Vidéo fil : son + durée en bas à droite, mêmes pilules verre que date / âge / lieu. */
+export function FeedVideoDurationSoundBar({
+  durationLabel,
+  showSoundToggle,
+  soundOn,
+  onToggleSound,
+}: {
+  durationLabel?: string;
+  showSoundToggle: boolean;
+  soundOn: boolean;
+  onToggleSound: () => void;
+}) {
+  const hasDuration = !!durationLabel?.trim();
+  if (!showSoundToggle && !hasDuration) return null;
+
   return (
-    <View style={align === 'right' ? styles.feedMetaPillWrapRight : styles.feedMetaPillWrapLeft}>
-      {pill}
+    <View style={styles.videoBottomControlsBar} pointerEvents="box-none">
+      {showSoundToggle ? (
+        <FeedMetaGlassPill
+          bare
+          onPress={onToggleSound}
+          accessibilityLabel={
+            soundOn ? 'Couper le son de la vidéo' : 'Activer le son de la vidéo'
+          }
+        >
+          {soundOn ? (
+            <Volume2 size={scale(16)} color={FEED_META_PILL_INK} strokeWidth={2} />
+          ) : (
+            <VolumeX size={scale(16)} color={FEED_META_PILL_INK} strokeWidth={2} />
+          )}
+        </FeedMetaGlassPill>
+      ) : null}
+      {hasDuration ? (
+        <FeedMetaGlassPill bare align="right">
+          <Text style={styles.feedMetaPillDate}>{durationLabel}</Text>
+        </FeedMetaGlassPill>
+      ) : null}
     </View>
   );
 }

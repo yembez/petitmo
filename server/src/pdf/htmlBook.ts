@@ -393,7 +393,7 @@ function pageMediaQr(
   const captionRaw = clampMediaBookCaption(sanitizeText((m.content ?? '').trim()));
   const captionHtml = captionRaw ? romanHtml(captionRaw) : '';
   const visualUrl =
-    kind === 'audio' ? imgAttr(m.voice_cover_url) : imgAttrFirst([m.thumbnail_url, m.poster_url]);
+    kind === 'audio' ? imgAttr(m.voice_cover_url) : imgAttrFirst([m.poster_print_url, m.poster_url, m.thumbnail_url]);
   const rotCss = rot ? `transform: rotate(${rot}deg); transform-origin: center;` : '';
   const locLabel = bookPdfLocationLabel(m.location);
   const typeLabel = kind === 'audio' ? 'Audio' : 'Video';

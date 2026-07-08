@@ -47,7 +47,16 @@ function downloadFilename(kind: TokenRow['kind']): string {
   return kind === 'video' ? 'petitmo-souvenir.mp4' : 'petitmo-souvenir.m4a';
 }
 
-function htmlPage(title: string, cardBody: string, extraScript = '', pageHeaderText = ''): string {
+function htmlPage(
+  title: string,
+  mainBody: string,
+  extraScript = '',
+  pageHeaderText = '',
+  flatLayout = false,
+): string {
+  const mainBlock = flatLayout
+    ? `<div class="page-main">${mainBody}</div>`
+    : `<div class="card">${mainBody}</div>`;
   return `<!doctype html>
 <html lang="fr">
 <head>
@@ -57,19 +66,22 @@ function htmlPage(title: string, cardBody: string, extraScript = '', pageHeaderT
   <style>
     body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,sans-serif;background:#F6F4F1;margin:0;padding:0;color:#1C1C1E}
     .wrap{max-width:560px;margin:0 auto;padding:28px 18px}
-    .page-top{display:flex;align-items:flex-start;gap:14px;margin-bottom:14px}
+    .page-top{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:14px}
     .page-top-logo{flex:0 0 auto;overflow:visible}
     .logo-svg{height:38px;width:auto;max-width:min(160px,42vw);display:block;overflow:visible}
-    .page-header-text{flex:1;min-width:0;padding-top:2px}
+    .page-header-text{flex:1;min-width:0;padding-top:2px;text-align:right}
     .page-header-kind{font-size:14px;font-weight:500;line-height:1.3;color:#1C1C1E}
     .page-header-date{margin-top:3px;font-size:12px;font-weight:400;line-height:1.35;color:#6B7280}
     .page-header-age{margin-top:1px;font-size:12px;font-weight:400;line-height:1.35;color:#6B7280}
     .page-header-loc{margin-top:3px;font-size:12px;font-weight:400;line-height:1.35;color:#9CA3AF}
+    .page-main{margin-top:0}
     .card{background:#fff;border:1px solid rgba(0,0,0,.06);border-radius:16px;padding:18px 18px;box-shadow:0 6px 20px rgba(0,0,0,.06)}
     .muted{color:#6B7280;font-size:14px;line-height:1.45}
     .btn{display:inline-block;margin-top:14px;margin-right:8px;padding:10px 14px;border-radius:12px;background:#C4784A;color:#fff;text-decoration:none;font-weight:600;border:none;font-size:15px;cursor:pointer;font-family:inherit}
     .btn-secondary{background:#fff;color:#C4784A;border:1.5px solid #C4784A}
     .player{width:100%;margin-top:0;border-radius:10px}
+    .player-video{display:block;width:100%;border-radius:16px;box-shadow:0 6px 20px rgba(0,0,0,.08);background:#111827;vertical-align:top}
+    .save-block{margin-top:16px}
     .save-hint{margin-top:10px;font-size:12px;line-height:1.45;color:#6B7280}
     .save-status{margin-top:8px;font-size:12px;line-height:1.45;color:#6B7280;display:none}
   </style>
@@ -80,9 +92,7 @@ function htmlPage(title: string, cardBody: string, extraScript = '', pageHeaderT
       <div class="page-top-logo">${petitmoLogoHtml()}</div>
       ${pageHeaderText}
     </div>
-    <div class="card">
-      ${cardBody}
-    </div>
+    ${mainBlock}
     <div class="muted" style="margin-top:14px;font-size:12px">Si ce souvenir ne se lance pas, réessaie dans quelques instants.</div>
   </div>
   ${extraScript}
@@ -91,17 +101,17 @@ function htmlPage(title: string, cardBody: string, extraScript = '', pageHeaderT
 }
 
 function saveControlsHtml(token: string, kind: TokenRow['kind']): string {
-  const primaryLabel = kind === 'video' ? 'Enregistrer la vidéo' : 'Télécharger l’audio';
+  const primaryLabel = kind === 'video' ? 'Télécharger' : 'Télécharger l’audio';
   const againLabel = 'Télécharger à nouveau';
   const iosHint =
     kind === 'video'
-      ? `<div id="save-hint" class="save-hint">Sur iPhone : touchez le bouton, puis « Partager » → « Enregistrer la vidéo » pour l’ajouter à Photos. Sinon, cherchez le fichier dans Fichiers → Téléchargements (<strong>petitmo-souvenir.mp4</strong>).</div>`
-      : `<div id="save-hint" class="save-hint">Le fichier audio s’enregistre dans Fichiers ou via le menu Partager (<strong>petitmo-souvenir.m4a</strong>).</div>`;
+      ? `<div id="save-hint" class="save-hint">Sur iPhone : touchez le bouton, faites défiler le menu vers le bas, puis « Enregistrer la vidéo ».</div>`
+      : `<div id="save-hint" class="save-hint">Le fichier s’enregistre via le menu qui s’ouvre en bas de l’écran.</div>`;
   const safeToken = token.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
   const safeKind = kind === 'video' ? 'video' : 'audio';
   const filename = downloadFilename(kind);
 
-  return `<div style="margin-top:16px">
+  return `<div class="save-block">
       <button type="button" id="save-btn" class="btn btn-secondary">${primaryLabel}</button>
       <div id="save-status" class="save-status"></div>
       ${iosHint}
@@ -119,8 +129,8 @@ function saveControlsHtml(token: string, kind: TokenRow['kind']): string {
       var againLabel = ${JSON.stringify(againLabel)};
       var statusAgain =
         kind === 'video'
-          ? 'Vous avez déjà téléchargé depuis ce navigateur. Si la vidéo n’est pas dans Photos, touchez « Télécharger à nouveau ».'
-          : 'Vous avez déjà téléchargé depuis ce navigateur. Si le fichier est introuvable, touchez « Télécharger à nouveau ».';
+          ? 'Déjà téléchargé ici. Pas dans Photos ? Touchez à nouveau.'
+          : 'Déjà téléchargé ici. Touchez à nouveau si besoin.';
 
       function applySavedUi() {
         if (btn) btn.textContent = againLabel;
@@ -197,17 +207,19 @@ function playerHtml(
   kind: TokenRow['kind'],
   src: string,
   display: PublicMediaDisplayContext,
-): { cardBody: string; pageHeaderText: string } {
+): { mainBody: string; pageHeaderText: string; flatLayout: boolean } {
   const saveBlock = saveControlsHtml(token, kind);
   const pageHeaderText = publicMediaPageHeaderHtml(kind, display);
+  const playerClass = kind === 'video' ? 'player player-video' : 'player';
   const playerTag =
     kind === 'video'
-      ? `<video class="player" controls playsinline src="${src}"></video>`
-      : `<audio class="player" controls src="${src}"></audio>`;
+      ? `<video class="${playerClass}" controls playsinline src="${src}"></video>`
+      : `<audio class="${playerClass}" controls src="${src}"></audio>`;
 
   return {
     pageHeaderText,
-    cardBody: `${playerTag}${saveBlock}`,
+    mainBody: `${playerTag}${saveBlock}`,
+    flatLayout: kind === 'video',
   };
 }
 
@@ -311,13 +323,13 @@ async function signedPlayerResponse(
 
   const display = await resolvePublicMediaDisplayContext(supabase, row);
 
-  const { cardBody, pageHeaderText } = playerHtml(row.token, row.kind, signedUrl, display);
+  const { mainBody, pageHeaderText, flatLayout } = playerHtml(row.token, row.kind, signedUrl, display);
 
   res
     .status(200)
     .set('Cache-Control', 'no-store')
     .type('text/html')
-    .send(htmlPage('Petitmo · Souvenir', cardBody, '', pageHeaderText));
+    .send(htmlPage('Petitmo · Souvenir', mainBody, '', pageHeaderText, flatLayout));
   return true;
 }
 

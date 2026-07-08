@@ -1,5 +1,7 @@
 import type { Memory } from '@/types/local';
+import { awaitVideoPosterForBookMemory } from '@/services/memoryLocalStore';
 import {
+  getVideoPosterUriForFeedAndViewer,
   isDeviceLocalMediaUri,
   normalizeMemoryMediaUriForDisplay,
 } from '@/utils/memoryPhotos';
@@ -11,7 +13,7 @@ import {
 } from '@/hooks/feedVideoPosterStableCache';
 
 function remoteVideoPosterRef(memory: Memory): string {
-  for (const u of [memory.poster_print_url, memory.poster_url, memory.thumbnail_url]) {
+  for (const u of [memory.poster_url, memory.thumbnail_url]) {
     const t = (u ?? '').trim();
     if (t && !isDeviceLocalMediaUri(t)) return t;
   }
@@ -60,12 +62,24 @@ export async function resolveFeedVideoPosterDisplayUri(memory: Memory): Promise<
   const remote = await resolveRemotePoster(memory);
   if (remote) return resolveFeedVideoPosterStableCache(memory.id, remote);
 
+  const updated = await awaitVideoPosterForBookMemory(memory.id);
+  if (updated) {
+    const localAfter = await readableLocalPosterUri(updated);
+    if (localAfter) return resolveFeedVideoPosterStableCache(memory.id, localAfter);
+    const remoteAfter = await resolveRemotePoster(updated);
+    if (remoteAfter) return resolveFeedVideoPosterStableCache(memory.id, remoteAfter);
+    const sync = getVideoPosterUriForFeedAndViewer(updated).trim();
+    if (sync) return resolveFeedVideoPosterStableCache(memory.id, sync);
+  }
+
   return '';
 }
 
-/** Sync : cache session uniquement (safe au 1er paint FlatList hors écran). */
+/** Sync : cache session ou chemin DB connu (1er paint fil / favoris). */
 export function peekSyncFeedVideoPosterDisplayUri(memory: Memory): string {
   if (memory.type !== 'video') return '';
   const cached = peekFeedVideoPosterStableCache(memory.id);
-  return cached ? normalizePosterDisplay(cached) : '';
+  if (cached) return normalizePosterDisplay(cached);
+  const sync = getVideoPosterUriForFeedAndViewer(memory).trim();
+  return sync ? normalizePosterDisplay(sync) : '';
 }

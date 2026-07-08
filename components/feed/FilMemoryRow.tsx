@@ -15,8 +15,6 @@ import {
   Play,
   Trash2,
   ImagePlus,
-  Volume2,
-  VolumeX,
   MapPin,
   Maximize2,
 } from 'lucide-react-native';
@@ -58,7 +56,11 @@ import { clampAudioBookAnnotation } from '@/lib/audioBookAnnotation';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { Video, ResizeMode, type AVPlaybackStatus } from 'expo-av';
 import { Swipeable, RectButton } from "react-native-gesture-handler";
-import { CapturedAtOverlay, FeedPostMetaOverlay } from '@/components/feed/FeedMediaOverlays';
+import {
+  CapturedAtOverlay,
+  FeedPostMetaOverlay,
+  FeedVideoDurationSoundBar,
+} from '@/components/feed/FeedMediaOverlays';
 import type { PendingUpload } from "@/contexts/PendingMediaUploadsContext";
 import {
   formatDuration,
@@ -285,7 +287,40 @@ function FilMemoryRow({
   const feedInlinePosterFade = useRef(new Animated.Value(1)).current;
   const feedInlineVideoReveal = useRef(new Animated.Value(0)).current;
   const feedInlineVideoRef = useRef<Video | null>(null);
-  useExpoAvShouldPlay(feedInlineVideoRef, canAutoplayVideoInline, videoPlaybackUri);
+  useExpoAvShouldPlay(feedInlineVideoRef, canAutoplayVideoInline, videoPlaybackUri, {
+    restartFromBeginningOnPlay: true,
+  });
+
+  /** `setAudioModeAsync` / `isMuted` peuvent interrompre expo-av — mute impératif + reprise lecture. */
+  useEffect(() => {
+    const player = feedInlineVideoRef.current;
+    if (!canAutoplayVideoInline) {
+      if (player) void player.setIsMutedAsync(true).catch(() => {});
+      return;
+    }
+    if (!player) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        if (feedInlineVideoSoundOn) {
+          await ensurePlaybackAudioForListening();
+        }
+        if (cancelled) return;
+        await player.setIsMutedAsync(!feedInlineVideoSoundOn);
+        if (cancelled) return;
+        const status = await player.getStatusAsync();
+        if (status.isLoaded && !status.isPlaying) {
+          await player.playAsync();
+        }
+      } catch {
+        /* source pas prête */
+      }
+    })();
+    return () => {
+      cancelled = true;
+      void player.setIsMutedAsync(true).catch(() => {});
+    };
+  }, [canAutoplayVideoInline, feedInlineVideoSoundOn]);
 
   useEffect(() => {
     setFeedInlineVideoSoundOn(false);
@@ -521,15 +556,12 @@ function FilMemoryRow({
                           style={StyleSheet.absoluteFillObject}
                           videoStyle={styles.feedInlineVideoNativeBg}
                           resizeMode={ResizeMode.COVER}
-                          shouldPlay={canAutoplayVideoInline}
+                          shouldPlay={false}
                           isLooping={canAutoplayVideoInline}
                           isMuted={!canAutoplayVideoInline || !feedInlineVideoSoundOn}
                           useNativeControls={false}
                           onReadyForDisplay={() => {
                             setFeedInlineVideoDisplayReady(prev => prev || true);
-                            if (canAutoplayVideoInline) {
-                              void feedInlineVideoRef.current?.playAsync();
-                            }
                           }}
                           onPlaybackStatusUpdate={(status: AVPlaybackStatus) => {
                             if (!status.isLoaded) return;
@@ -589,31 +621,16 @@ function FilMemoryRow({
                       </View>
                     </View>
                   ) : null}
-                  {memory.duration ? (
-                    <View style={styles.videoDurationBadgeBottomRight} pointerEvents="none">
-                      <Text style={styles.durationText}>{formatDuration(memory.duration)}</Text>
-                    </View>
-                  ) : null}
                 </View>
               </Pressable>
-              {canAutoplayVideoInline ? (
-                <TouchableOpacity
-                  style={styles.videoSoundToggleTopLeft}
-                  onPress={() => void toggleFeedInlineVideoSound()}
-                  activeOpacity={0.85}
-                  accessibilityRole="button"
-                  accessibilityLabel={
-                    feedInlineVideoSoundOn ? 'Couper le son de la vidéo' : 'Activer le son de la vidéo'
-                  }
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  {feedInlineVideoSoundOn ? (
-                    <Volume2 size={scale(18)} color="#FFFFFF" strokeWidth={2} />
-                  ) : (
-                    <VolumeX size={scale(18)} color="#FFFFFF" strokeWidth={2} />
-                  )}
-                </TouchableOpacity>
-              ) : null}
+              <FeedVideoDurationSoundBar
+                durationLabel={
+                  memory.duration ? formatDuration(memory.duration) : undefined
+                }
+                showSoundToggle={canAutoplayVideoInline}
+                soundOn={feedInlineVideoSoundOn}
+                onToggleSound={() => void toggleFeedInlineVideoSound()}
+              />
               {showCapturedOverlay && videoUriForOverlay ? (
                 <CapturedAtOverlay
                   uriForAnalysis={videoUriForOverlay}

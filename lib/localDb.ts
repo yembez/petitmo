@@ -129,6 +129,7 @@ export function initLocalDb(): void {
     add('extra_photo_paths', 'TEXT');
     add('thumbnail_path', 'TEXT');
     add('poster_print_url', 'TEXT');
+    add('local_poster_print_path', 'TEXT');
     add('captured_overlay_ink', 'TEXT');
     add('text_title', 'TEXT');
   } catch {
@@ -315,6 +316,7 @@ export function upsertLocalMemory(memory: Memory, uploadStatus?: UploadStatus): 
     `INSERT OR REPLACE INTO memories (
       id, child_id, user_id, type, content, text_title,
       local_media_path, local_original_path, local_thumb_path, local_display_path, local_print_path,
+      local_poster_print_path,
       original_px_w, original_px_h, print_px_w, print_px_h,
       media_url, media_path, thumb_url, display_url,
       print_url, poster_url, poster_print_url, thumbnail_url, thumbnail_path,
@@ -326,7 +328,7 @@ export function upsertLocalMemory(memory: Memory, uploadStatus?: UploadStatus): 
       upload_status, sync_status, synced_at,
       import_asset_id, import_source_fingerprint
     ) VALUES (
-      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
     )`,
     [
       memory.id,
@@ -340,6 +342,7 @@ export function upsertLocalMemory(memory: Memory, uploadStatus?: UploadStatus): 
       memory.local_thumb_path ?? null,
       memory.local_display_path ?? null,
       memory.local_print_path ?? null,
+      memory.local_poster_print_path ?? null,
       memory.original_px_w ?? null,
       memory.original_px_h ?? null,
       memory.print_px_w ?? null,
@@ -608,6 +611,7 @@ function deserializeMemory(row: Record<string, unknown>): Memory {
     local_thumb_path: (row.local_thumb_path as string | null) ?? null,
     local_display_path: (row.local_display_path as string | null) ?? null,
     local_print_path: (row.local_print_path as string | null) ?? null,
+    local_poster_print_path: (row.local_poster_print_path as string | null) ?? null,
     original_px_w: (row.original_px_w as number | null) ?? null,
     original_px_h: (row.original_px_h as number | null) ?? null,
     print_px_w: (row.print_px_w as number | null) ?? null,

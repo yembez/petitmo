@@ -1056,6 +1056,7 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
           ...g,
           thumbnail_url: thumbPublicUrl ?? g.thumbnail_url ?? null,
           poster_url: thumbPublicUrl ?? g.poster_url ?? null,
+          poster_print_url: thumbPublicUrl ?? g.poster_print_url ?? null,
         };
       }
       if (m.type !== 'photo') return g;

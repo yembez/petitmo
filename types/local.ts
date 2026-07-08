@@ -15,6 +15,8 @@ export type LocalFields = {
   local_thumb_path?: string | null
   local_display_path?: string | null
   local_print_path?: string | null
+  /** Poster vidéo impression (`poster_print.jpg`) — distinct du poster fil (`poster.jpg`). */
+  local_poster_print_path?: string | null
   /** Métadonnées pixels (pour DPI impression) */
   original_px_w?: number | null
   original_px_h?: number | null

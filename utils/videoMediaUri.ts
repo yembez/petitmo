@@ -112,6 +112,23 @@ export function syncFeedLocalVideoPlaybackUri(
   return '';
 }
 
+/**
+ * URI locale optimiste (chemins SQLite / sandbox) sans vérif disque — démarre l’autoplay immédiatement ;
+ * la résolution async confirme ensuite la lisibilité.
+ */
+export function optimisticFeedLocalVideoPlaybackUri(
+  m: Pick<Memory, 'id' | 'type' | 'edited_media_url' | 'media_url' | 'local_media_path' | 'local_original_path'>,
+): string {
+  const boot = syncFeedLocalVideoPlaybackUri(m);
+  if (boot) return boot;
+  for (const raw of videoPlaybackCandidateUrisFromMemory(m)) {
+    if (isHttpUrl(raw)) continue;
+    const n = normalizeVideoPlaybackUri(raw);
+    if (isFeedLocalVideoPlaybackUri(n)) return n;
+  }
+  return '';
+}
+
 /** URI exploitable par `expo-av` `Video` (préfixe `file://` si chemin absolu). */
 export function normalizeVideoPlaybackUri(raw: string): string {
   const input = raw.trim();

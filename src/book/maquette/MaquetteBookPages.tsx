@@ -55,18 +55,15 @@ import {
   pdfCoverTitleStyle,
   pdfFolioStyle,
   pdfLabelStyle,
-  PDF_MEDIA_QR_QR_MM,
-  PDF_MEDIA_QR_CARD_W_MM,
-  PDF_MEDIA_QR_CARD_PAD_MM,
-  PDF_MEDIA_QR_CARD_RADIUS_MM,
   PDF_MEDIA_QR_GAP_MM,
-  PDF_MEDIA_QR_TYPE_ICON_MM,
   PDF_MEDIA_QR_PULL_UP_MM,
   PDF_MEDIA_QR_CARD_BORDER_COLOR,
   PDF_MEDIA_QR_MUTED_COLOR,
   PDF_MEDIA_TEXT_PAD_X_MM,
+  pdfMediaQrCardLayoutPx,
   pdfMediaCaptionStyle,
   pdfMmToPreviewPxH,
+  pdfMmToPreviewPxUniform,
   pdfMmToPreviewPxW,
   pdfPhotoCaptionStyle,
   pdfPhotoNoteBodyStyle,
@@ -619,8 +616,8 @@ function VisualBand({
   bandH: number;
   children: (frameW: number, frameH: number) => ReactNode;
 }) {
-  const mx = pdfMmToPreviewPxW(BOOK_VISUAL_MARGIN_MM, width);
-  const my = pdfMmToPreviewPxH(BOOK_VISUAL_MARGIN_MM, height);
+  const mx = pdfMmToPreviewPxUniform(BOOK_VISUAL_MARGIN_MM, width, height);
+  const my = mx;
   const frameW = Math.max(1, width - 2 * mx);
   const frameH = Math.max(1, bandH - 2 * my);
   return (
@@ -1578,19 +1575,21 @@ function MaquetteVideoPosterVisual({
 }) {
   const raw = useBookVideoPosterDisplayUrl(memory).trim();
   if (!raw) return <>{fallback}</>;
-  if (isDeviceLocalMediaUri(raw)) {
+  const baseUri = (raw.split('?')[0] ?? raw).trim();
+  if (isDeviceLocalMediaUri(baseUri)) {
     return (
       <BookPagePhotoFrame
         uri={raw}
         frameW={frameW}
         frameH={frameH}
-        recyclingKey={`book-video-poster-${memory.id}`}
+        recyclingKey={`book-video-poster-${memory.id}-${memory.updated_at ?? ''}`}
       />
     );
   }
   return (
     <MaquetteVideoPosterCloudFrame
       memoryId={memory.id}
+      cacheKey={memory.updated_at ?? memory.poster_print_url ?? ''}
       raw={raw}
       frameW={frameW}
       frameH={frameH}
@@ -1601,12 +1600,14 @@ function MaquetteVideoPosterVisual({
 
 function MaquetteVideoPosterCloudFrame({
   memoryId,
+  cacheKey,
   raw,
   frameW,
   frameH,
   fallback,
 }: {
   memoryId: string;
+  cacheKey?: string;
   raw: string;
   frameW: number;
   frameH: number;
@@ -1620,7 +1621,7 @@ function MaquetteVideoPosterCloudFrame({
       uri={uri}
       frameW={frameW}
       frameH={frameH}
-      recyclingKey={`book-video-poster-${memoryId}`}
+      recyclingKey={`book-video-poster-${memoryId}-${cacheKey ?? ''}`}
     />
   );
 }
@@ -1664,8 +1665,8 @@ function MaquetteMediaQr({
   memoryTextFont: string;
 }) {
   const captionRaw = clampMediaBookCaption((memory.content ?? '').trim());
-  const mediaPad = Math.round(pdfMmToPreviewPxW(PDF_MEDIA_TEXT_PAD_X_MM, width));
-  const qrSize = Math.max(12, Math.round(pdfMmToPreviewPxW(PDF_MEDIA_QR_QR_MM, width)));
+  const mediaPad = Math.round(pdfMmToPreviewPxUniform(PDF_MEDIA_TEXT_PAD_X_MM, width, height));
+  const qrCard = pdfMediaQrCardLayoutPx(width, height);
   const photoInline = kind === 'audio' ? buildInlineCropProps(inlineCropConfig, memory.id) : undefined;
   const voiceVisualUri =
     kind === 'audio'
@@ -1675,11 +1676,7 @@ function MaquetteMediaQr({
       : '';
   const imgH = pdfMmToPreviewPxH(PHOTO_NOTE_BAND_HEIGHT_MM, height);
   const bookLoc = bookMaquetteLocationLabel(memory);
-  const cardW = Math.round(pdfMmToPreviewPxW(PDF_MEDIA_QR_CARD_W_MM, width));
-  const cardPad = Math.max(4, Math.round(pdfMmToPreviewPxW(PDF_MEDIA_QR_CARD_PAD_MM, width)));
-  const cardRadius = Math.round(pdfMmToPreviewPxW(PDF_MEDIA_QR_CARD_RADIUS_MM, width));
-  const bodyGap = Math.round(pdfMmToPreviewPxW(PDF_MEDIA_QR_GAP_MM, width));
-  const typeIconSize = Math.max(8, Math.round(pdfMmToPreviewPxW(PDF_MEDIA_QR_TYPE_ICON_MM, width)));
+  const bodyGap = Math.round(pdfMmToPreviewPxUniform(PDF_MEDIA_QR_GAP_MM, width, height));
   const typeLabel = kind === 'audio' ? 'Audio' : 'Video';
   const qrHint = kind === 'audio' ? 'Scanner pour écouter' : 'Scanner pour visionner';
 
@@ -1797,43 +1794,106 @@ function MaquetteMediaQr({
               style={[
                 styles.mediaQrCard,
                 {
-                  width: cardW,
-                  padding: cardPad,
-                  borderRadius: cardRadius,
+                  width: qrCard.cardW,
+                  minWidth: qrCard.cardW,
+                  maxWidth: qrCard.cardW,
+                  height: qrCard.cardH,
+                  minHeight: qrCard.cardH,
+                  maxHeight: qrCard.cardH,
+                  padding: qrCard.cardPad,
+                  borderRadius: qrCard.cardRadius,
                   borderColor: PDF_MEDIA_QR_CARD_BORDER_COLOR,
                 },
               ]}
             >
               <Text
-                style={[styles.mediaQrCardHint, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.45}
+                ellipsizeMode="tail"
+                style={[
+                  styles.mediaQrCardHint,
+                  {
+                    fontSize: qrCard.hintFontSize,
+                    lineHeight: qrCard.hintLineH,
+                    height: qrCard.hintLineH,
+                  },
+                  dm400 && { fontFamily: dm400 },
+                ]}
+                {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
               >
                 {qrHint}
               </Text>
-              <View style={[styles.mediaQrCardQr, { marginVertical: cardPad }]}>
+              <View
+                style={[
+                  styles.mediaQrCardQr,
+                  {
+                    marginTop: qrCard.qrMarginV,
+                    width: qrCard.qrSize,
+                    height: qrCard.qrSize,
+                    alignSelf: 'center',
+                  },
+                ]}
+              >
                 {qrUrl.trim().length > 0 ? (
-                  <QRCode value={qrUrl} size={qrSize} backgroundColor="#FFFFFF" color={INK} />
+                  <QRCode
+                    value={qrUrl}
+                    size={qrCard.qrSize}
+                    backgroundColor="#FFFFFF"
+                    color={INK}
+                  />
                 ) : (
                   <View
                     style={{
-                      width: qrSize,
-                      height: qrSize,
+                      width: qrCard.qrSize,
+                      height: qrCard.qrSize,
                       borderRadius: 4,
                       backgroundColor: '#EEEEEE',
                     }}
                   />
                 )}
               </View>
-              <View style={styles.mediaQrCardType}>
+              <View
+                style={[
+                  styles.mediaQrCardType,
+                  {
+                    marginTop: qrCard.qrMarginV,
+                    height: qrCard.typeRowH,
+                    minHeight: qrCard.typeRowH,
+                    maxHeight: qrCard.typeRowH,
+                  },
+                ]}
+              >
                 <Text
+                  numberOfLines={1}
                   style={[
                     styles.mediaQrCardTypeLabel,
-                    pdfLabelStyle(width),
+                    {
+                      fontSize: qrCard.typeLabelFontSize,
+                      lineHeight: qrCard.typeRowH,
+                      height: qrCard.typeRowH,
+                    },
                     dm400 && { fontFamily: dm400 },
                   ]}
+                  {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
                 >
                   {typeLabel}
                 </Text>
-                <MediaTypeIcon kind={kind} size={typeIconSize} color={PDF_MEDIA_QR_MUTED_COLOR} />
+                <View
+                  style={{
+                    width: qrCard.typeIconSize,
+                    height: qrCard.typeIconSize,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  <MediaTypeIcon
+                    kind={kind}
+                    size={qrCard.typeIconSize}
+                    color={PDF_MEDIA_QR_MUTED_COLOR}
+                  />
+                </View>
               </View>
             </View>
           </View>
@@ -2176,10 +2236,12 @@ const styles = StyleSheet.create({
   mediaQrBodyRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'nowrap',
   },
   mediaQrCaptionCol: {
     flex: 1,
     minWidth: 0,
+    flexShrink: 1,
   },
   mediaQrCaption: {
     color: INK,
@@ -2188,7 +2250,8 @@ const styles = StyleSheet.create({
   mediaQrCard: {
     borderWidth: 1,
     backgroundColor: '#FFFFFF',
-    alignItems: 'stretch',
+    flexShrink: 0,
+    overflow: 'hidden',
   },
   mediaQrCardHint: {
     color: PDF_MEDIA_QR_MUTED_COLOR,
@@ -2197,14 +2260,21 @@ const styles = StyleSheet.create({
   mediaQrCardQr: {
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
+    flexShrink: 0,
   },
   mediaQrCardType: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    overflow: 'hidden',
+    flexShrink: 0,
   },
   mediaQrCardTypeLabel: {
     color: PDF_MEDIA_QR_MUTED_COLOR,
+    flex: 1,
+    minWidth: 0,
+    marginRight: 2,
   },
   audioQrCenter: {
     alignItems: 'center',

@@ -31,6 +31,7 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -40,6 +41,7 @@ import { useBookQrTokenUrls } from '@/hooks/useBookQrTokenUrls';
 import { qrPreviewUrlForMemory } from '@/services/bookQrPreview';
 import MaquetteBookPages from '@/src/book/maquette/MaquetteBookPages';
 import EditTextModal from '@/components/EditTextModal';
+import { BookVideoPosterPickerModal } from '@/components/BookVideoPosterPickerModal';
 import { BookPreviewZoomWrap } from '@/components/BookPreviewZoomWrap';
 import {
   bookPrintFrameMmFor,
@@ -95,7 +97,7 @@ import {
   getPrimaryPhotoUriForBookPreview,
   getVoiceCoverUriForBookEditorDisplay,
   getVoiceCoverUriForBookPreview,
-  getVideoPosterUriForBookPreview,
+  getBookVideoPosterSyncDisplayUri,
 } from '@/utils/memoryPhotos';
 import { runBookExportPrepInBackground } from '@/services/bookExportPrep';
 import { getBookExportPrepIssues } from '@/services/bookExportPrep';
@@ -132,6 +134,19 @@ const MAX_BOOK_SELECTION_KEYS = 80;
  * Page seule (couverture à droite, quatrième à gauche, dernière page impaire) : **même format** que les demi-pages
  * du double page — la maquette (couverture incluse) attend width/height au ratio 210:280, pas un cadre 210:142.
  */
+function gelatoTrimPagePx(
+  availW: number,
+  availH: number,
+  opts?: { pageCount?: number; spineTotal?: number },
+): { width: number; height: number } {
+  const pageCount = opts?.pageCount ?? 1;
+  const spineTotal = opts?.spineTotal ?? 0;
+  const s = Math.min((availW - spineTotal) / (BOOK_PAGE_W_MM * pageCount), availH / BOOK_PAGE_H_MM);
+  const width = Math.max(1, Math.floor(s * BOOK_PAGE_W_MM));
+  const height = Math.max(1, Math.round((width * BOOK_PAGE_H_MM) / BOOK_PAGE_W_MM));
+  return { width, height };
+}
+
 function computeLandscapeSpreadLayout(
   left: PageRow | null,
   right: PageRow | null,
@@ -147,29 +162,24 @@ function computeLandscapeSpreadLayout(
   const hairline = Math.max(StyleSheet.hairlineWidth, 1);
   const spineTotal = spineMargin + hairline + spineMargin;
 
-  const trimPage = { w: BOOK_PAGE_W_MM, h: BOOK_PAGE_H_MM };
-
   if (!left && !right) {
     return { left: null, right: null, spineWidth: 0, rowHeight: 0 };
   }
 
   if (!left && right) {
-    const s = Math.min(availW / trimPage.w, availH / trimPage.h);
-    const rw = Math.max(1, Math.floor(s * trimPage.w));
-    const rh = Math.max(1, Math.floor(s * trimPage.h));
-    return { left: null, right: { width: rw, height: rh }, spineWidth: 0, rowHeight: rh };
+    const { width, height } = gelatoTrimPagePx(availW, availH);
+    return { left: null, right: { width, height }, spineWidth: 0, rowHeight: height };
   }
 
   if (left && !right) {
-    const s = Math.min(availW / trimPage.w, availH / trimPage.h);
-    const lw = Math.max(1, Math.floor(s * trimPage.w));
-    const lh = Math.max(1, Math.floor(s * trimPage.h));
-    return { left: { width: lw, height: lh }, right: null, spineWidth: 0, rowHeight: lh };
+    const { width, height } = gelatoTrimPagePx(availW, availH);
+    return { left: { width, height }, right: null, spineWidth: 0, rowHeight: height };
   }
 
-  const s = Math.min((availW - spineTotal) / (trimPage.w * 2), availH / trimPage.h);
-  const pw = Math.max(1, Math.floor(s * trimPage.w));
-  const ph = Math.max(1, Math.floor(s * trimPage.h));
+  const { width: pw, height: ph } = gelatoTrimPagePx(availW, availH, {
+    pageCount: 2,
+    spineTotal: spineTotal,
+  });
   return {
     left: { width: pw, height: ph },
     right: { width: pw, height: ph },
@@ -288,7 +298,7 @@ function bookPageMainImageUri(
     return getPrimaryPhotoUriForBookMaquetteDisplay(m).trim() || null;
   }
   if (page.type === 'audio') return getVoiceCoverUriForBookPreview(m).trim() || null;
-  if (page.type === 'video') return getVideoPosterUriForBookPreview(m).trim() || null;
+  if (page.type === 'video') return getBookVideoPosterSyncDisplayUri(m).trim() || null;
   return null;
 }
 
@@ -369,6 +379,7 @@ export default function BookPreviewScreen() {
   const [guestExportSubmitting, setGuestExportSubmitting] = useState(false);
   const pendingGuestExportMode = useRef<'screen' | 'print'>('screen');
   const [coverPickerOpen, setCoverPickerOpen] = useState(false);
+  const [videoPosterPickerMemory, setVideoPosterPickerMemory] = useState<Memory | null>(null);
   /** Depuis un tap en mode spread (paysage) : ouvre l’éditeur puis la modale texte sur la page tapée. */
   const [pendingTextEditPageIndex, setPendingTextEditPageIndex] = useState<number | null>(null);
   const [cropDpiMetaByKey, setCropDpiMetaByKey] = useState<
@@ -517,11 +528,8 @@ export default function BookPreviewScreen() {
   const editorPage = useMemo(() => {
     const availW = screenWidth - EDITOR_PAGE_SIDE_PAD * 2;
     const availH = availHPortrait - EDITOR_PAGE_VERT_PAD * 2;
-    const s = Math.min(availW / BOOK_PAGE_W_MM, availH / BOOK_PAGE_H_MM);
-    return {
-      w: Math.max(1, Math.floor(s * BOOK_PAGE_W_MM)),
-      h: Math.max(1, Math.floor(s * BOOK_PAGE_H_MM)),
-    };
+    const { width, height } = gelatoTrimPagePx(availW, availH);
+    return { w: width, h: height };
   }, [availHPortrait, screenWidth]);
 
   /**
@@ -716,6 +724,24 @@ export default function BookPreviewScreen() {
     void load({ silent: hadLocalSnapshotRef.current });
   }, [load]);
 
+  /** Retour Favoris → spread : snapshot SQLite immédiat puis rechargement complet. */
+  useFocusEffect(
+    useCallback(() => {
+      if (!bookId) return;
+      const snap = readBookPreviewLocalSnapshotSync(bookId);
+      if (snap) {
+        setBookSnapshot(snap.book);
+        setBookSelectionKeys(snap.bookSelectionKeys);
+        setBookMemories(snap.bookMemories);
+        if (snap.book.rotations) setRotations(snap.book.rotations);
+        if (snap.book.photoCrops) setPhotoCrops(snap.book.photoCrops);
+        setCoverTitleLine(snap.book.title);
+        setCoverPhotoUrl(resolveBookCoverEditorUri(snap.book));
+      }
+      void load({ silent: true });
+    }, [bookId, load]),
+  );
+
   /** Souvenirs audio existants : génère `voice_cover_print.jpg` (3200px) pour le badge DPI livre. */
   useEffect(() => {
     for (const m of bookMemories) {
@@ -735,14 +761,30 @@ export default function BookPreviewScreen() {
   }, [bookMemories]);
 
   const videoPosterBackfillRef = useRef(new Set<string>());
-  /** Souvenirs vidéo existants : génère `poster.jpg` si absent (vignette livre + export PDF). */
+  /** Souvenirs vidéo : génère `poster.jpg` par défaut si absent (fil + livre en attendant custom). */
   useEffect(() => {
     for (const m of bookMemories) {
       if (m.type !== 'video') continue;
+      const hasDefault =
+        !!(m.local_thumb_path ?? '').trim() ||
+        !!(m.poster_url ?? '').trim() ||
+        !!(m.thumbnail_url ?? '').trim();
+      if (hasDefault) continue;
       if (videoPosterBackfillRef.current.has(m.id)) continue;
       videoPosterBackfillRef.current.add(m.id);
       void awaitVideoPosterForBookMemory(m.id).then(updated => {
-        if (!updated?.poster_url && !updated?.thumbnail_url && !updated?.local_thumb_path) return;
+        if (!updated) {
+          videoPosterBackfillRef.current.delete(m.id);
+          return;
+        }
+        const ok =
+          !!(updated.poster_url ?? '').trim() ||
+          !!(updated.thumbnail_url ?? '').trim() ||
+          !!(updated.local_thumb_path ?? '').trim();
+        if (!ok) {
+          videoPosterBackfillRef.current.delete(m.id);
+          return;
+        }
         setBookMemories(prev => prev.map(x => (x.id === updated.id ? updated : x)));
       });
     }
@@ -1674,6 +1716,8 @@ export default function BookPreviewScreen() {
 
   const coverPhotoOk = !actionsDisabled && currentPage?.type === 'cover';
 
+  const videoImageOk = !actionsDisabled && currentPage?.type === 'video';
+
   const canDeletePage =
     !actionsDisabled &&
     (currentPage?.type === 'photo-full' ||
@@ -1722,6 +1766,14 @@ export default function BookPreviewScreen() {
     const m = 'memory' in currentPage ? merge(currentPage.memory) : null;
     openTextEditForPage(currentPage, m);
   }, [currentPage, editOk, merge, openTextEditForPage]);
+
+  const handleOpenVideoPosterPicker = useCallback(() => {
+    if (!currentPage || currentPage.type !== 'video') return;
+    const m = memoryForMaquette(currentPage, merge);
+    if (!m || m.type !== 'video') return;
+    const live = bookMemories.find(x => x.id === m.id) ?? m;
+    setVideoPosterPickerMemory(live);
+  }, [bookMemories, currentPage, merge]);
 
   const editModalSingleInitial = useMemo(() => {
     if (!textEditTarget) return '';
@@ -2436,6 +2488,21 @@ export default function BookPreviewScreen() {
                     </View>
                   </TouchableOpacity>
                 ) : null}
+                {videoImageOk ? (
+                  <TouchableOpacity
+                    style={styles.pill}
+                    onPress={handleOpenVideoPosterPicker}
+                    activeOpacity={0.75}
+                    hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Choisir l'image d'illustration de la vidéo"
+                  >
+                    <View style={styles.pillInner}>
+                      <ImageIcon size={14} color={THEME.textSecondary} strokeWidth={2} />
+                      <Text style={[styles.pillText, dm400 && { fontFamily: dm400 }]}>Image</Text>
+                    </View>
+                  </TouchableOpacity>
+                ) : null}
                 <TouchableOpacity
                   style={[styles.pill, !editOk && styles.pillDisabled]}
                   onPress={handleToolbarEdit}
@@ -2504,6 +2571,17 @@ export default function BookPreviewScreen() {
               />
             </View>
           ) : null}
+
+          <BookVideoPosterPickerModal
+            visible={videoPosterPickerMemory != null}
+            memory={videoPosterPickerMemory}
+            onClose={() => setVideoPosterPickerMemory(null)}
+            onSaved={updated => {
+              const fresh = getLocalMemoryById(updated.id) ?? updated;
+              setBookMemories(prev => prev.map(x => (x.id === fresh.id ? fresh : x)));
+              setVideoPosterPickerMemory(null);
+            }}
+          />
 
           </View>
         </GestureHandlerRootView>
