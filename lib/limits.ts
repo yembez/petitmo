@@ -11,8 +11,13 @@ export const FREE_TIER_VIDEO_MAX_DURATION = 30 // secondes
 export const FREE_TIER_VOICE_LIMIT = 5 // max souvenirs audio en gratuit
 export const FREE_TIER_VOICE_MAX_DURATION = 60 // secondes (création de souvenirs audio)
 export const FREE_TIER_BOOK_VOICE_MAX_DURATION = 60 // secondes (livres : QR audio)
-/** Max souvenirs audio avec QR dans un livre / PDF (plan gratuit). Aligné serveur `FREE_TIER_QR_AV_MAX_PER_BOOK`. */
+/** Max souvenirs audio avec QR dans un livre / PDF (plan gratuit). */
 export const FREE_TIER_BOOK_AUDIO_MAX_COUNT = 5
+/** Max souvenirs vidéo avec QR dans un livre / PDF (plan gratuit). Cloud QR uniquement après commande. */
+export const FREE_TIER_BOOK_VIDEO_MAX_COUNT = 5
+/** Pages audio+vidéo avec QR par livre (gratuit) = audio max + vidéo max. Aligné `server/src/constants/spec.ts`. */
+export const FREE_TIER_BOOK_QR_AV_MAX_PER_BOOK =
+  FREE_TIER_BOOK_AUDIO_MAX_COUNT + FREE_TIER_BOOK_VIDEO_MAX_COUNT
 
 /**
  * Largeur max (px) pour upload cloud / compression guest PDF (équilibre poids ↔ qualité A5).
@@ -126,5 +131,43 @@ export async function checkVideoLimit(
     current: videoCount,
     limit: FREE_TIER_VIDEO_LIMIT,
     isAtLimit: videoCount >= FREE_TIER_VIDEO_LIMIT,
+  }
+}
+
+export async function checkVoiceLimit(
+  childId: string
+): Promise<{
+  canCreate: boolean
+  current: number
+  limit: number
+  isAtLimit: boolean
+}> {
+  void childId
+  const tier = await getUserTier()
+
+  if (tier === 'paid') {
+    return {
+      canCreate: true,
+      current: 0,
+      limit: Infinity,
+      isAtLimit: false,
+    }
+  }
+
+  try {
+    if ((await getCachedUserMode()) === 'cloud') {
+      await pullFamilyMemoriesFromRemoteToLocal()
+    }
+  } catch {
+    // hors ligne
+  }
+
+  const voiceCount = getAllLocalMemories().filter(m => m.type === 'voice').length
+
+  return {
+    canCreate: voiceCount < FREE_TIER_VOICE_LIMIT,
+    current: voiceCount,
+    limit: FREE_TIER_VOICE_LIMIT,
+    isAtLimit: voiceCount >= FREE_TIER_VOICE_LIMIT,
   }
 }

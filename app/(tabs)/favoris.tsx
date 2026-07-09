@@ -80,7 +80,6 @@ import { clampAudioBookAnnotation } from '@/lib/audioBookAnnotation';
 import { AddToBookModal } from '@/components/AddToBookModal';
 import {
   addMemoriesToBook,
-  BookUpgradeRequiredError,
   createBookWithMemories,
   dedupeMemoryIds,
   upsertBook,
@@ -1283,35 +1282,6 @@ function FavorisScreen() {
       try {
         updated = await createBookWithMemories(createBookFlowTitle, selectedMemoryIds);
       } catch (e) {
-        if (e instanceof BookUpgradeRequiredError) {
-          Alert.alert(
-            'Petitmo+',
-            'Pour pouvoir ajouter une vidéo dans le livre et la revoir à tout moment grâce au QR Code, passer à Petitmo+.',
-            [
-              {
-                text: 'Annuler',
-                style: 'cancel',
-                onPress: () => {
-                  setSelectedIds(prev => {
-                    const next = new Set(prev);
-                    for (const it of galleryItems) {
-                      if (!next.has(it.key)) continue;
-                      if (it.memory.type === 'video') next.delete(it.key);
-                    }
-                    return next;
-                  });
-                },
-              },
-              {
-                text: 'Passer à Petitmo+',
-                style: 'default',
-                onPress: () =>
-                  router.push({ pathname: '/paywall', params: { context: 'BOOK_VIDEO' } }),
-              },
-            ],
-          );
-          return;
-        }
         Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
         return;
       } finally {
@@ -1352,35 +1322,6 @@ function FavorisScreen() {
           return;
         }
       } catch (e) {
-        if (e instanceof BookUpgradeRequiredError) {
-          Alert.alert(
-            'Petitmo+',
-            'Pour pouvoir ajouter une vidéo dans le livre et la revoir à tout moment grâce au QR Code, passer à Petitmo+.',
-            [
-              {
-                text: 'Annuler',
-                style: 'cancel',
-                onPress: () => {
-                  setSelectedIds(prev => {
-                    const next = new Set(prev);
-                    for (const it of galleryItems) {
-                      if (!next.has(it.key)) continue;
-                      if (it.memory.type === 'video') next.delete(it.key);
-                    }
-                    return next;
-                  });
-                },
-              },
-              {
-                text: 'Passer à Petitmo+',
-                style: 'default',
-                onPress: () =>
-                  router.push({ pathname: '/paywall', params: { context: 'BOOK_VIDEO' } }),
-              },
-            ],
-          );
-          return;
-        }
         Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
         return;
       }

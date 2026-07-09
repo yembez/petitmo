@@ -40,24 +40,16 @@ const TAB_ICON_SIZE = scale(24);
 const TAB_ICON_SIZE_FOCUSED = scale(24);
 /** Hauteur commune des icônes latérales — centrées verticalement dans le bandeau. */
 const TAB_ICON_ROW_H = scale(28);
-/** CTA « + » — disque flottant (réf. IMG_1275 : centre sur le bord haut du bandeau). */
-const CAPTURE_TAB_DISC_SIZE = scale(60);
-const CAPTURE_TAB_DISC_RADIUS = CAPTURE_TAB_DISC_SIZE / 2;
-const CAPTURE_TAB_DISC_ICON_SIZE = scale(27);
+/** CTA « + » — disque centré sur la ligne des icônes (même axe que Journal / Favoris / Livres). */
+const CAPTURE_TAB_DISC_SIZE = scale(48);
+const CAPTURE_TAB_DISC_ICON_SIZE = scale(22);
 /** Marge horizontale entre le disque et la courbe de l’encoche. */
 const CAPTURE_TAB_NOTCH_GAP = scale(34);
 /** Profondeur du fond de l’encoche (< rayon horizontal → bas remonté). */
 const CAPTURE_TAB_NOTCH_DEPTH = verticalScale(40);
 
 function captureTabNotchR(): number {
-  return captureTabNotchRadius(CAPTURE_TAB_DISC_RADIUS, CAPTURE_TAB_NOTCH_GAP);
-}
-
-/** Disque légèrement enfoncé dans l’encoche (sous le bord haut plat). */
-const CAPTURE_DISC_SINK = verticalScale(6);
-
-function floatingCaptureDiscTop(): number {
-  return -CAPTURE_TAB_DISC_RADIUS + CAPTURE_DISC_SINK;
+  return captureTabNotchRadius(CAPTURE_TAB_DISC_SIZE / 2, CAPTURE_TAB_NOTCH_GAP);
 }
 const TAB_LABEL_LINE_H = scale(12);
 const TAB_ICON_LABEL_GAP = verticalScale(3);
@@ -101,38 +93,9 @@ function TabBarGlyph({
   );
 }
 
-function CaptureTabIcon() {
-  /** Le disque flottant est rendu au niveau du shell ; on garde l’alignement des voisins. */
-  return <CaptureLabelSpacer />;
-}
-
-function FloatingCaptureDisc({
-  left,
-  onPress,
-  onLongPress,
-  accessibilityLabel,
-}: {
-  left: number;
-  onPress: () => void;
-  onLongPress: () => void;
-  accessibilityLabel: string;
-}) {
+function CaptureTabDisc() {
   return (
-    <PlatformPressable
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-      onPress={onPress}
-      onLongPress={onLongPress}
-      style={[
-        styles.floatingCaptureCta,
-        {
-          left,
-          top: floatingCaptureDiscTop(),
-          width: CAPTURE_TAB_DISC_SIZE,
-          height: CAPTURE_TAB_DISC_SIZE,
-        },
-      ]}
-    >
+    <View style={styles.captureTabIconSlot}>
       <View
         style={[
           styles.captureTabDisc,
@@ -145,11 +108,11 @@ function FloatingCaptureDisc({
       >
         <Plus
           size={CAPTURE_TAB_DISC_ICON_SIZE}
-          color={THEME.captureScreenCtaForeground}
+          color="#0A0A0A"
           strokeWidth={2.35}
         />
       </View>
-    </PlatformPressable>
+    </View>
   );
 }
 
@@ -213,30 +176,6 @@ export default function PetitmoContextTabBar({
   );
   const tabBarSlideY = useRef(new Animated.Value(0)).current;
   const [barWidth, setBarWidth] = useState(0);
-  const captureRouteIndex = state.routes.findIndex(r => r.name === 'index');
-  const captureRoute = captureRouteIndex >= 0 ? state.routes[captureRouteIndex] : null;
-  const captureRouteKey = captureRoute?.key;
-  const captureOptions = captureRouteKey ? descriptors[captureRouteKey]?.options : undefined;
-
-  const navigateToCapture = () => {
-    if (!captureRoute || captureRouteIndex < 0) return;
-    const event = navigation.emit({
-      type: 'tabPress',
-      target: captureRoute.key,
-      canPreventDefault: true,
-    });
-    if (state.index !== captureRouteIndex && !event.defaultPrevented) {
-      navigation.navigate(captureRoute.name, captureRoute.params);
-    }
-  };
-
-  const longPressCapture = () => {
-    if (!captureRouteKey) return;
-    navigation.emit({
-      type: 'tabLongPress',
-      target: captureRouteKey,
-    });
-  };
 
   useEffect(() => {
     if (!isCaptureTabActive) {
@@ -313,14 +252,6 @@ export default function PetitmoContextTabBar({
         notchRadius={captureTabNotchR()}
         notchDepth={CAPTURE_TAB_NOTCH_DEPTH}
       />
-      {barWidth > 0 && !isCaptureTabActive ? (
-        <FloatingCaptureDisc
-          left={(barWidth - CAPTURE_TAB_DISC_SIZE) / 2}
-          onPress={navigateToCapture}
-          onLongPress={longPressCapture}
-          accessibilityLabel={captureOptions?.tabBarAccessibilityLabel ?? 'Capturer'}
-        />
-      ) : null}
       <View style={styles.tabBarRow}>
         {FIXED_TAB_BAR_SLOTS.map(slot => {
           if (slot.kind === 'settings') {
@@ -388,7 +319,11 @@ export default function PetitmoContextTabBar({
               captureOverflow={isCapture && !isFocused}
             >
               {isCapture ? (
-                <CaptureTabIcon />
+                isCaptureTabActive ? (
+                  <CaptureLabelSpacer />
+                ) : (
+                  <CaptureTabDisc />
+                )
               ) : (
                 <TabBarGlyph
                   Icon={meta.Icon}
@@ -483,12 +418,6 @@ const styles = StyleSheet.create({
     zIndex: 3,
     justifyContent: 'center',
   },
-  floatingCaptureCta: {
-    position: 'absolute',
-    zIndex: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   tabBarPressableBase: {
     width: '100%',
     alignItems: 'center',
@@ -500,18 +429,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  captureTabIconSlot: {
+    height: TAB_ICON_ROW_H,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'visible',
+  },
   captureTabDisc: {
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: CAPTURE_SCREEN_ACCENT,
+    backgroundColor: THEME.tabBarBackground,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#000000',
     ...Platform.select({
       ios: {
         shadowColor: '#3C3126',
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.18,
-        shadowRadius: 5,
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.14,
+        shadowRadius: scale(8),
       },
-      android: { elevation: 6 },
+      android: { elevation: 4 },
       default: {},
     }),
   },

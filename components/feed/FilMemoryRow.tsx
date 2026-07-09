@@ -42,15 +42,16 @@ import PhotoMosaic from "@/components/PhotoMosaic";
 import {
   appendLocalMediaCacheBuster,
   getVoiceCoverUriForFeedAndViewer,
+  getVideoPosterUriForFeedAndViewer,
   isAlbumFullyFavorited,
   isFeedMultiPhotoAlbum,
+  memoryHasExplicitVoiceCover,
   normalizeMemoryMediaUriForDisplay,
   parseFavoritePhotoUrls,
 } from '@/utils/memoryPhotos';
-import { useFeedPhotoDisplayUrls } from "@/hooks/useFeedPhotoDisplayUrls";
+import { useFeedPhotoDisplayUrls } from '@/hooks/useFeedPhotoDisplayUrls';
 import { useFeedVideoPlaybackUri } from '@/hooks/useFeedVideoPlaybackUri';
 import { useExpoAvShouldPlay } from '@/hooks/useExpoAvShouldPlay';
-import { getVideoPosterUriForFeedAndViewer } from '@/utils/memoryPhotos';
 import { normalizeVideoPlaybackUri } from '@/utils/videoMediaUri';
 import { clampAudioBookAnnotation } from '@/lib/audioBookAnnotation';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
@@ -265,7 +266,8 @@ function FilMemoryRow({
     normalizeMemoryMediaUriForDisplay((voiceCoverSigned || voiceCoverRaw).trim()),
     memory.updated_at,
   );
-  const hasVoiceCover = !!voiceCoverDisplayUri.trim();
+  const hasVoiceCover =
+    memoryHasExplicitVoiceCover(memory) && !!voiceCoverDisplayUri.trim();
   const voicePlaybackSigned =
     useSignedMediaUrl(memory.type === 'voice' ? (memory.media_url ?? null) : null) ?? '';
   const videoPlaybackUri = useFeedVideoPlaybackUri(memory);
@@ -376,18 +378,22 @@ function FilMemoryRow({
   const isMediaPost =
     memory.type === 'photo' || memory.type === 'video' || memory.type === 'voice';
 
-  const mediaMetaOverlay = isMediaPost ? (
-    <FeedPostMetaOverlay
-      dateLabel={addedAtLabel}
-      ageLabel={ageAtMemory || undefined}
-      locationLabel={locationLabel || undefined}
-      onEditLocation={() => handleEditLocation(memory)}
-      showLocationEdit={!isOptimisticFeedPending}
-      feedDateFontFamily={feedDateFontFamily}
-      feedAgeFontFamily={feedAgeFontFamily}
-      feedLocationFilledFontFamily={feedLocationFilledFontFamily}
-      feedLocationPlaceholderFontFamily={feedLocationPlaceholderFontFamily}
-    />
+  const mediaMetaOverlayProps = {
+    dateLabel: addedAtLabel,
+    ageLabel: ageAtMemory || undefined,
+    locationLabel: locationLabel || undefined,
+    onEditLocation: () => handleEditLocation(memory),
+    showLocationEdit: !isOptimisticFeedPending,
+    feedDateFontFamily,
+    feedAgeFontFamily,
+    feedLocationFilledFontFamily,
+    feedLocationPlaceholderFontFamily,
+  };
+
+  const voiceMetaInline = memory.type === 'voice' && !hasVoiceCover;
+
+  const mediaMetaOverlay = isMediaPost && !voiceMetaInline ? (
+    <FeedPostMetaOverlay {...mediaMetaOverlayProps} />
   ) : null;
 
   const postCard = (
@@ -653,9 +659,12 @@ function FilMemoryRow({
             <View
               style={[
                 styles.audioBody,
-                hasVoiceCover ? styles.audioBodyWithCover : null,
+                hasVoiceCover ? styles.audioBodyWithCover : styles.audioBodyNoCover,
               ]}
             >
+              {!hasVoiceCover ? (
+                <FeedPostMetaOverlay {...mediaMetaOverlayProps} layout="inline" />
+              ) : null}
               {hasVoiceCover && (
                 <>
                   <Image
@@ -678,14 +687,14 @@ function FilMemoryRow({
                 <View
                   style={[
                     styles.audioPlayerWrap,
-                    hasVoiceCover ? styles.audioPlayerWrapCover : null,
+                    hasVoiceCover ? styles.audioPlayerWrapCover : styles.audioPlayerWrapNoCover,
                   ]}
                 >
                   <AudioPlayer
                     uri={voicePlaybackSigned || (memory.media_url ?? '')}
                     duration={memory.duration || 0}
                     playbackStartSec={memory.voice_playback_start_sec ?? null}
-                    variant={hasVoiceCover ? 'coverBottom' : 'default'}
+                    variant={hasVoiceCover ? 'coverBottom' : 'feedRow'}
                     controlIconColor={ACTION_ICON_INK}
                     coverFlushBottom={hasVoiceCover}
                     feedPlayDiscOutline

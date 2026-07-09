@@ -79,7 +79,7 @@ Petitmo a **deux modes** et **deux modes seulement** :
   - écrire un souvenir texte ;
   - ajouter une / plusieurs photos ;
   - enregistrer un audio ;
-  - créer un livre **sans la vidéo** (pas de QR vidéo en gratuit) mais **avec audio**.
+  - créer un livre **avec photos, audio et vidéo** (QR cloud **uniquement après commande** livre/PDF en gratuit).
 - **Tout** est stocké :
   - en **SQLite local** ;
   - dans le **sandbox / app storage** du téléphone.
@@ -119,8 +119,7 @@ Aucune autre écriture cloud n'est permise en gratuit. Pas de "petite sync genti
   pour les exceptions ci-dessus ; il n'est **jamais** présenté à l'utilisatrice comme un compte.
 - Tout texte qui suggère "tes souvenirs sont sauvegardés" en gratuit est **interdit**.
   Le badge actuel "Confidentialité 100% préservée" est OK.
-- En gratuit : la vidéo dans un livre est **bloquée** avec message clair vers le paywall
-  (cf. `BookUpgradeRequiredError` dans `services/books.ts`).
+- En gratuit : vidéo dans un livre autorisée (max 5 par livre, 30 s) ; QR vidéo cloud **après commande** uniquement — voir `validateFreeTierBookMemoryLimits` dans `services/books.ts`.
 
 ### Paywall — hero selon le contexte (`app/paywall.tsx`)
 

@@ -586,7 +586,43 @@ async function guestAvRawUploadAfterPdf(params: { pdfTicket: string; memories: M
         })()
       );
     }
-    // Vidéos : non prises en charge en QR médias sur le plan gratuit (et bloquées côté commande).
+    // Vidéos : upload brut après PDF (QR activé à la finalisation commande, comme l’audio).
+    if (m.type === 'video') {
+      const merged = mergeMemoryWithLocalRowForAv(m);
+      tasks.push(
+        (async () => {
+          try {
+            let local = localUriForAvRawUpload(merged, 'video');
+            if (!local) {
+              local = (await downloadHttpsVideoToTempIfNeeded(merged)) ?? '';
+            }
+            if (!local) {
+              if (__DEV__) console.warn('[guestAvRawUploadAfterPdf] video: no uri', m.id);
+              return;
+            }
+            const { status, json } = await postGuestUploadUrls({
+              pdfTicket,
+              assets: [{ kind: 'video', memoryId: m.id }],
+            });
+            const row = (json as { uploads?: Array<{ signedUrl?: string }> })?.uploads?.[0];
+            if (status === 200 && row?.signedUrl) {
+              await enqueueGuestRawUpload({
+                pdfTicket,
+                kind: 'video',
+                memoryId: m.id,
+                localUri: local,
+                mimeType: mimeTypeForVideoUpload(local),
+                policy: 'finalize_only',
+              });
+            } else if (__DEV__) {
+              console.warn('[guestAvRawUploadAfterPdf] video signed URL failed', m.id, status, json);
+            }
+          } catch (e) {
+            if (__DEV__) console.warn('[guestAvRawUploadAfterPdf] video', m.id, e);
+          }
+        })(),
+      );
+    }
   }
 
   await Promise.all(tasks);

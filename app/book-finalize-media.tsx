@@ -32,6 +32,12 @@ function mimeTypeForAudio(): string {
   return 'audio/mp4';
 }
 
+function mimeTypeForVideo(uri: string): string {
+  const u = uri.toLowerCase();
+  if (u.endsWith('.mov') || u.includes('.mov?')) return 'video/quicktime';
+  return 'video/mp4';
+}
+
 export default function BookFinalizeMediaScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -84,14 +90,13 @@ export default function BookFinalizeMediaScreen() {
     }
 
     const memories = collectMemoriesFromPagesForPdf(payload.pages, payload.localEdits ?? {});
-    // Plan gratuit : QR médias = audio uniquement
-    const av = memories.filter(m => m.type === 'voice');
+    const av = memories.filter(m => m.type === 'voice' || m.type === 'video');
 
     const tasks: Array<Promise<void>> = [];
     const keys: string[] = [];
 
     for (const m of av) {
-      const kind = 'audio';
+      const kind = m.type === 'voice' ? 'audio' : 'video';
       const local = localUriForAv(m);
       if (!local) continue;
       const key = `${kind}:${m.id}`;
@@ -102,7 +107,7 @@ export default function BookFinalizeMediaScreen() {
           kind,
           memoryId: m.id,
           localUri: local,
-          mimeType: mimeTypeForAudio(),
+          mimeType: kind === 'video' ? mimeTypeForVideo(local) : mimeTypeForAudio(),
           policy: 'finalize_only',
         })
       );

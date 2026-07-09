@@ -37,7 +37,7 @@ import { uploadMedia } from '@/services/media';
 import { getOrSelectFirstChild } from '@/services/children';
 import { armFeedSnapToLatestOnFocus } from '@/services/feedScrollRestore';
 import { getUserTier } from '@/lib/userTier';
-import { FREE_TIER_VOICE_MAX_DURATION } from '@/lib/limits';
+import { FREE_TIER_VOICE_MAX_DURATION, checkVoiceLimit } from '@/lib/limits';
 import { isAudioTrimAvailable, trimAudioToLocalFile } from '@/services/audioTrim';
 import { AudioTrimEditor } from '@/components/AudioTrimEditor';
 
@@ -424,6 +424,25 @@ export default function RecordVoiceScreen() {
         setIsSaving(false);
         router.push('/create-child');
         return;
+      }
+
+      if (tier === 'free') {
+        const voiceLimit = await checkVoiceLimit(childId);
+        if (!voiceLimit.canCreate) {
+          Alert.alert(
+            'Limite gratuite',
+            `Tu as atteint la limite de ${voiceLimit.limit} souvenirs audio. Passe à Petitmo+ pour continuer sans limite.`,
+            [
+              { text: 'OK', style: 'cancel' },
+              {
+                text: 'Découvrir Petitmo+',
+                onPress: () => router.push({ pathname: '/paywall', params: { context: 'GENERAL' } }),
+              },
+            ],
+          );
+          setIsSaving(false);
+          return;
+        }
       }
 
       const uri = recordingFileUriRef.current ?? recordingRef.current?.getURI();

@@ -6,14 +6,14 @@ export type TabBarSlot =
   | { kind: 'tab'; route: MainTabRoute };
 
 /**
- * Barre fixe (5 emplacements) : Paramètres · Livres · + · Favoris · Journal.
+ * Barre fixe (5 emplacements) : Paramètres · Favoris · + · Journal · Livres.
  * L’onglet actif reste visible (plus de barre « contextuelle » à 3 CTA).
  */
 export const FIXED_TAB_BAR_SLOTS: TabBarSlot[] = [
   { kind: 'settings' },
-  { kind: 'tab', route: 'fil' },
-  { kind: 'tab', route: 'index' },
   { kind: 'tab', route: 'favoris' },
+  { kind: 'tab', route: 'index' },
+  { kind: 'tab', route: 'fil' },
   { kind: 'tab', route: 'livres' },
 ];
 

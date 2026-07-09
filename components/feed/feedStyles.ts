@@ -395,6 +395,17 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: scale(8),
   },
+  /** Audio fil sans vignette : méta dans le flux (pas de vide sous overlay absolu). */
+  feedMetaPillBarInline: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: scale(8),
+    paddingHorizontal: scale(12),
+    paddingTop: scale(12),
+    paddingBottom: scale(4),
+    width: '100%',
+  },
   feedMetaPillWrapLeft: {
     flexShrink: 1,
     maxWidth: '52%',
@@ -521,21 +532,24 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   audioBody: {
-    minHeight: verticalScale(200),
     backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: FEED_GUTTER,
-    paddingVertical: verticalScale(16),
-    gap: verticalScale(14),
+    alignItems: 'stretch',
+    justifyContent: 'flex-start',
     position: 'relative',
     overflow: 'hidden',
+  },
+  /** Vocal fil sans photo de fond : hauteur pilotée par le contenu. */
+  audioBodyNoCover: {
+    paddingBottom: verticalScale(8),
+    gap: verticalScale(4),
   },
   audioBodyWithCover: {
     minHeight: verticalScale(260),
     marginHorizontal: MEDIA_CARD_INSET,
     borderRadius: MEDIA_CARD_RADIUS,
     overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
     /** Plein bord : sinon le padding d’audioBody crée des bandes blanches sur les côtés de la photo */
     paddingHorizontal: 0,
     paddingVertical: 0,
@@ -554,8 +568,8 @@ const styles = StyleSheet.create({
     position: 'relative',
     zIndex: 2,
     width: '100%',
-    alignItems: 'center',
-    gap: verticalScale(12),
+    alignItems: 'stretch',
+    gap: 0,
   },
   /** Lecteur + onde au ras du bas de la photo (léger dépassement pour compacter le vide visuel) */
   audioForegroundCover: {
@@ -569,7 +583,9 @@ const styles = StyleSheet.create({
   },
   audioPlayerWrap: {
     width: '100%',
-    maxWidth: scale(340),
+  },
+  audioPlayerWrapNoCover: {
+    paddingHorizontal: FEED_GUTTER,
   },
   audioPlayerWrapCover: {
     maxWidth: '100%',

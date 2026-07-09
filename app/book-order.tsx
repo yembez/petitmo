@@ -19,8 +19,7 @@ import { scale } from '@/utils/responsive';
 import { getUserTier } from '@/lib/userTier';
 import { getLastGuestExportEmail, setLastGuestExportEmail } from '@/lib/guestExportPrefs';
 import { calculateBookPriceEuros, type DiscountPercent } from '@/lib/printedBookQuote';
-import { FREE_TIER_BOOK_AUDIO_MAX_COUNT, FREE_TIER_BOOK_VOICE_MAX_DURATION } from '@/lib/limits';
-import { getBook } from '@/services/books';
+import { getBook, validateFreeTierBookMemoryLimits } from '@/services/books';
 import { getChildren } from '@/services/children';
 import { isInitExportConfigured } from '@/services/initExportApi';
 import { initPrintOrderExport } from '@/services/printBookOrder';
@@ -316,30 +315,15 @@ export default function BookOrderScreen() {
     const mail = email.trim().toLowerCase();
     const nowIso = new Date().toISOString();
 
-    // Plan gratuit : QR médias vidéo interdits (PDF + imprimé). Audio OK (finalisé après paiement).
+    // Plan gratuit : quotas audio/vidéo livre (QR cloud uniquement après commande).
     const pendingPayload = await getPendingBookOrderPdfPayload();
     if (subscriptionDb === 'free' && pendingPayload) {
       const memories = collectMemoriesFromPagesForPdf(pendingPayload.pages, pendingPayload.localEdits ?? {});
-      const hasVideo = memories.some(m => m.type === 'video');
-      if (hasVideo) {
+      try {
+        await validateFreeTierBookMemoryLimits(memories);
+      } catch (e) {
         setFieldErrors({
-          submit:
-            "Les QR vidéos ne sont pas disponibles avec le plan gratuit. Retire les vidéos de ce livre, ou passe à l’abonnement.",
-        });
-        return;
-      }
-
-      const audios = memories.filter(m => m.type === 'voice');
-      if (audios.length > FREE_TIER_BOOK_AUDIO_MAX_COUNT) {
-        setFieldErrors({
-          submit: `Avec le plan gratuit, ce livre peut contenir au maximum ${FREE_TIER_BOOK_AUDIO_MAX_COUNT} souvenirs audio.`,
-        });
-        return;
-      }
-      const tooLong = audios.find(m => (m.duration ?? 0) > FREE_TIER_BOOK_VOICE_MAX_DURATION);
-      if (tooLong) {
-        setFieldErrors({
-          submit: `Avec le plan gratuit, chaque souvenir audio est limité à ${FREE_TIER_BOOK_VOICE_MAX_DURATION} secondes.`,
+          submit: e instanceof Error ? e.message : 'Limite plan gratuit atteinte pour ce livre.',
         });
         return;
       }
@@ -399,8 +383,8 @@ export default function BookOrderScreen() {
 
         if (subscriptionDb === 'free') {
           const memories = collectMemoriesFromPagesForPdf(payload.pages, payload.localEdits ?? {});
-          const av = memories.filter(m => m.type === 'voice');
-          const keys = av.map(m => `audio:${m.id}`);
+          const av = memories.filter(m => m.type === 'voice' || m.type === 'video');
+          const keys = av.map(m => `${m.type === 'voice' ? 'audio' : 'video'}:${m.id}`);
 
           const hasPending = (await getPendingGuestRawUploadsCountForKeys(keys)) > 0;
           const hasLocalOrMissingCloud = av.some(m => {
@@ -481,8 +465,8 @@ export default function BookOrderScreen() {
       // Plan gratuit : QR médias audio uniquement, finalisation après paiement si nécessaire.
       if (subscriptionDb === 'free') {
         const memories = collectMemoriesFromPagesForPdf(payload.pages, payload.localEdits ?? {});
-        const av = memories.filter(m => m.type === 'voice');
-        const keys = av.map(m => `audio:${m.id}`);
+        const av = memories.filter(m => m.type === 'voice' || m.type === 'video');
+        const keys = av.map(m => `${m.type === 'voice' ? 'audio' : 'video'}:${m.id}`);
         const hasPending = (await getPendingGuestRawUploadsCountForKeys(keys)) > 0;
         const hasLocalOrMissingCloud = av.some(m => {
           const local = localUriForAvRawUpload(m);

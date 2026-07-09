@@ -15,7 +15,12 @@ import { awaitPhotoPrintDerivativesForMemory } from '@/services/memoryLocalStore
 import { getFamilyMemories, hydrateMemoriesByIds, toggleFavorite, uploadMedia } from '@/services/media';
 import { getUserTier } from '@/lib/userTier';
 import { supabase } from '@/lib/supabase';
-import { FREE_TIER_BOOK_AUDIO_MAX_COUNT, FREE_TIER_BOOK_VOICE_MAX_DURATION } from '@/lib/limits';
+import {
+  FREE_TIER_BOOK_AUDIO_MAX_COUNT,
+  FREE_TIER_BOOK_VIDEO_MAX_COUNT,
+  FREE_TIER_BOOK_VOICE_MAX_DURATION,
+  FREE_TIER_VIDEO_MAX_DURATION,
+} from '@/lib/limits';
 import { Platform } from 'react-native';
 import { copyAsync, documentDirectory, downloadAsync, makeDirectoryAsync } from 'expo-file-system/legacy';
 import { getSignedMediaDisplayUrl } from '@/lib/mediaSignedUrl';
@@ -122,13 +127,54 @@ function resolveCoverFromBookFavorites(
   return null;
 }
 
-export class BookUpgradeRequiredError extends Error {
-  code: 'BOOK_VIDEO_REQUIRES_PLUS';
-  constructor(message: string) {
-    super(message);
-    this.name = 'BookUpgradeRequiredError';
-    this.code = 'BOOK_VIDEO_REQUIRES_PLUS';
+export type FreeTierBookMemoryRow = {
+  id: string;
+  type: string;
+  duration?: number | null;
+};
+
+/**
+ * Garde-fou plan gratuit : quotas audio/vidéo dans un livre (QR cloud uniquement après commande).
+ */
+export async function validateFreeTierBookMemoryLimits(
+  memories: readonly FreeTierBookMemoryRow[],
+): Promise<void> {
+  const tier = await getUserTier();
+  if (tier !== 'free') return;
+
+  const videos = memories.filter(m => m.type === 'video');
+  if (videos.length > FREE_TIER_BOOK_VIDEO_MAX_COUNT) {
+    throw new Error(
+      `Avec le plan gratuit, ce livre peut contenir au maximum ${FREE_TIER_BOOK_VIDEO_MAX_COUNT} souvenirs vidéo.`,
+    );
   }
+  const tooLongVideo = videos.find(m => (m.duration ?? 0) > FREE_TIER_VIDEO_MAX_DURATION);
+  if (tooLongVideo) {
+    throw new Error(
+      `Avec le plan gratuit, chaque souvenir vidéo est limité à ${FREE_TIER_VIDEO_MAX_DURATION} secondes.`,
+    );
+  }
+
+  const audios = memories.filter(m => m.type === 'voice');
+  if (audios.length > FREE_TIER_BOOK_AUDIO_MAX_COUNT) {
+    throw new Error(
+      `Avec le plan gratuit, ce livre peut contenir au maximum ${FREE_TIER_BOOK_AUDIO_MAX_COUNT} souvenirs audio.`,
+    );
+  }
+  const tooLongAudio = audios.find(m => (m.duration ?? 0) > FREE_TIER_BOOK_VOICE_MAX_DURATION);
+  if (tooLongAudio) {
+    throw new Error(
+      `Avec le plan gratuit, chaque souvenir audio est limité à ${FREE_TIER_BOOK_VOICE_MAX_DURATION} secondes.`,
+    );
+  }
+}
+
+/** Garde-fou plan gratuit : vidéo / quota audio dans un livre. */
+async function assertBookMemoriesAllowedForTier(allMemoryIds: readonly string[]): Promise<void> {
+  const memories = allMemoryIds
+    .map(id => getLocalMemoryById(id))
+    .filter(Boolean) as FreeTierBookMemoryRow[];
+  await validateFreeTierBookMemoryLimits(memories);
 }
 
 export type Book = {
@@ -909,35 +955,6 @@ export function readBookPreviewLocalSnapshotSync(bookId: string): BookPreviewLoc
   );
 
   return { child, familyChildren, book, bookMemories, bookSelectionKeys };
-}
-
-/** Garde-fou plan gratuit : vidéo / quota audio dans un livre. */
-async function assertBookMemoriesAllowedForTier(allMemoryIds: readonly string[]): Promise<void> {
-  const tier = await getUserTier();
-  if (tier !== 'free') return;
-
-  const memories = allMemoryIds
-    .map(id => getLocalMemoryById(id))
-    .filter(Boolean) as Array<{ id: string; type: string; duration?: number | null }>;
-
-  if (memories.some(m => m.type === 'video')) {
-    throw new BookUpgradeRequiredError(
-      'Pour pouvoir ajouter une vidéo dans le livre et la revoir à tout moment grâce au QR Code, passer à Petitmo+.'
-    );
-  }
-
-  const audios = memories.filter(m => m.type === 'voice');
-  if (audios.length > FREE_TIER_BOOK_AUDIO_MAX_COUNT) {
-    throw new Error(
-      `Avec le plan gratuit, ce livre peut contenir au maximum ${FREE_TIER_BOOK_AUDIO_MAX_COUNT} souvenirs audio.`
-    );
-  }
-  const tooLong = audios.find(m => (m.duration ?? 0) > FREE_TIER_BOOK_VOICE_MAX_DURATION);
-  if (tooLong) {
-    throw new Error(
-      `Avec le plan gratuit, chaque souvenir audio est limité à ${FREE_TIER_BOOK_VOICE_MAX_DURATION} secondes.`
-    );
-  }
 }
 
 export async function createBook(title?: string): Promise<Book> {

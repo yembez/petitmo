@@ -11,6 +11,8 @@ import { THEME } from '@/constants/theme';
 
 const PLAY = scale(50);
 const STACK = scale(104);
+/** Fil sans vignette : disque play compact, aligné sur l’onde. */
+const PLAY_FEED = scale(44);
 const BAR_COUNT = 42;
 /** Demi-hauteur de l’onde (barres centrées sur l’axe) */
 const WAVE_HALF = scale(18);
@@ -30,7 +32,7 @@ interface AudioPlayerProps {
    */
   playbackStartSec?: number | null;
   /** Avec photo de fond : play à gauche + onde sur la même ligne en bas */
-  variant?: 'default' | 'coverBottom';
+  variant?: 'default' | 'coverBottom' | 'feedRow';
   /** Icônes play / pause (défaut blanc). */
   controlIconColor?: string;
   /** Réduit les marges internes pour coller play + onde au bas du visuel (ex. fil avec photo). */
@@ -143,7 +145,8 @@ export default function AudioPlayer({
   );
 
   const [waveW, setWaveW] = useState(0);
-  const waveH = WAVE_HALF * 2;
+  const waveHalf = variant === 'feedRow' ? scale(12) : WAVE_HALF;
+  const waveH = waveHalf * 2;
   const barW =
     waveW > 1 ? Math.max(scale(2), (waveW - BAR_GAP * (BAR_COUNT - 1)) / BAR_COUNT) : 0;
   const maxBarH = Math.max(scale(4), waveH - scale(2));
@@ -308,9 +311,21 @@ export default function AudioPlayer({
 
   const stack = STACK;
   const ringSizes = [stack * 0.92, stack * 0.76, stack * 0.6];
+  const feedRowH = Math.max(PLAY_FEED, waveH);
 
   /** Bas du bouton aligné sur le bas de l’onde (fil avec photo), sans grande pile décorative. */
   const PLAY_FLUSH = scale(54);
+  const playFeedEl = (
+    <GlassPlayDisc
+      size={PLAY_FEED}
+      iconSize={scale(22)}
+      isPlaying={isPlaying}
+      controlIconColor={controlIconColor}
+      onPress={togglePlayPause}
+      outline={feedPlayDiscOutline}
+      disableBlur={disableBlurDisc}
+    />
+  );
   const playFlushEl = (
     <GlassPlayDisc
       size={PLAY_FLUSH}
@@ -362,7 +377,11 @@ export default function AudioPlayer({
 
   const waveformEl = (
     <View
-      style={[styles.waveform, variant === 'coverBottom' && styles.waveformCover]}
+      style={[
+        styles.waveform,
+        (variant === 'coverBottom' || variant === 'feedRow') && styles.waveformCover,
+        variant === 'feedRow' && { height: waveH },
+      ]}
       onLayout={e => setWaveW(Math.max(0, Math.floor(e.nativeEvent.layout.width)))}
     >
       {waveW > 1 && barW > 0 ? (
@@ -397,6 +416,7 @@ export default function AudioPlayer({
         styles.timeRow,
         variant === 'coverBottom' && styles.timeRowCover,
         variant === 'coverBottom' && coverFlushBottom && styles.timeRowCoverFlush,
+        variant === 'feedRow' && styles.timeRowFeedRow,
       ]}
     >
       <Text style={styles.timeText}>{formatDuration(Math.floor(positionDisplay))}</Text>
@@ -410,6 +430,20 @@ export default function AudioPlayer({
       <View style={[styles.containerCover, coverFlushBottom && styles.containerCoverFlush]}>
         <View style={[styles.coverBottomRow, coverFlushBottom && styles.coverBottomRowFlush]}>
           {coverFlushBottom ? playFlushEl : playStackEl}
+          {waveformEl}
+        </View>
+        {timeRowEl}
+      </View>
+    );
+  }
+
+  if (variant === 'feedRow') {
+    return (
+      <View style={styles.containerFeedRow}>
+        <View style={[styles.feedRow, { minHeight: feedRowH }]}>
+          <View style={[styles.feedPlaySlot, { height: feedRowH, width: PLAY_FEED }]}>
+            {playFeedEl}
+          </View>
           {waveformEl}
         </View>
         {timeRowEl}
@@ -444,6 +478,23 @@ const styles = StyleSheet.create({
     paddingTop: 0,
     paddingBottom: 0,
   },
+  containerFeedRow: {
+    width: '100%',
+    paddingVertical: 0,
+    paddingHorizontal: 0,
+    backgroundColor: 'transparent',
+  },
+  feedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+    gap: scale(10),
+  },
+  feedPlaySlot: {
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   coverBottomRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -473,11 +524,16 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth * 2,
     borderColor: 'rgba(255, 255, 255, 0.78)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: scale(4) },
-    shadowOpacity: 0.2,
-    shadowRadius: scale(10),
-    elevation: 8,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: scale(2) },
+        shadowOpacity: 0.12,
+        shadowRadius: scale(4),
+      },
+      android: { elevation: 4 },
+      default: {},
+    }),
   },
   glassPlayOuterOutline: {
     borderColor: '#000000',
@@ -523,6 +579,10 @@ const styles = StyleSheet.create({
   timeRowCoverFlush: {
     marginTop: scale(2),
     paddingBottom: 0,
+  },
+  timeRowFeedRow: {
+    marginTop: scale(4),
+    paddingHorizontal: 0,
   },
   timeText: {
     fontSize: scale(12),

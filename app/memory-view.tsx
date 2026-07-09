@@ -47,7 +47,7 @@ import {
   formatDuration,
   formatBookLocationShort,
 } from '@/utils/date';
-import { addMemoryToBook, BookUpgradeRequiredError, createBookWithMemories, listBooks, removeMemoryFromBook, type Book } from '@/services/books';
+import { addMemoryToBook, createBookWithMemories, listBooks, removeMemoryFromBook, type Book } from '@/services/books';
 import type { Child, Memory } from '@/types/local';
 import { formatFamilyAgesLine, sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 
@@ -136,21 +136,6 @@ export default function MemoryViewScreen() {
     });
   }, []);
 
-  const showBookVideoPaywallAlert = useCallback(() => {
-    Alert.alert(
-      'Petitmo+',
-      'Pour pouvoir ajouter une vidéo dans le livre et la revoir à tout moment grâce au QR Code, passer à Petitmo+.',
-      [
-        { text: 'Annuler', style: 'cancel' },
-        {
-          text: 'Passer à Petitmo+',
-          style: 'default',
-          onPress: () => router.push({ pathname: '/paywall', params: { context: 'BOOK_VIDEO' } }),
-        },
-      ]
-    );
-  }, [router]);
-
   const addMemoryToBookFromModal = useCallback(
     async (bookId: string) => {
       if (!memoryId) return;
@@ -161,10 +146,6 @@ export default function MemoryViewScreen() {
       try {
         next = await addMemoryToBook(bookId, memoryId);
       } catch (e) {
-        if (e instanceof BookUpgradeRequiredError && e.code === 'BOOK_VIDEO_REQUIRES_PLUS') {
-          showBookVideoPaywallAlert();
-          return;
-        }
         Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
         return;
       }
@@ -172,7 +153,7 @@ export default function MemoryViewScreen() {
       setBooks(prev => prev.map(x => (x.id === bookId ? next : x)));
       closeBookModal();
     },
-    [books, closeBookModal, memoryId, showBookVideoPaywallAlert]
+    [books, closeBookModal, memoryId]
   );
 
   const removeMemoryFromBookFromModal = useCallback(
@@ -193,16 +174,12 @@ export default function MemoryViewScreen() {
     try {
       created = await createBookWithMemories(newBookTitle, [memoryId]);
     } catch (e) {
-      if (e instanceof BookUpgradeRequiredError && e.code === 'BOOK_VIDEO_REQUIRES_PLUS') {
-        showBookVideoPaywallAlert();
-        return;
-      }
       Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
       return;
     }
     setBooks(prev => [created, ...prev]);
     closeBookModal();
-  }, [closeBookModal, memoryId, newBookTitle, showBookVideoPaywallAlert]);
+  }, [closeBookModal, memoryId, newBookTitle]);
 
   useFocusEffect(
     useCallback(() => {

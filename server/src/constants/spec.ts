@@ -1,5 +1,5 @@
-/** Max pages audio + vidéo avec QR par livre (tier free). Spec : 5 vocaux / livre. */
-export const FREE_TIER_QR_AV_MAX_PER_BOOK = 5;
+/** Max pages audio + vidéo avec QR par livre (tier free). 5 audio + 5 vidéo. */
+export const FREE_TIER_QR_AV_MAX_PER_BOOK = 10;
 
 /** Durée URL signée PDF renvoyée au client (secondes). Spec ~10 min. */
 export const PDF_SIGNED_URL_SECONDS = 600;

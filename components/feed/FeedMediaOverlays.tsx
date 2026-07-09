@@ -132,6 +132,7 @@ export function FeedPostMetaOverlay({
   feedAgeFontFamily,
   feedLocationFilledFontFamily,
   feedLocationPlaceholderFontFamily,
+  layout = 'overlay',
 }: {
   dateLabel: string;
   ageLabel?: string;
@@ -142,12 +143,16 @@ export function FeedPostMetaOverlay({
   feedAgeFontFamily?: string;
   feedLocationFilledFontFamily?: string;
   feedLocationPlaceholderFontFamily?: string;
+  /** `inline` : dans le flux (audio fil sans vignette) ; `overlay` : absolu sur la média. */
+  layout?: 'overlay' | 'inline';
 }) {
   const hasLocation = !!locationLabel?.trim();
   const showLocationPill = showLocationEdit || hasLocation;
 
+  const barStyle = layout === 'inline' ? styles.feedMetaPillBarInline : styles.feedMetaPillBar;
+
   return (
-    <View style={styles.feedMetaPillBar} pointerEvents="box-none">
+    <View style={barStyle} pointerEvents="box-none">
       <FeedMetaGlassPill align="left">
         <View style={styles.feedMetaPillInnerColumn}>
           <Text

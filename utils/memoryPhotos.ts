@@ -466,10 +466,15 @@ export function collectVoiceCoverReadableSourceCandidates(memory: Memory): strin
 function pickVoiceCoverSandboxPath(memory: Memory): string {
   const stored = (memory.voice_cover_path ?? '').trim();
   if (stored && !isStaleVoicePickerCachePath(stored)) return stored;
-  for (const p of voiceCoverSandboxFileCandidates(memory.id)) {
-    if (p.trim()) return p;
-  }
   return '';
+}
+
+/** Vrai seulement si l’utilisatrice a ajouté une cover (colonnes SQLite / cloud), pas un chemin candidat vide. */
+export function memoryHasExplicitVoiceCover(memory: Memory): boolean {
+  if (memory.type !== 'voice') return false;
+  if ((memory.voice_cover_url ?? '').trim()) return true;
+  const path = (memory.voice_cover_path ?? '').trim();
+  return !!(path && !isStaleVoicePickerCachePath(path));
 }
 
 /** Livre / PDF : dérivé print local (`local_print_path`), sinon cover d’origine. */

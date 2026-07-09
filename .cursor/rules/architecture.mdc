@@ -13,7 +13,7 @@ Petitmo a **deux modes** et deux modes seulement.
 - **Aucun cloud**, aucun backup, aucune sync, aucune création de compte email/mot de passe.
 - Perte du téléphone = perte des données (assumé produit).
 - Souvenirs autorisés : texte, photo (seule ou album), audio.
-- Livre : couverture + photos + audio (QR audio). **La vidéo dans un livre = Petitmo+** — lever `BookUpgradeRequiredError` (`services/books.ts`).
+- Livre : couverture + photos + audio/vidéo (QR après commande en gratuit). Max **5 audios** et **5 vidéos** par livre — voir `lib/limits.ts` et `validateFreeTierBookMemoryLimits` (`services/books.ts`).
 
 ### Exceptions Supabase autorisées en gratuit (et UNIQUEMENT celles-ci)
 
@@ -42,9 +42,9 @@ L'abonnement (`lib/userTier.ts`) déverrouille : sync cloud, restauration, multi
 - **Serveur (option A)** : `subscriptionTier` (`paid` / `free`) dans **`auth.users.app_metadata`** sur Supabase — mis à jour par Edge Function (webhook RevenueCat / validation IAP). Jamais modifiable par le client.
 - `lib/userTier.ts` — lit et met en cache ce tier pour l’UX (AsyncStorage) ; **pas** la source de vérité absolue.
 - `lib/userMode.ts` — `local | cloud` (dérivé du tier).
-- `lib/limits.ts` — limites gratuit (20 souvenirs, 10 vidéos, durées audio).
+- `lib/limits.ts` — limites gratuit (20 souvenirs, 5 vidéos, durées audio).
 - `services/localOnlyMemoryCapture.ts` — capture 100 % locale.
-- `services/books.ts` — `BookUpgradeRequiredError`.
+- `services/books.ts` — `validateFreeTierBookMemoryLimits`.
 - `docs/specs/architecture-locale-cloud.md` — référence canonique.
 - `AGENTS.md` — version longue de la règle d'or.
 - **Livre / PDF** : date sous photo·vidéo·audio = `created_at` (prise / événement), **pas** `inserted_at` ; payload guest `created_at` + `utils/memoryBookDisplayDate.ts`.

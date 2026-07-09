@@ -30,7 +30,7 @@ import { upgradeToFullCloud } from '@/services/migration'
 import { flushPendingCloudUploadsOnce } from '@/services/pendingCloudFlush'
 import { hydrateTabScreensFromLocal } from '@/services/tabScreensHydrate'
 import { grantDigitalExportPurchase } from '@/lib/digitalExportPurchase'
-import { FREE_TIER_LIMIT } from '@/lib/limits'
+import { FREE_TIER_LIMIT, FREE_TIER_VIDEO_LIMIT } from '@/lib/limits'
 import { THEME } from '@/constants/theme'
 import { hp, scale, screenHeight, screenWidth, verticalScale } from '@/utils/responsive'
 
@@ -112,7 +112,7 @@ const PAYWALL_MESSAGES: Record<
   },
   VIDEO_LIMIT_REACHED: {
     eyebrow: 'Petitmo+',
-    title: n => `Tu as utilisé tes 10 vidéos gratuites de ${n}.`,
+    title: n => `Tu as utilisé tes ${FREE_TIER_VIDEO_LIMIT} vidéos gratuites de ${n}.`,
     subtitle: 'Des vidéos illimitées et sans limite de durée avec Petitmo+.',
   },
   VOICE_LIMIT_REACHED: {
