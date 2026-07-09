@@ -1,0 +1,13 @@
+# Service Railway : Root Directory = server/media-worker
+# (Settings → Root Directory, distinct du service PDF `server/`).
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "node src/index.js"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10

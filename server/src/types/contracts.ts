@@ -73,6 +73,8 @@ export type GenerateBookPdfPayload = {
 export type GenerateBookPdfResponse = {
   pdfUrlSigned: string;
   pdfStoragePath: string | null;
+  /** Tokens QR stables par `memoryId` — cache client SQLite après export. */
+  qrTokensByMemoryId?: Record<string, string>;
 };
 
 export type QrLinkRow = {

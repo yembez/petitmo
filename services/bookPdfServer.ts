@@ -11,7 +11,7 @@ import {
   isIosBackgroundSignedPutUploadAvailable,
   uploadFileToSignedPutUrlIosBackground,
 } from '@/services/signedUrlIosBackgroundUpload';
-import { enqueueGuestRawUpload, markGuestRawUploadDone } from '@/services/pendingRawGuestUploads';
+import { persistQrTokensFromPdfResponse } from '@/services/bookQrPreview';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import { getInfoAsync } from 'expo-file-system/legacy';
 import type { BookPage } from '@/src/book/BookEngine';
@@ -895,6 +895,7 @@ export async function generateBookPdfViaServer(input: GenerateBookPdfServerInput
       )
     );
   }
+  persistQrTokensFromPdfResponse(json);
 
   const safeBook = input.bookId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
   const mode = input.exportMode === 'print' ? 'print' : 'digital';
@@ -1146,6 +1147,7 @@ export async function generateBookPdfWithExportTicket(
       )
     );
   }
+  persistQrTokensFromPdfResponse(json);
 
   const avUploadPromise = guestAvRawUploadAfterPdf({ pdfTicket, memories });
 

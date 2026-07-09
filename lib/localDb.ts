@@ -132,6 +132,7 @@ export function initLocalDb(): void {
     add('local_poster_print_path', 'TEXT');
     add('captured_overlay_ink', 'TEXT');
     add('text_title', 'TEXT');
+    add('public_media_token', 'TEXT');
   } catch {
     // Silencieux (ne doit pas empêcher l’app de démarrer)
   }
@@ -326,9 +327,9 @@ export function upsertLocalMemory(memory: Memory, uploadStatus?: UploadStatus): 
       is_favorite, duration, file_size, location, captured_overlay_ink,
       created_at, inserted_at, updated_at,
       upload_status, sync_status, synced_at,
-      import_asset_id, import_source_fingerprint
+      import_asset_id, import_source_fingerprint, public_media_token
     ) VALUES (
-      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
     )`,
     [
       memory.id,
@@ -378,6 +379,7 @@ export function upsertLocalMemory(memory: Memory, uploadStatus?: UploadStatus): 
       memory.synced_at ?? new Date().toISOString(),
       memory.import_asset_id?.trim() ? memory.import_asset_id.trim() : null,
       memory.import_source_fingerprint?.trim() ? memory.import_source_fingerprint.trim() : null,
+      memory.public_media_token?.trim() ? memory.public_media_token.trim() : null,
     ]
   )
 }
@@ -628,6 +630,10 @@ function deserializeMemory(row: Record<string, unknown>): Memory {
     import_source_fingerprint:
       typeof row.import_source_fingerprint === 'string' && row.import_source_fingerprint.trim()
         ? row.import_source_fingerprint.trim()
+        : null,
+    public_media_token:
+      typeof row.public_media_token === 'string' && row.public_media_token.trim()
+        ? row.public_media_token.trim()
         : null,
   }
 }

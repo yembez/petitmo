@@ -23,9 +23,34 @@ import {
   Image,
   RefreshControl,
   InteractionManager,
+  Platform,
   type ListRenderItem,
 } from 'react-native';
-import { useFonts, DMSans_400Regular, DMSans_500Medium, DMSans_600SemiBold, DMSans_700Bold } from '@expo-google-fonts/dm-sans';
+import { useFonts, DMSans_400Regular, DMSans_400Regular_Italic, DMSans_500Medium, DMSans_600SemiBold, DMSans_700Bold } from '@expo-google-fonts/dm-sans';
+import { EBGaramond_400Regular, EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
+import { MEMORY_TEXT_FONT_SOURCES } from '@/constants/memoryTextFont';
+import { buildBookMaquetteTypography } from '@/constants/bookMaquetteTypography';
+import { BookSpreadSlide } from '@/components/BookSpreadSlide';
+import { BookPortraitSpreadRow } from '@/components/BookPortraitSpreadRow';
+import {
+  gelatoTrimPagePx,
+  computePortraitBrowseLayout,
+  PORTRAIT_BROWSE_ROW_GAP,
+  PORTRAIT_BROWSE_SIDE_PAD,
+} from '@/utils/bookSpreadLayout';
+import {
+  bookPortraitPerfDumpSummary,
+  bookPortraitPerfListRender,
+  bookPortraitPerfPrefetch,
+  bookPortraitPerfRender,
+  bookPortraitPerfScroll,
+  bookPortraitPerfStartScrollMonitor,
+  bookPortraitPerfState,
+  bookPortraitPerfStopScrollMonitor,
+  bookPortraitPerfTiming,
+  isBookPortraitPerfEnabled,
+  useBookPortraitPerfTrace,
+} from '@/utils/bookPortraitSpreadPerf';
 import { Check, ImageIcon, Pencil, Trash2, X } from 'lucide-react-native';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -34,11 +59,10 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Image as ExpoImage } from 'expo-image';
 import { buildBookPages, type BookPage, type PhotoFullVariant } from '@/src/book/BookEngine';
 import { useBookQrTokenUrls } from '@/hooks/useBookQrTokenUrls';
-import { qrPreviewUrlForMemory } from '@/services/bookQrPreview';
+import { qrPreviewUrlForMemory, resolveBookQrTokensForPreview } from '@/services/bookQrPreview';
 import MaquetteBookPages from '@/src/book/maquette/MaquetteBookPages';
 import EditTextModal from '@/components/EditTextModal';
 import { BookVideoPosterPickerModal } from '@/components/BookVideoPosterPickerModal';
@@ -46,8 +70,6 @@ import { BookPreviewZoomWrap } from '@/components/BookPreviewZoomWrap';
 import {
   bookPrintFrameMmFor,
   effectiveBookPhotoPrintDpi,
-  BOOK_PAGE_W_MM,
-  BOOK_PAGE_H_MM,
   type BookPhotoPageType,
 } from '@/utils/bookPhotoPrintDpi';
 import { getChildren, getOrSelectFirstChild } from '@/services/children';
@@ -97,8 +119,8 @@ import {
   getPrimaryPhotoUriForBookPreview,
   getVoiceCoverUriForBookEditorDisplay,
   getVoiceCoverUriForBookPreview,
-  getBookVideoPosterSyncDisplayUri,
 } from '@/utils/memoryPhotos';
+import { hasReadableBookVideoPoster, peekSyncBookVideoPosterDisplayUri } from '@/utils/bookVideoPosterUri';
 import { runBookExportPrepInBackground } from '@/services/bookExportPrep';
 import { getBookExportPrepIssues } from '@/services/bookExportPrep';
 import { useSignedMediaUrl, peekSignedMediaDisplayUrl, primeSignedMediaDisplayUrls } from '@/lib/mediaSignedUrl';
@@ -115,79 +137,19 @@ import { THEME } from '@/constants/theme';
 const HEADER_H = 44;
 const BOTTOM_H = 82;
 /** Vue verticale (Phase 1) : marge latérale ; pages collées à la reliure (trait + ombres latérales). */
-const BROWSE_SIDE_PAD = 16;
+const BROWSE_SIDE_PAD = PORTRAIT_BROWSE_SIDE_PAD;
 /** Éditeur plein écran : marges autour de la page Gelato 21×28 (effet feuillet posé sur le fond). */
 const EDITOR_PAGE_SIDE_PAD = 28;
 const EDITOR_PAGE_VERT_PAD = 24;
-const BROWSE_PAGE_GAP = 0;
-const BROWSE_ROW_GAP = 24;
-/** Largeur de la « reliure » (dégradé d’ombre) au centre d’un spread. */
-const BROWSE_SPINE_W = 16;
+const BROWSE_ROW_GAP = PORTRAIT_BROWSE_ROW_GAP;
 /** Fond du viewer livre — blanc cassé charte (`THEME.bg`). */
 const BROWSE_BG = THEME.bg;
 const MIN_BOOK_SELECTION_KEYS = 5;
 const MAX_BOOK_SELECTION_KEYS = 80;
 
 /**
- * Aligné sur `bookPhotoPrintDpi` — trim Gelato 21×28 (aperçu éditeur = trim, pas fond perdu).
- * Spread paysage : deux pages → même gabarit **Gelato 21×28** (210×280 mm à l’échelle), comme un livre ouvert.
- * Page seule (couverture à droite, quatrième à gauche, dernière page impaire) : **même format** que les demi-pages
- * du double page — la maquette (couverture incluse) attend width/height au ratio 210:280, pas un cadre 210:142.
+ * Spread paysage : deux pages → même gabarit Gelato 21×28 (voir `utils/bookSpreadLayout.ts`).
  */
-function gelatoTrimPagePx(
-  availW: number,
-  availH: number,
-  opts?: { pageCount?: number; spineTotal?: number },
-): { width: number; height: number } {
-  const pageCount = opts?.pageCount ?? 1;
-  const spineTotal = opts?.spineTotal ?? 0;
-  const s = Math.min((availW - spineTotal) / (BOOK_PAGE_W_MM * pageCount), availH / BOOK_PAGE_H_MM);
-  const width = Math.max(1, Math.floor(s * BOOK_PAGE_W_MM));
-  const height = Math.max(1, Math.round((width * BOOK_PAGE_H_MM) / BOOK_PAGE_W_MM));
-  return { width, height };
-}
-
-function computeLandscapeSpreadLayout(
-  left: PageRow | null,
-  right: PageRow | null,
-  availW: number,
-  availH: number,
-): {
-  left: { width: number; height: number } | null;
-  right: { width: number; height: number } | null;
-  spineWidth: number;
-  rowHeight: number;
-} {
-  const spineMargin = 6;
-  const hairline = Math.max(StyleSheet.hairlineWidth, 1);
-  const spineTotal = spineMargin + hairline + spineMargin;
-
-  if (!left && !right) {
-    return { left: null, right: null, spineWidth: 0, rowHeight: 0 };
-  }
-
-  if (!left && right) {
-    const { width, height } = gelatoTrimPagePx(availW, availH);
-    return { left: null, right: { width, height }, spineWidth: 0, rowHeight: height };
-  }
-
-  if (left && !right) {
-    const { width, height } = gelatoTrimPagePx(availW, availH);
-    return { left: { width, height }, right: null, spineWidth: 0, rowHeight: height };
-  }
-
-  const { width: pw, height: ph } = gelatoTrimPagePx(availW, availH, {
-    pageCount: 2,
-    spineTotal: spineTotal,
-  });
-  return {
-    left: { width: pw, height: ph },
-    right: { width: pw, height: ph },
-    spineWidth: spineTotal,
-    rowHeight: ph,
-  };
-}
-
 type PageRow = { page: BookPage; pageNum: number };
 
 type SpreadRow = {
@@ -298,11 +260,12 @@ function bookPageMainImageUri(
     return getPrimaryPhotoUriForBookMaquetteDisplay(m).trim() || null;
   }
   if (page.type === 'audio') return getVoiceCoverUriForBookPreview(m).trim() || null;
-  if (page.type === 'video') return getBookVideoPosterSyncDisplayUri(m).trim() || null;
+  if (page.type === 'video') return peekSyncBookVideoPosterDisplayUri(m).trim() || null;
   return null;
 }
 
-function prefetchBookPageImage(uri: string | null): void {
+function prefetchBookPageImage(uri: string | null, source = 'book-preview'): void {
+  bookPortraitPerfPrefetch(uri, source);
   if (!uri) return;
   const trimmed = uri.trim();
   if (!trimmed) return;
@@ -324,10 +287,18 @@ export default function BookPreviewScreen() {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const [fontsLoaded] = useFonts({
     DMSans_400Regular,
+    DMSans_400Regular_Italic,
     DMSans_500Medium,
     DMSans_600SemiBold,
     DMSans_700Bold,
+    EBGaramond_400Regular,
+    EBGaramond_400Regular_Italic,
+    ...MEMORY_TEXT_FONT_SOURCES,
   });
+  const maquetteTypography = useMemo(
+    () => buildBookMaquetteTypography(fontsLoaded),
+    [fontsLoaded],
+  );
   const dm400 = fontsLoaded ? 'DMSans_400Regular' : undefined;
   const dm500 = fontsLoaded ? 'DMSans_500Medium' : undefined;
   const dm600 = fontsLoaded ? 'DMSans_600SemiBold' : undefined;
@@ -536,12 +507,9 @@ export default function BookPreviewScreen() {
    * Vue verticale (Phase 1, style Google Photos) : couverture seule en tête,
    * puis doubles-pages côte à côte avec un petit espace. Pages au ratio Gelato 210:280.
    */
-  const browseLeaf = useMemo(() => {
-    const availW = screenWidth - BROWSE_SIDE_PAD * 2;
-    const pageW = Math.max(1, Math.floor((availW - BROWSE_PAGE_GAP) / 2));
-    const pageH = Math.max(1, Math.round((pageW * BOOK_PAGE_H_MM) / BOOK_PAGE_W_MM));
-    return { pageW, pageH };
-  }, [screenWidth]);
+  const browseLayout = useMemo(() => computePortraitBrowseLayout(screenWidth), [screenWidth]);
+  const { pageW: browsePageW, pageH: browsePageH, rowHeight: browseRowHeight, contentPaddingTop: browseContentPaddingTop } =
+    browseLayout;
 
   const signedCoverPhotoUrl = useSignedMediaUrl(coverPhotoUrl);
   const coverPhotoDisplayUriRaw = (signedCoverPhotoUrl ?? coverPhotoUrl ?? null)?.trim()
@@ -560,6 +528,57 @@ export default function BookPreviewScreen() {
     const raw = (signedCoverBrowseUrl ?? coverPhotoBrowseUriRaw ?? null)?.trim();
     return raw ? normalizeMemoryMediaUriForDisplay(raw) : null;
   }, [signedCoverBrowseUrl, coverPhotoBrowseUriRaw]);
+
+  const portraitPerfEnabled = isBookPortraitPerfEnabled() && !isLandscape;
+  const portraitScreenRenderRef = useRef(0);
+
+  if (portraitPerfEnabled) {
+    portraitScreenRenderRef.current += 1;
+    bookPortraitPerfRender('BookPreviewScreen', {
+      n: portraitScreenRenderRef.current,
+      spreadRows: spreadRows.length,
+      pageRows: pageRows.length,
+    });
+  }
+
+  useBookPortraitPerfTrace(
+    'BookPreview',
+    {
+      loading,
+      editorOpen,
+      fontsLoaded,
+      spreadRowsLen: spreadRows.length,
+      pagesLen: pages.length,
+      qrTokenCount: Object.keys(qrTokensByMemoryId).length,
+      coverPhotoBrowseUri,
+      signedCoverBrowseUrl,
+      coverPhotoDisplayUri,
+      cropDpiKeys: Object.keys(cropDpiMetaByKey).join(','),
+      photoCropsRef: photoCrops,
+      rotationsRef: rotations,
+      bookMemoriesLen: bookMemories.length,
+      browsePageW,
+      browsePageH,
+      browseRowHeight,
+    },
+    portraitPerfEnabled,
+  );
+
+  useEffect(() => {
+    if (!portraitPerfEnabled) return;
+    console.log(
+      '[BookPortraitPerf] ▶ Diagnostic spread portrait actif — filtre Metro/logs sur « BookPortraitPerf ». Désactiver : EXPO_PUBLIC_BOOK_PORTRAIT_PERF=0',
+    );
+    bookPortraitPerfState('session:start', {
+      spreadRows: spreadRows.length,
+      pageRows: pageRows.length,
+      qrTokenCount: Object.keys(qrTokensByMemoryId).length,
+    });
+    return () => {
+      bookPortraitPerfDumpSummary();
+      bookPortraitPerfStopScrollMonitor();
+    };
+  }, [portraitPerfEnabled]);
 
   const coverPhotoPrintUri = useMemo(
     () => (bookSnapshot ? resolveBookCoverPrintUri(bookSnapshot) : null),
@@ -677,10 +696,32 @@ export default function BookPreviewScreen() {
         : null;
       const cloudRefs = collectBookMaquetteCloudMediaRefs(picked, coverBrowseForPrime);
       if (cloudRefs.length > 0) {
+        const t0 = Date.now();
+        if (isBookPortraitPerfEnabled()) {
+          bookPortraitPerfState('load:primeSignedMedia:start', { count: cloudRefs.length });
+        }
         await primeSignedMediaDisplayUrls(cloudRefs);
+        if (isBookPortraitPerfEnabled()) {
+          bookPortraitPerfTiming('load:primeSignedMedia:done', t0, { count: cloudRefs.length });
+        }
       }
 
       setBookMemories(picked);
+
+      const builtPages = buildBookPages(ch, picked);
+      if (picked.some(m => m.type === 'voice' || m.type === 'video')) {
+        void (async () => {
+          const t0 =
+            typeof performance !== 'undefined' ? performance.now() : Date.now();
+          if (isBookPortraitPerfEnabled()) {
+            bookPortraitPerfState('load:resolveBookQrTokens:background');
+          }
+          await resolveBookQrTokensForPreview(ch.id, builtPages);
+          if (isBookPortraitPerfEnabled()) {
+            bookPortraitPerfTiming('load:resolveBookQrTokens:done', t0);
+          }
+        })();
+      }
 
       InteractionManager.runAfterInteractions(() => {
         void (async () => {
@@ -761,31 +802,28 @@ export default function BookPreviewScreen() {
   }, [bookMemories]);
 
   const videoPosterBackfillRef = useRef(new Set<string>());
-  /** Souvenirs vidéo : génère `poster.jpg` par défaut si absent (fil + livre en attendant custom). */
+  /** Souvenirs vidéo : génère `poster.jpg` si aucune vignette lisible (pas seulement colonne SQLite remplie). */
   useEffect(() => {
     for (const m of bookMemories) {
       if (m.type !== 'video') continue;
-      const hasDefault =
-        !!(m.local_thumb_path ?? '').trim() ||
-        !!(m.poster_url ?? '').trim() ||
-        !!(m.thumbnail_url ?? '').trim();
-      if (hasDefault) continue;
       if (videoPosterBackfillRef.current.has(m.id)) continue;
-      videoPosterBackfillRef.current.add(m.id);
-      void awaitVideoPosterForBookMemory(m.id).then(updated => {
-        if (!updated) {
-          videoPosterBackfillRef.current.delete(m.id);
-          return;
-        }
-        const ok =
-          !!(updated.poster_url ?? '').trim() ||
-          !!(updated.thumbnail_url ?? '').trim() ||
-          !!(updated.local_thumb_path ?? '').trim();
-        if (!ok) {
-          videoPosterBackfillRef.current.delete(m.id);
-          return;
-        }
-        setBookMemories(prev => prev.map(x => (x.id === updated.id ? updated : x)));
+      void hasReadableBookVideoPoster(m).then(readable => {
+        if (readable) return;
+        if (videoPosterBackfillRef.current.has(m.id)) return;
+        videoPosterBackfillRef.current.add(m.id);
+        void awaitVideoPosterForBookMemory(m.id).then(updated => {
+          if (!updated) {
+            videoPosterBackfillRef.current.delete(m.id);
+            return;
+          }
+          void hasReadableBookVideoPoster(updated).then(ok => {
+            if (!ok) {
+              videoPosterBackfillRef.current.delete(m.id);
+              return;
+            }
+            setBookMemories(prev => prev.map(x => (x.id === updated.id ? updated : x)));
+          });
+        });
       });
     }
   }, [bookMemories]);
@@ -1174,15 +1212,47 @@ export default function BookPreviewScreen() {
   }, [unlockAndBack]);
 
   const merge = useCallback((m: Memory) => m, []);
+  const bookMemoriesRef = useRef(bookMemories);
+  bookMemoriesRef.current = bookMemories;
+  const bulkPortraitPrefetchKeyRef = useRef<string | null>(null);
 
-  /** Prefetch couverture + vignettes des pages dès que les URIs sont connues. */
+  /** Prefetch images browse — une fois par livre, étalé pour ne pas bloquer le scroll. */
   useEffect(() => {
-    if (loading) return;
-    prefetchBookPageImage(coverPhotoBrowseUri);
-    for (const row of pageRows) {
-      prefetchBookPageImage(bookPageMainImageUri(row, merge, coverPhotoBrowseUri));
-    }
-  }, [loading, coverPhotoBrowseUri, pageRows, merge]);
+    if (loading || isLandscape) return;
+    const key = `${bookId ?? 'draft'}:${pageRows.length}:${coverPhotoBrowseUri ?? ''}`;
+    if (bulkPortraitPrefetchKeyRef.current === key) return;
+    bulkPortraitPrefetchKeyRef.current = key;
+
+    const task = InteractionManager.runAfterInteractions(() => {
+      if (isBookPortraitPerfEnabled()) {
+        bookPortraitPerfState('bulk-prefetch:start', { pageRows: pageRows.length });
+      }
+      const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      let i = 0;
+      const schedule = () => {
+        if (i === 0) {
+          prefetchBookPageImage(coverPhotoBrowseUri, 'bulk-cover');
+          i++;
+        } else if (i <= pageRows.length) {
+          const row = pageRows[i - 1];
+          if (row) {
+            prefetchBookPageImage(
+              bookPageMainImageUri(row, merge, coverPhotoBrowseUri),
+              `bulk-p${row.pageNum}`,
+            );
+          }
+          i++;
+        }
+        if (i <= pageRows.length) {
+          setTimeout(schedule, 32);
+        } else if (isBookPortraitPerfEnabled()) {
+          bookPortraitPerfTiming('bulk-prefetch:done', startedAt, { pageRows: pageRows.length });
+        }
+      };
+      schedule();
+    });
+    return () => task.cancel();
+  }, [bookId, coverPhotoBrowseUri, isLandscape, loading, merge, pageRows]);
 
   const onRotateMemory = useCallback((memoryId: string) => {
     setRotations(prev => ({
@@ -1314,6 +1384,7 @@ export default function BookPreviewScreen() {
           }}
           onRequestTextEdit={() => openTextEditForPage(page, m ?? null)}
           qrUrl={qrUrl}
+          typography={maquetteTypography}
         />
       );
     },
@@ -1333,6 +1404,7 @@ export default function BookPreviewScreen() {
       openTextEditForPage,
       upsertPhotoCrop,
       qrTokensByMemoryId,
+      maquetteTypography,
     ]
   );
 
@@ -1463,99 +1535,42 @@ export default function BookPreviewScreen() {
     [editorPageIndex, editorPage, renderMaquettePage, screenWidth, availHPortrait]
   );
 
+  const getMemoryForPage = useCallback((page: BookPage): Memory | null => {
+    const m = memoryForMaquette(page, merge);
+    if (!m) return null;
+    return bookMemoriesRef.current.find(x => x.id === m.id) ?? m;
+  }, [merge]);
+
+  const onSpreadTextEditForPage = useCallback(
+    (pageIndex: number) => {
+      const ix = Math.max(0, pageIndex);
+      setPendingTextEditPageIndex(ix);
+      openEditor(ix);
+    },
+    [openEditor],
+  );
+
   const renderSpreadItem: ListRenderItem<SpreadRow> = useCallback(
-    ({ item, index }) => {
-      const left = item.left;
-      const right = item.right;
-      const layout = computeLandscapeSpreadLayout(left, right, screenWidth, availHLandscape);
-
-      const leftMem = left ? memoryForMaquette(left.page, merge) : null;
-      const rightMem = right ? memoryForMaquette(right.page, merge) : null;
-      const qrUrlLeft = qrPreviewUrlForMemory(leftMem?.id, qrTokensByMemoryId);
-      const qrUrlRight = qrPreviewUrlForMemory(rightMem?.id, qrTokensByMemoryId);
-
-      const renderSpreadMaquette = (
-        row: PageRow,
-        dims: { width: number; height: number },
-        qrUrl: string,
-      ) => {
-        const mem = memoryForMaquette(row.page, merge);
-        return (
-          <View style={[styles.spreadPageCenter, { width: dims.width, height: dims.height }]}>
-            <MaquetteBookPages
-              page={row.page}
-              pageNum={row.pageNum}
-              width={dims.width}
-              height={dims.height}
-              child={child!}
-              familyChildren={familyChildren}
-              memory={mem}
-              rotation={mem ? rotations[mem.id] ?? 0 : 0}
-              photoCrop={
-                mem &&
-                (row.page.type === 'photo-full' ||
-                  row.page.type === 'photo-note' ||
-                  row.page.type === 'audio')
-                  ? photoCrops[mem.id]
-                  : undefined
-              }
-              truncated={false}
-              coverYearLabel={coverYearLabel}
-              coverDisplayTitle={row.page.type === 'cover' ? (coverTitleLine ?? `Journal de ${child!.name}`) : undefined}
-              coverPhotoUri={row.page.type === 'cover' ? coverPhotoBrowseUri : null}
-              coverPhotoCrop={photoCrops.cover}
-              coverPhotoImgPxW={row.page.type === 'cover' ? cropDpiMetaByKey.cover?.imgPxW : undefined}
-              coverPhotoImgPxH={row.page.type === 'cover' ? cropDpiMetaByKey.cover?.imgPxH : undefined}
-              chapterDisplayTitle={row.page.type === 'chapter' ? (chapterTitleLine ?? undefined) : undefined}
-              onRotate={() => {}}
-              onRequestTextEdit={() => {
-                // En mode spread (paysage), on ne sait pas éditer “in place” : on ouvre l’éditeur
-                // sur la page tapée puis on affiche la modale texte.
-                setPendingTextEditPageIndex(Math.max(0, row.pageNum - 1));
-                openEditor(Math.max(0, row.pageNum - 1));
-              }}
-              qrUrl={qrUrl}
-            />
-          </View>
-        );
-      };
-
-      const showSpine = Boolean(left && right && layout.spineWidth > 0);
-
+    ({ item }) => {
+      if (!child) return null;
       return (
-        <View
-          style={[
-            styles.pageSlide,
-            styles.pageSlideSpread,
-            { width: screenWidth, height: availHLandscape },
-          ]}
-        >
-          <BookPreviewZoomWrap
-            width={screenWidth}
-            height={availHLandscape}
-            isPagerActive={index === currentPageIndex}
-          >
-            <View style={styles.spreadZoomInner}>
-              <View style={styles.spreadRow}>
-                {layout.left ? (
-                  <View style={[styles.spreadCell, layout.left]}>
-                    {renderSpreadMaquette(left!, layout.left, qrUrlLeft)}
-                  </View>
-                ) : null}
-                {showSpine ? (
-                  <View style={[styles.spreadSpine, { width: layout.spineWidth, height: layout.rowHeight }]}>
-                    <View style={styles.spreadSpineHairline} />
-                  </View>
-                ) : null}
-                {layout.right ? (
-                  <View style={[styles.spreadCell, layout.right]}>
-                    {renderSpreadMaquette(right!, layout.right, qrUrlRight)}
-                  </View>
-                ) : null}
-              </View>
-            </View>
-          </BookPreviewZoomWrap>
-        </View>
+        <BookSpreadSlide
+          item={item}
+          screenWidth={screenWidth}
+          availHLandscape={availHLandscape}
+          child={child}
+          familyChildren={familyChildren}
+          coverYearLabel={coverYearLabel}
+          coverTitleLine={coverTitleLine}
+          chapterTitleLine={chapterTitleLine}
+          coverPhotoBrowseUri={coverPhotoBrowseUri}
+          cropDpiMetaCover={cropDpiMetaByKey.cover}
+          photoCrops={photoCrops}
+          rotations={rotations}
+          typography={maquetteTypography}
+          getMemoryForPage={getMemoryForPage}
+          onRequestTextEditForPage={onSpreadTextEditForPage}
+        />
       );
     },
     [
@@ -1565,131 +1580,138 @@ export default function BookPreviewScreen() {
       coverPhotoBrowseUri,
       coverTitleLine,
       coverYearLabel,
-      cropDpiMetaByKey,
-      currentPageIndex,
-      merge,
+      cropDpiMetaByKey.cover,
+      familyChildren,
+      getMemoryForPage,
+      maquetteTypography,
+      onSpreadTextEditForPage,
       photoCrops,
       rotations,
       screenWidth,
-      qrTokensByMemoryId,
-    ]
+    ],
   );
 
-  /** Un feuillet (page) en lecture seule dans la vue verticale ; tap → éditeur plein écran. */
-  const renderBrowseLeaf = useCallback(
-    (row: PageRow, w: number, h: number) => {
-      const mem = memoryForMaquette(row.page, merge);
-      const qrUrl = qrPreviewUrlForMemory(mem?.id, qrTokensByMemoryId);
-      const showFolio = row.page.type !== 'cover' && row.page.type !== 'back-cover';
+  const onPrefetchBrowseImage = useCallback((uri: string | null) => {
+    prefetchBookPageImage(uri);
+  }, []);
+
+  const getPrefetchUriForRow = useCallback(
+    (row: PageRow): string | null =>
+      bookPageMainImageUri(row, merge, coverPhotoBrowseUri),
+    [coverPhotoBrowseUri, merge],
+  );
+
+  const onOpenBrowseEditor = useCallback(
+    (pageIndex: number) => openEditor(pageIndex),
+    [openEditor],
+  );
+
+  const onPortraitViewableItemsChanged = useRef(
+    ({
+      viewableItems,
+      changed,
+    }: {
+      viewableItems: Array<{ index: number | null; isViewable?: boolean }>;
+      changed: Array<{ index: number | null; isViewable?: boolean }>;
+    }) => {
+      bookPortraitPerfScroll('viewable', {
+        viewable: viewableItems.map(v => v.index).filter((i): i is number => i != null),
+        changed: changed.map(c => ({ index: c.index, visible: c.isViewable })),
+      });
+    },
+  ).current;
+
+  const portraitViewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 40,
+    minimumViewTime: 80,
+  }).current;
+
+  const onPortraitScrollBeginDrag = useCallback(() => {
+    bookPortraitPerfScroll('begin-drag');
+    bookPortraitPerfStartScrollMonitor();
+  }, []);
+
+  const onPortraitScrollEndDrag = useCallback(() => {
+    bookPortraitPerfScroll('end-drag');
+  }, []);
+
+  const onPortraitMomentumScrollEnd = useCallback(
+    (e: { nativeEvent: { contentOffset: { y: number } } }) => {
+      bookPortraitPerfScroll('momentum-end', { y: Math.round(e.nativeEvent.contentOffset.y) });
+      bookPortraitPerfStopScrollMonitor();
+    },
+    [],
+  );
+
+  const onPortraitScroll = useCallback(
+    (e: { nativeEvent: { contentOffset: { y: number }; velocity?: { y?: number } } }) => {
+      bookPortraitPerfScroll('scroll', {
+        y: Math.round(e.nativeEvent.contentOffset.y),
+        vy: e.nativeEvent.velocity?.y != null ? Math.round(e.nativeEvent.velocity.y) : undefined,
+      });
+    },
+    [],
+  );
+
+  const renderPortraitSpreadItem: ListRenderItem<SpreadRow> = useCallback(
+    ({ item }) => {
+      if (!child) return null;
+      bookPortraitPerfListRender(
+        item.spreadIndex,
+        item.left?.pageNum,
+        item.right?.pageNum,
+      );
       return (
-        <View style={styles.browseLeafCol}>
-          <View style={[styles.browseLeafShadow, { width: w, height: h }]}>
-            <Pressable
-              onPressIn={() =>
-                prefetchBookPageImage(bookPageMainImageUri(row, merge, coverPhotoBrowseUri))
-              }
-              onPress={() => openEditor(row.pageNum - 1)}
-              style={[styles.browseLeafCard, { width: w, height: h }]}
-              accessibilityRole="button"
-              accessibilityLabel={`Modifier la page ${row.pageNum}`}
-            >
-              <MaquetteBookPages
-              page={row.page}
-              pageNum={row.pageNum}
-              width={w}
-              height={h}
-              child={child!}
-              familyChildren={familyChildren}
-              memory={mem}
-              rotation={mem ? rotations[mem.id] ?? 0 : 0}
-              photoCrop={
-                mem &&
-                (row.page.type === 'photo-full' ||
-                  row.page.type === 'photo-note' ||
-                  row.page.type === 'audio')
-                  ? photoCrops[mem.id]
-                  : undefined
-              }
-              truncated={false}
-              coverYearLabel={coverYearLabel}
-              coverDisplayTitle={row.page.type === 'cover' ? (coverTitleLine ?? `Journal de ${child!.name}`) : undefined}
-              coverPhotoUri={row.page.type === 'cover' ? coverPhotoBrowseUri : null}
-              coverPhotoCrop={photoCrops.cover}
-              coverPhotoImgPxW={row.page.type === 'cover' ? cropDpiMetaByKey.cover?.imgPxW : undefined}
-              coverPhotoImgPxH={row.page.type === 'cover' ? cropDpiMetaByKey.cover?.imgPxH : undefined}
-              chapterDisplayTitle={row.page.type === 'chapter' ? (chapterTitleLine ?? undefined) : undefined}
-              onRotate={() => {}}
-              onRequestTextEdit={() => openEditor(row.pageNum - 1)}
-              qrUrl={qrUrl}
-            />
-            </Pressable>
-          </View>
-          <Text style={[styles.browseFolio, dm400 && { fontFamily: dm400 }]}>
-            {showFolio ? String(row.pageNum) : ' '}
-          </Text>
-        </View>
+        <BookPortraitSpreadRow
+          item={item}
+          pageW={browsePageW}
+          pageH={browsePageH}
+          child={child}
+          familyChildren={familyChildren}
+          coverYearLabel={coverYearLabel}
+          coverTitleLine={coverTitleLine}
+          chapterTitleLine={chapterTitleLine}
+          coverPhotoBrowseUri={coverPhotoBrowseUri}
+          cropDpiMetaCover={cropDpiMetaByKey.cover}
+          photoCrops={photoCrops}
+          rotations={rotations}
+          typography={maquetteTypography}
+          folioFont={dm400}
+          getMemoryForPage={getMemoryForPage}
+          getPrefetchUri={getPrefetchUriForRow}
+          onOpenEditor={onOpenBrowseEditor}
+          onPrefetchImage={onPrefetchBrowseImage}
+        />
       );
     },
     [
+      browsePageH,
+      browsePageW,
       child,
       chapterTitleLine,
       coverPhotoBrowseUri,
       coverTitleLine,
       coverYearLabel,
-      cropDpiMetaByKey,
+      cropDpiMetaByKey.cover,
       dm400,
-      merge,
-      openEditor,
+      familyChildren,
+      getMemoryForPage,
+      getPrefetchUriForRow,
+      maquetteTypography,
+      onOpenBrowseEditor,
+      onPrefetchBrowseImage,
       photoCrops,
       rotations,
-      qrTokensByMemoryId,
-    ]
+    ],
   );
 
-  const renderVerticalSpreadItem: ListRenderItem<SpreadRow> = useCallback(
-    ({ item }) => {
-      const { pageW, pageH } = browseLeaf;
-      const isPair = Boolean(item.left && item.right);
-      if (isPair) {
-        return (
-          <View style={styles.browseRow}>
-            <View style={styles.browsePairWrap}>
-              <View style={styles.browsePairRow}>
-                {renderBrowseLeaf(item.left!, pageW, pageH)}
-                {renderBrowseLeaf(item.right!, pageW, pageH)}
-              </View>
-              {/* Reliure : ombres légères de part et d'autre + trait central. */}
-              <LinearGradient
-                colors={[
-                  'rgba(0,0,0,0)',
-                  'rgba(0,0,0,0.14)',
-                  'rgba(0,0,0,0.30)',
-                  'rgba(0,0,0,0.14)',
-                  'rgba(0,0,0,0)',
-                ]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                pointerEvents="none"
-                style={[
-                  styles.browseSpine,
-                  { height: pageH, width: BROWSE_SPINE_W, left: pageW - BROWSE_SPINE_W / 2 },
-                ]}
-              >
-                <View style={styles.browseSpineLine} pointerEvents="none" />
-              </LinearGradient>
-            </View>
-          </View>
-        );
-      }
-      const only = item.left ?? item.right;
-      if (!only) return <View />;
-      return (
-        <View style={[styles.browseRow, styles.browseRowSingle]}>
-          {renderBrowseLeaf(only, pageW, pageH)}
-        </View>
-      );
-    },
-    [browseLeaf, renderBrowseLeaf]
+  const portraitSpreadGetItemLayout = useCallback(
+    (_: ArrayLike<SpreadRow> | null | undefined, index: number) => ({
+      length: browseRowHeight,
+      offset: browseContentPaddingTop + index * browseRowHeight,
+      index,
+    }),
+    [browseContentPaddingTop, browseRowHeight],
   );
 
   const editorActivePageIndex = editorOpen ? editorPageIndex : currentPageIndex;
@@ -2372,35 +2394,42 @@ export default function BookPreviewScreen() {
           disableIntervalMomentum
           showsHorizontalScrollIndicator={false}
           onMomentumScrollEnd={onBookPagerMomentumEnd}
-          // IMPORTANT perf: éviter un nouvel objet `extraData` à chaque render (a-coups).
-          // Les items se rerender déjà via `renderItem`/closures quand l'écran rerender.
           style={styles.list}
           getItemLayout={(_, index) => ({
             length: screenWidth,
             offset: screenWidth * index,
             index,
           })}
-          initialNumToRender={4}
-          maxToRenderPerBatch={4}
-          windowSize={7}
-          updateCellsBatchingPeriod={50}
-          removeClippedSubviews={false}
+          initialNumToRender={2}
+          maxToRenderPerBatch={2}
+          windowSize={5}
+          updateCellsBatchingPeriod={100}
+          removeClippedSubviews
         />
       ) : (
         <FlatList
           key="browse"
           data={spreadRows}
           keyExtractor={(_, i) => i.toString()}
-          renderItem={renderVerticalSpreadItem as any}
+          renderItem={renderPortraitSpreadItem as any}
           showsVerticalScrollIndicator={false}
           style={[styles.list, styles.browseList]}
           contentContainerStyle={[
             styles.browseContent,
             bookId ? styles.browseContentWithAddBar : null,
           ]}
-          initialNumToRender={6}
-          maxToRenderPerBatch={6}
-          windowSize={9}
+          getItemLayout={portraitSpreadGetItemLayout}
+          onScroll={onPortraitScroll}
+          scrollEventThrottle={32}
+          onScrollBeginDrag={onPortraitScrollBeginDrag}
+          onScrollEndDrag={onPortraitScrollEndDrag}
+          onMomentumScrollEnd={onPortraitMomentumScrollEnd}
+          onViewableItemsChanged={onPortraitViewableItemsChanged}
+          viewabilityConfig={portraitViewabilityConfig}
+          initialNumToRender={3}
+          maxToRenderPerBatch={2}
+          windowSize={7}
+          updateCellsBatchingPeriod={100}
           removeClippedSubviews={false}
         />
       )}

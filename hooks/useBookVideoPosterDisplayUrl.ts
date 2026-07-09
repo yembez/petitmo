@@ -1,88 +1,54 @@
 import { useEffect, useState } from 'react';
 import type { Memory } from '@/types/local';
-import { awaitVideoPosterForBookMemory } from '@/services/memoryLocalStore';
+import { peekBookVideoPosterStableCache } from '@/hooks/bookVideoPosterStableCache';
 import {
-  getBookVideoPosterDisplayUri,
-  getBookVideoPosterSyncDisplayUri,
-  getVideoPosterUriForFeedAndViewer,
-  hasCustomVideoPrintPoster,
-  getVideoPosterPrintUriForBookPreview,
-  isDeviceLocalMediaUri,
-  normalizeMemoryMediaUriForDisplay,
-} from '@/utils/memoryPhotos';
-import { isLocalMediaUriReadable } from '@/utils/localMediaReadable';
-import { getSignedMediaDisplayUrl } from '@/lib/mediaSignedUrl';
+  peekSyncBookVideoPosterDisplayUri,
+  resolveBookVideoPosterDisplayUri,
+} from '@/utils/bookVideoPosterUri';
+import { bookPortraitPerfNetwork, bookPortraitPerfTiming, isBookPortraitPerfEnabled } from '@/utils/bookPortraitSpreadPerf';
 
-async function resolveRemotePoster(memory: Memory): Promise<string> {
-  for (const u of [memory.poster_print_url, memory.poster_url, memory.thumbnail_url]) {
-    const t = (u ?? '').trim();
-    if (!t || isDeviceLocalMediaUri(t)) continue;
-    if (/^https?:\/\//i.test(t)) return normalizeMemoryMediaUriForDisplay(t);
-    const signed = (await getSignedMediaDisplayUrl(t)).trim();
-    if (signed) return normalizeMemoryMediaUriForDisplay(signed);
-  }
-  return '';
-}
-
-async function readableLocalUri(uri: string): Promise<string> {
-  const base = (uri.split('?')[0] ?? uri).trim();
-  if (!base || !isDeviceLocalMediaUri(base)) return '';
-  if (await isLocalMediaUriReadable(base)) {
-    return normalizeMemoryMediaUriForDisplay(uri.trim() || base);
-  }
-  return '';
-}
-
-async function readableLocalBookPosterUri(memory: Memory): Promise<string> {
-  if (hasCustomVideoPrintPoster(memory)) {
-    const custom = getBookVideoPosterDisplayUri(memory).trim();
-    if (custom) {
-      const readable = await readableLocalUri(custom);
-      if (readable) return custom;
-    }
-    const customRaw = getVideoPosterPrintUriForBookPreview(memory).trim();
-    if (customRaw && !isDeviceLocalMediaUri(customRaw)) return customRaw;
-  }
-  const feed = getVideoPosterUriForFeedAndViewer(memory).trim();
-  if (feed) {
-    const readable = await readableLocalUri(feed);
-    if (readable) return readable;
-  }
-  return '';
+function stickyPosterUri(prev: string, next: string): string {
+  const n = next.trim();
+  if (n) return n;
+  return prev.trim();
 }
 
 /**
- * Poster vidéo pour la maquette livre.
- * Custom `poster_print` si choisi, sinon poster fil par défaut (`poster.jpg` t≈0).
+ * Poster vidéo maquette livre (spread + éditeur).
+ * Custom `poster_print` si lisible, sinon poster fil ; chemins morts ignorés.
  */
 export function useBookVideoPosterDisplayUrl(memory: Memory): string {
-  const syncUri =
-    memory.type === 'video' ? getBookVideoPosterSyncDisplayUri(memory).trim() : '';
-  const [asyncUri, setAsyncUri] = useState('');
+  const [uri, setUri] = useState(() => peekSyncBookVideoPosterDisplayUri(memory));
 
   useEffect(() => {
     if (memory.type !== 'video') {
-      setAsyncUri('');
+      setUri('');
+      return;
+    }
+
+    const cached = peekBookVideoPosterStableCache(memory.id);
+    if (cached) {
+      setUri(prev => stickyPosterUri(prev, cached));
       return;
     }
 
     let alive = true;
+    const startedAt = Date.now();
+    if (isBookPortraitPerfEnabled()) {
+      bookPortraitPerfNetwork('useBookVideoPoster:resolve-start', {
+        memoryId: memory.id.slice(0, 8),
+      });
+    }
     void (async () => {
-      let resolved = await readableLocalBookPosterUri(memory);
-      if (!resolved.trim()) {
-        resolved = await resolveRemotePoster(memory);
-      }
-      if (!resolved.trim()) {
-        const updated = await awaitVideoPosterForBookMemory(memory.id);
-        if (updated) {
-          resolved =
-            (await readableLocalBookPosterUri(updated)) ||
-            getBookVideoPosterSyncDisplayUri(updated).trim() ||
-            getVideoPosterUriForFeedAndViewer(updated).trim();
-        }
+      const resolved = await resolveBookVideoPosterDisplayUri(memory);
+      if (isBookPortraitPerfEnabled()) {
+        bookPortraitPerfTiming('useBookVideoPoster:resolve-done', startedAt, {
+          memoryId: memory.id.slice(0, 8),
+          hasUri: Boolean(resolved.trim()),
+        });
       }
       if (!alive || !resolved.trim()) return;
-      setAsyncUri(resolved);
+      setUri(prev => stickyPosterUri(prev, resolved));
     })();
 
     return () => {
@@ -100,12 +66,6 @@ export function useBookVideoPosterDisplayUrl(memory: Memory): string {
   ]);
 
   if (memory.type !== 'video') return '';
-
-  if (hasCustomVideoPrintPoster(memory)) {
-    const custom = getBookVideoPosterDisplayUri(memory).trim();
-    if (custom) return custom;
-    return asyncUri.trim() || syncUri;
-  }
-
-  return syncUri || asyncUri.trim();
+  const cachedLive = peekBookVideoPosterStableCache(memory.id);
+  return uri.trim() || (cachedLive?.trim() ?? '');
 }

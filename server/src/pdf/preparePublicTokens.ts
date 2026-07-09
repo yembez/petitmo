@@ -27,8 +27,10 @@ export async function preparePublicTokensForBook(params: {
   memoriesById: Map<string, MemoryRow>;
   subscriptionTier: 'free' | 'premium';
   childBirthdate?: string | null;
+  /** Aperçu livre in-app : token QR seulement, pas de sync display à chaque ouverture. */
+  previewOnly?: boolean;
 }): Promise<PrepareTokensResult> {
-  const { supabase, pages, memoriesById, subscriptionTier, childBirthdate } = params;
+  const { supabase, pages, memoriesById, subscriptionTier, childBirthdate, previewOnly } = params;
   const avCount = countAudioVideoPages(pages);
   if (subscriptionTier === 'free' && avCount > FREE_TIER_QR_AV_MAX_PER_BOOK) {
     return {
@@ -62,8 +64,10 @@ export async function preparePublicTokensForBook(params: {
       kind,
       expiresAtIso: bookPublicMediaExpiresAtIso(),
     });
-    await linkPublicMediaTokenToMemorySource(supabase, tok, m);
-    await syncPublicMediaTokenDisplayContext(supabase, tok, m, childBirthdate ?? null);
+    if (!previewOnly) {
+      await linkPublicMediaTokenToMemorySource(supabase, tok, m);
+      await syncPublicMediaTokenDisplayContext(supabase, tok, m, childBirthdate ?? null);
+    }
     tokensByMemoryId.set(memoryId, tok);
   }
 

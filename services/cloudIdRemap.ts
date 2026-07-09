@@ -16,6 +16,7 @@ import {
   upsertLocalMemory,
 } from '@/lib/localDb';
 import { getSelectedChild, setSelectedChild } from '@/services/children';
+import { remapBookQrTokensOnCloudAfterIdRemap } from '@/services/bookQrPreview';
 import { remapFeedLocalCacheForMemoryId } from '@/services/feedLocalPhotoCache';
 import { isPetitmoUuid, newPetitmoEntityId } from '@/utils/petitmoEntityId';
 import type { Memory } from '@/types/local';
@@ -35,6 +36,7 @@ function remapMemoryPathsForId(memory: Memory, oldId: string, newId: string): Me
   return {
     ...memory,
     id: newId,
+    public_media_token: memory.public_media_token ?? null,
     local_media_path: replaceIdInPath(memory.local_media_path, oldId, newId),
     local_original_path: replaceIdInPath(memory.local_original_path, oldId, newId),
     local_thumb_path: replaceIdInPath(memory.local_thumb_path, oldId, newId),
@@ -182,6 +184,10 @@ export async function remapLegacyEntityIdsForCloudSync(): Promise<LegacyIdRemapR
 
   if (__DEV__ && (report.childrenRemapped > 0 || report.memoriesRemapped > 0)) {
     console.log('[cloudIdRemap]', report);
+  }
+
+  if (memoryIdMap.size > 0) {
+    await remapBookQrTokensOnCloudAfterIdRemap(memoryIdMap);
   }
 
   return report;

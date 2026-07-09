@@ -113,6 +113,15 @@ function qrTokenList(tokensByMemoryId: Map<string, string>): string[] {
   return [...new Set([...tokensByMemoryId.values()].map(t => t.trim()).filter(Boolean))];
 }
 
+function qrTokensRecord(tokensByMemoryId: Map<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [memoryId, token] of tokensByMemoryId.entries()) {
+    const t = token.trim();
+    if (t) out[memoryId] = t;
+  }
+  return out;
+}
+
 function startBookQrWorkers(
   supabase: SupabaseClient,
   tokensByMemoryId: Map<string, string>,
@@ -306,6 +315,7 @@ export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient,
       const out: GenerateBookPdfResponse = {
         pdfUrlSigned: saved.pdfUrlSigned,
         pdfStoragePath: saved.pdfStoragePath,
+        qrTokensByMemoryId: qrTokensRecord(qrResult.tokensByMemoryId),
       };
       res.status(200).json(out);
     } catch (e) {
@@ -513,6 +523,7 @@ async function handleTicketPdf(
     const out: GenerateBookPdfResponse = {
       pdfUrlSigned: saved.pdfUrlSigned,
       pdfStoragePath: saved.pdfStoragePath,
+      qrTokensByMemoryId: qrTokensRecord(qrResult.tokensByMemoryId),
     };
     res.status(200).json(out);
   } catch (e) {
@@ -719,6 +730,7 @@ async function handleTicketPrintPdf(
     const out: GenerateBookPdfResponse = {
       pdfUrlSigned: saved.pdfUrlSigned,
       pdfStoragePath: saved.pdfStoragePath,
+      qrTokensByMemoryId: qrTokensRecord(qrResult.tokensByMemoryId),
     };
     res.status(200).json(out);
   } catch (e) {

@@ -90,6 +90,8 @@ export type GenerateBookPdfResponse = {
   pdfUrlSigned: string;
   /** `books/...` dans bucket `books-pdf` si premium ; null si free (pas de rétention longue). */
   pdfStoragePath: string | null;
+  /** Tokens QR stables par `memoryId` — à persister en SQLite local après export. */
+  qrTokensByMemoryId?: Record<string, string>;
 };
 
 /** Ligne attendue dans public.qr_links (migration Supabase). */

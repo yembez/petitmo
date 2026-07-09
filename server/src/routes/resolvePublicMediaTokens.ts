@@ -105,6 +105,7 @@ export function registerResolvePublicMediaTokensRoute(app: Express, supabase: Su
       memoriesById,
       subscriptionTier: 'premium',
       childBirthdate: (child as { birthdate?: string | null }).birthdate ?? null,
+      previewOnly: true,
     });
 
     if (!qrResult.ok) {

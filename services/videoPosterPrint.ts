@@ -4,6 +4,7 @@ import * as VideoThumbnails from 'expo-video-thumbnails';
 import type { Memory } from '@/types/local';
 import { getLocalMemoryById, upsertLocalMemory } from '@/lib/localDb';
 import { resolveReadableVideoPlaybackUri } from '@/utils/videoMediaUri';
+import { invalidateBookVideoPosterStableCache } from '@/hooks/bookVideoPosterStableCache';
 import { getVideoPosterPrintUriForBookPreview } from '@/utils/memoryPhotos';
 
 function sleep(ms: number): Promise<void> {
@@ -59,6 +60,7 @@ export async function persistVideoPosterPrintAtTimeMs(
       updated_at: now,
     };
     upsertLocalMemory(next);
+    invalidateBookVideoPosterStableCache(id);
     DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId: id });
     return next;
   } catch (e) {

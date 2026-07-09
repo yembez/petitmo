@@ -29,6 +29,8 @@ export type LocalFields = {
   import_asset_id?: string | null
   /** Empreinte stable pour un post-album (plusieurs `assetId` triés). */
   import_source_fingerprint?: string | null
+  /** Token QR stable (`public_media_tokens`) — cache local SQLite, définitif par souvenir. */
+  public_media_token?: string | null
 }
 
 export type Memory = SupabaseMemory & LocalFields

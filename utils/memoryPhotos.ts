@@ -681,16 +681,17 @@ export function getBookVideoPosterDisplayUri(memory: Memory): string {
 }
 
 /**
- * Poster vidéo livre pour le premier paint.
- * Illustration custom si choisie, sinon poster fil par défaut (`poster.jpg` t≈0).
+ * Poster vidéo livre pour le premier paint (prefetch / legacy).
+ * Ne renvoie que le cache session ou une URL https — jamais un chemin local non vérifié.
+ * Préférer `peekSyncBookVideoPosterDisplayUri` (`utils/bookVideoPosterUri.ts`).
  */
 export function getBookVideoPosterSyncDisplayUri(memory: Memory): string {
   if (memory.type !== 'video') return '';
-  if (hasCustomVideoPrintPoster(memory)) {
-    const custom = getBookVideoPosterDisplayUri(memory).trim();
-    if (custom) return custom;
+  for (const u of [memory.poster_print_url, memory.poster_url, memory.thumbnail_url]) {
+    const t = (u ?? '').trim();
+    if (t && /^https?:\/\//i.test(t)) return normalizeMemoryMediaUriForDisplay(t);
   }
-  return getVideoPosterUriForFeedAndViewer(memory).trim();
+  return '';
 }
 
 /** Toutes les URLs d’un souvenir photo (1ère = version éditée si présente, puis `extra_photo_urls`). */

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { bookPortraitPerfNetwork, isBookPortraitPerfEnabled } from '@/utils/bookPortraitSpreadPerf';
 
 /** Affichage client : URLs courtes, re-signées au besoin via le cache. */
 export const MEDIA_DISPLAY_SIGNED_TTL_SEC = 3600;
@@ -161,8 +162,20 @@ export function useSignedMediaUrl(url: string | null | undefined): string | null
       return;
     }
     let alive = true;
+    if (isBookPortraitPerfEnabled()) {
+      bookPortraitPerfNetwork('useSignedMediaUrl:fetch-start', {
+        path: extractMediaBucketPath(raw)?.slice(0, 48),
+      });
+    }
     void (async () => {
+      const t0 = Date.now();
       const next = await getSignedMediaDisplayUrl(raw);
+      if (isBookPortraitPerfEnabled()) {
+        bookPortraitPerfNetwork('useSignedMediaUrl:fetch-done', {
+          ms: Date.now() - t0,
+          changed: next !== raw,
+        });
+      }
       if (alive) setOut(prev => (prev === next ? prev : next || null));
     })();
     return () => {

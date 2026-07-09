@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from 'react';
+import { memo, useMemo, type ReactNode } from 'react';
 import {
   View,
   Text,
@@ -9,19 +9,6 @@ import {
 import { Image as ExpoImage } from 'expo-image';
 import Svg, { Rect, Path } from 'react-native-svg';
 import QRCode from 'react-native-qrcode-svg';
-import {
-  useFonts,
-  DMSans_400Regular,
-  DMSans_400Regular_Italic,
-  DMSans_500Medium,
-  DMSans_600SemiBold,
-} from '@expo-google-fonts/dm-sans';
-import { EBGaramond_400Regular, EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
-import {
-  MEMORY_TEXT_FONT_FAMILY,
-  MEMORY_TEXT_FONT_FALLBACK,
-  MEMORY_TEXT_FONT_SOURCES,
-} from '@/constants/memoryTextFont';
 import type { BookPage, PhotoFullVariant } from '@/src/book/BookEngine';
 import type { Child, Memory } from '@/types/local';
 import { formatBookLocationShort } from '@/utils/date';
@@ -31,6 +18,9 @@ import { bookPhotoCropImageRect } from '@/utils/bookPhotoCropLayout';
 import BookPagePhotoFrame from '@/components/BookPagePhotoFrame';
 import CoverPageSpineOverlay from '@/components/CoverPageSpineOverlay';
 import { clampMediaBookCaption } from '@/lib/mediaBookCaption';
+import type { BookMaquetteTypography } from '@/constants/bookMaquetteTypography';
+import { MEMORY_TEXT_FONT_FALLBACK } from '@/constants/memoryTextFont';
+import { bookPortraitPerfRender } from '@/utils/bookPortraitSpreadPerf';
 import { useBookVideoPosterDisplayUrl } from '@/hooks/useBookVideoPosterDisplayUrl';
 import {
   getPrimaryPhotoUriForBookMaquetteDisplay,
@@ -723,9 +713,13 @@ type Props = {
   /** Ouvre l’éditeur de texte pour la page courante (couverture ou souvenir). */
   onRequestTextEdit: () => void;
   qrUrl: string;
+  /** Typo chargée une fois par l’écran livre (évite `useFonts` par page / spread). */
+  typography: BookMaquetteTypography;
+  /** Contexte perf debug (ex. `portrait-browse`). */
+  perfContext?: string;
 };
 
-export default function MaquetteBookPages(props: Props) {
+function MaquetteBookPages(props: Props) {
   const {
     page,
     pageNum,
@@ -749,26 +743,30 @@ export default function MaquetteBookPages(props: Props) {
     qrUrl,
     coverYearLabel,
     familyChildren: familyChildrenProp,
+    typography,
+    perfContext,
   } = props;
+
+  if (perfContext) {
+    bookPortraitPerfRender('MaquetteBookPages', {
+      perfContext,
+      pageType: page.type,
+      pageNum,
+      memoryId: memory?.id?.slice(0, 8),
+      w: Math.round(width),
+      h: Math.round(height),
+      hasQr: Boolean(qrUrl),
+    });
+  }
 
   const familyChildren = familyChildrenProp ?? [child];
 
-  const [fontsLoaded] = useFonts({
-    DMSans_400Regular,
-    DMSans_400Regular_Italic,
-    DMSans_500Medium,
-    DMSans_600SemiBold,
-    EBGaramond_400Regular,
-    EBGaramond_400Regular_Italic,
-    ...MEMORY_TEXT_FONT_SOURCES,
-  });
-
-  const dm400 = fontsLoaded ? 'DMSans_400Regular' : undefined;
-  const dm600 = fontsLoaded ? 'DMSans_600SemiBold' : undefined;
-  const dmItalic = fontsLoaded ? 'DMSans_400Regular_Italic' : undefined;
-  const garamondIt = fontsLoaded ? 'EBGaramond_400Regular_Italic' : undefined;
-  const garamond = fontsLoaded ? 'EBGaramond_400Regular' : undefined;
-  const memoryTextFont = fontsLoaded ? MEMORY_TEXT_FONT_FAMILY : MEMORY_TEXT_FONT_FALLBACK;
+  const dm400 = typography.dm400;
+  const dm600 = typography.dm600;
+  const dmItalic = typography.dmItalic;
+  const garamondIt = typography.garamondIt;
+  const garamond = typography.garamond;
+  const memoryTextFont = typography.memoryTextFont;
 
   const pad = Math.min(28, width * 0.06);
   const typoScale = typographyScaleForMaquette(page.type, height);
@@ -952,6 +950,8 @@ export default function MaquetteBookPages(props: Props) {
     }
   }
 }
+
+export default memo(MaquetteBookPages);
 
 function MaquetteCover({
   child,
@@ -1463,6 +1463,20 @@ function MaquetteQuote({
 
 type MediaQrKind = 'audio' | 'video';
 
+const BookMaquetteQrCode = memo(function BookMaquetteQrCode({
+  value,
+  size,
+  color,
+}: {
+  value: string;
+  size: number;
+  color: string;
+}) {
+  return (
+    <QRCode value={value} size={size} backgroundColor="#FFFFFF" color={color} />
+  );
+});
+
 function MediaQrVisualFallback({
   kind,
   width,
@@ -1836,12 +1850,7 @@ function MaquetteMediaQr({
                 ]}
               >
                 {qrUrl.trim().length > 0 ? (
-                  <QRCode
-                    value={qrUrl}
-                    size={qrCard.qrSize}
-                    backgroundColor="#FFFFFF"
-                    color={INK}
-                  />
+                  <BookMaquetteQrCode value={qrUrl} size={qrCard.qrSize} color={INK} />
                 ) : (
                   <View
                     style={{
