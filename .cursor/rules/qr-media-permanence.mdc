@@ -1,0 +1,36 @@
+---
+description: QR médias livre (/m/{token}) — pérennité critique, garde-fous obligatoires
+globs:
+  - server/src/**/publicMedia*
+  - server/src/worker/publicMedia*
+  - server/src/pdf/*Public*
+  - server/src/pdf/preparePublicTokens.ts
+  - server/src/pdf/linkPublicMediaTokenSource.ts
+  - supabase/functions/guest-upload-urls/**
+  - services/bookQrPreview.ts
+  - docs/specs/qr-media-permanence.md
+---
+
+# QR médias — règle critique
+
+Un QR dans un PDF exporté ou livre imprimé est **figé dans le marbre** : le token `public_media_tokens.token` ne doit **jamais** être invalidé par un ré-export, un remapping ou un upload guest ultérieur.
+
+## Avant toute modification
+
+1. Lire `docs/specs/qr-media-permanence.md`.
+2. Vérifier que le changement respecte : **ready terminal**, archive `qr-media/archive/`, auto-heal au scan.
+
+## Interdictions
+
+- `UPDATE public_media_tokens SET status = 'pending_upload'` sur une ligne déjà `ready`.
+- Remplacer `ready_path` d’un token `ready`.
+- Supprimer des objets sous `qr-media/ready/` ou `qr-media/archive/` (sauf procédure ops documentée).
+
+## Module serveur
+
+Utiliser `server/src/publicMedia/permanence.ts` pour heal, archive et audit — ne pas dupliquer la logique.
+
+## Tests obligatoires si touché
+
+- Rescan d’un QR d’un **PDF exporté la veille** (même `memory_id`).
+- Vérifier `public_media_token_events` après export.

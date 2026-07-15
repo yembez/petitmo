@@ -16,10 +16,10 @@ function isPayload(body: unknown): body is { memoryId: string; base64Jpeg: strin
 }
 
 export function registerUploadGuestAssetsRoutes(app: Express, supabase: SupabaseClient): void {
-  // Besoin d’un payload plus gros que 2mb pour une photo JPEG base64.
+  // JPEG 3200 px en base64 — marge au-dessus de l’ancien plafond 25 mb.
   app.post(
     '/v1/books/upload-guest-photo',
-    express.json({ limit: '25mb' }),
+    express.json({ limit: '40mb' }),
     async (req: Request, res: Response) => {
       const body = req.body;
       if (!isPayload(body)) {

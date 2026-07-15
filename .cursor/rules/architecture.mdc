@@ -13,12 +13,12 @@ Petitmo a **deux modes** et deux modes seulement.
 - **Aucun cloud**, aucun backup, aucune sync, aucune création de compte email/mot de passe.
 - Perte du téléphone = perte des données (assumé produit).
 - Souvenirs autorisés : texte, photo (seule ou album), audio.
-- Livre : couverture + photos + audio/vidéo (QR après commande en gratuit). Max **5 audios** et **5 vidéos** par livre — voir `lib/limits.ts` et `validateFreeTierBookMemoryLimits` (`services/books.ts`).
+- Livre : couverture + photos + audio/vidéo (QR cloud **après paiement** commande/export en gratuit). Max **5 audios** et **5 vidéos** par livre — voir `lib/limits.ts`, `validateFreeTierBookMemoryLimits` (`services/books.ts`), spec `docs/specs/free-tier-book-qr-av.md`.
 
 ### Exceptions Supabase autorisées en gratuit (et UNIQUEMENT celles-ci)
 
 1. Achat PDF / commande livre — flux `services/books.ts`, `services/printBookOrder.ts`, `lib/digitalExportPurchase.ts`.
-2. Stockage cloud d'un audio pour QR pérenne dans un livre commandé.
+2. Stockage cloud d'un **audio ou d'une vidéo** pour **QR pérenne** dans un livre commandé ou exporté payé (pas une sync du fil). Spec : `docs/specs/free-tier-book-qr-av.md`.
 
 Le device-user Supabase auto-créé dans `app/_layout.tsx` est une **mécanique technique** pour ces deux cas — il n'est jamais présenté à l'utilisatrice gratuite comme un compte. Voir `supabase-write-policy.mdc` pour la liste exacte.
 

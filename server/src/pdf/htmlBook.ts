@@ -13,6 +13,8 @@ import {
 } from '../constants/pdfDigitalSpec';
 import type { BookPageServer } from '../types/contracts';
 import type { ChildRow, MemoryRow } from './memoryRow';
+import type { GelatoCoverLayout } from '../gelato/coverDimensions';
+import { gelatoInnerPages } from '../gelato/photobookLayout';
 import { memoryBookDisplayDateIso } from './memoryBookDisplayDate';
 import { clampMediaBookCaption } from './mediaBookCaption';
 import { coverCropImgInlineStyle } from './bookPhotoCropLayout';
@@ -199,8 +201,13 @@ function pageCover(
     typeof coverImgPxH === 'number' &&
     coverImgPxW > 0 &&
     coverImgPxH > 0;
+  // Cadre = bandeau réel (parité maquette : pageW × pageH×142/216), pas 216:142.
+  const pageWmm = printBleed ? PRINT_PAGE_WIDTH_MM : DIGITAL_PAGE_WIDTH_MM;
+  const pageHmm = printBleed ? PRINT_PAGE_HEIGHT_MM : DIGITAL_PAGE_HEIGHT_MM;
+  const coverFrameHmm = pageHmm * BOOK_COVER_PHOTO_HEIGHT_RATIO;
+  const coverFrameWmm = printBleed ? pageWmm + 2 * PRINT_BLEED_MM : pageWmm;
   const imgStyle = hasCoverDims
-    ? coverCropImgInlineStyle(crop, coverImgPxW, coverImgPxH)
+    ? coverCropImgInlineStyle(crop, coverImgPxW, coverImgPxH, coverFrameWmm, coverFrameHmm)
     : `position:absolute;inset:-1px;width:calc(100% + 2px);height:calc(100% + 2px);object-fit:cover;${cropCss(crop)}`;
   return `<div class="page cover">
   <div class="cover-photo${bleedCls}">
@@ -464,6 +471,70 @@ function pageBackCover(pageNum: number): string {
 </div>`;
 }
 
+function pageGelatoBlankEndpaper(): string {
+  return `<div class="page gelato-endpaper"></div>`;
+}
+
+function pageGelatoWraparoundSpread(
+  layout: GelatoCoverLayout,
+  input: BuildBookHtmlInput,
+  child: ChildRow,
+  coverPhotoUrl: string | null | undefined,
+  coverPhotoImgPxW?: number,
+  coverPhotoImgPxH?: number,
+): string {
+  const { contentFront, contentBack, spine, spreadWidthMm, spreadHeightMm } = layout;
+  const explicit = (coverPhotoUrl ?? '').trim();
+  const src = explicit ? imgAttr(explicit) : imgAttr(child.photo_url);
+  const hasCoverDims =
+    typeof coverPhotoImgPxW === 'number' &&
+    typeof coverPhotoImgPxH === 'number' &&
+    coverPhotoImgPxW > 0 &&
+    coverPhotoImgPxH > 0;
+  const coverCrop = input.pages.find(p => p.type === 'cover')?.crop;
+  const frontPhotoHmm = contentFront.heightMm * BOOK_COVER_PHOTO_HEIGHT_RATIO;
+  const imgStyle = hasCoverDims
+    ? coverCropImgInlineStyle(
+        coverCrop,
+        coverPhotoImgPxW,
+        coverPhotoImgPxH,
+        contentFront.widthMm,
+        frontPhotoHmm,
+      )
+    : `position:absolute;inset:-1px;width:calc(100% + 2px);height:calc(100% + 2px);object-fit:cover;${cropCss(coverCrop)}`;
+
+  const spineTitle = esc(input.coverTitle.slice(0, 48));
+
+  return `<div class="page gelato-wraparound">
+  <div class="gw-canvas" style="width:${spreadWidthMm}mm;height:${spreadHeightMm}mm;">
+    <div class="gw-panel gw-back" style="left:${contentBack.leftMm}mm;top:${contentBack.topMm}mm;width:${contentBack.widthMm}mm;height:${contentBack.heightMm}mm;">
+      <div class="gw-back-inner">
+        <div class="subtitle" style="color:#AEAEB2;">Chaque moment compte.</div>
+        <div class="label" style="margin-top:8pt;">petitmo · vos souvenirs pour toujours</div>
+        <div class="chapter-rule" style="margin-top:12pt;"></div>
+      </div>
+    </div>
+    <div class="gw-panel gw-spine" style="left:${spine.leftMm}mm;top:${spine.topMm}mm;width:${spine.widthMm}mm;height:${spine.heightMm}mm;">
+      <div class="gw-spine-title">${spineTitle}</div>
+    </div>
+    <div class="gw-panel gw-front" style="left:${contentFront.leftMm}mm;top:${contentFront.topMm}mm;width:${contentFront.widthMm}mm;height:${contentFront.heightMm}mm;">
+      <div class="gw-front-photo">
+        ${
+          src
+            ? `<div class="crop-frame" style="width:100%;height:100%;"><img class="crop-img" src="${src}" alt="" style="${imgStyle}" /></div>`
+            : '<div class="cover-placeholder"></div>'
+        }
+      </div>
+      <div class="gw-front-text">
+        <div class="cover-title">${esc(input.coverTitle)}</div>
+        <div class="cover-period">${esc(input.coverYearLabel)}</div>
+        <div class="cover-hairline"></div>
+      </div>
+    </div>
+  </div>
+</div>`;
+}
+
 function renderPage(page: BookPageServer, input: BuildBookHtmlInput, pageNum: number, _pageWmm: number): string {
   const { child, coverTitle, coverYearLabel, chapterTitle, qrBaseUrl, coverPhotoUrl, coverPhotoImgPxW, coverPhotoImgPxH, memoriesById, qrTokensByMemoryId } =
     input;
@@ -528,12 +599,61 @@ function buildHtmlDocument(
   pagesHtml: string,
   pageWmm: number,
   pageHmm: number,
-  isPrint: boolean
+  isPrint: boolean,
+  gelatoSpread?: { widthMm: number; heightMm: number },
 ): string {
   const bleedMm = isPrint ? PRINT_BLEED_MM : 0;
   const pnImgHmm = (PHOTO_NOTE_INNER_MM + 2 * BOOK_VISUAL_MARGIN_MM).toFixed(2);
   const coverPhotoHmm = (pageHmm * BOOK_COVER_PHOTO_HEIGHT_RATIO).toFixed(2);
   const pfImgHmm = (pageHmm * PHOTO_FULL_BAND_HEIGHT_RATIO).toFixed(2);
+  const gelatoPageCss = gelatoSpread
+    ? `
+@page gelato-spread { size: ${gelatoSpread.widthMm}mm ${gelatoSpread.heightMm}mm; margin: 0; }
+.page.gelato-wraparound {
+  page: gelato-spread;
+  width: ${gelatoSpread.widthMm}mm;
+  height: ${gelatoSpread.heightMm}mm;
+}
+.gw-canvas { position: relative; background: #fff; overflow: hidden; }
+.gw-panel { position: absolute; overflow: hidden; background: #fff; }
+.gw-back-inner {
+  width: 100%; height: 100%;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center; text-align: center;
+  padding: 0 12mm;
+}
+.gw-spine {
+  display: flex; align-items: center; justify-content: center;
+  background: #fff;
+}
+.gw-spine-title {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-family: 'EB Garamond', serif;
+  font-style: italic;
+  font-size: 8pt;
+  color: #1C1C1E;
+  max-height: 90%;
+  overflow: hidden;
+  text-align: center;
+}
+.gw-front { display: flex; flex-direction: column; }
+.gw-front-photo {
+  width: 100%;
+  height: ${(BOOK_COVER_PHOTO_HEIGHT_RATIO * 100).toFixed(2)}%;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.gw-front-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 3mm 8mm 6mm;
+}
+.page.gelato-endpaper { background: #fff; }
+`
+    : '';
   const bodyClass = isPrint ? ' class="print-bleed"' : '';
   return `<!DOCTYPE html>
 <html lang="fr">
@@ -1035,6 +1155,7 @@ body.print-bleed .back-inner {
 body.print-bleed .folio {
   bottom:calc(8mm + var(--bleed));
 }
+${gelatoPageCss}
 
 </style>
 </head>
@@ -1050,4 +1171,34 @@ export function buildBookHtml(input: BuildBookHtmlInput): string {
   const pagesHtml = input.pages.map((p, i) => renderPage(p, input, i + 1, pageWmm)).join('');
 
   return buildHtmlDocument(input.coverTitle, pagesHtml, pageWmm, pageHmm, isPrint);
+}
+
+/** PDF print au format template Gelato photobook (spread + gardes + intérieur). */
+export function buildGelatoPhotobookHtml(
+  input: BuildBookHtmlInput,
+  layout: GelatoCoverLayout,
+): string {
+  const printInput: BuildBookHtmlInput = { ...input, exportMode: 'print' };
+  const pageWmm = PRINT_PAGE_WIDTH_MM;
+  const pageHmm = PRINT_PAGE_HEIGHT_MM;
+  const innerPages = gelatoInnerPages(input.pages);
+
+  const spreadHtml = pageGelatoWraparoundSpread(
+    layout,
+    printInput,
+    input.child,
+    input.coverPhotoUrl,
+    input.coverPhotoImgPxW,
+    input.coverPhotoImgPxH,
+  );
+  const innerHtml = innerPages
+    .map((p, i) => renderPage(p, printInput, i + 1, pageWmm))
+    .join('');
+
+  const pagesHtml = `${spreadHtml}${pageGelatoBlankEndpaper()}${innerHtml}${pageGelatoBlankEndpaper()}`;
+
+  return buildHtmlDocument(input.coverTitle, pagesHtml, pageWmm, pageHmm, true, {
+    widthMm: layout.spreadWidthMm,
+    heightMm: layout.spreadHeightMm,
+  });
 }

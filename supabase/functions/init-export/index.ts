@@ -156,18 +156,23 @@ Deno.serve(async (req: Request) => {
   const ip = clientIp(req);
   const ipHash = await sha256Hex(`${ip}:${jwtSecret}`);
 
-  const { count: ipCount, error: ipErr } = await supabase
-    .from('export_requests')
-    .select('id', { count: 'exact', head: true })
-    .gte('created_at', new Date(Date.now() - 60 * 60 * 1000).toISOString())
-    .eq('client_ip_hash', ipHash);
+  /** Aperçu PDF impression (`pdf_export` + `print`) = outil de QA, pas une commande payante. */
+  const isPrintPreviewTest = requestType === 'pdf_export' && exportMode === 'print';
 
-  if (ipErr) {
-    console.error('[init-export] ip rate', ipErr.message);
-    return jsonRes({ error: 'Database error' }, 500);
-  }
-  if ((ipCount ?? 0) >= MAX_INIT_PER_IP_1H) {
-    return jsonRes({ error: 'Too many requests from this network', code: 'RATE_LIMIT_IP' }, 429);
+  if (!isPrintPreviewTest) {
+    const { count: ipCount, error: ipErr } = await supabase
+      .from('export_requests')
+      .select('id', { count: 'exact', head: true })
+      .gte('created_at', new Date(Date.now() - 60 * 60 * 1000).toISOString())
+      .eq('client_ip_hash', ipHash);
+
+    if (ipErr) {
+      console.error('[init-export] ip rate', ipErr.message);
+      return jsonRes({ error: 'Database error' }, 500);
+    }
+    if ((ipCount ?? 0) >= MAX_INIT_PER_IP_1H) {
+      return jsonRes({ error: 'Too many requests from this network', code: 'RATE_LIMIT_IP' }, 429);
+    }
   }
 
   const { data: existingContact, error: findErr } = await supabase
@@ -220,18 +225,20 @@ Deno.serve(async (req: Request) => {
   }
 
   const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const { count: emailCount, error: emailErr } = await supabase
-    .from('export_requests')
-    .select('id', { count: 'exact', head: true })
-    .eq('crm_contact_id', crmContactId)
-    .gte('created_at', since24h);
+  if (!isPrintPreviewTest) {
+    const { count: emailCount, error: emailErr } = await supabase
+      .from('export_requests')
+      .select('id', { count: 'exact', head: true })
+      .eq('crm_contact_id', crmContactId)
+      .gte('created_at', since24h);
 
-  if (emailErr) {
-    console.error('[init-export] email rate', emailErr.message);
-    return jsonRes({ error: 'Database error' }, 500);
-  }
-  if ((emailCount ?? 0) >= MAX_EXPORTS_PER_EMAIL_24H) {
-    return jsonRes({ error: 'Export limit reached for this email (24h)', code: 'RATE_LIMIT_EMAIL' }, 429);
+    if (emailErr) {
+      console.error('[init-export] email rate', emailErr.message);
+      return jsonRes({ error: 'Database error' }, 500);
+    }
+    if ((emailCount ?? 0) >= MAX_EXPORTS_PER_EMAIL_24H) {
+      return jsonRes({ error: 'Export limit reached for this email (24h)', code: 'RATE_LIMIT_EMAIL' }, 429);
+    }
   }
 
   if (requestType === 'pdf_export' && tier === 'free') {

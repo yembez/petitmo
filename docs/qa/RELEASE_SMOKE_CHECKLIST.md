@@ -128,7 +128,23 @@ Attendu final : `"status": "ready"`.
 
 - [ ] Commande `print_order` via `init-export` (`type: print_order`, `export_mode: print`)
 - [ ] Ticket `export_print` → `generate-pdf` avec `exportMode: "print"`
-- [ ] PDF 218×288 mm, fond perdu 4 mm (voir `server/PROD_CHECKLIST.md` §5)
+- [ ] PDF 218×288 mm, fond perdu 4 mm (voir `server/PROD_CHECKLIST.md` §6)
+- [ ] Script : `./scripts/qa/smoke-print.sh`
+
+---
+
+## Test E — Gelato (consolidation pré-prod)
+
+Voir `server/PROD_CHECKLIST.md` §7. Ordre :
+
+- [ ] **E1** PDF print seul (`smoke-print.sh`) — `export_requests.status = done`
+- [ ] **E2** Webhook (`smoke-gelato-webhook.sh` ou test notification Gelato) — `200` Railway
+- [ ] **E3** Railway `GELATO_ORDER_TYPE=draft` → `./scripts/qa/smoke-gelato-draft.sh` (32 pages) → dashboard Gelato sans impression auto
+- [ ] **E4** Parcours app `/book-order` → `sent_to_printer` + `printer_order_id`
+- [ ] **E5** Webhook `order_status_updated` → `shipped_at` / tracking dans `printer_order_json`
+- [ ] **E6** (prod) `GELATO_ORDER_TYPE=order` + 1 livre physique + QR audio OK
+
+**Pas encore requis pour E1–E5** : paiement IAP livre (bloquant release utilisatrices).
 
 ---
 

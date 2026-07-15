@@ -13,6 +13,7 @@ type CropDpiMeta = {
   dpiPxH?: number;
   printMmW: number;
   printMmH: number;
+  blurScore?: number | null;
 };
 
 type InlineCropProps = {
@@ -140,6 +141,7 @@ function BookPagePhotoFrame({
             dpiPxH={dpiMeta?.dpiPxH}
             printMmW={dpiMeta.printMmW}
             printMmH={dpiMeta.printMmH}
+            blurScore={dpiMeta?.blurScore}
             onChange={next => inlineCrop.onChange(inlineCrop.storageKey, next)}
             coverMode={coverMode}
           />
@@ -177,7 +179,7 @@ function BookPagePhotoFrame({
 
       {isLoadingMeta ? (
         <View style={styles.hintPill} pointerEvents="none">
-          <Text style={styles.hintPillText}>Préparation du recadrage…</Text>
+          <Text style={styles.hintPillText}>Calcul qualité impression…</Text>
         </View>
       ) : null}
     </View>

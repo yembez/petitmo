@@ -4,12 +4,13 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { THEME } from '@/constants/theme';
 import { scale } from '@/utils/responsive';
-import { getPendingBookOrderPdfPayload } from '@/lib/pendingBookOrderPdf';
+import { getPendingBookOrderPdfPayload, clearPendingBookOrderPdfPayload } from '@/lib/pendingBookOrderPdf';
 import type { Memory } from '@/types/local';
 import { collectMemoriesFromPagesForPdf } from '@/services/bookPdfServer';
 import {
   enqueueGuestRawUpload,
   getPendingGuestRawUploadsCountForKeys,
+  getPendingGuestRawUploadsCount,
   processPendingGuestRawUploads,
 } from '@/services/pendingRawGuestUploads';
 
@@ -63,6 +64,7 @@ export default function BookFinalizeMediaScreen() {
   const totalRef = useRef<number>(0);
 
   const goToConfirmation = useCallback(() => {
+    void clearPendingBookOrderPdfPayload();
     router.replace({
       pathname: '/book-order-confirmation',
       params: {
@@ -83,13 +85,9 @@ export default function BookFinalizeMediaScreen() {
     setSlowHint(false);
 
     const payload = await getPendingBookOrderPdfPayload();
-    if (!payload) {
-      // Rien à finaliser : on n’empêche pas la confirmation.
-      setPhase('done');
-      return;
-    }
-
-    const memories = collectMemoriesFromPagesForPdf(payload.pages, payload.localEdits ?? {});
+    const memories = payload
+      ? collectMemoriesFromPagesForPdf(payload.pages, payload.localEdits ?? {})
+      : [];
     const av = memories.filter(m => m.type === 'voice' || m.type === 'video');
 
     const tasks: Array<Promise<void>> = [];
@@ -114,16 +112,23 @@ export default function BookFinalizeMediaScreen() {
     }
 
     targetKeysRef.current = Array.from(new Set(keys));
-    totalRef.current = targetKeysRef.current.length;
 
-    // Rien à faire → terminé.
-    if (totalRef.current === 0) {
-      setProgressPct(100);
-      setPhase('done');
-      return;
+    // Payload déjà vidé : traiter la file persistée par generateBookPdfWithExportTicket.
+    if (targetKeysRef.current.length === 0) {
+      const pendingCount = await getPendingGuestRawUploadsCount();
+      if (pendingCount === 0) {
+        setProgressPct(100);
+        setPhase('done');
+        return;
+      }
+      totalRef.current = pendingCount;
+    } else {
+      totalRef.current = targetKeysRef.current.length;
     }
 
-    await Promise.all(tasks);
+    if (tasks.length > 0) {
+      await Promise.all(tasks);
+    }
 
     const startedAt = Date.now();
     const slowTimer = setTimeout(() => setSlowHint(true), 90_000);
@@ -132,7 +137,10 @@ export default function BookFinalizeMediaScreen() {
       // On force ici car c’est une étape “fenêtre ouverte”.
       while (true) {
         await processPendingGuestRawUploads({ force: true });
-        const left = await getPendingGuestRawUploadsCountForKeys(targetKeysRef.current);
+        const left =
+          targetKeysRef.current.length > 0
+            ? await getPendingGuestRawUploadsCountForKeys(targetKeysRef.current)
+            : await getPendingGuestRawUploadsCount();
         const total = totalRef.current || 1;
         const done = Math.max(0, Math.min(total, total - left));
         setProgressPct(Math.round((done / total) * 100));

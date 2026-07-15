@@ -3,13 +3,21 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { loadGelatoConfig } from '../gelato/config';
 
 type GelatoWebhookBody = {
+  /** Id événement webhook (pas toujours l’id commande Gelato). */
   id?: string;
+  orderId?: string;
   orderReferenceId?: string;
   fulfillmentStatus?: string;
   shipment?: {
     trackingCode?: string;
     trackingUrl?: string;
   };
+  items?: Array<{
+    fulfillments?: Array<{
+      trackingCode?: string;
+      trackingUrl?: string;
+    }>;
+  }>;
 };
 
 function webhookAuthorized(req: Request, secret: string | null): boolean {
@@ -20,6 +28,33 @@ function webhookAuthorized(req: Request, secret: string | null): boolean {
       : '') ||
     (typeof req.headers['x-webhook-secret'] === 'string' ? req.headers['x-webhook-secret'] : '');
   return header === secret;
+}
+
+function gelatoOrderIdFromBody(body: GelatoWebhookBody): string {
+  const orderId = typeof body.orderId === 'string' ? body.orderId.trim() : '';
+  if (orderId) return orderId;
+  const eventId = typeof body.id === 'string' ? body.id.trim() : '';
+  return eventId;
+}
+
+function trackingFromBody(body: GelatoWebhookBody): { code?: string; url?: string } {
+  const shipCode = body.shipment?.trackingCode?.trim();
+  if (shipCode) {
+    return { code: shipCode, url: body.shipment?.trackingUrl?.trim() };
+  }
+  const items = body.items;
+  if (!Array.isArray(items)) return {};
+  for (const item of items) {
+    const fulfillments = item.fulfillments;
+    if (!Array.isArray(fulfillments)) continue;
+    for (const f of fulfillments) {
+      const code = f.trackingCode?.trim();
+      if (code) {
+        return { code, url: f.trackingUrl?.trim() };
+      }
+    }
+  }
+  return {};
 }
 
 function isShippedStatus(status: string): boolean {
@@ -41,11 +76,12 @@ export function registerGelatoWebhookRoute(app: Express, supabase: SupabaseClien
     }
 
     const body = req.body as GelatoWebhookBody;
-    const gelatoOrderId = typeof body.id === 'string' ? body.id.trim() : '';
+    const gelatoOrderId = gelatoOrderIdFromBody(body);
     const exportRequestId =
       typeof body.orderReferenceId === 'string' ? body.orderReferenceId.trim() : '';
     const fulfillmentStatus =
       typeof body.fulfillmentStatus === 'string' ? body.fulfillmentStatus.trim() : '';
+    const tracking = trackingFromBody(body);
 
     if (!gelatoOrderId && !exportRequestId) {
       res.status(400).json({ error: 'Missing order id' });
@@ -79,6 +115,8 @@ export function registerGelatoWebhookRoute(app: Express, supabase: SupabaseClien
           : {}),
         lastWebhook: body,
         lastWebhookAt: new Date().toISOString(),
+        ...(tracking.code ? { trackingCode: tracking.code } : {}),
+        ...(tracking.url ? { trackingUrl: tracking.url } : {}),
       },
     };
 
@@ -88,6 +126,8 @@ export function registerGelatoWebhookRoute(app: Express, supabase: SupabaseClien
       patch.shipped_at = patch.shipped_at ?? nowIso;
     } else if (fulfillmentStatus && isShippedStatus(fulfillmentStatus)) {
       patch.shipped_at = nowIso;
+    } else if (tracking.code) {
+      patch.shipped_at = patch.shipped_at ?? nowIso;
     }
 
     const { error: upErr } = await supabase.from('export_requests').update(patch).eq('id', row.id);
@@ -97,7 +137,12 @@ export function registerGelatoWebhookRoute(app: Express, supabase: SupabaseClien
       return;
     }
 
-    console.log('[gelato-webhook] ok', row.id, fulfillmentStatus || 'no-status');
+    console.log(
+      '[gelato-webhook] ok',
+      row.id,
+      fulfillmentStatus || 'no-status',
+      tracking.code ? `tracking=${tracking.code}` : '',
+    );
     res.status(200).json({ ok: true });
   });
 }

@@ -218,7 +218,7 @@ app.post('/process-memory', async (req, res) => {
       const mainExt = (path.extname(mainPath).slice(1) || 'bin').toLowerCase();
       const thumbBuf = await makeJpegVariantRobust(src, 600, 76, mainExt);
       const displayBuf = await makeJpegVariantRobust(src, 1600, 84, mainExt);
-      const printBuf = await makeJpegVariantRobust(src, 2400, 88, mainExt);
+      const printBuf = await makeJpegVariantRobust(src, 3200, 86, mainExt);
       const capturedOverlayInk = await overlayInkFromBottomRight(thumbBuf);
 
       const thumbPath = `${baseDir}/thumb.jpg`;
@@ -288,7 +288,7 @@ app.post('/process-memory', async (req, res) => {
         const posterBuf = await fs.readFile(tmpPoster);
         // 2 posters: léger pour app, HD pour impression.
         const posterSmall = await makeJpegVariant(posterBuf, 800, 82);
-        const posterPrint = await makeJpegVariant(posterBuf, 2400, 88);
+        const posterPrint = await makeJpegVariant(posterBuf, 3200, 86);
         const capturedOverlayInk = await overlayInkFromBottomRight(posterSmall);
 
         const posterPath = `${baseDir}/poster.jpg`;

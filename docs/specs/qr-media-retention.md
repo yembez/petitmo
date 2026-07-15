@@ -1,6 +1,6 @@
 # Rétention QR médias livre — conservation & durée
 
-> **Règle d'or** : le fil complet reste local-first ; seuls les **audio/vidéo derrière un QR de livre** (export PDF / commande imprimée) sont stockés en cloud — exception explicite. Voir [`architecture-locale-cloud.md`](./architecture-locale-cloud.md) §1.1.
+> **Règle d'or** : le fil complet reste local-first ; seuls les **audio/vidéo derrière un QR de livre** (export PDF / commande imprimée **payée**) sont stockés en cloud — exception explicite. Détail gratuit : [`free-tier-book-qr-av.md`](./free-tier-book-qr-av.md). Voir aussi [`architecture-locale-cloud.md`](./architecture-locale-cloud.md) §1.1.
 >
 > Spec **prochaine étape dev** (juillet 2026). Référencer ce fichier dans les PR qui touchent durée QR, backup ou copy produit.
 

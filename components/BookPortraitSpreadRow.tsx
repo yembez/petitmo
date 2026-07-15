@@ -1,5 +1,6 @@
 import { memo } from 'react';
 import { StyleSheet, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import type { BookPage } from '@/src/book/BookEngine';
 import type { Child, Memory } from '@/types/local';
 import type { PhotoCrop } from '@/src/book/photoCrop';
@@ -96,17 +97,24 @@ function BookPortraitSpreadRowInner({
             {item.left ? renderLeaf(item.left) : null}
             {item.right ? renderLeaf(item.right) : null}
           </View>
-          <View
+          <LinearGradient
+            colors={[
+              'rgba(0,0,0,0)',
+              'rgba(0,0,0,0.14)',
+              'rgba(0,0,0,0.30)',
+              'rgba(0,0,0,0.14)',
+              'rgba(0,0,0,0)',
+            ]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
             pointerEvents="none"
             style={[
               styles.browseSpine,
               { height: pageH, width: PORTRAIT_BROWSE_SPINE_W, left: pageW - PORTRAIT_BROWSE_SPINE_W / 2 },
             ]}
           >
-            <View style={styles.browseSpineShadeLeft} />
-            <View style={styles.browseSpineLine} />
-            <View style={styles.browseSpineShadeRight} />
-          </View>
+            <View style={styles.browseSpineLine} pointerEvents="none" />
+          </LinearGradient>
         </View>
       </View>
     );
@@ -151,20 +159,12 @@ const styles = StyleSheet.create({
   browseSpine: {
     position: 'absolute',
     top: 0,
-    flexDirection: 'row',
-    alignItems: 'stretch',
+    alignItems: 'center',
     justifyContent: 'center',
-  },
-  browseSpineShadeLeft: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.10)',
   },
   browseSpineLine: {
     width: StyleSheet.hairlineWidth,
+    height: '100%',
     backgroundColor: 'rgba(0,0,0,0.22)',
-  },
-  browseSpineShadeRight: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.10)',
   },
 });

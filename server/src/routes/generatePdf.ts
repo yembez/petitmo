@@ -2,7 +2,7 @@ import type { Express, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { verifyExportTicket, type VerifiedExportTicket } from '../auth/exportPdfTicket';
-import { buildBookHtml } from '../pdf/htmlBook';
+import { buildBookHtml, buildGelatoPhotobookHtml } from '../pdf/htmlBook';
 import { countRenderedBookPages } from '../pdf/bookPageCount';
 import { htmlToDigitalPdfBuffer, htmlToPdfBuffer } from '../pdf/renderPdf';
 import { saveBookPdfAndSign, saveBookPdfForExportRequest } from '../pdf/pdfStorage';
@@ -15,6 +15,10 @@ import {
   signUrlForPdfRender,
 } from '../pdf/signSupabaseMediaForPdf';
 import { submitGelatoPrintOrder } from '../gelato/placePrintOrder';
+import { fetchGelatoCoverLayout } from '../gelato/coverDimensions';
+import { gelatoPhotobookPdfPageCount, validateGelatoInnerPageCount } from '../gelato/photobookLayout';
+import { loadGelatoConfig } from '../gelato/config';
+import { countPdfPages } from '../pdf/countPdfPages';
 import type {
   GenerateBookPdfPayload,
   GenerateBookPdfResponse,
@@ -681,12 +685,23 @@ async function handleTicketPrintPdf(
         ? ((await signUrlForPdfRender(supabase, projectOrigin, coverRawPrint)) ?? coverRawPrint)
         : null;
 
-    const html = buildBookHtml({
+    const gelatoConfig = loadGelatoConfig();
+    const gelatoLayoutError = gelatoConfig ? validateGelatoInnerPageCount(body.pages) : null;
+    if (gelatoLayoutError) {
+      await supabase
+        .from('export_requests')
+        .update({ status: 'failed', last_error: gelatoLayoutError.slice(0, 2000) })
+        .eq('id', ticket.export_request_id);
+      res.status(400).json({ error: gelatoLayoutError });
+      return;
+    }
+
+    const bookHtmlInput = {
       coverTitle: body.coverTitle,
       coverYearLabel: body.coverYearLabel,
       chapterTitle: body.chapterTitle,
       qrBaseUrl: body.qrBaseUrl,
-      exportMode: 'print',
+      exportMode: 'print' as const,
       pages: body.pages,
       child: childForHtmlPrint,
       coverPhotoUrl: coverForHtmlPrint,
@@ -694,10 +709,20 @@ async function handleTicketPrintPdf(
       coverPhotoImgPxH: body.coverPhotoImgPxH,
       memoriesById: memoriesForHtmlPrint,
       qrTokensByMemoryId: qrResult.tokensByMemoryId,
-    });
+    };
+
+    let html: string;
+    if (gelatoConfig) {
+      const gelatoPageCount = gelatoPhotobookPdfPageCount(body.pages);
+      const coverLayout = await fetchGelatoCoverLayout(gelatoConfig, gelatoPageCount);
+      html = buildGelatoPhotobookHtml(bookHtmlInput, coverLayout);
+    } else {
+      html = buildBookHtml(bookHtmlInput);
+    }
 
     const pdf = await htmlToPdfBuffer(html);
     await qrWorkerPromise;
+    const pdfPageCount = await countPdfPages(pdf);
     const saved = await saveBookPdfForExportRequest(supabase, {
       exportRequestId: ticket.export_request_id,
       bookId: body.bookId,
@@ -719,6 +744,7 @@ async function handleTicketPrintPdf(
       exportRequestId: ticket.export_request_id,
       bookId: body.bookId,
       pdfStoragePath: saved.uploadedStoragePath,
+      pdfPageCount,
     }).then(result => {
       if (!result.ok) {
         console.error('[generate-pdf] gelato', ticket.export_request_id, result.message);

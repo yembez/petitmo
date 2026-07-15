@@ -13,20 +13,29 @@ export const FREE_TIER_VOICE_MAX_DURATION = 60 // secondes (création de souveni
 export const FREE_TIER_BOOK_VOICE_MAX_DURATION = 60 // secondes (livres : QR audio)
 /** Max souvenirs audio avec QR dans un livre / PDF (plan gratuit). */
 export const FREE_TIER_BOOK_AUDIO_MAX_COUNT = 5
-/** Max souvenirs vidéo avec QR dans un livre / PDF (plan gratuit). Cloud QR uniquement après commande. */
+/** Max souvenirs vidéo dans un livre (plan gratuit). QR cloud après paiement commande/export — spec free-tier-book-qr-av.md */
 export const FREE_TIER_BOOK_VIDEO_MAX_COUNT = 5
 /** Pages audio+vidéo avec QR par livre (gratuit) = audio max + vidéo max. Aligné `server/src/constants/spec.ts`. */
 export const FREE_TIER_BOOK_QR_AV_MAX_PER_BOOK =
   FREE_TIER_BOOK_AUDIO_MAX_COUNT + FREE_TIER_BOOK_VIDEO_MAX_COUNT
 
 /**
- * Largeur max (px) pour upload cloud / compression guest PDF (équilibre poids ↔ qualité A5).
+ * Largeur max (px) du dérivé **print** livre — local, upload guest PDF, et cloud.
+ * 3200 px → ≈ 370–430 DPI sur cadre photo pleine page Gelato (186×210 mm), marge de recadrage incluse.
  */
-export const MEDIA_BOOK_PRINT_MAX_WIDTH = 1600
+export const MEDIA_BOOK_PRINT_MAX_WIDTH = 3200
 
-/** Largeur du dérivé local `print.jpg` / `voice_cover_print.jpg` (impression livre, badge DPI).
- *  3200 px → ~370 DPI sur une cover 210 mm (avec marge de recadrage), ≥ 300 DPI sur photo pleine page. */
-export const MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH = 3200
+/** Alias historique — même cible que `MEDIA_BOOK_PRINT_MAX_WIDTH`. */
+export const MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH = MEDIA_BOOK_PRINT_MAX_WIDTH
+
+/**
+ * JPEG upload guest PDF (pages intérieures) : 3200 px + qualité un peu plus basse
+ * pour limiter le poids vs l’ancien 1600@0.82.
+ */
+export const MEDIA_BOOK_PDF_JPEG_QUALITY = 0.78
+
+/** Couverture : un peu plus nette (une seule image, impact poids faible). */
+export const MEDIA_BOOK_PDF_COVER_JPEG_QUALITY = 0.85
 
 export type LimitCheck = {
   canCreate: boolean

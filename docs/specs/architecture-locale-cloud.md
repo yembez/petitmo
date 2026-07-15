@@ -17,7 +17,7 @@ Petitmo a **deux modes**, et **deux modes seulement**.
   - écrire un souvenir texte ;
   - ajouter des photos (seule ou en album) ;
   - enregistrer un audio ;
-  - créer un livre avec couverture + photos + audio (QR audio).
+  - créer un livre avec couverture + photos + **audio et vidéo** (QR cloud **après commande / export payé** uniquement).
 - **Stockage** :
   - SQLite local (`expo-sqlite`) ;
   - sandbox / app storage du téléphone (`petitmo_memories/<id>/...`).
@@ -31,8 +31,7 @@ Petitmo a **deux modes**, et **deux modes seulement**.
 Le mode gratuit n'écrit en base distante que dans **ces deux cas exclusifs** :
 
 1. **Achat PDF / commande livre** (paiement à l'acte).
-2. **Stockage cloud du souvenir audio** uniquement pour permettre un
-   **QR code pérenne** dans un livre commandé.
+2. **Stockage cloud du souvenir audio ou vidéo** uniquement pour un **QR code pérenne** dans un livre **commandé ou exporté payé** (pas une sync du fil). Détail : [`free-tier-book-qr-av.md`](./free-tier-book-qr-av.md).
 
 Hors de ces deux cas, **aucune écriture cloud n'est permise** en gratuit.
 Pas de backup automatique, pas de sync silencieuse, pas de "au cas où".
@@ -81,11 +80,11 @@ Détail médias / merge : [`.cursor/rules/local-first-media.mdc`](../../.cursor/
 flowchart LR
     install[Installation app] --> mode{Plan ?}
     mode -- "gratuit (defaut)" --> local[SQLite + sandbox UNIQUEMENT]
-    local --> use1[ecrire / photos / audio / livre sans video]
+    local --> use1[ecrire / photos / audio / livre + video locale]
     mode -- "passe a Petitmo+" --> account[Creation compte cloud]
     account --> cloud[Sync Supabase complete]
     cloud --> use2[restauration + multi-device + QR video]
-    local -. "exceptions ciblees" .-> supaFree["Achat PDF/livre + audio QR perenne"]
+    local -. "exceptions ciblees" .-> supaFree["Achat PDF/livre + QR audio/video perenne"]
     local -. "perte telephone" .-> lost[Donnees perdues, accepte]
 ```
 
@@ -98,7 +97,7 @@ flowchart LR
 | Bouton "J'ai déjà un compte" (login classique) | Autorisé. Si l'email n'a pas de **compte cloud payant**, afficher un message clair + CTA "Créer un compte". |
 | Aucun parcours gratuit ne déclenche email/mot de passe | Sinon ça contredit la promesse "sans inscription obligatoire". |
 | Aucun texte "tes souvenirs sont sauvegardés" en gratuit | Faux et trompeur. Le badge actuel "Confidentialité 100% préservée" reste correct. |
-| Vidéo dans un livre en gratuit → `BookUpgradeRequiredError` + paywall | Le QR vidéo nécessite un stockage cloud pérenne, donc Petitmo+. |
+| Vidéo dans un livre (gratuit) | **Autorisée** en local (max 5 / livre, 30 s). QR cloud **après paiement** commande ou export PDF — voir [`free-tier-book-qr-av.md`](./free-tier-book-qr-av.md). |
 
 ---
 
@@ -129,7 +128,8 @@ montrer : **"Cette adresse e-mail n'a pas de compte cloud payant associé"** + C
 | Tier `free` vs `paid` | [`lib/userTier.ts`](../../lib/userTier.ts) |
 | Limites plan gratuit | [`lib/limits.ts`](../../lib/limits.ts) |
 | Capture 100% locale | [`services/localOnlyMemoryCapture.ts`](../../services/localOnlyMemoryCapture.ts) |
-| Erreur upgrade livre (vidéo gratuit) | [`services/books.ts`](../../services/books.ts) |
+| Erreur upgrade livre (quotas A/V dépassés) | [`services/books.ts`](../../services/books.ts) `validateFreeTierBookMemoryLimits` |
+| QR audio/vidéo gratuit (exception cloud) | [`free-tier-book-qr-av.md`](./free-tier-book-qr-av.md) |
 | Device-user Supabase (mécanique interne) | [`app/_layout.tsx`](../../app/_layout.tsx) |
 | Écran d'accueil | [`app/onboarding.tsx`](../../app/onboarding.tsx) |
 | Modale "Ajouter au livre" + alerte upgrade | [`components/AddToBookModal.tsx`](../../components/AddToBookModal.tsx) |
@@ -162,7 +162,7 @@ L'app crée systématiquement une session Supabase anonyme dans
 function `create-device-user`).
 
 - C'est une **mécanique technique** pour rendre possibles les **exceptions
-  autorisées** (achat PDF/livre, audio QR pérenne).
+  autorisées** (achat PDF/livre, QR audio/vidéo pérenne après commande).
 - **Elle n'est jamais présentée à l'utilisatrice** comme un compte.
 - Quand l'utilisatrice passe à Petitmo+ et crée un vrai compte, on peut lier la
   session existante au compte (à concevoir dans un plan dédié).
@@ -205,10 +205,9 @@ Si l'utilisatrice clique sur un CTA "S'abonner" ou "Créer un compte" alors qu'u
 ### 6.1 Profil gratuit (local-first strict)
 
 1. Désinstaller / réinstaller, créer enfant.
-2. Importer 3 photos, 1 audio, créer un livre.
-3. Vérifier qu'**aucune** ligne `memories` n'apparaît côté Supabase.
-4. Tenter d'ajouter une vidéo au livre → alerte `BookUpgradeRequiredError`
-   + CTA paywall (cf. [`services/books.ts`](../../services/books.ts)).
+2. Importer 3 photos, 1 audio, **1 vidéo**, créer un livre avec photos + audio + vidéo.
+3. Vérifier qu'**aucune** ligne `memories` cloud n'apparaît pour le fil (hors flux commande).
+4. Aperçu livre : vidéo visible (poster local). QR actif **uniquement** après commande / export payé (cf. [`free-tier-book-qr-av.md`](./free-tier-book-qr-av.md) §8).
 
 ### 6.2 Profil payant
 

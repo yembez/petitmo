@@ -21,6 +21,7 @@ function memoryCloudMediaStoragePath(m: MemoryRow): string | null {
  * dans le bucket `media`) pour que le worker puisse transcodifier vers `qr-media/ready/`.
  *
  * Ne remplace pas un upload guest déjà planifié (`qr-media/raw/…`).
+ * Ne modifie jamais un token `ready` — voir `docs/specs/qr-media-permanence.md` et trigger SQL.
  */
 export async function linkPublicMediaTokenToMemorySource(
   supabase: SupabaseClient,

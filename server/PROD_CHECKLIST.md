@@ -139,9 +139,88 @@ curl -L "<pdfUrlSigned>" -o out.pdf
 open out.pdf
 ```
 
-### 5) Mode print (fond perdu 4 mm Gelato)
+### 5.1) Pérennité QR (`/m/{token}`) — critique produit
+
+Voir [`docs/specs/qr-media-permanence.md`](../docs/specs/qr-media-permanence.md).
+
+**Ordre déploiement** (obligatoire) :
+
+1. Appliquer la migration `20260709180000_public_media_token_permanence.sql` (`supabase db push`).
+2. Redéployer `guest-upload-urls` (Edge Function).
+3. Redéployer `server/` Railway.
+
+**Smoke après deploy** :
+
+```bash
+./scripts/qa/smoke-qr-audio.sh
+```
+
+Rescanner un QR d’un **PDF exporté avant le deploy** — doit toujours jouer.
+
+**Diagnostic token** :
+
+```sql
+SELECT token, status, ready_path, last_error, updated_at FROM public_media_tokens WHERE token = '<TOKEN>';
+SELECT created_at, event, detail FROM public_media_token_events WHERE token = '<TOKEN>' ORDER BY created_at DESC LIMIT 20;
+```
+
+### 6) Mode print (fond perdu 4 mm Gelato)
 
 - Le **mode print** est supporté **uniquement** via ticket `export_print` (commande `print_order`).
 - Page PDF : **218×288 mm** (trim 210×280 + 4 mm de chaque côté).
 - Côté HTML, `--bleed` = 4 mm ; les visuels `.bleed-x` débordent sur le fond perdu.
 
+### 7) Gelato — consolidation pré-prod (ordre recommandé)
+
+Variables Railway (service `petitmo`) :
+
+| Variable | Rôle |
+|----------|------|
+| `GELATO_API_KEY` | Clé API dashboard Gelato |
+| `GELATO_PRODUCT_UID` | Livre photo 21×28 couverture rigide |
+| `GELATO_SHIPMENT_METHOD_UID` | `standard` (ou UID quote API) |
+| `GELATO_CURRENCY` | `EUR` |
+| `GELATO_DEFAULT_PHONE` | Téléphone livraison (requis API) |
+| `GELATO_PDF_SIGNED_URL_SECONDS` | TTL URL PDF pour Gelato (défaut 7 j) |
+| `GELATO_WEBHOOK_SECRET` | = header `x-gelato-webhook-secret` côté Gelato |
+| `GELATO_ORDER_TYPE` | **`draft`** en QA · **`order`** en prod |
+| `GELATO_MIN_PAGE_COUNT` | Total pages PDF photobook (défaut **33** = 30 intérieures + spread + 2 gardes) |
+
+Webhook Gelato : `POST https://<PUBLIC_PDF_URL>/v1/webhooks/gelato` · events `order_status_updated` (+ optionnel `order_item_tracking_code_updated`).
+
+**Phase 1 — PDF print seul** (sans Gelato ou clé absente) :
+
+```bash
+./scripts/qa/smoke-print.sh
+```
+
+**Phase 2 — Webhook** :
+
+```bash
+./scripts/qa/smoke-gelato-webhook.sh <export_request_id>
+```
+
+**Phase 3 — Commande Gelato QA** : `GELATO_ORDER_TYPE=draft` sur Railway → **redéployer le serveur** → :
+
+```bash
+./scripts/qa/smoke-gelato-draft.sh
+```
+
+Dashboard Gelato : commande visible (draft), **pas** en production. Le script génère **30 pages intérieures** → PDF **33 pages** (spread couverture + 2 gardes blanches + contenu), format template Gelato.
+
+**Phase 4 — Parcours app** : livre réel → `/book-order` → vérifier Supabase :
+
+```sql
+SELECT id, status, printer_order_id, last_error, shipped_at, delivered_at,
+       printer_order_json->>'trackingCode' AS tracking
+FROM export_requests
+WHERE type = 'print_order'
+ORDER BY created_at DESC
+LIMIT 5;
+```
+
+Attendu après generate-pdf : `status = sent_to_printer`, `printer_order_id` non null, logs Railway `[gelato] order placed`.
+
+**Phase 5 — Prod Gelato** : repasser `GELATO_ORDER_TYPE=order` · **1** livre physique test · QR audio scanné sur PDF imprimé.
+
+**Hors scope Gelato (bloquant App Store impression)** : paiement IAP / achat à l’acte livre côté app (aujourd’hui commande possible sans encaissement).

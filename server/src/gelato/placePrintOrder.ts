@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { formatGelatoApiError } from './apiError';
 import { gelatoOrderApiUrl, loadGelatoConfig, type GelatoConfig } from '../gelato/config';
 import { gelatoShippingAddress, parsePetitmoShippingAddress } from '../gelato/shippingAddress';
 import { createSignedBooksPdfUrl } from '../pdf/pdfStorage';
@@ -7,6 +8,8 @@ export type SubmitGelatoPrintOrderParams = {
   exportRequestId: string;
   bookId: string;
   pdfStoragePath: string;
+  /** Nombre de pages du PDF print réellement généré (requis livre photo Gelato). */
+  pdfPageCount: number;
 };
 
 export type SubmitGelatoPrintOrderResult =
@@ -77,19 +80,34 @@ export async function submitGelatoPrintOrder(
     return { ok: false, message: `pdf signed url: ${msg}` };
   }
 
+  const pdfPageCount =
+    typeof params.pdfPageCount === 'number' && params.pdfPageCount > 0
+      ? Math.round(params.pdfPageCount)
+      : 0;
+
+  if (pdfPageCount < config.minPageCount) {
+    const msg = `gelato skip: PDF ${pdfPageCount} page(s), minimum ${config.minPageCount} pour le produit photobook`;
+    await supabase
+      .from('export_requests')
+      .update({ last_error: msg.slice(0, 2000) })
+      .eq('id', params.exportRequestId);
+    return { ok: false, message: msg };
+  }
+
+  const item: Record<string, unknown> = {
+    itemReferenceId: params.bookId,
+    productUid: config.productUid,
+    files: [{ type: 'default', url: pdfUrl }],
+    quantity: 1,
+    pageCount: pdfPageCount,
+  };
+
   const body = {
-    orderType: 'order',
+    orderType: config.orderType,
     orderReferenceId: params.exportRequestId,
     customerReferenceId: String(row.crm_contact_id),
     currency: config.currency,
-    items: [
-      {
-        itemReferenceId: params.bookId,
-        productUid: config.productUid,
-        files: [{ type: 'default', url: pdfUrl }],
-        quantity: 1,
-      },
-    ],
+    items: [item],
     shipmentMethodUid: config.shipmentMethodUid,
     shippingAddress: gelatoShippingAddress({
       shippingName: shipName,
@@ -121,19 +139,16 @@ export async function submitGelatoPrintOrder(
   }
 
   if (!res.ok) {
-    const detail =
-      typeof json.message === 'string'
-        ? json.message
-        : typeof json.error === 'string'
-          ? json.error
-          : rawText.slice(0, 300);
+    const detail = formatGelatoApiError(res.status, json, rawText);
+    console.error('[gelato] order rejected', params.exportRequestId, detail, rawText.slice(0, 1500));
     await supabase
       .from('export_requests')
       .update({
-        last_error: `gelato ${res.status}: ${detail}`.slice(0, 2000),
+        last_error: detail,
+        printer_order_json: { gelatoError: json, gelatoErrorRaw: rawText.slice(0, 4000) },
       })
       .eq('id', params.exportRequestId);
-    return { ok: false, message: `Gelato HTTP ${res.status}: ${detail}` };
+    return { ok: false, message: detail };
   }
 
   const gelatoOrderId = typeof json.id === 'string' ? json.id : '';
@@ -156,6 +171,11 @@ export async function submitGelatoPrintOrder(
     return { ok: false, message: upErr.message };
   }
 
-  console.log('[gelato] order placed', params.exportRequestId, gelatoOrderId);
+  console.log(
+    '[gelato] order placed',
+    params.exportRequestId,
+    gelatoOrderId,
+    config.orderType === 'draft' ? '(draft — pas en production)' : '',
+  );
   return { ok: true, gelatoOrderId, skipped: false };
 }

@@ -580,6 +580,7 @@ type InlineCropConfig = {
       dpiPxH?: number;
       printMmW: number;
       printMmH: number;
+      blurScore?: number | null;
     }
   >;
   onChange: (storageKey: string, crop: PhotoCrop) => void;
@@ -989,7 +990,7 @@ function MaquetteCover({
   onPressTitle: () => void;
 }) {
   const photoUri = coverPhotoUri?.trim() || child.photo_url?.trim() || null;
-  /** Aligné PDF serveur (`server/src/pdf/htmlBook.ts`) : bande photo = 142 mm sur page 216 mm. */
+  /** Aligné PDF (`BOOK_COVER_PHOTO_HEIGHT_RATIO` = 142/216) : ~65,7 % de la hauteur page. */
   const imgH = height * (142 / 216);
   const y = new Date().getFullYear();
   const periodLine = bookYearLabel || `${y - 1} – ${y}`;

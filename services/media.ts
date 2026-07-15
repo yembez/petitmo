@@ -380,7 +380,7 @@ async function stratifiedUpload(params: {
   };
 }
 
-/** Cover vocal : dérivé print local (3200px) ou repli upload cloud (1600px). */
+/** Cover vocal : dérivé print local (3200px) ou repli upload cloud. */
 async function prepareLocalUriForVoiceCoverUpload(coverUri: string): Promise<string> {
   const trimmed = coverUri.trim();
   if (!trimmed || Platform.OS === 'web') return trimmed;

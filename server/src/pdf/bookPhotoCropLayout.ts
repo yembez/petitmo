@@ -67,25 +67,33 @@ export function bookPhotoCropImageRect(
   };
 }
 
-/** Style inline `<img>` couverture (pourcentages du cadre photo). */
+/**
+ * Style inline `<img>` couverture (pourcentages du cadre photo).
+ * `frameRefW` / `frameRefH` doivent être le **vrai** bandeau rendu
+ * (digital : pageW × pageH×142/216 ; print+bleed : pageW+2×bleed × pageH×142/216).
+ * Ne jamais utiliser le cadre historique 216:142 — il zoome trop (ratio ~1,52 vs ~1,14).
+ */
 export function coverCropImgInlineStyle(
   crop: PhotoCrop | undefined,
   imgPxW: number,
   imgPxH: number,
-  frameRefW = 1000,
-  frameRefH = (1000 * 142) / 216,
+  frameRefW: number,
+  frameRefH: number,
 ): string {
-  const rect = bookPhotoCropImageRect(frameRefW, frameRefH, imgPxW, imgPxH, crop);
-  const leftPct = (rect.left / frameRefW) * 100;
-  const topPct = (rect.top / frameRefH) * 100;
-  const widthPct = (rect.width / frameRefW) * 100;
-  const heightPct = (rect.height / frameRefH) * 100;
+  const fw = Math.max(1, frameRefW);
+  const fh = Math.max(1, frameRefH);
+  const rect = bookPhotoCropImageRect(fw, fh, imgPxW, imgPxH, crop);
+  const leftPct = (rect.left / fw) * 100;
+  const topPct = (rect.top / fh) * 100;
+  const widthPct = (rect.width / fw) * 100;
+  const heightPct = (rect.height / fh) * 100;
   return [
     'position:absolute',
+    'inset:auto',
     `left:${leftPct.toFixed(4)}%`,
     `top:${topPct.toFixed(4)}%`,
     `width:${widthPct.toFixed(4)}%`,
     `height:${heightPct.toFixed(4)}%`,
-    'object-fit:cover',
+    'object-fit:fill',
   ].join(';');
 }

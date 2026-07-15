@@ -315,7 +315,7 @@ export default function BookOrderScreen() {
     const mail = email.trim().toLowerCase();
     const nowIso = new Date().toISOString();
 
-    // Plan gratuit : quotas audio/vidéo livre (QR cloud uniquement après commande).
+    // Plan gratuit : quotas audio/vidéo livre ; QR cloud après paiement (spec free-tier-book-qr-av.md).
     const pendingPayload = await getPendingBookOrderPdfPayload();
     if (subscriptionDb === 'free' && pendingPayload) {
       const memories = collectMemoriesFromPagesForPdf(pendingPayload.pages, pendingPayload.localEdits ?? {});
@@ -378,28 +378,25 @@ export default function BookOrderScreen() {
 
         await setBookOrderResultPdfUri(localUri);
         await setLastGuestExportEmail(mail);
-        await clearPendingBookOrderPdfPayload();
         const pricePaid = res.priceCents / 100;
 
-        if (subscriptionDb === 'free') {
-          const memories = collectMemoriesFromPagesForPdf(payload.pages, payload.localEdits ?? {});
-          const av = memories.filter(m => m.type === 'voice' || m.type === 'video');
-          const keys = av.map(m => `${m.type === 'voice' ? 'audio' : 'video'}:${m.id}`);
+        const memories = collectMemoriesFromPagesForPdf(payload.pages, payload.localEdits ?? {});
+        const av = memories.filter(m => m.type === 'voice' || m.type === 'video');
+        const avKeys = av.map(m => `${m.type === 'voice' ? 'audio' : 'video'}:${m.id}`);
+        const hasPendingUploads = (await getPendingGuestRawUploadsCountForKeys(avKeys)) > 0;
+        const hasLocalAvToUpload = av.some(m => {
+          const local = localUriForAvRawUpload(m);
+          if (local) return true;
+          const main = (m.media_url ?? m.edited_media_url ?? '').trim();
+          return main ? !isHttps(main) : true;
+        });
 
-          const hasPending = (await getPendingGuestRawUploadsCountForKeys(keys)) > 0;
-          const hasLocalOrMissingCloud = av.some(m => {
-            const local = localUriForAvRawUpload(m);
-            if (local) return true;
-            const main = (m.media_url ?? m.edited_media_url ?? '').trim();
-            return main ? !isHttps(main) : true;
-          });
-
-          if (hasPending || hasLocalOrMissingCloud) {
-            navigateToFinalizeMedia({ pricePaidEuros: pricePaid, emailNorm: mail, exportTicket: res.exportTicket });
-            return;
-          }
+        if (av.length > 0 && (hasPendingUploads || hasLocalAvToUpload)) {
+          navigateToFinalizeMedia({ pricePaidEuros: pricePaid, emailNorm: mail, exportTicket: res.exportTicket });
+          return;
         }
 
+        await clearPendingBookOrderPdfPayload();
         navigateToConfirmation({ pricePaidEuros: pricePaid, emailNorm: mail });
       } catch (e) {
         if (e instanceof Error && (e.message === 'PREP_NOT_READY' || e.message.startsWith('PREP_NOT_READY:'))) {

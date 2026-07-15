@@ -13,6 +13,7 @@ import {
 } from '@/lib/localDb';
 import { awaitPhotoPrintDerivativesForMemory } from '@/services/memoryLocalStore';
 import { getFamilyMemories, hydrateMemoriesByIds, toggleFavorite, uploadMedia } from '@/services/media';
+import { materializeCloudMediaToSandboxForMemory } from '@/services/memoryCloudMaterialize';
 import { getUserTier } from '@/lib/userTier';
 import { supabase } from '@/lib/supabase';
 import {
@@ -43,11 +44,23 @@ export type BookCoverUriVariant = 'list' | 'editor' | 'print';
 import {
   isCloudMediaReference,
   isLocalMediaUriReadable,
+  isSandboxUriFromForeignContainer,
   rebaseSandboxUriToCurrentContainer,
 } from '@/utils/localMediaReadable';
 import type { Child, Memory } from '@/types/local';
 import { peekSelectedChildIdLastKnown } from '@/services/children';
 import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
+
+/** Chemin local SQLite souvent invalide après sync cloud / autre appareil — ne pas l’afficher tel quel. */
+function looksLikeStaleLocalCoverRef(ref: string): boolean {
+  const t = ref.trim();
+  if (!t || isCloudMediaReference(t)) return false;
+  return (
+    t.includes('petitmo_memories/') ||
+    t.startsWith('file://') ||
+    isSandboxUriFromForeignContainer(t)
+  );
+}
 
 function bookCoverMatchesMemory(memory: Memory, coverRef: string): boolean {
   const ref = coverRef.trim();
@@ -134,7 +147,9 @@ export type FreeTierBookMemoryRow = {
 };
 
 /**
- * Garde-fou plan gratuit : quotas audio/vidéo dans un livre (QR cloud uniquement après commande).
+ * Garde-fou plan gratuit : quotas audio/vidéo **dans un livre** (composition locale OK).
+ * QR cloud (audio + vidéo) : upload **après paiement** commande livre ou export PDF uniquement.
+ * Spec : docs/specs/free-tier-book-qr-av.md
  */
 export async function validateFreeTierBookMemoryLimits(
   memories: readonly FreeTierBookMemoryRow[],
@@ -449,35 +464,39 @@ export function resolveBookCoverDisplayUri(
   const legacyBookCovers = direct.includes('petitmo_memories/book_covers/');
 
   if (legacyBookCovers) {
-    const dedicated =
-      normalizeMemoryMediaUriForDisplay(direct) ||
-      normalizeMemoryMediaUriForDisplay(rebaseSandboxUriToCurrentContainer(direct));
-    if (dedicated) return dedicated;
-  }
-
-  if (direct && !legacyBookCovers) {
+    const byBookId = dedicatedBookCoverUriForBook(book.id);
+    if (byBookId) return byBookId;
+    // Copie `book_covers/` absente (autre appareil) → souvenirs / cloud plus bas.
+  } else if (direct) {
     for (const memoryId of book.memoryIds) {
       const m = getLocalMemoryById(memoryId);
       if (!m || m.type !== 'photo' || !bookCoverMatchesMemory(m, direct)) continue;
       const fresh = freshCoverUriFromMatchedMemory(m, direct, variant);
-      if (fresh && !isCloudMediaReference(fresh)) return fresh;
-      if (fresh && !isCloudMediaReference(direct)) return fresh;
+      if (fresh) return fresh;
     }
 
     const fromFavorites = resolveCoverFromBookFavorites(book, direct, variant);
-    if (fromFavorites && !isCloudMediaReference(fromFavorites)) return fromFavorites;
+    if (fromFavorites) return fromFavorites;
 
     if (isCloudMediaReference(direct)) {
       return normalizeMemoryMediaUriForDisplay(direct) || direct;
     }
 
-    if (variant === 'print') {
+    if (variant === 'print' || variant === 'list') {
       const dedicated = dedicatedBookCoverUriForBook(book.id);
       if (dedicated) return dedicated;
     }
-    if (variant === 'list') {
-      const dedicated = dedicatedBookCoverUriForBook(book.id);
-      if (dedicated) return dedicated;
+
+    if (looksLikeStaleLocalCoverRef(direct)) {
+      const cloudFallback = resolveBookCoverCloudFallbackUri(book, '', variant);
+      if (cloudFallback) return cloudFallback;
+      const coverMem = findBookCoverMemory(book);
+      if (coverMem?.type === 'photo') {
+        const canon = canonicalBookCoverPhotoRef(coverMem).trim();
+        const uri = freshCoverUriFromMatchedMemory(coverMem, canon || direct, variant);
+        if (uri) return uri;
+      }
+      return null;
     }
 
     return normalizeMemoryMediaUriForDisplay(direct) || null;
@@ -800,18 +819,67 @@ export async function healBookMemoryIdsIfWiped(book: Book): Promise<Book> {
 
 /**
  * Répare uniquement le **choix** de couverture déjà enregistré (rebase sandbox / bascule print).
- * Ne remplace jamais par « le premier favori » du livre.
+ * Ne remplace jamais par « le premier favori » du livre (sauf couverture vide).
  */
+async function materializeBookCoverMemories(book: Book): Promise<void> {
+  const ids = dedupeMemoryIds(book.memoryIds ?? []);
+  if (ids.length === 0) return;
+
+  const coverMem = findBookCoverMemory(book);
+  if (coverMem) {
+    await materializeCloudMediaToSandboxForMemory(coverMem.id);
+  }
+
+  for (const memoryId of ids) {
+    const m = getLocalMemoryById(memoryId);
+    if (m?.type !== 'photo') continue;
+    await materializeCloudMediaToSandboxForMemory(memoryId);
+  }
+}
+
+function bookCoverPersistedChanged(before: Book, after: Book): boolean {
+  return (before.coverPhotoUrl ?? '').trim() !== (after.coverPhotoUrl ?? '').trim();
+}
+
+async function persistHealedBookCoverIfChanged(before: Book, after: Book): Promise<Book> {
+  if (!bookCoverPersistedChanged(before, after)) return after;
+  await upsertBook(after);
+  return after;
+}
+
+/** Remplace une ref couverture locale morte par une ref cloud ou canonique du souvenir photo. */
+function healStaleLocalCoverPhotoRef(book: Book): Book {
+  const direct = (book.coverPhotoUrl ?? '').trim();
+  if (!direct || !looksLikeStaleLocalCoverRef(direct)) return book;
+
+  const coverMem = findBookCoverMemory(book);
+  if (coverMem?.type === 'photo') {
+    const canon = canonicalBookCoverPhotoRef(coverMem).trim();
+    if (canon && !looksLikeStaleLocalCoverRef(canon)) {
+      return { ...book, coverPhotoUrl: canon };
+    }
+    const cloud = resolveBookCoverCloudFallbackUri(book, '', 'list');
+    if (cloud && isCloudMediaReference(cloud)) {
+      return { ...book, coverPhotoUrl: cloud };
+    }
+  }
+
+  return book;
+}
+
 export async function healBookCoverIfNeeded(book: Book): Promise<Book> {
-  const current = book;
+  const before = book;
+  let current = healStaleLocalCoverPhotoRef(book);
   await hydrateMemoriesByIds(current.memoryIds ?? []);
+  current = healStaleLocalCoverPhotoRef(current);
+  await materializeBookCoverMemories(current);
 
   const direct = (current.coverPhotoUrl ?? '').trim();
 
   if (direct.includes('petitmo_memories/book_covers/')) {
     const rebased = rebaseSandboxUriToCurrentContainer(direct);
     if (await isLocalMediaUriReadable(rebased)) {
-      return current;
+      return persistHealedBookCoverIfChanged(before, current);
     }
   }
 
@@ -821,12 +889,12 @@ export async function healBookCoverIfNeeded(book: Book): Promise<Book> {
   const printUri = resolveBookCoverPrintUri(current)?.trim() ?? '';
   if (printUri && (await isLocalMediaUriReadable(printUri))) {
     await persistBookCoverUri(current.id, printUri);
-    return current;
+    return persistHealedBookCoverIfChanged(before, current);
   }
 
   if (dedicatedReadable && dedicated) {
     await persistBookCoverUri(current.id, dedicated);
-    return current;
+    return persistHealedBookCoverIfChanged(before, current);
   }
 
   if (!direct) {
@@ -834,14 +902,26 @@ export async function healBookCoverIfNeeded(book: Book): Promise<Book> {
     if (favList) {
       const persisted = await persistBookCoverUri(current.id, favList);
       if (persisted && (await isLocalMediaUriReadable(persisted))) {
-        return { ...current, coverPhotoUrl: persisted };
+        return persistHealedBookCoverIfChanged(before, {
+          ...current,
+          coverPhotoUrl: persisted,
+        });
       }
     }
     const cloudEmpty = resolveBookCoverCloudFallbackUri(current, '', 'list');
     if (cloudEmpty) {
       const persisted = await persistBookCoverUri(current.id, cloudEmpty);
       if (persisted && (await isLocalMediaUriReadable(persisted))) {
-        return { ...current, coverPhotoUrl: persisted };
+        return persistHealedBookCoverIfChanged(before, {
+          ...current,
+          coverPhotoUrl: persisted,
+        });
+      }
+      if (isCloudMediaReference(cloudEmpty)) {
+        return persistHealedBookCoverIfChanged(before, {
+          ...current,
+          coverPhotoUrl: cloudEmpty,
+        });
       }
     }
     return current;
@@ -854,7 +934,7 @@ export async function healBookCoverIfNeeded(book: Book): Promise<Book> {
     const freshPrint = getBookPhotoPrintUri(coverMem, ref).trim();
     if (freshPrint && (await isLocalMediaUriReadable(freshPrint))) {
       await persistBookCoverUri(current.id, freshPrint);
-      return current;
+      return persistHealedBookCoverIfChanged(before, current);
     }
   }
 
@@ -863,10 +943,23 @@ export async function healBookCoverIfNeeded(book: Book): Promise<Book> {
     if (!cloud) continue;
     const persisted = await persistBookCoverUri(current.id, cloud);
     if (persisted && (await isLocalMediaUriReadable(persisted))) {
-      return { ...current, coverPhotoUrl: persisted };
+      return persistHealedBookCoverIfChanged(before, {
+        ...current,
+        coverPhotoUrl: persisted,
+      });
     }
     if (cloud && isCloudMediaReference(cloud)) {
-      return { ...current, coverPhotoUrl: cloud };
+      return persistHealedBookCoverIfChanged(before, {
+        ...current,
+        coverPhotoUrl: cloud,
+      });
+    }
+  }
+
+  if (looksLikeStaleLocalCoverRef(ref)) {
+    const healedRef = healStaleLocalCoverPhotoRef(current);
+    if (bookCoverPersistedChanged(current, healedRef)) {
+      return persistHealedBookCoverIfChanged(before, healedRef);
     }
   }
 
@@ -1313,5 +1406,7 @@ export async function restoreBooksFromSupabaseIfPremium(): Promise<void> {
       chapterTitle,
     });
   }
+
+  await healAllBookCovers(listBooksFromSqliteSync());
 }
 

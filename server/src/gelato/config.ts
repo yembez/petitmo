@@ -6,12 +6,27 @@ export type GelatoConfig = {
   defaultPhone: string;
   pdfSignedUrlSeconds: number;
   webhookSecret: string | null;
+  /** `draft` = visible dashboard Gelato, pas d’impression tant que non converti. */
+  orderType: 'order' | 'draft';
+  /** Minimum pages PDF pour livre photo Gelato (défaut 30). */
+  minPageCount: number;
 };
 
 const GELATO_ORDER_API = 'https://order.gelatoapis.com/v4/orders';
 
 export function gelatoOrderApiUrl(): string {
   return GELATO_ORDER_API;
+}
+
+function parseGelatoOrderType(): 'order' | 'draft' {
+  const raw = process.env.GELATO_ORDER_TYPE?.trim().toLowerCase();
+  return raw === 'draft' ? 'draft' : 'order';
+}
+
+function parseGelatoMinPageCount(): number {
+  const raw = process.env.GELATO_MIN_PAGE_COUNT?.trim();
+  const n = raw ? Number.parseInt(raw, 10) : 33;
+  return Number.isFinite(n) && n >= 1 ? n : 33;
 }
 
 /** Gelato optionnel : sans clé / productUid, le PDF print est généré mais pas envoyé à l’imprimeur. */
@@ -27,6 +42,9 @@ export function loadGelatoConfig(): GelatoConfig | null {
       ? pdfSignedUrlSeconds
       : 7 * 24 * 60 * 60;
 
+  const orderType = parseGelatoOrderType();
+  const minPageCount = parseGelatoMinPageCount();
+
   return {
     apiKey,
     productUid,
@@ -35,5 +53,7 @@ export function loadGelatoConfig(): GelatoConfig | null {
     defaultPhone: process.env.GELATO_DEFAULT_PHONE?.trim() || '0000000000',
     pdfSignedUrlSeconds: pdfTtl,
     webhookSecret: process.env.GELATO_WEBHOOK_SECRET?.trim() || null,
+    orderType,
+    minPageCount,
   };
 }

@@ -2,7 +2,13 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import {
+  markPublicMediaTokenReady,
+  tryHealReadyTokenFromStorage,
+} from '../publicMedia/permanence';
 import { transcodeAudioForQr, transcodeVideoForQr } from './ffmpegTranscode';
+
+export { tryHealReadyTokenFromStorage } from '../publicMedia/permanence';
 
 export type WorkerOnceResult = { ok: boolean; processed: boolean };
 
@@ -65,13 +71,19 @@ async function processTokenRow(
   supabase: SupabaseClient,
   row: PublicMediaTokenRow,
 ): Promise<WorkerOnceResult> {
+  if (row.status !== 'ready') {
+    const healed = await tryHealReadyTokenFromStorage(supabase, row.token, row.kind, 'worker');
+    if (healed) return { ok: true, processed: true };
+  }
+
   const tmp = await mkdtemp(path.join(tmpdir(), 'petitmo-qr-'));
   try {
     const { error: lockErr } = await supabase
       .from('public_media_tokens')
       .update({ status: 'processing', last_error: null, updated_at: new Date().toISOString() })
       .eq('token', row.token)
-      .in('status', ['pending_upload', 'uploaded', 'failed']);
+      .in('status', ['pending_upload', 'uploaded', 'failed'])
+      .neq('status', 'ready');
     if (lockErr) throw new Error(lockErr.message);
 
     const { data: dl, error: dlErr } = await supabase.storage.from(row.raw_bucket!).download(row.raw_path!);
@@ -83,25 +95,12 @@ async function processTokenRow(
         ? await transcodeVideoForQr(tmp, inputBuf, row.raw_path)
         : await transcodeAudioForQr(tmp, inputBuf, row.raw_path);
 
-    const readyBucket = 'qr-media';
-    const readyPath = `ready/${row.token}.${row.kind === 'video' ? 'mp4' : 'm4a'}`;
-    const { error: upErr } = await supabase.storage.from(readyBucket).upload(readyPath, outBytes, {
-      contentType: row.kind === 'video' ? 'video/mp4' : 'audio/mp4',
-      upsert: true,
+    await markPublicMediaTokenReady(supabase, {
+      token: row.token,
+      mediaId: row.media_id,
+      kind: row.kind,
+      readyBytes: outBytes,
     });
-    if (upErr) throw new Error(`upload ready failed: ${upErr.message}`);
-
-    const { error: upRowErr } = await supabase
-      .from('public_media_tokens')
-      .update({
-        status: 'ready',
-        ready_bucket: readyBucket,
-        ready_path: readyPath,
-        last_error: null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('token', row.token);
-    if (upRowErr) throw new Error(upRowErr.message);
 
     return { ok: true, processed: true };
   } catch (e) {
@@ -183,10 +182,24 @@ export async function ensureQrTokensReady(params: {
         continue;
       }
       if (status === 'failed') {
+        const { data: kindRow } = await params.supabase
+          .from('public_media_tokens')
+          .select('kind')
+          .eq('token', token)
+          .maybeSingle();
+        const kind = (kindRow as { kind?: 'audio' | 'video' } | null)?.kind;
+        if (kind === 'audio' || kind === 'video') {
+          const healed = await tryHealReadyTokenFromStorage(params.supabase, token, kind, 'ensureQrTokensReady');
+          if (healed) {
+            pending.delete(token);
+            continue;
+          }
+        }
         await params.supabase
           .from('public_media_tokens')
           .update({ status: 'pending_upload', last_error: null, updated_at: new Date().toISOString() })
-          .eq('token', token);
+          .eq('token', token)
+          .neq('status', 'ready');
       }
       await runPublicMediaWorkerOnce({ token });
     }
@@ -203,10 +216,28 @@ export async function tryProcessPublicMediaTokenOnVisit(token: string): Promise<
   const trimmed = token.trim();
   if (!trimmed) return;
   const supabase = createServiceClient();
+
+  const { data: row } = await supabase
+    .from('public_media_tokens')
+    .select('token, kind, status, ready_path')
+    .eq('token', trimmed)
+    .maybeSingle();
+  const kind = (row as { kind?: 'audio' | 'video' } | null)?.kind;
+  const status = (row as { status?: string } | null)?.status;
+  const readyPath = (row as { ready_path?: string | null } | null)?.ready_path;
+
+  if (status === 'ready' && readyPath?.trim()) return;
+
+  if (kind === 'audio' || kind === 'video') {
+    const healed = await tryHealReadyTokenFromStorage(supabase, trimmed, kind, 'visit');
+    if (healed) return;
+  }
+
   await supabase
     .from('public_media_tokens')
     .update({ status: 'pending_upload', last_error: null, updated_at: new Date().toISOString() })
     .eq('token', trimmed)
-    .eq('status', 'failed');
+    .eq('status', 'failed')
+    .neq('status', 'ready');
   await runPublicMediaWorkerOnce({ token: trimmed });
 }

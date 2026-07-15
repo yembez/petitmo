@@ -32,7 +32,7 @@ Toute nouvelle écriture cloud doit être **encadrée** par `if ((await getCache
    - `services/printBookOrder.ts`
    - `lib/digitalExportPurchase.ts`
    - `services/initExportApi.ts`
-2. **Stockage cloud d'un audio pour QR pérenne** dans un livre commandé (sous-cas du flux livre).
+2. **Stockage cloud d'un audio ou d'une vidéo pour QR pérenne** dans un livre **commandé ou exporté payé** (sous-cas du flux livre — **pas** une sync du fil). Spec : [`docs/specs/free-tier-book-qr-av.md`](../docs/specs/free-tier-book-qr-av.md).
 
 Le device-user Supabase auto-créé dans `app/_layout.tsx` est la mécanique technique pour ces deux cas. Il n'est **jamais** présenté à l'utilisatrice gratuite comme un compte.
 

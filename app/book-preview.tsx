@@ -73,7 +73,7 @@ import {
   type BookPhotoPageType,
 } from '@/utils/bookPhotoPrintDpi';
 import { getChildren, getOrSelectFirstChild } from '@/services/children';
-import { getFamilyMemories, getMemoryById, updateMemoryContent } from '@/services/media';
+import { getMemoryById, updateMemoryContent } from '@/services/media';
 import { healDeadLocalMediaPointersForMemories } from '@/services/memoryDisplayHeal';
 import { ensureVoiceMemoryCloudForBookExport } from '@/services/migration';
 import { supabase } from '@/lib/supabase';
@@ -108,24 +108,31 @@ import {
 import { BookPdfGeneratingOverlay } from '@/components/BookPdfGeneratingOverlay';
 import { GuestPdfExportModal } from '@/components/GuestPdfExportModal';
 import {
-  parseFavoritePhotoUrls,
-  mapPhotoUrlToThumb,
-  getAlbumCanonicalFavoriteUrls,
   normalizeMemoryMediaUriForDisplay,
   collectBookPhotoDpiUriCandidates,
   getBookPhotoPrintPixelSize,
+  getBookPhotoPrintUri,
   collectBookMaquetteCloudMediaRefs,
   getPrimaryPhotoUriForBookMaquetteDisplay,
   getPrimaryPhotoUriForBookPreview,
   getVoiceCoverUriForBookEditorDisplay,
   getVoiceCoverUriForBookPreview,
 } from '@/utils/memoryPhotos';
+import {
+  buildFavoriteCoverThumbs,
+  listLocalMemoriesMarkedForFavoris,
+  loadMemoriesForFavorisTab,
+} from '@/services/favorisMemories';
 import { hasReadableBookVideoPoster, peekSyncBookVideoPosterDisplayUri } from '@/utils/bookVideoPosterUri';
 import { runBookExportPrepInBackground } from '@/services/bookExportPrep';
 import { getBookExportPrepIssues } from '@/services/bookExportPrep';
 import { useSignedMediaUrl, peekSignedMediaDisplayUrl, primeSignedMediaDisplayUrls } from '@/lib/mediaSignedUrl';
 import { isDeviceLocalMediaUri } from '@/utils/memoryPhotos';
 import { bookLineBudgetForMemoryType, bookCharsPerLineForMemoryType } from '@/utils/textLimits';
+import {
+  estimatePhotoBlurScore,
+  photoBlurStatus,
+} from '@/utils/photoBlurScore';
 
 import type { Child, Memory } from '@/types/local';
 import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
@@ -336,6 +343,8 @@ export default function BookPreviewScreen() {
     localSnapshot?.book.title ?? null,
   );
   const [bookSnapshot, setBookSnapshot] = useState<Book | null>(localSnapshot?.book ?? null);
+  const bookSnapshotRef = useRef(bookSnapshot);
+  bookSnapshotRef.current = bookSnapshot;
   const [coverPhotoUrl, setCoverPhotoUrl] = useState<string | null>(
     localSnapshot ? resolveBookCoverEditorUri(localSnapshot.book) : null,
   );
@@ -364,6 +373,7 @@ export default function BookPreviewScreen() {
         printMmW: number;
         printMmH: number;
         sourceUri?: string;
+        blurScore?: number | null;
       }
     >
   >({});
@@ -643,6 +653,7 @@ export default function BookPreviewScreen() {
           return;
         }
         b = await healBookMemoryIdsIfStale(b);
+        b = await healBookCoverIfNeeded(b);
         if (b.textEdits && Object.keys(b.textEdits).length > 0) {
           for (const [id, e] of Object.entries(b.textEdits)) {
             if (e.content !== undefined) {
@@ -751,7 +762,9 @@ export default function BookPreviewScreen() {
       }
 
       InteractionManager.runAfterInteractions(() => {
-        void getFamilyMemories().then(all => setAllMemories(all as Memory[]));
+        void loadMemoriesForFavorisTab()
+          .then(all => setAllMemories(all))
+          .catch(() => setAllMemories(listLocalMemoriesMarkedForFavoris()));
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Chargement impossible');
@@ -827,6 +840,23 @@ export default function BookPreviewScreen() {
       });
     }
   }, [bookMemories]);
+
+  /** Materialisation cloud → sandbox : réappliquer la couverture si elle apparaît après sync. */
+  useEffect(() => {
+    if (!bookId) return;
+    const sub = DeviceEventEmitter.addListener('petitmo:memories-updated', () => {
+      const snap = bookSnapshotRef.current;
+      if (!snap) return;
+      void healBookCoverIfNeeded(snap).then(healed => {
+        const beforeUri = resolveBookCoverDisplayUri(snap, { variant: 'list' });
+        const afterUri = resolveBookCoverDisplayUri(healed, { variant: 'list' });
+        if (beforeUri === afterUri) return;
+        setBookSnapshot(healed);
+        setCoverPhotoUrl(resolveBookCoverEditorUri(healed));
+      });
+    });
+    return () => sub.remove();
+  }, [bookId]);
 
   /** Local-first : patch SQLite → state sans re-fetch cloud au focus. */
   useEffect(() => {
@@ -932,7 +962,7 @@ export default function BookPreviewScreen() {
       uri: string;
       pageType: BookPhotoPageType;
       photoFullVariant?: PhotoFullVariant;
-    }): Promise<{
+      }): Promise<{
       imgPxW: number;
       imgPxH: number;
       dpiPxW: number;
@@ -940,9 +970,10 @@ export default function BookPreviewScreen() {
       printMmW: number;
       printMmH: number;
       sourceUri?: string;
+      blurScore?: number | null;
     }> => {
       const mm = bookPrintFrameMmFor(payload.pageType, payload.photoFullVariant);
-      const finish = (display: { w: number; h: number }, dpi: { w: number; h: number }) => ({
+      const finish = (display: { w: number; h: number }, dpi: { w: number; h: number }, blurScore: number | null) => ({
         imgPxW: display.w,
         imgPxH: display.h,
         dpiPxW: dpi.w,
@@ -950,6 +981,7 @@ export default function BookPreviewScreen() {
         printMmW: mm.w,
         printMmH: mm.h,
         sourceUri: payload.uri,
+        blurScore,
       });
 
       const memoryForPayload = (): Memory | null => {
@@ -1051,7 +1083,29 @@ export default function BookPreviewScreen() {
         displayH = dpiH;
       }
 
-      return finish({ w: displayW, h: displayH }, { w: dpiW, h: dpiH });
+      let blurScore: number | null = null;
+      // Priorité : URI affichée / print (ce qui part au PDF), pas l’original bruyant.
+      const blurUriCandidates = [
+        payload.uri,
+        bookPrintUri ?? undefined,
+        ...(mem ? [mem.local_print_path, getBookPhotoPrintUri(mem, coverRef)] : []),
+        ...dpiUriCandidates,
+      ]
+        .map(u => (u ?? '').trim())
+        .filter(Boolean);
+      const seenBlur = new Set<string>();
+      for (const blurUri of blurUriCandidates) {
+        if (seenBlur.has(blurUri)) continue;
+        seenBlur.add(blurUri);
+        try {
+          blurScore = await estimatePhotoBlurScore(blurUri);
+          if (blurScore != null) break;
+        } catch {
+          /* essai suivant */
+        }
+      }
+
+      return finish({ w: displayW, h: displayH }, { w: dpiW, h: dpiH }, blurScore);
     },
     [bookMemories, bookSnapshot, getImagePx]
   );
@@ -1187,6 +1241,10 @@ export default function BookPreviewScreen() {
 
   const openCoverPicker = useCallback(() => {
     setCoverPickerOpen(true);
+    // Recharge comme l’onglet Favoris (flags + favorite_photo_urls à jour).
+    void loadMemoriesForFavorisTab()
+      .then(all => setAllMemories(all))
+      .catch(() => setAllMemories(listLocalMemoriesMarkedForFavoris()));
   }, []);
 
   const closeCoverPicker = useCallback(() => {
@@ -1408,28 +1466,7 @@ export default function BookPreviewScreen() {
     ]
   );
 
-  const favoriteCoverThumbs = useMemo(() => {
-    const out: { thumb: string; source: string }[] = [];
-    const seen = new Set<string>();
-    for (const m of allMemories) {
-      if (m.type !== 'photo') continue;
-      const favUrls = parseFavoritePhotoUrls(m);
-      const allUrls =
-        favUrls.length > 0 ? favUrls : m.is_favorite ? getAlbumCanonicalFavoriteUrls(m) : [];
-      for (const u of allUrls) {
-        const source = u.trim();
-        if (!source) continue;
-        const mapped = normalizeMemoryMediaUriForDisplay(mapPhotoUrlToThumb(m, source));
-        if (!mapped) continue;
-        // On déduplique par URL favorite canonique (pas par thumb affiché).
-        const dedupeKey = source;
-        if (seen.has(dedupeKey)) continue;
-        seen.add(dedupeKey);
-        out.push({ thumb: mapped, source });
-      }
-    }
-    return out;
-  }, [allMemories]);
+  const favoriteCoverThumbs = useMemo(() => buildFavoriteCoverThumbs(allMemories), [allMemories]);
 
   const pickCover = useCallback(
     async (uri: string) => {
@@ -1910,6 +1947,11 @@ export default function BookPreviewScreen() {
             });
             if (dpi > 0 && dpi < 200) blocks.push(`Couverture (${dpi} DPI)`);
             else if (dpi > 0 && dpi < 240) warns.push(`Couverture (${dpi} DPI)`);
+            const coverBlur =
+              cropDpiMetaByKey.cover?.blurScore ?? (await estimatePhotoBlurScore(coverUri));
+            const coverBlurSt = photoBlurStatus(coverBlur);
+            if (coverBlurSt === 'blurry') blocks.push('Couverture (photo floue)');
+            else if (coverBlurSt === 'soft') warns.push('Couverture (un peu floue)');
           } catch {
             // Si on ne peut pas lire la taille, on ne bloque pas.
           }
@@ -1937,6 +1979,12 @@ export default function BookPreviewScreen() {
             const label = `${p.type === 'photo-full' ? 'Photo pleine page' : 'Photo + texte'} (${dpi} DPI)`;
             if (dpi > 0 && dpi < 200) blocks.push(label);
             else if (dpi > 0 && dpi < 240) warns.push(label);
+            const blur =
+              cropDpiMetaByKey[p.memory.id]?.blurScore ?? (await estimatePhotoBlurScore(uri));
+            const blurSt = photoBlurStatus(blur);
+            const blurLabel = p.type === 'photo-full' ? 'Photo pleine page' : 'Photo + texte';
+            if (blurSt === 'blurry') blocks.push(`${blurLabel} (photo floue)`);
+            else if (blurSt === 'soft') warns.push(`${blurLabel} (un peu floue)`);
           } catch {
             // ignore
           }
@@ -1963,6 +2011,11 @@ export default function BookPreviewScreen() {
             const label = `Audio — illustration (${dpi} DPI)`;
             if (dpi > 0 && dpi < 200) blocks.push(label);
             else if (dpi > 0 && dpi < 240) warns.push(label);
+            const blur =
+              cropDpiMetaByKey[m.id]?.blurScore ?? (await estimatePhotoBlurScore(coverUri));
+            const blurSt = photoBlurStatus(blur);
+            if (blurSt === 'blurry') blocks.push('Audio — illustration (photo floue)');
+            else if (blurSt === 'soft') warns.push('Audio — illustration (un peu floue)');
           } catch {
             // ignore
           }
@@ -1973,7 +2026,7 @@ export default function BookPreviewScreen() {
             'Qualité impression insuffisante',
             `Impossible d’exporter en mode impression.\n\nÀ corriger (recadrage moins zoomé ou meilleure photo) :\n- ${blocks.join(
               '\n- '
-            )}\n\nRègle : <200 DPI = bloquant.`,
+            )}\n\nRègle : <200 DPI ou photo floue = bloquant.`,
             [{ text: 'OK' }]
           );
           return;
@@ -1983,9 +2036,9 @@ export default function BookPreviewScreen() {
           const proceed = await new Promise<boolean>(resolve => {
             Alert.alert(
               'Qualité impression moyenne',
-              `Certaines photos sont sous 240 DPI.\n\nTu peux exporter quand même, mais ça peut être un peu flou.\n\n- ${warns.join(
+              `Certaines photos sont sous 240 DPI ou un peu floues.\n\nTu peux exporter quand même, mais le rendu peut être moins net.\n\n- ${warns.join(
                 '\n- '
-              )}\n\nRègle : ≥240 DPI OK · <240 warning · <200 bloquant.`,
+              )}`,
               [
                 { text: 'Annuler', style: 'cancel', onPress: () => resolve(false) },
                 { text: 'Exporter quand même', onPress: () => resolve(true) },
@@ -2075,6 +2128,8 @@ export default function BookPreviewScreen() {
       bookSnapshot,
       coverPhotoPrintUri,
       coverPhotoImgPxForPdf,
+      cropDpiMetaByKey,
+      getImagePx,
     ]
   );
 
@@ -2606,7 +2661,7 @@ export default function BookPreviewScreen() {
                       <Text style={styles.coverPickerSectionLabel}>Photos des favoris</Text>
                     ) : (
                       <Text style={styles.coverPickerSectionHint}>
-                        Aucune photo favorite pour ce livre — utilise la galerie ou ajoute des favoris.
+                        Aucune photo dans tes favoris — utilise la galerie ou ajoute des favoris.
                       </Text>
                     )}
                   </View>

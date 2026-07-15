@@ -84,12 +84,26 @@ Attendu :
 - Livre OK.
 - QR audio OK (si prévu en gratuit dans livre).
 
-### A5 — Vidéo dans livre (gratuit : interdit)
+### A5 — Vidéo dans livre (gratuit : autorisée en local)
 
-1. Tenter d’ajouter une vidéo au livre.
+1. Importer une vidéo (≤ 30 s).
+2. Créer un livre, ajouter la vidéo.
 
 Attendu :
-- Message clair + CTA paywall (`BookUpgradeRequiredError`), pas de crash.
+- **Autorisé** — aperçu / spread OK (poster sandbox).
+- **Aucun** upload cloud du souvenir vers `memories` (fil reste local).
+- QR vidéo **inactif** tant qu’aucune commande livre / export PDF payé.
+
+Spec : [`docs/specs/free-tier-book-qr-av.md`](../specs/free-tier-book-qr-av.md).
+
+### A5bis — QR vidéo après commande livre (gratuit)
+
+1. Livre avec ≥ 1 vidéo → commander l’impression → `book-finalize-media` si proposé.
+2. Scanner le QR du PDF reçu.
+
+Attendu :
+- Lecture vidéo via `/m/{token}`.
+- Upload cloud **uniquement** bucket `qr-media` (pas sync fil).
 
 ### A6 — Réinstall (gratuit : données perdues)
 

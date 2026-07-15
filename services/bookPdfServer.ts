@@ -39,7 +39,12 @@ import {
 } from '@/utils/memoryPhotos';
 import { pickFirstReadableLocalMediaUri } from '@/utils/localMediaReadable';
 import { resolveServerPdfEntitlements } from '@/lib/digitalExportPurchase';
-import { MEDIA_BOOK_PRINT_MAX_WIDTH, MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH } from '@/lib/limits';
+import {
+  MEDIA_BOOK_PRINT_MAX_WIDTH,
+  MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH,
+  MEDIA_BOOK_PDF_JPEG_QUALITY,
+  MEDIA_BOOK_PDF_COVER_JPEG_QUALITY,
+} from '@/lib/limits';
 import { isInitExportConfigured, postInitExport, postGuestUploadUrls } from '@/services/initExportApi';
 import { publicMediaBaseUrl } from '@/lib/publicMediaBaseUrl';
 
@@ -307,7 +312,7 @@ async function compressLocalJpegForGuestUpload(
 ): Promise<string> {
   if (Platform.OS === 'web') return localUri;
   const maxWidth = opts?.maxWidth ?? MEDIA_BOOK_PRINT_MAX_WIDTH;
-  const quality = opts?.quality ?? 0.82;
+  const quality = opts?.quality ?? MEDIA_BOOK_PDF_JPEG_QUALITY;
   try {
     const manipulated = await ImageManipulator.manipulateAsync(
       localUri,
@@ -974,7 +979,7 @@ export async function generateBookPdfWithExportTicket(
       if (!readableCover) throw new Error('COVER_NOT_READABLE');
       const compressedCover = await compressLocalJpegForGuestUpload(readableCover, {
         maxWidth: MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH,
-        quality: 0.9,
+        quality: MEDIA_BOOK_PDF_COVER_JPEG_QUALITY,
       });
       const { readUrl } = await guestUploadMediaImageThenReadUrl({
         pdfTicket,

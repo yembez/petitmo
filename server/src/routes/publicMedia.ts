@@ -7,7 +7,7 @@ import {
   resolvePublicMediaDisplayContext,
   type PublicMediaDisplayContext,
 } from '../publicMediaDisplayContext';
-import { tryProcessPublicMediaTokenOnVisit } from '../worker/publicMediaWorkerOnce';
+import { tryProcessPublicMediaTokenOnVisit, tryHealReadyTokenFromStorage } from '../worker/publicMediaWorkerOnce';
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{20,200}$/;
 const PLAYER_SIGN_SEC = 120;
@@ -372,15 +372,24 @@ export function registerPublicMediaRoutes(app: Express, supabase: SupabaseClient
       return;
     }
 
-    const { row, error } = await fetchTokenRow(supabase, token);
-    if (error) {
-      console.error('[m] select', error);
+    const fetched = await fetchTokenRow(supabase, token);
+    if (fetched.error) {
+      console.error('[m] select', fetched.error);
       res.status(500).type('text/plain').send('Server error');
       return;
     }
+    let row = fetched.row;
     if (!row) {
       res.status(404).type('text/plain').send('Not found');
       return;
+    }
+
+    if (row.status !== 'ready' && (row.kind === 'audio' || row.kind === 'video')) {
+      const healed = await tryHealReadyTokenFromStorage(supabase, row.token, row.kind, 'route_m');
+      if (healed) {
+        const refreshed = await fetchTokenRow(supabase, token);
+        if (refreshed.row) row = refreshed.row;
+      }
     }
 
     if (isTokenExpired(row.expires_at)) {

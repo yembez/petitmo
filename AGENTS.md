@@ -91,8 +91,8 @@ Petitmo a **deux modes** et **deux modes seulement** :
 
 Ce sont les **seuls** moments où le mode gratuit écrit en base distante :
 
-1. **Achat PDF / livre** (commande / paiement à l'acte).
-2. **Stockage du souvenir audio** uniquement quand il faut un **QR code pérenne** dans le livre commandé.
+1. **Achat PDF / commande livre** (commande / paiement à l'acte).
+2. **Stockage cloud d'un souvenir audio ou vidéo** uniquement pour un **QR code pérenne** dans un livre **commandé ou exporté payé** — pas une sync du fil. Voir [`docs/specs/free-tier-book-qr-av.md`](docs/specs/free-tier-book-qr-av.md).
 
 Aucune autre écriture cloud n'est permise en gratuit. Pas de "petite sync gentille en arrière-plan", pas de backup auto, pas de "au cas où".
 
@@ -119,7 +119,7 @@ Aucune autre écriture cloud n'est permise en gratuit. Pas de "petite sync genti
   pour les exceptions ci-dessus ; il n'est **jamais** présenté à l'utilisatrice comme un compte.
 - Tout texte qui suggère "tes souvenirs sont sauvegardés" en gratuit est **interdit**.
   Le badge actuel "Confidentialité 100% préservée" est OK.
-- En gratuit : vidéo dans un livre autorisée (max 5 par livre, 30 s) ; QR vidéo cloud **après commande** uniquement — voir `validateFreeTierBookMemoryLimits` dans `services/books.ts`.
+- En gratuit : **vidéo dans un livre autorisée** (max 5 par livre, 30 s) ; QR audio/vidéo cloud **uniquement après paiement** commande livre ou export PDF — spec [`docs/specs/free-tier-book-qr-av.md`](docs/specs/free-tier-book-qr-av.md), garde-fou [`validateFreeTierBookMemoryLimits`](services/books.ts).
 
 ### Paywall — hero selon le contexte (`app/paywall.tsx`)
 
@@ -138,7 +138,8 @@ Aucune autre écriture cloud n'est permise en gratuit. Pas de "petite sync genti
 | Tier `free` vs `paid` (source de vérité) | [`lib/userTier.ts`](lib/userTier.ts) |
 | Limites plan gratuit (souvenirs, audio, vidéo) | [`lib/limits.ts`](lib/limits.ts) |
 | Capture 100% locale (gratuit) | [`services/localOnlyMemoryCapture.ts`](services/localOnlyMemoryCapture.ts) |
-| Garde-fou livre gratuit + erreur upgrade | [`services/books.ts`](services/books.ts) |
+| Garde-fou livre gratuit (quotas A/V) | [`services/books.ts`](services/books.ts) `validateFreeTierBookMemoryLimits` |
+| QR audio/vidéo gratuit (exception cloud) | [`docs/specs/free-tier-book-qr-av.md`](docs/specs/free-tier-book-qr-av.md) |
 | Materialisation cloud → sandbox (Petitmo+) | [`services/memoryCloudMaterialize.ts`](services/memoryCloudMaterialize.ts) |
 | Création device-user Supabase (mécanique technique) | [`app/_layout.tsx`](app/_layout.tsx) |
 | Écran d'accueil | [`app/onboarding.tsx`](app/onboarding.tsx) |
@@ -159,6 +160,8 @@ Aucune autre écriture cloud n'est permise en gratuit. Pas de "petite sync genti
 - [`services/bookPdf.ts`](services/bookPdf.ts) ne contient plus que **`shareBookPdf`** (partage d’un fichier déjà obtenu du serveur).
 
 **Parité déploiement Supabase — service PDF Railway** : le Node `server/` utilise la **service role** sur les tables du flux export (ex. `public_media_tokens`). Dès qu’une PR ajoute ou utilise une **colonne ou table** côté serveur, il doit exister une migration sous [`supabase/migrations/`](supabase/migrations/) et elle doit être **appliquée en prod** avant ou avec le push Railway. Sinon les inserts échouent ; symptôme historique : **502** sur `generate-pdf` alors que `/health` répond 200 (ex. colonne manquante `expires_at` → migration `20260505120000_public_media_tokens_expires_at.sql`).
+
+**QR médias livre** : un token `ready` est **figé dans le marbre** (PDF imprimé / exporté). Garde-fous : trigger SQL, copie `qr-media/archive/`, auto-heal au scan. Specs : [`docs/specs/qr-media-permanence.md`](docs/specs/qr-media-permanence.md), exception gratuit A/V [`docs/specs/free-tier-book-qr-av.md`](docs/specs/free-tier-book-qr-av.md).
 
 ### Parité maquette livre ↔ export PDF
 

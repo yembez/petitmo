@@ -12,6 +12,10 @@ import { Image as ExpoImage } from 'expo-image';
 import BookPhotoDpiBadge from '@/components/BookPhotoDpiBadge';
 import { defaultPhotoCrop, type PhotoCrop } from '@/src/book/photoCrop';
 import { bookPhotoCoverBaseSize, clampBookPhotoCropPan } from '@/utils/bookPhotoCropLayout';
+import {
+  effectiveBlurScoreForCropScale,
+  estimatePhotoBlurScore,
+} from '@/utils/photoBlurScore';
 
 const SPRING = { damping: 22, stiffness: 220, mass: 0.7 } as const;
 
@@ -56,6 +60,8 @@ type Props = {
   dpiPxH?: number;
   printMmW: number;
   printMmH: number;
+  /** Score netteté (Laplacien) pour le badge qualité. */
+  blurScore?: number | null;
   onChange: (crop: PhotoCrop) => void;
   /**
    * Couverture : cale l'image sur son ratio réel dans le cadre (au lieu de `contentFit="cover"`),
@@ -83,11 +89,32 @@ export function BookInlinePhotoCrop({
   dpiPxH,
   printMmW,
   printMmH,
+  blurScore,
   onChange,
   coverMode = false,
 }: Props) {
   const badgePxW = dpiPxW && dpiPxW > 0 ? dpiPxW : imgPxW;
   const badgePxH = dpiPxH && dpiPxH > 0 ? dpiPxH : imgPxH;
+  /** Mesure sur l’URI affichée (pas l’original bruyant du prefetch). */
+  const [measuredBlur, setMeasuredBlur] = useState<number | null>(
+    typeof blurScore === 'number' ? blurScore : null,
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    const u = uri.trim();
+    if (!u) {
+      setMeasuredBlur(null);
+      return;
+    }
+    void estimatePhotoBlurScore(u).then(score => {
+      if (!cancelled) setMeasuredBlur(score);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [uri]);
+
   /**
    * En `coverMode`, l'image est calée à sa taille « cover » réelle (déborde le cadre sur un axe)
    * et déplaçable : on peut atteindre toute la photo. Sinon, comportement page intérieure
@@ -252,6 +279,10 @@ export function BookInlinePhotoCrop({
           printMmW={printMmW}
           printMmH={printMmH}
           scale={liveScale}
+          blurScore={effectiveBlurScoreForCropScale(
+            measuredBlur ?? blurScore,
+            liveScale,
+          )}
         />
       </View>
 

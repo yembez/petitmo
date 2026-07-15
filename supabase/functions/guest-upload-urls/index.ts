@@ -159,7 +159,7 @@ Deno.serve(async (req: Request) => {
   }
 
   const ticket = await verifyPdfTicket(body.pdfTicket, jwtSecret);
-  if (!ticket || ticket.petitmo_ticket !== 'export_pdf') {
+  if (!ticket) {
     return jsonRes({ error: 'Invalid pdfTicket' }, 401);
   }
 
@@ -223,12 +223,67 @@ Deno.serve(async (req: Request) => {
       const path = `raw/${exportRequestId}/${a.kind}/${safeIdSegment(memoryId)}.${ext}`;
       const token = await ensurePublicMediaToken(supabase, { mediaId: memoryId, kind: a.kind });
 
-      // On pré-enregistre où sera l’upload raw (le worker pourra vérifier/relancer).
+      const { data: tokenRow, error: tokenRowErr } = await supabase
+        .from('public_media_tokens')
+        .select('status, ready_bucket, ready_path')
+        .eq('token', token)
+        .maybeSingle();
+      if (tokenRowErr) {
+        console.error('[guest-upload-urls] token row', tokenRowErr.message);
+        return jsonRes({ error: 'Database error' }, 500);
+      }
+
+      const readyPath = `ready/${token}.${ext}`;
+      const existingReadyPath = (tokenRow as { ready_path?: string | null } | null)?.ready_path?.trim();
+      const existingStatus = (tokenRow as { status?: string } | null)?.status;
+
+      if (existingStatus === 'ready' && existingReadyPath) {
+        results.push({
+          kind: a.kind,
+          memoryId,
+          bucket: (tokenRow as { ready_bucket?: string | null }).ready_bucket ?? bucket,
+          path: existingReadyPath,
+          token,
+          alreadyReady: true,
+        });
+        continue;
+      }
+
+      const { data: readyBlob, error: readyDlErr } = await supabase.storage.from(bucket).download(readyPath);
+      if (!readyDlErr && readyBlob) {
+        await supabase
+          .from('public_media_tokens')
+          .update({
+            status: 'ready',
+            ready_bucket: bucket,
+            ready_path: readyPath,
+            last_error: null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('token', token);
+        results.push({
+          kind: a.kind,
+          memoryId,
+          bucket,
+          path: readyPath,
+          token,
+          alreadyReady: true,
+        });
+        continue;
+      }
+
+      // Nouvel upload raw uniquement si le token n’est pas déjà prêt (QR pérenne dans les PDF exportés).
       await supabase
         .from('public_media_tokens')
-        .update({ raw_bucket: bucket, raw_path: path, status: 'pending_upload', updated_at: new Date().toISOString() })
-        .eq('media_id', memoryId)
-        .eq('kind', a.kind);
+        .update({
+          raw_bucket: bucket,
+          raw_path: path,
+          status: 'pending_upload',
+          last_error: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('token', token)
+        .neq('status', 'ready');
 
       const { data, error } = await supabase.storage.from(bucket).createSignedUploadUrl(path, { upsert: true });
       if (error || !data?.signedUrl) {

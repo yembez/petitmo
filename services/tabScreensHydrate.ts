@@ -6,7 +6,7 @@ import {
   setCaptureTabChildSnapshot,
 } from '@/services/children';
 import { getFamilyMemories } from '@/services/media';
-import { listBooks, listBooksFromSqliteSync } from '@/services/books';
+import { listBooks, listBooksFromSqliteSync, healAllBookCovers, healAllBookMemoryIdsIfWiped } from '@/services/books';
 import { setFeedHydrationSnapshots } from '@/services/tabScreensCache';
 
 /**
@@ -67,10 +67,11 @@ export function hydrateTabScreensFromLocal(): Promise<void> {
         return;
       }
 
-      const [memories, books] = await Promise.all([
+      const [memories, booksRaw] = await Promise.all([
         getFamilyMemories(),
         listBooks(),
       ]);
+      const books = await healAllBookCovers(await healAllBookMemoryIdsIfWiped(booksRaw));
 
       setFeedHydrationSnapshots(activeChild, memories, books);
       setCaptureTabChildSnapshot(activeChild);

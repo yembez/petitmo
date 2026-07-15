@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Test print — health → init-export print_order → generate-pdf print → téléchargement
+# PDF format seulement (3 pages). Pour Gelato draft : ./scripts/qa/smoke-gelato-draft.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
