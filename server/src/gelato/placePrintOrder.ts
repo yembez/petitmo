@@ -9,8 +9,10 @@ export type SubmitGelatoPrintOrderParams = {
   exportRequestId: string;
   bookId: string;
   pdfStoragePath: string;
-  /** Nombre de pages du PDF print réellement généré (requis livre photo Gelato). */
+  /** Nombre de pages du PDF print réellement généré (spread + gardes + intérieures). */
   pdfPageCount: number;
+  /** Pages intérieures catalogue Gelato (≠ billable_pages Petitmo). */
+  catalogPageCount: number;
 };
 
 export type SubmitGelatoPrintOrderResult =
@@ -38,7 +40,7 @@ export async function submitGelatoPrintOrder(
   const { data: row, error } = await supabase
     .from('export_requests')
     .select(
-      'id, type, status, book_id, crm_contact_id, shipping_name, shipping_address_json, printer_order_id, billable_pages',
+      'id, type, status, book_id, crm_contact_id, shipping_name, shipping_address_json, printer_order_id',
     )
     .eq('id', params.exportRequestId)
     .maybeSingle();
@@ -86,11 +88,10 @@ export async function submitGelatoPrintOrder(
       ? Math.round(params.pdfPageCount)
       : 0;
 
-  const billableFromRow =
-    typeof (row as { billable_pages?: unknown }).billable_pages === 'number'
-      ? Math.round((row as { billable_pages: number }).billable_pages)
+  const gelatoPageCount =
+    typeof params.catalogPageCount === 'number' && params.catalogPageCount > 0
+      ? Math.round(params.catalogPageCount)
       : 0;
-  const gelatoPageCount = billableFromRow;
 
   if (gelatoPageCount < GELATO_MIN_INNER_PAGES) {
     const msg = `gelato skip: pageCount catalogue ${gelatoPageCount}, minimum ${GELATO_MIN_INNER_PAGES} pages intérieures`;

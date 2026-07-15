@@ -40,6 +40,11 @@ import { canExportBookPdfViaServer, grantDigitalExportPurchase, resolveServerPdf
 import { DIGITAL_EXPORT_PDF_EUR } from '@/lib/bookExportPricing';
 import type { Child } from '@/types/local';
 import { getPendingGuestRawUploadsCountForKeys } from '@/services/pendingRawGuestUploads';
+import {
+  gelatoInnerPageCount,
+  gelatoMinInnerPagesAlertMessage,
+  GELATO_MIN_INNER_PAGES,
+} from '@/utils/bookGelatoInnerPages';
 
 const COUNTRY_OPTIONS = [
   { code: 'FR' as const, label: 'France' },
@@ -331,6 +336,16 @@ export default function BookOrderScreen() {
 
     if (exportMode === 'print') {
       if (!isInitExportConfigured()) return;
+      if (pendingPayload) {
+        const innerPagesForGelato = gelatoInnerPageCount(pendingPayload.pages);
+        if (innerPagesForGelato < GELATO_MIN_INNER_PAGES) {
+          Alert.alert(
+            'Livre trop court pour l’impression',
+            gelatoMinInnerPagesAlertMessage(innerPagesForGelato),
+          );
+          return;
+        }
+      }
       setSubmitting(true);
       try {
         const payload = pendingPayload;

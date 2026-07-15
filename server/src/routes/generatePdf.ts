@@ -746,6 +746,7 @@ async function handleTicketPrintPdf(
       bookId: body.bookId,
       pdfStoragePath: saved.uploadedStoragePath,
       pdfPageCount,
+      catalogPageCount: gelatoCatalogPageCount(body.pages),
     }).then(result => {
       if (!result.ok) {
         console.error('[generate-pdf] gelato', ticket.export_request_id, result.message);
