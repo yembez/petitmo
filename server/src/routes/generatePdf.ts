@@ -2,7 +2,8 @@ import type { Express, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { verifyExportTicket, type VerifiedExportTicket } from '../auth/exportPdfTicket';
-import { buildBookHtml, buildGelatoPhotobookHtml } from '../pdf/htmlBook';
+import { buildBookHtml, buildGelatoSpreadHtml, buildGelatoBlockHtml } from '../pdf/htmlBook';
+import { renderGelatoPhotobookPdf } from '../pdf/gelatoPhotobookPdf';
 import { countRenderedBookPages } from '../pdf/bookPageCount';
 import { htmlToDigitalPdfBuffer, htmlToPdfBuffer } from '../pdf/renderPdf';
 import { saveBookPdfAndSign, saveBookPdfForExportRequest } from '../pdf/pdfStorage';
@@ -711,16 +712,16 @@ async function handleTicketPrintPdf(
       qrTokensByMemoryId: qrResult.tokensByMemoryId,
     };
 
-    let html: string;
+    let pdf: Buffer;
     if (gelatoConfig) {
       const gelatoPageCount = gelatoPhotobookPdfPageCount(body.pages);
       const coverLayout = await fetchGelatoCoverLayout(gelatoConfig, gelatoPageCount);
-      html = buildGelatoPhotobookHtml(bookHtmlInput, coverLayout);
+      const spreadHtml = buildGelatoSpreadHtml(bookHtmlInput, coverLayout);
+      const blockHtml = buildGelatoBlockHtml(bookHtmlInput);
+      pdf = await renderGelatoPhotobookPdf(spreadHtml, blockHtml, coverLayout);
     } else {
-      html = buildBookHtml(bookHtmlInput);
+      pdf = await htmlToPdfBuffer(buildBookHtml(bookHtmlInput));
     }
-
-    const pdf = await htmlToPdfBuffer(html);
     await qrWorkerPromise;
     const pdfPageCount = await countPdfPages(pdf);
     const saved = await saveBookPdfForExportRequest(supabase, {

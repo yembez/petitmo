@@ -505,7 +505,7 @@ function pageGelatoWraparoundSpread(
 
   const spineTitle = esc(input.coverTitle.slice(0, 48));
 
-  return `<div class="page gelato-wraparound">
+  return `<div class="page">
   <div class="gw-canvas" style="width:${spreadWidthMm}mm;height:${spreadHeightMm}mm;">
     <div class="gw-panel gw-back" style="left:${contentBack.leftMm}mm;top:${contentBack.topMm}mm;width:${contentBack.widthMm}mm;height:${contentBack.heightMm}mm;">
       <div class="gw-back-inner">
@@ -1173,32 +1173,38 @@ export function buildBookHtml(input: BuildBookHtmlInput): string {
   return buildHtmlDocument(input.coverTitle, pagesHtml, pageWmm, pageHmm, isPrint);
 }
 
-/** PDF print au format template Gelato photobook (spread + gardes + intérieur). */
-export function buildGelatoPhotobookHtml(
+/** HTML une seule page : spread couverture rigide (dimensions Gelato exactes). */
+export function buildGelatoSpreadHtml(
   input: BuildBookHtmlInput,
   layout: GelatoCoverLayout,
 ): string {
-  const printInput: BuildBookHtmlInput = { ...input, exportMode: 'print' };
-  const pageWmm = PRINT_PAGE_WIDTH_MM;
-  const pageHmm = PRINT_PAGE_HEIGHT_MM;
-  const innerPages = gelatoInnerPages(input.pages);
-
   const spreadHtml = pageGelatoWraparoundSpread(
     layout,
-    printInput,
+    { ...input, exportMode: 'print' },
     input.child,
     input.coverPhotoUrl,
     input.coverPhotoImgPxW,
     input.coverPhotoImgPxH,
   );
+  return buildHtmlDocument(
+    input.coverTitle,
+    spreadHtml,
+    layout.spreadWidthMm,
+    layout.spreadHeightMm,
+    false,
+    { widthMm: layout.spreadWidthMm, heightMm: layout.spreadHeightMm },
+  );
+}
+
+/** HTML bloc intérieur : garde + pages + garde (218×288 mm). */
+export function buildGelatoBlockHtml(input: BuildBookHtmlInput): string {
+  const printInput: BuildBookHtmlInput = { ...input, exportMode: 'print' };
+  const pageWmm = PRINT_PAGE_WIDTH_MM;
+  const pageHmm = PRINT_PAGE_HEIGHT_MM;
+  const innerPages = gelatoInnerPages(input.pages);
   const innerHtml = innerPages
     .map((p, i) => renderPage(p, printInput, i + 1, pageWmm))
     .join('');
-
-  const pagesHtml = `${spreadHtml}${pageGelatoBlankEndpaper()}${innerHtml}${pageGelatoBlankEndpaper()}`;
-
-  return buildHtmlDocument(input.coverTitle, pagesHtml, pageWmm, pageHmm, true, {
-    widthMm: layout.spreadWidthMm,
-    heightMm: layout.spreadHeightMm,
-  });
+  const pagesHtml = `${pageGelatoBlankEndpaper()}${innerHtml}${pageGelatoBlankEndpaper()}`;
+  return buildHtmlDocument(input.coverTitle, pagesHtml, pageWmm, pageHmm, true);
 }

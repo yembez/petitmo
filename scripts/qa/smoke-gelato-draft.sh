@@ -12,7 +12,8 @@ require_cmd curl
 require_cmd jq
 load_env
 
-# Gelato photobook 21×28 : 30 pages intérieures → 33 pages PDF (spread + 2 gardes).
+# Email unique par run (évite RATE_LIMIT_EMAIL sur qa+petitmo-smoke@…)
+QA_TEST_EMAIL="qa+gelato-$(date +%Y%m%d-%H%M%S)-${RANDOM}@example.com"
 GELATO_QA_INNER_PAGES="${GELATO_QA_INNER_PAGES:-30}"
 GELATO_QA_MAQUETTE_PAGES=$((GELATO_QA_INNER_PAGES + 2))
 
@@ -23,7 +24,6 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 BOOK_ID="qa-gelato-${STAMP}"
 CHILD_ID="qa-child-${STAMP}"
 PDF_OUT="${OUT_DIR}/livre-gelato-draft-${STAMP}.pdf"
-QA_TEST_EMAIL="${QA_TEST_EMAIL:-qa+gelato-${STAMP}@example.com}"
 
 info "1/5 Healthcheck ${PUBLIC_PDF_URL}/health"
 curl -sS "${PUBLIC_PDF_URL}/health" | jq -e '.ok == true' >/dev/null
