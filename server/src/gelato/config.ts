@@ -8,7 +8,7 @@ export type GelatoConfig = {
   webhookSecret: string | null;
   /** `draft` = visible dashboard Gelato, pas d’impression tant que non converti. */
   orderType: 'order' | 'draft';
-  /** Minimum pages PDF pour livre photo Gelato (défaut 30). */
+  /** Minimum pages intérieures catalogue Gelato (défaut 30). Le PDF total = intérieures + 3. */
   minPageCount: number;
 };
 
@@ -25,8 +25,8 @@ function parseGelatoOrderType(): 'order' | 'draft' {
 
 function parseGelatoMinPageCount(): number {
   const raw = process.env.GELATO_MIN_PAGE_COUNT?.trim();
-  const n = raw ? Number.parseInt(raw, 10) : 33;
-  return Number.isFinite(n) && n >= 1 ? n : 33;
+  const n = raw ? Number.parseInt(raw, 10) : 30;
+  return Number.isFinite(n) && n >= 1 ? n : 30;
 }
 
 /** Gelato optionnel : sans clé / productUid, le PDF print est généré mais pas envoyé à l’imprimeur. */

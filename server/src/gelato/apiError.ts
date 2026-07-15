@@ -18,8 +18,10 @@ export function formatGelatoApiError(
   }
 
   const errors = json.errors;
-  if (Array.isArray(errors)) {
-    for (const entry of errors) {
+  const details = json.details;
+  for (const list of [errors, details]) {
+    if (!Array.isArray(list)) continue;
+    for (const entry of list) {
       if (typeof entry === 'string' && entry.trim()) {
         parts.push(entry.trim());
         continue;

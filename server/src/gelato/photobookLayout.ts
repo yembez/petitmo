@@ -13,6 +13,11 @@ export function gelatoPhotobookPdfPageCount(pages: BookPageServer[]): number {
   return gelatoInnerPages(pages).length + 3;
 }
 
+/** pageCount API Gelato = pages intérieures catalogue (≠ total pages PDF). */
+export function gelatoCatalogPageCount(pages: BookPageServer[]): number {
+  return gelatoInnerPages(pages).length;
+}
+
 export function gelatoInnerPageCount(pages: BookPageServer[]): number {
   return gelatoInnerPages(pages).length;
 }

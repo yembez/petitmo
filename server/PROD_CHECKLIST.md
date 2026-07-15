@@ -184,7 +184,7 @@ Variables Railway (service `petitmo`) :
 | `GELATO_PDF_SIGNED_URL_SECONDS` | TTL URL PDF pour Gelato (défaut 7 j) |
 | `GELATO_WEBHOOK_SECRET` | = header `x-gelato-webhook-secret` côté Gelato |
 | `GELATO_ORDER_TYPE` | **`draft`** en QA · **`order`** en prod |
-| `GELATO_MIN_PAGE_COUNT` | Total pages PDF photobook (défaut **33** = 30 intérieures + spread + 2 gardes) |
+| `GELATO_MIN_PAGE_COUNT` | Pages intérieures minimum catalogue (défaut **30**) ; le PDF fait intérieures + 3 |
 
 Webhook Gelato : `POST https://<PUBLIC_PDF_URL>/v1/webhooks/gelato` · events `order_status_updated` (+ optionnel `order_item_tracking_code_updated`).
 

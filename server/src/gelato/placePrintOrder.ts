@@ -3,6 +3,7 @@ import { formatGelatoApiError } from './apiError';
 import { gelatoOrderApiUrl, loadGelatoConfig, type GelatoConfig } from '../gelato/config';
 import { gelatoShippingAddress, parsePetitmoShippingAddress } from '../gelato/shippingAddress';
 import { createSignedBooksPdfUrl } from '../pdf/pdfStorage';
+import { GELATO_MIN_INNER_PAGES } from './photobookLayout';
 
 export type SubmitGelatoPrintOrderParams = {
   exportRequestId: string;
@@ -37,7 +38,7 @@ export async function submitGelatoPrintOrder(
   const { data: row, error } = await supabase
     .from('export_requests')
     .select(
-      'id, type, status, book_id, crm_contact_id, shipping_name, shipping_address_json, printer_order_id',
+      'id, type, status, book_id, crm_contact_id, shipping_name, shipping_address_json, printer_order_id, billable_pages',
     )
     .eq('id', params.exportRequestId)
     .maybeSingle();
@@ -85,8 +86,24 @@ export async function submitGelatoPrintOrder(
       ? Math.round(params.pdfPageCount)
       : 0;
 
-  if (pdfPageCount < config.minPageCount) {
-    const msg = `gelato skip: PDF ${pdfPageCount} page(s), minimum ${config.minPageCount} pour le produit photobook`;
+  const billableFromRow =
+    typeof (row as { billable_pages?: unknown }).billable_pages === 'number'
+      ? Math.round((row as { billable_pages: number }).billable_pages)
+      : 0;
+  const gelatoPageCount = billableFromRow;
+
+  if (gelatoPageCount < GELATO_MIN_INNER_PAGES) {
+    const msg = `gelato skip: pageCount catalogue ${gelatoPageCount}, minimum ${GELATO_MIN_INNER_PAGES} pages intérieures`;
+    await supabase
+      .from('export_requests')
+      .update({ last_error: msg.slice(0, 2000) })
+      .eq('id', params.exportRequestId);
+    return { ok: false, message: msg };
+  }
+
+  const expectedPdfPages = gelatoPageCount + 3;
+  if (pdfPageCount < expectedPdfPages) {
+    const msg = `gelato skip: PDF ${pdfPageCount} page(s), attendu ≥ ${expectedPdfPages} (format spread + gardes + ${gelatoPageCount} intérieures)`;
     await supabase
       .from('export_requests')
       .update({ last_error: msg.slice(0, 2000) })
@@ -99,7 +116,7 @@ export async function submitGelatoPrintOrder(
     productUid: config.productUid,
     files: [{ type: 'default', url: pdfUrl }],
     quantity: 1,
-    pageCount: pdfPageCount,
+    pageCount: gelatoPageCount,
   };
 
   const body = {

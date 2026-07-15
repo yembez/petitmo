@@ -17,7 +17,7 @@ import {
 } from '../pdf/signSupabaseMediaForPdf';
 import { submitGelatoPrintOrder } from '../gelato/placePrintOrder';
 import { fetchGelatoCoverLayout } from '../gelato/coverDimensions';
-import { gelatoPhotobookPdfPageCount, validateGelatoInnerPageCount } from '../gelato/photobookLayout';
+import { gelatoCatalogPageCount, validateGelatoInnerPageCount } from '../gelato/photobookLayout';
 import { loadGelatoConfig } from '../gelato/config';
 import { countPdfPages } from '../pdf/countPdfPages';
 import type {
@@ -714,8 +714,8 @@ async function handleTicketPrintPdf(
 
     let pdf: Buffer;
     if (gelatoConfig) {
-      const gelatoPageCount = gelatoPhotobookPdfPageCount(body.pages);
-      const coverLayout = await fetchGelatoCoverLayout(gelatoConfig, gelatoPageCount);
+      const catalogPageCount = gelatoCatalogPageCount(body.pages);
+      const coverLayout = await fetchGelatoCoverLayout(gelatoConfig, catalogPageCount);
       const spreadHtml = buildGelatoSpreadHtml(bookHtmlInput, coverLayout);
       const blockHtml = buildGelatoBlockHtml(bookHtmlInput);
       pdf = await renderGelatoPhotobookPdf(spreadHtml, blockHtml, coverLayout);
