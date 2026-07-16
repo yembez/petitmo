@@ -2,7 +2,7 @@
  * Export PDF livre — **uniquement** via le service distant (Playwright / Chromium).
  * Aucune génération PDF sur l’appareil (expo-print) : voir AGENTS.md / `.cursor/rules/architecture.mdc`.
  */
-import { downloadAsync, documentDirectory, makeDirectoryAsync } from 'expo-file-system/legacy';
+import { downloadAsync, documentDirectory, makeDirectoryAsync, deleteAsync } from 'expo-file-system/legacy';
 import { readAsStringAsync, EncodingType } from 'expo-file-system/legacy';
 import { uploadAsync as uploadAsyncLegacy } from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -70,6 +70,18 @@ function pdfServerBaseUrl(): string | null {
   const raw = process.env.EXPO_PUBLIC_PDF_SERVER_URL?.trim();
   if (!raw) return null;
   return raw.replace(/\/$/, '');
+}
+
+/** Tmp cover / slots album après export — évite de saturer le sandbox iOS. */
+async function clearPdfExportTempDirs(): Promise<void> {
+  if (Platform.OS === 'web' || !documentDirectory) return;
+  for (const name of ['petitmo-pdf-slot-tmp', 'petitmo-cover-tmp'] as const) {
+    try {
+      await deleteAsync(`${documentDirectory}${name}`, { idempotent: true });
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 function errorMessageFromPdfServerJson(
@@ -1256,6 +1268,19 @@ export async function generateBookPdfWithExportTicket(
     throw new Error('Ticket export manquant.');
   }
 
+  await clearPdfExportTempDirs();
+  try {
+    return await generateBookPdfWithExportTicketBody(base, pdfTicket, input);
+  } finally {
+    await clearPdfExportTempDirs();
+  }
+}
+
+async function generateBookPdfWithExportTicketBody(
+  base: string,
+  pdfTicket: string,
+  input: GenerateBookPdfWithExportTicketInput,
+): Promise<{ localUri: string; response: GenerateBookPdfResponse }> {
   const { subscriptionTier, digitalExportPaid = false } = input;
   const memories = collectMemoriesFromPagesForPdf(input.pages, input.localEdits);
 
