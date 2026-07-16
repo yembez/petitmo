@@ -294,7 +294,15 @@ export function getLocalBook(bookId: string): LocalBookRow | null {
 
 export function upsertLocalBook(book: Omit<LocalBookRow, 'updatedAt'>): void {
   const now = new Date().toISOString()
+  const existing = getLocalBook(book.id)
   const memoryIds = uniq(book.memoryIds ?? [])
+
+  // `undefined` = préserver la valeur SQLite (évite wipe restore cloud / remap partiel).
+  // Tableau / objet vide = clear explicite.
+  const memoryPhotoRefs =
+    book.memoryPhotoRefs !== undefined ? book.memoryPhotoRefs : existing?.memoryPhotoRefs
+  const pageEntries = book.pageEntries !== undefined ? book.pageEntries : existing?.pageEntries
+
   db.runSync(
     `INSERT OR REPLACE INTO books (
       id, title, createdAt, memoryIds, memoryPhotoRefs, pageEntries, coverPhotoUrl,
@@ -306,12 +314,10 @@ export function upsertLocalBook(book: Omit<LocalBookRow, 'updatedAt'>): void {
       (book.title ?? '').trim() || 'Livre',
       book.createdAt ?? now,
       JSON.stringify(memoryIds),
-      book.memoryPhotoRefs && Object.keys(book.memoryPhotoRefs).length
-        ? JSON.stringify(book.memoryPhotoRefs)
+      memoryPhotoRefs && Object.keys(memoryPhotoRefs).length
+        ? JSON.stringify(memoryPhotoRefs)
         : null,
-      book.pageEntries && book.pageEntries.length
-        ? JSON.stringify(book.pageEntries)
-        : null,
+      pageEntries && pageEntries.length ? JSON.stringify(pageEntries) : null,
       book.coverPhotoUrl ?? null,
       book.rotations ? JSON.stringify(book.rotations) : null,
       book.photoCrops ? JSON.stringify(book.photoCrops) : null,

@@ -164,13 +164,22 @@ export async function remapLegacyEntityIdsForCloudSync(): Promise<LegacyIdRemapR
     const newPhotoCrops = remapRecordKeys(book.photoCrops, memoryIdMap);
     const newTextEdits = remapRecordKeys(book.textEdits, memoryIdMap);
     const newMemoryPhotoRefs = remapRecordKeys(book.memoryPhotoRefs, memoryIdMap);
+    const newPageEntries = book.pageEntries?.map(e => ({
+      ...e,
+      memoryId: memoryIdMap.get(e.memoryId) ?? e.memoryId,
+    }));
 
     const memChanged = newMemoryIds.some((id, i) => id !== (book.memoryIds ?? [])[i]);
+    const entriesChanged =
+      !!newPageEntries &&
+      (newPageEntries.length !== (book.pageEntries?.length ?? 0) ||
+        newPageEntries.some((e, i) => e.memoryId !== (book.pageEntries?.[i]?.memoryId ?? '')));
     const metaChanged =
       newRotations !== book.rotations ||
       newPhotoCrops !== book.photoCrops ||
       newTextEdits !== book.textEdits ||
-      newMemoryPhotoRefs !== book.memoryPhotoRefs;
+      newMemoryPhotoRefs !== book.memoryPhotoRefs ||
+      entriesChanged;
 
     if (!memChanged && !metaChanged) continue;
 
@@ -181,6 +190,7 @@ export async function remapLegacyEntityIdsForCloudSync(): Promise<LegacyIdRemapR
       photoCrops: newPhotoCrops,
       textEdits: newTextEdits,
       memoryPhotoRefs: newMemoryPhotoRefs,
+      pageEntries: newPageEntries,
     });
     report.booksPatched += 1;
   }

@@ -79,9 +79,12 @@ async function withFreshBookCoverPhotoUrl(
   try {
     const book = await getBook(payload.bookId);
     if (!book) return payload;
+    // Local-first : URI print / book_covers résolue avant la ref cloud stockée.
     const fresh = resolveBookCoverPrintUri(book)?.trim() || null;
-    if (!fresh) return payload;
-    return { ...payload, coverPhotoUrl: fresh };
+    const stored = (book.coverPhotoUrl ?? '').trim();
+    const next = fresh || stored;
+    if (!next) return payload;
+    return { ...payload, coverPhotoUrl: next };
   } catch {
     return payload;
   }

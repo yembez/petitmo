@@ -15,6 +15,10 @@ import {
   BOOK_COVER_THUMB_WIDTH,
   type BookCoverColorTheme,
 } from '@/constants/bookCoverThumbnail';
+import {
+  BOOK_DIGITAL_PAGE_WIDTH_MM,
+  COVER_TITLE_SPINE_SAFE_EXTRA_MM,
+} from '@/src/book/pdfPreviewTypo';
 
 export type BookCoverThumbnailProps = {
   title: string;
@@ -64,6 +68,9 @@ function BookCoverThumbnail({
       : null;
 
   const coverTitle = title.trim() || 'Mon livre';
+  const textPadX = scale(8);
+  const textPadLeft =
+    textPadX + Math.round((faceW * COVER_TITLE_SPINE_SAFE_EXTRA_MM) / BOOK_DIGITAL_PAGE_WIDTH_MM);
 
   return (
     <View style={styles.outer} pointerEvents="none">
@@ -104,7 +111,7 @@ function BookCoverThumbnail({
             </View>
           )}
         </View>
-        <View style={[styles.textZone, { height: textH, paddingHorizontal: scale(8) }]}>
+        <View style={[styles.textZone, { height: textH, paddingLeft: textPadLeft, paddingRight: textPadX }]}>
           <Text
             style={[
               styles.coverTitle,

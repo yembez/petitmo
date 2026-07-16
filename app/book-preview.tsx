@@ -598,7 +598,7 @@ export default function BookPreviewScreen() {
   }, [signedCoverPhotoUrl, coverPhotoUrl]);
 
   const coverPhotoBrowseUriRaw = useMemo(
-    () => (bookSnapshot ? resolveBookCoverDisplayUri(bookSnapshot, { variant: 'list' }) : null),
+    () => (bookSnapshot ? resolveBookCoverPrintUri(bookSnapshot) : null),
     [bookSnapshot],
   );
   const signedCoverBrowseUrl = useSignedMediaUrl(coverPhotoBrowseUriRaw);
@@ -2247,7 +2247,7 @@ export default function BookPreviewScreen() {
             bookId: bookId ?? `draft-${child.id}`,
             childId: child.id,
             child,
-            coverPhotoUrl: coverPhotoPrintUri,
+            coverPhotoUrl: coverPhotoPrintUri || bookSnapshot?.coverPhotoUrl?.trim() || null,
             coverPhotoImgPxW: coverPhotoImgPxForPdf?.w,
             coverPhotoImgPxH: coverPhotoImgPxForPdf?.h,
             coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
@@ -2337,7 +2337,7 @@ export default function BookPreviewScreen() {
       bookId: bookId ?? `draft-${child.id}`,
       childId: child.id,
       child,
-      coverPhotoUrl: coverPhotoPrintUri,
+      coverPhotoUrl: coverPhotoPrintUri || bookSnapshot?.coverPhotoUrl?.trim() || null,
       coverPhotoImgPxW: coverPhotoImgPxForPdf?.w,
       coverPhotoImgPxH: coverPhotoImgPxForPdf?.h,
       coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
@@ -2397,7 +2397,7 @@ export default function BookPreviewScreen() {
       bookId: bookId ?? `draft-${child.id}`,
       childId: child.id,
       child,
-      coverPhotoUrl: coverPhotoPrintUri,
+      coverPhotoUrl: coverPhotoPrintUri || bookSnapshot?.coverPhotoUrl?.trim() || null,
       coverPhotoImgPxW: coverPhotoImgPxForPdf?.w,
       coverPhotoImgPxH: coverPhotoImgPxForPdf?.h,
       coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
@@ -2461,7 +2461,7 @@ export default function BookPreviewScreen() {
           bookId: bookId ?? `draft-${child.id}`,
           childId: child.id,
           child,
-          coverPhotoUrl: coverPhotoPrintUri,
+          coverPhotoUrl: coverPhotoPrintUri || bookSnapshot?.coverPhotoUrl?.trim() || null,
           coverPhotoImgPxW: coverPhotoImgPxForPdf?.w,
           coverPhotoImgPxH: coverPhotoImgPxForPdf?.h,
           coverTitle: coverTitleLine ?? `Journal de ${child.name}`,

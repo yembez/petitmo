@@ -17,6 +17,12 @@ export const BOOK_PAGE_RATIO = BOOK_DIGITAL_PAGE_WIDTH_MM / BOOK_DIGITAL_PAGE_HE
 /** Marge blanche autour des visuels [M] — parité `--visual-margin` dans `htmlBook.ts`. */
 export const BOOK_VISUAL_MARGIN_MM = 12;
 
+/**
+ * Décalage extra du bloc titre couverture vers la droite (marge de sécurité reliure / hinge).
+ * Parité `COVER_TITLE_SPINE_SAFE_EXTRA_MM` dans `server/src/constants/pdfDigitalSpec.ts`.
+ */
+export const COVER_TITLE_SPINE_SAFE_EXTRA_MM = 10;
+
 /** Hauteur bande photo pleine page (`.pf-image`) — 75 % de la page trim. */
 export const PHOTO_FULL_BAND_HEIGHT_RATIO = 0.75;
 

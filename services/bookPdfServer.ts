@@ -23,6 +23,7 @@ import type {
 } from '@/types/shared';
 import { supabase } from '@/lib/supabase';
 import { getLocalMemoryById } from '@/lib/localDb';
+import { getSignedMediaDisplayUrl } from '@/lib/mediaSignedUrl';
 import {
   ensureChildRowExistsOnSupabaseForExport,
   ensureLocalChildrenSyncedToSupabase,
@@ -34,8 +35,10 @@ import {
   collectVideoPosterLocalUploadUriCandidates,
   collectVoiceCoverLocalUploadUriCandidates,
   getBookPhotoPrintUri,
+  getPhotoUriForBookMaquetteDisplay,
   getVideoPosterUriForBookPreview,
   getVoiceCoverUriForBookPreview,
+  indexOfPhotoUrlInFeed,
   inferLocalDisplayPathFromPrint,
   memoryPhotoMatchesUrl,
   normalizePhotoUrlForCompare,
@@ -303,6 +306,33 @@ async function resolveAlbumPhotoHttpsUrlForSessionPdf(
   return await uploadFileToSupabase(compressed, path, { upsert: true });
 }
 
+/** Upload slot album (session premium) → Map pour `photoRef` HTTPS par page. */
+async function buildPagePhotoRefHttpsMapSession(
+  pages: BookPage[],
+  childId: string,
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  for (const p of pages) {
+    if (p.type !== 'photo-full' && p.type !== 'photo-note') continue;
+    const m = p.memory;
+    const ref = p.photoRef?.trim();
+    if (!m || m.type !== 'photo' || !ref) continue;
+    const mapKey = `${m.id}::${normalizePhotoUrlForCompare(ref)}`;
+    if (out.has(mapKey)) continue;
+    if (isHttps(ref)) {
+      out.set(mapKey, ref);
+      continue;
+    }
+    try {
+      const url = await resolveAlbumPhotoHttpsUrlForSessionPdf(m, ref, childId);
+      if (url) out.set(mapKey, url);
+    } catch (e) {
+      if (__DEV__) console.warn('[bookPdfServer] album slot session', m.id, e);
+    }
+  }
+  return out;
+}
+
 /** Overrides `guestMemories` : URL print HTTPS pour le slot album choisi dans le livre. */
 async function ensurePhotoPrintUrlsForServerPdf(
   pages: BookPage[],
@@ -374,6 +404,66 @@ function memoryToGuestPayload(m: Memory): GuestMemoryForPdfPayload {
     voice_cover_url: m.voice_cover_url ?? null,
     created_at: m.created_at,
   };
+}
+
+/** Upload chaque slot album des pages → Map `memoryId::photoRefNorm` → URL HTTPS. */
+async function buildPagePhotoRefHttpsMap(
+  pages: BookPage[],
+  pdfTicket: string,
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (Platform.OS === 'web') return out;
+
+  for (const p of pages) {
+    if (p.type !== 'photo-full' && p.type !== 'photo-note') continue;
+    const m = p.memory;
+    const ref = p.photoRef?.trim();
+    if (!m || m.type !== 'photo' || !ref) continue;
+    const mapKey = `${m.id}::${normalizePhotoUrlForCompare(ref)}`;
+    if (out.has(mapKey)) continue;
+    if (isHttps(ref)) {
+      out.set(mapKey, ref);
+      continue;
+    }
+    const slotPrint = getBookPhotoPrintUri(m, ref).trim();
+    const local = await pickFirstReadableLocalMediaUri(
+      [slotPrint, ref, inferLocalDisplayPathFromPrint(slotPrint || ref)].filter(u => u.trim().length > 0),
+    );
+    if (!local) continue;
+    try {
+      const compressed = await compressLocalJpegForGuestUpload(local, {
+        maxWidth: MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH,
+        quality: MEDIA_BOOK_PDF_JPEG_QUALITY,
+      });
+      const slotKey =
+        normalizePhotoUrlForCompare(ref).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 20) || 'slot';
+      const { readUrl } = await guestUploadMediaImageThenReadUrl({
+        pdfTicket,
+        asset: { kind: 'photo', memoryId: `${m.id}_${slotKey}` },
+        localUri: compressed,
+        mimeType: 'image/jpeg',
+      });
+      out.set(mapKey, readUrl);
+    } catch (e) {
+      if (__DEV__) console.warn('[bookPdfServer] album slot upload', m.id, e);
+    }
+  }
+  return out;
+}
+
+function applyHttpsPhotoRefsToServerPages(
+  pages: GenerateBookPdfPayload['pages'],
+  slotHttps: Map<string, string>,
+): GenerateBookPdfPayload['pages'] {
+  if (slotHttps.size === 0) return pages;
+  return pages.map(p => {
+    if (p.type !== 'photo-full' && p.type !== 'photo-note') return p;
+    const mid = (p.memoryId ?? '').trim();
+    const ref = (p.photoRef ?? '').trim();
+    if (!mid || !ref) return p;
+    const https = slotHttps.get(`${mid}::${normalizePhotoUrlForCompare(ref)}`);
+    return https ? { ...p, photoRef: https } : p;
+  });
 }
 
 function isHttps(u: string | null | undefined): boolean {
@@ -932,6 +1022,18 @@ export async function generateBookPdfViaServer(input: GenerateBookPdfServerInput
 
   const { subscriptionTier, digitalExportPaid } = await resolveServerPdfEntitlements();
 
+  const slotHttpsSession = await buildPagePhotoRefHttpsMapSession(input.pages, input.childId);
+  const pagesPayload = applyHttpsPhotoRefsToServerPages(
+    mapBookPagesToServerPayload(
+      input.pages,
+      input.rotations,
+      input.photoCrops,
+      input.localEdits,
+      input.memoryPhotoRefs,
+    ),
+    slotHttpsSession,
+  );
+
   const payload: GenerateBookPdfPayload = {
     bookId: input.bookId,
     childId: input.childId,
@@ -944,13 +1046,7 @@ export async function generateBookPdfViaServer(input: GenerateBookPdfServerInput
     // QR stable public : `https://petitmo.app/m/{token}` (pas le serveur PDF).
     qrBaseUrl: publicMediaBaseUrl(),
     exportMode: input.exportMode === 'print' ? 'print' : 'digital',
-    pages: mapBookPagesToServerPayload(
-      input.pages,
-      input.rotations,
-      input.photoCrops,
-      input.localEdits,
-      input.memoryPhotoRefs,
-    ),
+    pages: pagesPayload,
     subscriptionTier,
     ...(subscriptionTier === 'free' ? { digitalExportPaid } : {}),
     ...(guestMemoryOverrides.length > 0 ? { guestMemories: guestMemoryOverrides } : {}),
@@ -1056,45 +1152,106 @@ export async function generateBookPdfWithExportTicket(
   const coverLocal = (coverPhotoUrlOut ?? '').trim();
   if (coverLocal && !isHttps(coverLocal) && Platform.OS !== 'web') {
     try {
-      // Uniquement la couverture choisie — ne jamais retomber sur « la 1ʳᵉ photo du livre ».
-      // Ordre : URI print résolue → fichiers du souvenir correspondant → copie book_covers en dernier.
-      const coverCandidates: string[] = [coverLocal, inferLocalDisplayPathFromPrint(coverLocal)];
+      /**
+       * Local-first (règle d’or) : le spread affiche déjà la cover → bytes en sandbox
+       * (`book_covers/{bookId}.jpg`, print/display du slot). Cloud = repli sécurité seulement
+       * si aucun fichier local lisible (autre appareil / purge).
+       */
+      const coverIsCloudPath = isBareMediaBucketPath(coverLocal) || isHttps(coverLocal);
       const photoIds = memories.filter(m => m.type === 'photo').map(m => m.id);
-      const coverMem = findPhotoMemoryByCoverRef(coverLocal, photoIds);
-      if (coverMem) {
-        coverCandidates.push(...collectPhotoLocalUploadUriCandidates(coverMem));
-        const printSlot = getBookPhotoPrintUri(coverMem, coverLocal).trim();
-        if (printSlot) coverCandidates.push(printSlot);
-      } else {
-        for (const m of memories) {
-          if (m.type !== 'photo') continue;
-          if (!memoryPhotoMatchesUrl(m, coverLocal)) continue;
-          coverCandidates.push(...collectPhotoLocalUploadUriCandidates(m));
-          const printSlot = getBookPhotoPrintUri(m, coverLocal).trim();
-          if (printSlot) coverCandidates.push(printSlot);
+      const coverMem =
+        findPhotoMemoryByCoverRef(coverLocal, photoIds) ??
+        memories.find(m => m.type === 'photo' && memoryPhotoMatchesUrl(m, coverLocal)) ??
+        null;
+
+      const coverCandidates: string[] = [];
+
+      if (coverMem && coverMem.type === 'photo') {
+        const idx = indexOfPhotoUrlInFeed(coverMem, coverLocal);
+        // Slot connu seulement : jamais dump primaire / autres photos d’album.
+        if (idx >= 0) {
+          const printSlot = getBookPhotoPrintUri(coverMem, coverLocal).trim();
+          if (printSlot && !isHttps(printSlot) && !isBareMediaBucketPath(printSlot)) {
+            coverCandidates.push(printSlot, inferLocalDisplayPathFromPrint(printSlot));
+          }
+          const displaySlot = getPhotoUriForBookMaquetteDisplay(coverMem, coverLocal).trim();
+          if (displaySlot && !isHttps(displaySlot) && !isBareMediaBucketPath(displaySlot)) {
+            coverCandidates.push(displaySlot);
+          }
         }
       }
+
+      // Copie persistée après choix de cover (souvent = ce que le spread a affiché).
       const dedicated = dedicatedBookCoverUriForBook(input.bookId);
       if (dedicated) coverCandidates.push(dedicated);
-      const readableCover = await pickFirstReadableLocalMediaUri(
-        coverCandidates.filter(u => u.trim().length > 0),
+
+      if (!coverIsCloudPath) {
+        coverCandidates.push(coverLocal, inferLocalDisplayPathFromPrint(coverLocal));
+      }
+
+      const localOnly = coverCandidates.filter(
+        u => u.trim().length > 0 && !isHttps(u) && !isBareMediaBucketPath(u),
       );
-      if (!readableCover) {
+      const readableCover = await pickFirstReadableLocalMediaUri(localOnly);
+
+      if (readableCover) {
+        const compressedCover = await compressLocalJpegForGuestUpload(readableCover, {
+          maxWidth: MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH,
+          quality: MEDIA_BOOK_PDF_COVER_JPEG_QUALITY,
+        });
+        const { readUrl } = await guestUploadMediaImageThenReadUrl({
+          pdfTicket,
+          asset: { kind: 'cover' },
+          localUri: compressedCover,
+          mimeType: 'image/jpeg',
+        });
+        coverPhotoUrlOut = readUrl;
+      } else if (coverIsCloudPath) {
+        if (__DEV__) {
+          console.warn(
+            '[bookPdfServer] cover: aucun fichier local lisible — repli cloud (hors local-first idéal)',
+            coverLocal.slice(0, 96),
+          );
+        }
+        const signed = await getSignedMediaDisplayUrl(coverLocal);
+        if (!signed || !isHttps(signed)) {
+          // Service role côté serveur saura signer (chemin Storage nu).
+          coverPhotoUrlOut = coverLocal;
+        } else {
+          try {
+            const baseDir = documentDirectory ?? '';
+            const tmpDir = `${baseDir}petitmo-cover-tmp`;
+            try {
+              await makeDirectoryAsync(tmpDir, { intermediates: true });
+            } catch {
+              /* exists */
+            }
+            const dest = `${tmpDir}/cover-${Date.now()}.jpg`;
+            const dl = await downloadAsync(signed, dest);
+            if (dl.status !== 200 || !dl.uri) {
+              coverPhotoUrlOut = signed;
+            } else {
+              const compressedCover = await compressLocalJpegForGuestUpload(dl.uri, {
+                maxWidth: MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH,
+                quality: MEDIA_BOOK_PDF_COVER_JPEG_QUALITY,
+              });
+              const { readUrl } = await guestUploadMediaImageThenReadUrl({
+                pdfTicket,
+                asset: { kind: 'cover' },
+                localUri: compressedCover,
+                mimeType: 'image/jpeg',
+              });
+              coverPhotoUrlOut = readUrl;
+            }
+          } catch {
+            coverPhotoUrlOut = signed;
+          }
+        }
+      } else {
         throw new Error(
-          `COVER_NOT_READABLE cover=${coverLocal.slice(0, 96)} candidates=${coverCandidates.length}`,
+          `COVER_NOT_READABLE cover=${coverLocal.slice(0, 96)} candidates=${localOnly.length}`,
         );
       }
-      const compressedCover = await compressLocalJpegForGuestUpload(readableCover, {
-        maxWidth: MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH,
-        quality: MEDIA_BOOK_PDF_COVER_JPEG_QUALITY,
-      });
-      const { readUrl } = await guestUploadMediaImageThenReadUrl({
-        pdfTicket,
-        asset: { kind: 'cover' },
-        localUri: compressedCover,
-        mimeType: 'image/jpeg',
-      });
-      coverPhotoUrlOut = readUrl;
     } catch (e) {
       const detail = e instanceof Error ? e.message : String(e);
       if (__DEV__) console.warn('[bookPdfServer] cover upload failed', detail);
@@ -1218,6 +1375,18 @@ export async function generateBookPdfWithExportTicket(
     }),
   );
 
+  const slotHttps = await buildPagePhotoRefHttpsMap(input.pages, pdfTicket);
+  const pagesPayload = applyHttpsPhotoRefsToServerPages(
+    mapBookPagesToServerPayload(
+      input.pages,
+      input.rotations,
+      input.photoCrops,
+      input.localEdits,
+      input.memoryPhotoRefs,
+    ),
+    slotHttps,
+  );
+
   const payload: GenerateBookPdfPayload = {
     bookId: input.bookId,
     childId: input.childId,
@@ -1229,13 +1398,7 @@ export async function generateBookPdfWithExportTicket(
     chapterTitle: input.chapterTitle,
     qrBaseUrl: publicMediaBaseUrl(),
     exportMode: input.exportMode === 'print' ? 'print' : 'digital',
-    pages: mapBookPagesToServerPayload(
-      input.pages,
-      input.rotations,
-      input.photoCrops,
-      input.localEdits,
-      input.memoryPhotoRefs,
-    ),
+    pages: pagesPayload,
     subscriptionTier,
     ...(subscriptionTier === 'free' ? { digitalExportPaid } : {}),
     guestChild: {

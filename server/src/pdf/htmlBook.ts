@@ -6,6 +6,7 @@ import {
   PRINT_BLEED_MM,
   BOOK_COVER_PHOTO_HEIGHT_RATIO,
   BOOK_VISUAL_MARGIN_MM,
+  COVER_TITLE_SPINE_SAFE_EXTRA_MM,
   PDF_MEDIA_TEXT_PAD_X_MM,
   PHOTO_FULL_BAND_HEIGHT_RATIO,
   PHOTO_NOTE_INNER_MM,
@@ -183,6 +184,13 @@ function photoMainUrl(m: MemoryRow): string {
   ).trim();
 }
 
+/** Slot album : `photoRef` HTTPS (upload guest) prioritaire sur le print_url primaire. */
+function photoUrlForPage(m: MemoryRow, photoRef?: string | null): string {
+  const ref = (photoRef ?? '').trim();
+  if (/^https:\/\//i.test(ref)) return ref;
+  return photoMainUrl(m);
+}
+
 function pageCover(
   child: ChildRow,
   coverPhotoUrl: string | null | undefined,
@@ -244,9 +252,10 @@ function pagePhotoFull(
   crop: PhotoCrop | undefined,
   birthdate: string | null | undefined,
   variant: 'FP' | 'M' | undefined,
-  printBleed: boolean
+  printBleed: boolean,
+  photoRef?: string | null,
 ): string {
-  const src = imgAttr(photoMainUrl(m));
+  const src = imgAttr(photoUrlForPage(m, photoRef));
   const captionRaw = sanitizeText((m.content ?? '').trim());
   const rotCss = rot ? `transform: rotate(${rot}deg); transform-origin: center;` : '';
   const captionHtml = captionRaw ? romanHtml(captionRaw) : '';
@@ -278,9 +287,10 @@ function pagePhotoNote(
   rot: number,
   pageNum: number,
   crop: PhotoCrop | undefined,
-  birthdate: string | null | undefined
+  birthdate: string | null | undefined,
+  photoRef?: string | null,
 ): string {
-  const src = imgAttr(photoMainUrl(m));
+  const src = imgAttr(photoUrlForPage(m, photoRef));
   const legend = sanitizeText((m.content ?? '').trim());
   const rotCss = rot ? `transform: rotate(${rot}deg); transform-origin: center;` : '';
   const locLabel = bookPdfLocationLabel(m.location);
@@ -568,9 +578,9 @@ function renderPage(page: BookPageServer, input: BuildBookHtmlInput, pageNum: nu
       const birthdate = child.birthdate;
       switch (page.type) {
         case 'photo-full':
-          return pagePhotoFull(m, rot, pageNum, crop, birthdate, page.variant, printBleed);
+          return pagePhotoFull(m, rot, pageNum, crop, birthdate, page.variant, printBleed, page.photoRef);
         case 'photo-note':
-          return pagePhotoNote(m, rot, pageNum, crop, birthdate);
+          return pagePhotoNote(m, rot, pageNum, crop, birthdate, page.photoRef);
         case 'quote':
           return pageQuote(m, pageNum, birthdate);
         case 'audio': {
@@ -649,7 +659,8 @@ function buildHtmlDocument(
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: 3mm 8mm 6mm;
+  /* +${COVER_TITLE_SPINE_SAFE_EXTRA_MM}mm à gauche : marge hinge / rigole Gelato */
+  padding: 3mm 8mm 6mm ${8 + COVER_TITLE_SPINE_SAFE_EXTRA_MM}mm;
 }
 .page.gelato-endpaper { background: #fff; }
 `
@@ -679,6 +690,8 @@ function buildHtmlDocument(
   --pf-fp-img-h:calc(var(--page-h) - var(--pf-fp-footer-h));
   --pad-x:15mm;
   --pad-x-safe:calc(15mm + var(--bleed));
+  --cover-title-pad-left:calc(var(--pad-x) + ${COVER_TITLE_SPINE_SAFE_EXTRA_MM}mm);
+  --cover-title-pad-left-safe:calc(var(--pad-x-safe) + ${COVER_TITLE_SPINE_SAFE_EXTRA_MM}mm);
   --media-pad-x:${PDF_MEDIA_TEXT_PAD_X_MM}mm;
   --media-pad-x-safe:calc(${PDF_MEDIA_TEXT_PAD_X_MM}mm + var(--bleed));
   --visual-margin:${BOOK_VISUAL_MARGIN_MM}mm;
@@ -767,10 +780,10 @@ body.print-bleed .inner {
 .cover-placeholder { width:100%; height:100%; background:#E8E8ED; }
 .cover-text {
   flex:1; display:flex; flex-direction:column; justify-content:center;
-  padding:4mm var(--pad-x) 10mm;
+  padding:4mm var(--pad-x) 10mm var(--cover-title-pad-left);
 }
 body.print-bleed .cover-text {
-  padding-left:var(--pad-x-safe);
+  padding-left:var(--cover-title-pad-left-safe);
   padding-right:var(--pad-x-safe);
 }
 .cover-title {

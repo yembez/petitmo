@@ -17,6 +17,12 @@ Spec complète : `docs/specs/book-page-layout.md`
 - Marge latérale safe [M] : **12 mm** de chaque côté → zone safe = **186 mm** de large
 - Largeur photo [M] = 210 − 2 × 12 = **186 mm**
 
+### Couverture — bloc titre vs reliure
+
+- Marge latérale de base du bandeau titre : **15 mm** (`--pad-x`)
+- **+10 mm** supplémentaires à **gauche** uniquement (`COVER_TITLE_SPINE_SAFE_EXTRA_MM`) pour éloigner titre / période / filet de la rigole (hinge Gelato)
+- Parité : maquette (`MaquetteBookPages`), miniature liste, PDF digital/print (`.cover-text`), wraparound Gelato (`.gw-front-text`)
+
 ---
 
 ## Deux variantes de gabarit photo

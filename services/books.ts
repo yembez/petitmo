@@ -30,6 +30,7 @@ import {
   getAlbumCanonicalFavoriteUrls,
   getAllPhotoUrlsForFeed,
   getBookPhotoPrintUri,
+  getPhotoUriForBookMaquetteDisplay,
   getPrimaryPhotoUriForBookPreview,
   getVideoPosterUriForFeedAndViewer,
   getVoiceCoverUriForFeedAndViewer,
@@ -94,11 +95,29 @@ function freshCoverUriFromMatchedMemory(
     if (slot) return normalizeMemoryMediaUriForDisplay(slot);
   }
   if (variant === 'print') {
+    const ref = coverRef.trim();
+    let idx = 0;
+    if (ref) {
+      idx = indexOfPhotoUrlInFeed(memory, ref);
+      // Ref hors feed : ne pas forcer le slot 0 ni renvoyer le cloud — laisser le caller
+      // tenter `book_covers/` local (local-first).
+      if (idx < 0) return null;
+    }
     const printUri = getBookPhotoPrintUri(memory, coverRef);
-    if (printUri) return printUri;
-    // Pas de print encore : même souvenir que l’aperçu (display), pas la copie book_covers.
-    const display = firstNonEmptyUri(memory.display_url, memory.media_url, coverRef);
-    return display ? normalizeMemoryMediaUriForDisplay(display) || display : null;
+    if (printUri && !isCloudMediaReference(printUri)) return printUri;
+    // Même slot en display sandbox (aperçu) avant tout chemin Storage.
+    const displaySlot = getPhotoUriForBookMaquetteDisplay(memory, coverRef).trim();
+    if (displaySlot && !isCloudMediaReference(displaySlot)) {
+      return normalizeMemoryMediaUriForDisplay(displaySlot) || displaySlot;
+    }
+    // Primaires locales uniquement pour le slot 0 — jamais une autre photo d’album.
+    if (idx === 0) {
+      const display = firstNonEmptyUri(memory.local_display_path, memory.local_print_path);
+      if (display && !isCloudMediaReference(display)) {
+        return normalizeMemoryMediaUriForDisplay(display) || display;
+      }
+    }
+    return printUri ? normalizeMemoryMediaUriForDisplay(printUri) || printUri : null;
   }
   const fallback = normalizeMemoryMediaUriForDisplay(coverRef.trim());
   return fallback || null;
@@ -616,25 +635,30 @@ export function resolveBookCoverDisplayUri(
     if (byBookId) return byBookId;
     // Copie `book_covers/` absente (autre appareil) → souvenirs / cloud plus bas.
   } else if (direct) {
+    let cloudFromMemory: string | null = null;
     for (const memoryId of book.memoryIds) {
       const m = getLocalMemoryById(memoryId);
       if (!m || m.type !== 'photo' || !bookCoverMatchesMemory(m, direct)) continue;
       const fresh = freshCoverUriFromMatchedMemory(m, direct, variant);
-      if (fresh) return fresh;
+      if (!fresh) continue;
+      // Local-first : fichier sandbox avant chemin Storage / URL signée.
+      if (!isCloudMediaReference(fresh)) return fresh;
+      if (!cloudFromMemory) cloudFromMemory = fresh;
     }
 
     const fromFavorites = resolveCoverFromBookFavorites(book, direct, variant);
+    if (fromFavorites && !isCloudMediaReference(fromFavorites)) return fromFavorites;
+
+    // Copie `book_covers/` = même bytes que le spread si la cover a été choisie / persistée.
+    // Toujours avant le cloud (liste + print / export).
+    const dedicated = dedicatedBookCoverUriForBook(book.id);
+    if (dedicated) return dedicated;
+
     if (fromFavorites) return fromFavorites;
+    if (cloudFromMemory) return cloudFromMemory;
 
     if (isCloudMediaReference(direct)) {
       return normalizeMemoryMediaUriForDisplay(direct) || direct;
-    }
-
-    // Liste seulement : copie `book_covers/` (peut être stale pour l’export print).
-    // Print : ne pas retomber ici — sinon PDF ≠ aperçu après changement de couverture.
-    if (variant === 'list') {
-      const dedicated = dedicatedBookCoverUriForBook(book.id);
-      if (dedicated) return dedicated;
     }
 
     if (looksLikeStaleLocalCoverRef(direct)) {
@@ -1590,6 +1614,8 @@ export async function backupBooksToSupabaseIfPremium(): Promise<void> {
     created_at: b.createdAt,
     updated_at: b.updatedAt,
     memory_ids: b.memoryIds,
+    page_entries: b.pageEntries ?? null,
+    memory_photo_refs: b.memoryPhotoRefs ?? null,
     cover_photo_url: b.coverPhotoUrl ?? null,
     rotations: b.rotations ?? null,
     photo_crops: b.photoCrops ?? null,
@@ -1598,7 +1624,12 @@ export async function backupBooksToSupabaseIfPremium(): Promise<void> {
   }));
 
   // Upsert tout : robuste et idempotent.
-  await booksTable().upsert(payload, { onConflict: 'id' });
+  const { error: upsertErr } = await booksTable().upsert(payload, { onConflict: 'id' });
+  if (upsertErr) {
+    // Migration page_entries pas encore appliquée en prod → fallback sans colonnes nouvelles.
+    const legacy = payload.map(({ page_entries: _pe, memory_photo_refs: _mr, ...rest }) => rest);
+    await booksTable().upsert(legacy, { onConflict: 'id' });
+  }
 
   const localIds = new Set(books.map((b: LocalBookRow) => b.id));
   const { data: remoteRows, error: listErr } = await booksTable().select('id').eq('user_id', user.id);
@@ -1655,6 +1686,36 @@ function safeTextEdits(x: unknown): Record<string, { content?: string | null }> 
   return Object.keys(out).length ? out : null;
 }
 
+function safeMemoryPhotoRefs(x: unknown): Record<string, string> | undefined {
+  if (!x || typeof x !== 'object' || Array.isArray(x)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(x as Record<string, unknown>)) {
+    const id = k.trim();
+    const ref = typeof v === 'string' ? v.trim() : '';
+    if (id && ref) out[id] = ref;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+function safePageEntries(x: unknown): BookPageEntry[] {
+  if (!Array.isArray(x)) return [];
+  const out: BookPageEntry[] = [];
+  for (const e of x) {
+    if (!e || typeof e !== 'object') continue;
+    const mid =
+      typeof (e as { memoryId?: unknown }).memoryId === 'string'
+        ? (e as { memoryId: string }).memoryId.trim()
+        : '';
+    if (!mid) continue;
+    const pr =
+      typeof (e as { photoRef?: unknown }).photoRef === 'string'
+        ? (e as { photoRef: string }).photoRef.trim()
+        : '';
+    out.push(pr ? { memoryId: mid, photoRef: pr } : { memoryId: mid });
+  }
+  return out;
+}
+
 /**
  * Restauration cloud → SQLite (premium uniquement).
  * Règle de merge “safe” : on garde la version la plus récente (local.updatedAt vs remote.updated_at).
@@ -1667,12 +1728,21 @@ export async function restoreBooksFromSupabaseIfPremium(): Promise<void> {
   const user = u.user;
   if (!user) return;
 
-  const { data, error } = await booksTable()
+  let { data, error } = await booksTable()
     .select(
-      'id, user_id, title, created_at, updated_at, memory_ids, cover_photo_url, rotations, photo_crops, text_edits, chapter_title'
+      'id, user_id, title, created_at, updated_at, memory_ids, page_entries, memory_photo_refs, cover_photo_url, rotations, photo_crops, text_edits, chapter_title'
     )
     .eq('user_id', user.id)
     .order('updated_at', { ascending: false });
+
+  if (error) {
+    ({ data, error } = await booksTable()
+      .select(
+        'id, user_id, title, created_at, updated_at, memory_ids, cover_photo_url, rotations, photo_crops, text_edits, chapter_title'
+      )
+      .eq('user_id', user.id)
+      .order('updated_at', { ascending: false }));
+  }
 
   if (error || !Array.isArray(data)) {
     return;
@@ -1717,11 +1787,32 @@ export async function restoreBooksFromSupabaseIfPremium(): Promise<void> {
     const textEdits = safeTextEdits(row.text_edits);
     const chapterTitle = typeof row.chapter_title === 'string' ? row.chapter_title : null;
 
+    const remotePageEntries = safePageEntries(row.page_entries);
+    const remoteMemoryPhotoRefs = safeMemoryPhotoRefs(row.memory_photo_refs);
+    const localPageEntries = local?.pageEntries ?? [];
+    const localMemoryPhotoRefs = local?.memoryPhotoRefs;
+
+    // Jamais écraser des pageEntries APPEND locales plus riches par un remote sans pages.
+    const pageEntries =
+      remotePageEntries.length > 0
+        ? localPageEntries.length > remotePageEntries.length
+          ? localPageEntries
+          : remotePageEntries
+        : localPageEntries.length > 0
+          ? localPageEntries
+          : undefined;
+    const memoryPhotoRefs =
+      remoteMemoryPhotoRefs && Object.keys(remoteMemoryPhotoRefs).length > 0
+        ? remoteMemoryPhotoRefs
+        : localMemoryPhotoRefs;
+
     upsertLocalBook({
       id,
       title,
       createdAt,
       memoryIds,
+      pageEntries,
+      memoryPhotoRefs,
       coverPhotoUrl,
       rotations: rotations ?? undefined,
       photoCrops: photoCrops ?? undefined,

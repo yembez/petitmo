@@ -32,6 +32,12 @@ export const BOOK_VISUAL_MARGIN_MM = 12;
  * (`PDF_MEDIA_TEXT_PAD_X_MM`).
  */
 export const PDF_MEDIA_TEXT_PAD_X_MM = 22;
+
+/**
+ * Décalage extra du bloc titre couverture vers la droite (loin de la rigole / hinge).
+ * Parité maquette `pdfPreviewTypo.ts` + `.cover-text` / `.gw-front-text` dans `htmlBook.ts`.
+ */
+export const COVER_TITLE_SPINE_SAFE_EXTRA_MM = 10;
 /** Hauteur bande `.pf-image` — 75 % de la page trim. */
 export const PHOTO_FULL_BAND_HEIGHT_RATIO = 0.75;
 /** Zone image utile photo-note (carré dans zone safe 186 mm). */

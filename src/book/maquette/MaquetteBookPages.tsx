@@ -75,6 +75,8 @@ import {
   pdfTextMemoryGuillemetBodyStyle,
   pdfTextMemoryTitleStyle,
   BOOK_VISUAL_MARGIN_MM,
+  BOOK_DIGITAL_PAGE_WIDTH_MM,
+  COVER_TITLE_SPINE_SAFE_EXTRA_MM,
   PHOTO_FULL_BAND_HEIGHT_RATIO,
   PHOTO_NOTE_BAND_HEIGHT_MM,
   PHOTO_FULL_FP_FOOTER_MM,
@@ -1072,7 +1074,16 @@ function MaquetteCover({
           <View style={[styles.coverPh, { height: imgH }]} />
         )}
       </View>
-      <View style={[styles.coverTextBlock, { paddingHorizontal: pad, paddingTop: Math.round(8 * typoScale) }]}>
+      <View
+        style={[
+          styles.coverTextBlock,
+          {
+            paddingLeft: pad + Math.round((width * COVER_TITLE_SPINE_SAFE_EXTRA_MM) / BOOK_DIGITAL_PAGE_WIDTH_MM),
+            paddingRight: pad,
+            paddingTop: Math.round(8 * typoScale),
+          },
+        ]}
+      >
         <Pressable onPress={onPressTitle} accessibilityRole="button">
           <Text
             style={[
