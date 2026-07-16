@@ -1196,7 +1196,7 @@ export function buildGelatoSpreadHtml(
   );
 }
 
-/** HTML bloc intérieur : garde + pages + garde (218×288 mm). */
+/** HTML bloc intérieur : garde avant + pages contenu + page de fin (texte 4ᵉ) ; plus de garde blanche finale vide. */
 export function buildGelatoBlockHtml(input: BuildBookHtmlInput): string {
   const printInput: BuildBookHtmlInput = { ...input, exportMode: 'print' };
   const pageWmm = PRINT_PAGE_WIDTH_MM;
@@ -1205,6 +1205,9 @@ export function buildGelatoBlockHtml(input: BuildBookHtmlInput): string {
   const innerHtml = innerPages
     .map((p, i) => renderPage(p, printInput, i + 1, pageWmm))
     .join('');
-  const pagesHtml = `${pageGelatoBlankEndpaper()}${innerHtml}${pageGelatoBlankEndpaper()}`;
+  // Parité maquette : dernière page = « Chaque moment compte. » (pas une garde blanche).
+  // La 4ᵉ de couverture physique porte aussi ce texte sur le spread wraparound.
+  const endPageNum = innerPages.length + 2;
+  const pagesHtml = `${pageGelatoBlankEndpaper()}${innerHtml}${pageBackCover(endPageNum)}`;
   return buildHtmlDocument(input.coverTitle, pagesHtml, pageWmm, pageHmm, true);
 }

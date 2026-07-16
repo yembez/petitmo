@@ -37,8 +37,10 @@ import {
   getVideoPosterUriForBookPreview,
   getVoiceCoverUriForBookPreview,
   inferLocalDisplayPathFromPrint,
+  memoryPhotoMatchesUrl,
   normalizePhotoUrlForCompare,
 } from '@/utils/memoryPhotos';
+import { dedicatedBookCoverUriForBook, findPhotoMemoryByCoverRef } from '@/services/books';
 import { pickFirstReadableLocalMediaUri } from '@/utils/localMediaReadable';
 import { resolveServerPdfEntitlements } from '@/lib/digitalExportPurchase';
 import {
@@ -1054,18 +1056,34 @@ export async function generateBookPdfWithExportTicket(
   const coverLocal = (coverPhotoUrlOut ?? '').trim();
   if (coverLocal && !isHttps(coverLocal) && Platform.OS !== 'web') {
     try {
-      const coverHighRes: string[] = [coverLocal];
-      for (const m of memories) {
-        if (m.type !== 'photo') continue;
-        coverHighRes.push(m.local_original_path ?? '', m.local_print_path ?? '');
+      // Uniquement la couverture choisie — ne jamais retomber sur « la 1ʳᵉ photo du livre ».
+      // Ordre : URI print résolue → fichiers du souvenir correspondant → copie book_covers en dernier.
+      const coverCandidates: string[] = [coverLocal, inferLocalDisplayPathFromPrint(coverLocal)];
+      const photoIds = memories.filter(m => m.type === 'photo').map(m => m.id);
+      const coverMem = findPhotoMemoryByCoverRef(coverLocal, photoIds);
+      if (coverMem) {
+        coverCandidates.push(...collectPhotoLocalUploadUriCandidates(coverMem));
+        const printSlot = getBookPhotoPrintUri(coverMem, coverLocal).trim();
+        if (printSlot) coverCandidates.push(printSlot);
+      } else {
+        for (const m of memories) {
+          if (m.type !== 'photo') continue;
+          if (!memoryPhotoMatchesUrl(m, coverLocal)) continue;
+          coverCandidates.push(...collectPhotoLocalUploadUriCandidates(m));
+          const printSlot = getBookPhotoPrintUri(m, coverLocal).trim();
+          if (printSlot) coverCandidates.push(printSlot);
+        }
       }
-      const coverFallback: string[] = [inferLocalDisplayPathFromPrint(coverLocal)];
-      for (const m of memories) {
-        if (m.type === 'photo') coverFallback.push(...collectPhotoLocalUploadUriCandidates(m));
+      const dedicated = dedicatedBookCoverUriForBook(input.bookId);
+      if (dedicated) coverCandidates.push(dedicated);
+      const readableCover = await pickFirstReadableLocalMediaUri(
+        coverCandidates.filter(u => u.trim().length > 0),
+      );
+      if (!readableCover) {
+        throw new Error(
+          `COVER_NOT_READABLE cover=${coverLocal.slice(0, 96)} candidates=${coverCandidates.length}`,
+        );
       }
-      const coverCandidates = [...coverHighRes, ...coverFallback].filter(u => u.trim().length > 0);
-      const readableCover = await pickFirstReadableLocalMediaUri(coverCandidates);
-      if (!readableCover) throw new Error('COVER_NOT_READABLE');
       const compressedCover = await compressLocalJpegForGuestUpload(readableCover, {
         maxWidth: MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH,
         quality: MEDIA_BOOK_PDF_COVER_JPEG_QUALITY,
@@ -1077,8 +1095,15 @@ export async function generateBookPdfWithExportTicket(
         mimeType: 'image/jpeg',
       });
       coverPhotoUrlOut = readUrl;
-    } catch {
-      coverPhotoUrlOut = null;
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      if (__DEV__) console.warn('[bookPdfServer] cover upload failed', detail);
+      throw new Error(
+        appendDevExportHint(
+          'Impossible d’envoyer la couverture du livre pour le PDF. Rouvre l’aperçu, vérifie la photo de couverture, puis réessaie.',
+          detail,
+        ),
+      );
     }
   }
 

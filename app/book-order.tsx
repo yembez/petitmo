@@ -19,7 +19,7 @@ import { scale } from '@/utils/responsive';
 import { getUserTier } from '@/lib/userTier';
 import { getLastGuestExportEmail, setLastGuestExportEmail } from '@/lib/guestExportPrefs';
 import { calculateBookPriceEuros, type DiscountPercent } from '@/lib/printedBookQuote';
-import { getBook, validateFreeTierBookMemoryLimits } from '@/services/books';
+import { getBook, resolveBookCoverPrintUri, validateFreeTierBookMemoryLimits } from '@/services/books';
 import { getChildren } from '@/services/children';
 import { isInitExportConfigured } from '@/services/initExportApi';
 import { initPrintOrderExport } from '@/services/printBookOrder';
@@ -28,6 +28,7 @@ import {
   generateBookPdfViaServerAsGuest,
   generateBookPdfWithExportTicket,
   collectMemoriesFromPagesForPdf,
+  type GenerateBookPdfServerInput,
 } from '@/services/bookPdfServer';
 import { BookPdfGeneratingOverlay } from '@/components/BookPdfGeneratingOverlay';
 import { getBookExportPrepIssues, runBookExportPrepInBackground } from '@/services/bookExportPrep';
@@ -68,6 +69,21 @@ type FieldKey =
 
 function isValidEmail(s: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim().toLowerCase());
+}
+
+/** Couverture fraîche depuis SQLite (évite un pending stale après changement dans l’aperçu). */
+async function withFreshBookCoverPhotoUrl(
+  payload: GenerateBookPdfServerInput,
+): Promise<GenerateBookPdfServerInput> {
+  try {
+    const book = await getBook(payload.bookId);
+    if (!book) return payload;
+    const fresh = resolveBookCoverPrintUri(book)?.trim() || null;
+    if (!fresh) return payload;
+    return { ...payload, coverPhotoUrl: fresh };
+  } catch {
+    return payload;
+  }
 }
 
 function pickAddressFromJson(
@@ -348,11 +364,11 @@ export default function BookOrderScreen() {
       }
       setSubmitting(true);
       try {
-        const payload = pendingPayload;
-        if (!payload) {
+        if (!pendingPayload) {
           setFieldErrors({ submit: 'Aucun aperçu de livre chargé. Repasse par l’aperçu du livre.' });
           return;
         }
+        const payload = await withFreshBookCoverPhotoUrl(pendingPayload);
 
         void getBookExportPrepIssues({
           pages: payload.pages,
@@ -460,11 +476,12 @@ export default function BookOrderScreen() {
     setSubmitting(true);
     setPrepHint(null);
     try {
-      const payload = await getPendingBookOrderPdfPayload();
-      if (!payload) {
+      const pending = await getPendingBookOrderPdfPayload();
+      if (!pending) {
         setFieldErrors({ submit: 'Aucun aperçu de livre chargé. Repasse par l’aperçu du livre.' });
         return;
       }
+      const payload = await withFreshBookCoverPhotoUrl(pending);
 
       // Le flux guest gère désormais photo + audio + vidéo via upload vers le serveur PDF (ticket),
       // donc on ne bloque plus ici sur des médias locaux (préparation best-effort uniquement).

@@ -96,7 +96,9 @@ function freshCoverUriFromMatchedMemory(
   if (variant === 'print') {
     const printUri = getBookPhotoPrintUri(memory, coverRef);
     if (printUri) return printUri;
-    return null;
+    // Pas de print encore : même souvenir que l’aperçu (display), pas la copie book_covers.
+    const display = firstNonEmptyUri(memory.display_url, memory.media_url, coverRef);
+    return display ? normalizeMemoryMediaUriForDisplay(display) || display : null;
   }
   const fallback = normalizeMemoryMediaUriForDisplay(coverRef.trim());
   return fallback || null;
@@ -628,7 +630,9 @@ export function resolveBookCoverDisplayUri(
       return normalizeMemoryMediaUriForDisplay(direct) || direct;
     }
 
-    if (variant === 'print' || variant === 'list') {
+    // Liste seulement : copie `book_covers/` (peut être stale pour l’export print).
+    // Print : ne pas retomber ici — sinon PDF ≠ aperçu après changement de couverture.
+    if (variant === 'list') {
       const dedicated = dedicatedBookCoverUriForBook(book.id);
       if (dedicated) return dedicated;
     }
