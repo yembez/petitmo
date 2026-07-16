@@ -177,7 +177,7 @@ Variables Railway (service `petitmo`) :
 | Variable | Rôle |
 |----------|------|
 | `GELATO_API_KEY` | Clé API dashboard Gelato |
-| `GELATO_PRODUCT_UID` | Livre photo 21×28 couverture rigide |
+| `GELATO_PRODUCT_UID` | Livre photo **21×28 cm** couverture rigide (portrait). **Pas** le 20×20 / 8×8. |
 | `GELATO_SHIPMENT_METHOD_UID` | `standard` (ou UID quote API) |
 | `GELATO_CURRENCY` | `EUR` |
 | `GELATO_DEFAULT_PHONE` | Téléphone livraison (requis API) |

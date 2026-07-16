@@ -7,7 +7,7 @@ export function gelatoInnerPages(pages: BookPageServer[]): BookPageServer[] {
 
 /**
  * Gelato photobook : spread couverture + garde avant + N intérieures + garde arrière.
- * Ex. 30 pages intérieures → 33 pages PDF (cf. template Gelato 8×11).
+ * Ex. 30 pages intérieures → 33 pages PDF (template Gelato photobook 21×28 / ~8.3×11).
  */
 export function gelatoPhotobookPdfPageCount(pages: BookPageServer[]): number {
   return gelatoInnerPages(pages).length + 3;

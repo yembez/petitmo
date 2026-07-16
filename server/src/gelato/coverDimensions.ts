@@ -82,3 +82,24 @@ export async function fetchGelatoCoverLayout(
     spine,
   };
 }
+
+/**
+ * Petitmo = livre photo portrait **210×280 mm (21×28)**, pas le carré 20×20 / 8×8.
+ * Si `GELATO_PRODUCT_UID` pointe vers un autre SKU, Gelato imprime le mauvais format
+ * alors que l’app / le PDF sont dimensionnés en 21×28.
+ */
+export function assertGelatoCoverLayoutMatchesPetitmo(layout: GelatoCoverLayout): void {
+  const { widthMm: w, heightMm: h } = layout.contentFront;
+  const ratio = h / w;
+  const isSquare = Math.abs(ratio - 1) < 0.12;
+  const looksLike20x20 = w >= 185 && w <= 215 && h >= 185 && h <= 215;
+  const portraitOk = ratio >= 1.2 && w >= 195 && w <= 230 && h >= 255 && h <= 310;
+
+  if (isSquare || looksLike20x20 || !portraitOk) {
+    throw new Error(
+      `GELATO_PRODUCT_UID incorrect pour Petitmo : panneau avant ${w.toFixed(0)}×${h.toFixed(0)} mm ` +
+        `(productUid=${layout.productUid}). Attendu : livre photo portrait ~210×280 mm (21×28), ` +
+        `pas Hard Cover 20×20 / 8×8. Corrige la variable Railway GELATO_PRODUCT_UID.`,
+    );
+  }
+}
