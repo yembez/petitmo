@@ -3,7 +3,10 @@ import { Platform } from 'react-native';
 import { documentDirectory } from 'expo-file-system/legacy';
 import { extractMediaBucketPath } from '@/lib/mediaSignedUrl';
 import { peekFeedBootstrapDisplayUrls } from '@/services/feedLocalPhotoCache';
-import { rebaseSandboxUriToCurrentContainer } from '@/utils/localMediaReadable';
+import {
+  isSandboxUriFromForeignContainer,
+  rebaseSandboxUriToCurrentContainer,
+} from '@/utils/localMediaReadable';
 function asTrimmedStringArray(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -23,6 +26,18 @@ function firstNonEmpty(...candidates: (string | null | undefined)[]): string {
 export function normalizeMemoryMediaUriForDisplay(u: string): string {
   const raw = u.trim();
   if (!raw) return '';
+  // Expo Image a parfois résolu un chemin Storage nu → `…/Petitmo.app/<uuid>/…/photo/…` (Bundle mort).
+  const fromBundle = extractMediaBucketPath(raw);
+  if (fromBundle && (raw.includes('/Bundle/Application/') || /\/[^/]+\.app\//i.test(raw) || raw === fromBundle || raw.replace(/^file:\/\//i, '') === fromBundle)) {
+    // Toujours renvoyer le chemin bucket nu (à signer) — jamais file:// Bundle.
+    if (raw.includes('/Bundle/Application/') || /\/[^/]+\.app\//i.test(raw) || raw.startsWith('file:')) {
+      return fromBundle;
+    }
+  }
+  const bundleLeak = raw.match(/\.app\/((?:guest\/|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/).+)$/i);
+  if (bundleLeak?.[1] && extractMediaBucketPath(bundleLeak[1])) {
+    return bundleLeak[1];
+  }
   // Rebase container iOS (nouvel UUID après build/réinstall) avant tout : sinon `file://…/<ancien UUID>/…` mort.
   const t = rebaseSandboxUriToCurrentContainer(raw);
   if (
@@ -33,10 +48,16 @@ export function normalizeMemoryMediaUriForDisplay(u: string): string {
     t.startsWith('assets-library://') ||
     t.startsWith('data:')
   ) {
+    // file:// Bundle déjà traité supra ; double garde.
+    if (t.includes('/Bundle/Application/') || /\/[^/]+\.app\//i.test(t)) {
+      return extractMediaBucketPath(t) ?? '';
+    }
     return t;
   }
   // Chemin objet Storage (`uuid/.../photo/...`) — pas un fichier local ; évite `file://` incorrect après réinstall.
   if (extractMediaBucketPath(t)) return t;
+  // Ne jamais préfixer file:// un chemin qui ressemble à Storage (uuid/…).
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(t) || t.startsWith('guest/')) return t;
   const path = t.startsWith('/') ? t : `/${t}`;
   return `file://${path}`;
 }
@@ -81,6 +102,13 @@ export function pickPhotoUriForOverlayPalette(memory: Memory): string {
   return raw ? normalizeMemoryMediaUriForDisplay(raw) : '';
 }
 
+function isUnusableLocalPhotoPath(path: string): boolean {
+  const t = path.trim();
+  if (!t) return true;
+  if (t.includes('/Bundle/Application/')) return true;
+  return isSandboxUriFromForeignContainer(t);
+}
+
 /** Une case d’album : `extra_photo_paths` peut pointer vers un fichier sandbox mort. */
 function pickAlbumExtraSlotNormalized(
   localExtra: string | undefined,
@@ -90,7 +118,8 @@ function pickAlbumExtraSlotNormalized(
 ): string {
   const loc = typeof localExtra === 'string' ? localExtra.trim() : '';
   const rem = firstNonEmpty(display, thumb, original);
-  const raw = loc || rem;
+  const locOk = loc && !isUnusableLocalPhotoPath(loc);
+  const raw = locOk ? loc : rem || loc;
   return raw ? normalizeMemoryMediaUriForDisplay(raw) : '';
 }
 
@@ -372,10 +401,37 @@ export function getPrimaryPhotoUriForBookMaquetteDisplay(memory: Memory): string
   return pickPrimaryPhotoNormalizedForFeedAndViewer(memory);
 }
 
+/**
+ * Aperçu maquette livre pour un slot photo précis (album / favori).
+ * `photoRef` absent = slot principal (0).
+ */
+export function getPhotoUriForBookMaquetteDisplay(memory: Memory, photoRef?: string): string {
+  if (memory.type !== 'photo') return '';
+  const ref = photoRef?.trim() ?? '';
+  let slotIndex = ref ? indexOfPhotoUrlInFeed(memory, ref) : 0;
+  if (slotIndex < 0) slotIndex = 0;
+  if (slotIndex === 0) return getPrimaryPhotoUriForBookMaquetteDisplay(memory);
+
+  const extraIdx = slotIndex - 1;
+  const localExtras = asTrimmedStringArray(memory.extra_photo_paths);
+  const thumbs = asTrimmedStringArray(memory.extra_thumb_urls);
+  const displays = asTrimmedStringArray(memory.extra_display_urls);
+  const originals = asTrimmedStringArray(memory.extra_photo_urls);
+  return pickAlbumExtraSlotNormalized(
+    localExtras[extraIdx],
+    displays[extraIdx],
+    thumbs[extraIdx],
+    originals[extraIdx],
+  );
+}
+
 /** Collecte les refs cloud à pré-signer avant affichage maquette livre. */
 export function collectBookMaquetteCloudMediaRefs(
   memories: readonly Memory[],
   coverUri?: string | null,
+  memoryPhotoRefs?: Record<string, string>,
+  /** Toutes les pages (multi-photos d’un même album). */
+  pageEntries?: readonly { memoryId: string; photoRef?: string }[],
 ): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -388,9 +444,24 @@ export function collectBookMaquetteCloudMediaRefs(
     out.push(t);
   };
   add(coverUri);
+  const byId = new Map(memories.map(m => [m.id, m]));
+  if (pageEntries && pageEntries.length > 0) {
+    for (const e of pageEntries) {
+      const m = byId.get(e.memoryId.trim());
+      if (!m) continue;
+      if (m.type === 'photo') {
+        add(getPhotoUriForBookMaquetteDisplay(m, e.photoRef ?? memoryPhotoRefs?.[m.id]));
+      } else if (m.type === 'video') {
+        add(getVideoPosterUriForBookPreview(m));
+      } else if (m.type === 'voice') {
+        add(getVoiceCoverUriForBookPreview(m));
+      }
+    }
+    return out;
+  }
   for (const m of memories) {
     if (m.type === 'photo') {
-      add(getPrimaryPhotoUriForBookMaquetteDisplay(m));
+      add(getPhotoUriForBookMaquetteDisplay(m, memoryPhotoRefs?.[m.id]));
     } else if (m.type === 'video') {
       add(getVideoPosterUriForBookPreview(m));
     } else if (m.type === 'voice') {

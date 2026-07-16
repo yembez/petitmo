@@ -11,8 +11,13 @@ import {
   enqueueGuestRawUpload,
   getPendingGuestRawUploadsCountForKeys,
   getPendingGuestRawUploadsCount,
+  getPendingGuestRawUploadLastErrors,
   processPendingGuestRawUploads,
 } from '@/services/pendingRawGuestUploads';
+
+const HARD_TIMEOUT_MS = 3 * 60_000;
+const SLOW_HINT_MS = 45_000;
+const STUCK_AFTER_PARTIAL_MS = 90_000;
 
 function parsePriceEuros(raw: string | string[] | undefined): number {
   const s = Array.isArray(raw) ? raw[0] : raw;
@@ -59,6 +64,8 @@ export default function BookFinalizeMediaScreen() {
   const [phase, setPhase] = useState<'finalizing' | 'done' | 'needs_network'>('finalizing');
   const [progressPct, setProgressPct] = useState(0);
   const [slowHint, setSlowHint] = useState(false);
+  const [statusLine, setStatusLine] = useState('');
+  const cancelledRef = useRef(false);
 
   const targetKeysRef = useRef<string[]>([]);
   const totalRef = useRef<number>(0);
@@ -77,12 +84,16 @@ export default function BookFinalizeMediaScreen() {
   }, [email, marketingOptIn, params.exportMode, priceEuros, router]);
 
   const startFinalization = useCallback(async () => {
+    cancelledRef.current = false;
     if (!exportTicket) {
       setPhase('needs_network');
+      setStatusLine('Jeton d’export manquant.');
       return;
     }
     setPhase('finalizing');
     setSlowHint(false);
+    setStatusLine('');
+    setProgressPct(0);
 
     const payload = await getPendingBookOrderPdfPayload();
     const memories = payload
@@ -107,7 +118,7 @@ export default function BookFinalizeMediaScreen() {
           localUri: local,
           mimeType: kind === 'video' ? mimeTypeForVideo(local) : mimeTypeForAudio(),
           policy: 'finalize_only',
-        })
+        }),
       );
     }
 
@@ -131,11 +142,12 @@ export default function BookFinalizeMediaScreen() {
     }
 
     const startedAt = Date.now();
-    const slowTimer = setTimeout(() => setSlowHint(true), 90_000);
+    let lastProgressAt = startedAt;
+    let lastDone = 0;
+    const slowTimer = setTimeout(() => setSlowHint(true), SLOW_HINT_MS);
     try {
-      // Boucle jusqu’à ce que tous les keys ciblés aient disparu de la queue.
-      // On force ici car c’est une étape “fenêtre ouverte”.
-      while (true) {
+      while (!cancelledRef.current) {
+        setStatusLine('Envoi des médias…');
         await processPendingGuestRawUploads({ force: true });
         const left =
           targetKeysRef.current.length > 0
@@ -145,15 +157,46 @@ export default function BookFinalizeMediaScreen() {
         const done = Math.max(0, Math.min(total, total - left));
         setProgressPct(Math.round((done / total) * 100));
 
+        if (done > lastDone) {
+          lastDone = done;
+          lastProgressAt = Date.now();
+        }
+
         if (left <= 0) break;
 
-        // Si ça dépasse ~2min et qu’on n’avance pas, on propose “pause”.
-        if (Date.now() - startedAt > 120_000 && done === 0) {
+        const elapsed = Date.now() - startedAt;
+        const stalled = Date.now() - lastProgressAt > STUCK_AFTER_PARTIAL_MS;
+
+        if (elapsed > HARD_TIMEOUT_MS || (elapsed > 60_000 && stalled)) {
+          const errs = await getPendingGuestRawUploadLastErrors(
+            targetKeysRef.current.length > 0 ? targetKeysRef.current : undefined,
+          );
+          if (__DEV__ && errs.length > 0) {
+            console.warn('[book-finalize-media] timeout / stall', errs);
+          }
+          setStatusLine(
+            errs[0]?.lastError
+              ? `Dernière erreur : ${errs[0].lastError.slice(0, 120)}`
+              : 'La connexion semble insuffisante pour terminer.',
+          );
           setPhase('needs_network');
           return;
         }
-        await new Promise(r => setTimeout(r, 800));
+
+        const errs = await getPendingGuestRawUploadLastErrors(
+          targetKeysRef.current.length > 0 ? targetKeysRef.current : undefined,
+        );
+        const abandoned = errs.filter(e => e.attempts >= 6);
+        if (abandoned.length > 0 && abandoned.length >= left) {
+          setStatusLine(abandoned[0]?.lastError?.slice(0, 120) || 'Échec upload médias.');
+          setPhase('needs_network');
+          return;
+        }
+
+        await new Promise(r => setTimeout(r, 600));
       }
+
+      if (cancelledRef.current) return;
 
       setProgressPct(100);
       setPhase('done');
@@ -171,6 +214,9 @@ export default function BookFinalizeMediaScreen() {
         setLoading(false);
       }
     })();
+    return () => {
+      cancelledRef.current = true;
+    };
   }, [startFinalization]);
 
   const onRetry = useCallback(() => {
@@ -178,7 +224,8 @@ export default function BookFinalizeMediaScreen() {
   }, [startFinalization]);
 
   const onLater = useCallback(() => {
-    // UX: on laisse la reprise silencieuse au prochain lancement (queue persistée).
+    // UX: reprise silencieuse au prochain lancement pour les items `auto` ;
+    // finalize_only reste en file jusqu’à un nouvel essai / prochain parcours.
     goToConfirmation();
   }, [goToConfirmation]);
 
@@ -197,28 +244,43 @@ export default function BookFinalizeMediaScreen() {
           <>
             <Text style={styles.title}>Petite pause ❤️</Text>
             <Text style={styles.sub}>
-              Nous avons besoin d’une meilleure connexion pour terminer votre livre.
+              Nous avons besoin d’une meilleure connexion pour terminer les audios et vidéos (QR) de votre livre.
             </Text>
+            {statusLine ? <Text style={styles.errLine}>{statusLine}</Text> : null}
             <Pressable style={styles.cta} onPress={onRetry} hitSlop={10}>
               <Text style={styles.ctaText}>Réessayer</Text>
             </Pressable>
             <Pressable onPress={onLater} hitSlop={10} style={styles.secondaryWrap}>
-              <Text style={styles.secondaryText}>Plus tard</Text>
+              <Text style={styles.secondaryText}>Continuer sans attendre</Text>
             </Pressable>
           </>
         ) : (
           <>
             <Text style={styles.title}>Dernière étape ❤️</Text>
-            <Text style={styles.sub}>Nous sécurisons les souvenirs audio de votre livre.</Text>
+            <Text style={styles.sub}>Nous sécurisons les audios et vidéos (QR) de votre livre.</Text>
             <Text style={styles.sub2}>Gardez cette fenêtre ouverte quelques instants.</Text>
 
-            <View style={styles.progressWrap} accessibilityRole="progressbar" accessibilityValue={{ now: progressPct, min: 0, max: 100 }}>
+            <View
+              style={styles.progressWrap}
+              accessibilityRole="progressbar"
+              accessibilityValue={{ now: progressPct, min: 0, max: 100 }}
+            >
               <View style={[styles.progressFill, { width: `${progressPct}%` }]} />
             </View>
             <Text style={styles.progressLabel}>{progressPct}%</Text>
 
+            {statusLine ? <Text style={styles.statusLine}>{statusLine}</Text> : null}
+
             {slowHint ? (
-              <Text style={styles.slowHint}>Nous avons presque terminé. Merci de garder cette fenêtre ouverte encore quelques instants.</Text>
+              <>
+                <Text style={styles.slowHint}>
+                  Cela prend plus longtemps que prévu (gros fichier ou réseau). Tu peux continuer — on
+                  réessaiera plus tard.
+                </Text>
+                <Pressable onPress={onLater} hitSlop={10} style={styles.secondaryWrap}>
+                  <Text style={styles.secondaryText}>Continuer sans attendre</Text>
+                </Pressable>
+              </>
             ) : (
               <Text style={styles.hint}>Cela peut prendre jusqu’à une minute selon votre connexion.</Text>
             )}
@@ -266,6 +328,21 @@ const styles = StyleSheet.create({
     borderRadius: scale(999),
   },
   progressLabel: { marginTop: scale(10), textAlign: 'center', color: THEME.textMuted, fontSize: scale(14) },
+  statusLine: {
+    marginTop: scale(8),
+    textAlign: 'center',
+    color: THEME.textMuted,
+    fontSize: scale(12),
+    lineHeight: scale(16),
+  },
+  errLine: {
+    marginTop: scale(8),
+    marginBottom: scale(4),
+    textAlign: 'center',
+    color: '#B91C1C',
+    fontSize: scale(13),
+    lineHeight: scale(18),
+  },
   hint: { marginTop: scale(14), textAlign: 'center', color: THEME.textMuted, fontSize: scale(14), lineHeight: scale(20) },
   slowHint: { marginTop: scale(14), textAlign: 'center', color: THEME.textMuted, fontSize: scale(14), lineHeight: scale(20) },
   spinnerRow: { marginTop: scale(14), alignItems: 'center' },
@@ -280,4 +357,3 @@ const styles = StyleSheet.create({
   secondaryWrap: { marginTop: scale(14), alignItems: 'center' },
   secondaryText: { color: THEME.textMuted, fontSize: scale(15) },
 });
-

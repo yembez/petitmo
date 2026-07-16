@@ -31,6 +31,7 @@ export type BookBrowseLeafProps = {
   rotations: Record<string, number>;
   typography: BookMaquetteTypography;
   folioFont?: string;
+  memoryPhotoRef?: string | null;
   prefetchUri: string | null;
   onOpenEditor: (pageIndex: number) => void;
   onPrefetchImage: (uri: string | null) => void;
@@ -52,6 +53,7 @@ function BookBrowseLeafInner({
   rotations,
   typography,
   folioFont,
+  memoryPhotoRef,
   prefetchUri,
   onOpenEditor,
   onPrefetchImage,
@@ -92,6 +94,7 @@ function BookBrowseLeafInner({
             child={child}
             familyChildren={familyChildren}
             memory={memory}
+            memoryPhotoRef={memoryPhotoRef}
             rotation={memory ? rotations[memory.id] ?? 0 : 0}
             photoCrop={
               memory &&

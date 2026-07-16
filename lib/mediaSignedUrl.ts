@@ -23,11 +23,30 @@ const BARE_MEDIA_PATH_RE =
  * venir d’un autre sous-domaine / variante, ou `Constants.expoConfig` peut diverger — sans
  * chemin extrait, `createSignedUrl` n’est jamais appelé et les images restent cassées.
  */
+/**
+ * True si Expo Image / RN résoudrait ce chemin sous `…/Petitmo.app/<bucketPath>` (WARN Bundle).
+ */
+export function isAppBundleMediaLeakUri(uri: string | null | undefined): boolean {
+  const t = (uri ?? '').trim();
+  if (!t) return false;
+  return t.includes('/Bundle/Application/') || /\/[^/]+\.app\//i.test(t);
+}
+
 export function extractMediaBucketPath(urlOrPath: string): string | null {
   const s = urlOrPath.trim();
   if (!s) return null;
+  // iOS : bare path résolu → `file:///…/Petitmo.app/uuid/child/photo/…`
+  const bundleLeak = s.match(
+    /\.app\/((?:guest\/|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/).+)$/i,
+  );
+  if (bundleLeak?.[1] && BARE_MEDIA_PATH_RE.test(bundleLeak[1])) {
+    return bundleLeak[1];
+  }
   if (!s.startsWith('http')) {
     if (BARE_MEDIA_PATH_RE.test(s)) return s;
+    // `file:///uuid/...` (file:// à tort sur un chemin Storage)
+    const noFile = s.replace(/^file:\/\//i, '');
+    if (BARE_MEDIA_PATH_RE.test(noFile)) return noFile;
     return null;
   }
   const m = s.match(/\/storage\/v1\/object\/(?:public|sign|authenticated)\/media\/(.+?)(?:\?|$)/i);
@@ -144,11 +163,30 @@ export async function getSignedUrlAfterMediaUpload(filePath: string): Promise<st
   return data.signedUrl;
 }
 
+/**
+ * True si `uri` est un chemin Storage nu (`uuid/...`) — **jamais** le passer tel quel à
+ * Expo Image : iOS le résout en relatif sous `Petitmo.app/…` → WARN Bundle introuvable.
+ */
+export function isBareMediaBucketPath(uri: string | null | undefined): boolean {
+  const t = (uri ?? '').trim();
+  if (!t) return false;
+  // Bundle leak = chemin Storage déguisé — à signer, jamais à afficher tel quel.
+  if (isAppBundleMediaLeakUri(t) && extractMediaBucketPath(t)) return true;
+  if (/^https?:\/\//i.test(t) || t.startsWith('file:') || t.startsWith('content:') || t.startsWith('ph://')) {
+    return false;
+  }
+  return !!extractMediaBucketPath(t);
+}
+
 export function useSignedMediaUrl(url: string | null | undefined): string | null {
   const raw = typeof url === 'string' ? url.trim() : '';
   const [out, setOut] = useState<string | null>(() => {
     if (!raw) return null;
-    return peekSignedMediaDisplayUrl(raw) ?? raw;
+    const peeked = peekSignedMediaDisplayUrl(raw);
+    if (peeked && !isBareMediaBucketPath(peeked)) return peeked;
+    // Attendre la signature — ne pas exposer le chemin nu (résolu → Bundle iOS).
+    if (isBareMediaBucketPath(raw)) return null;
+    return peeked ?? raw;
   });
 
   useEffect(() => {
@@ -157,7 +195,7 @@ export function useSignedMediaUrl(url: string | null | undefined): string | null
       return;
     }
     const cached = peekSignedMediaDisplayUrl(raw);
-    if (cached) {
+    if (cached && !isBareMediaBucketPath(cached)) {
       setOut(prev => (prev === cached ? prev : cached));
       return;
     }
@@ -176,7 +214,13 @@ export function useSignedMediaUrl(url: string | null | undefined): string | null
           changed: next !== raw,
         });
       }
-      if (alive) setOut(prev => (prev === next ? prev : next || null));
+      if (!alive) return;
+      // Signature échouée + chemin bucket → null (évite Bundle WARN).
+      if (isBareMediaBucketPath(next)) {
+        setOut(prev => (prev == null ? prev : null));
+        return;
+      }
+      setOut(prev => (prev === next ? prev : next || null));
     })();
     return () => {
       alive = false;

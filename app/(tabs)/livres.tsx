@@ -27,6 +27,7 @@ import { THEME } from '@/constants/theme';
 import BookCoverThumbnail from '@/components/BookCoverThumbnail';
 import { bookCoverPeriodLabelForBook } from '@/utils/bookCoverPeriodLabel';
 import {
+  bookPageEntries,
   booksListVisualSignature,
   deleteBook,
   healAllBookCovers,
@@ -41,7 +42,10 @@ import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { normalizeMemoryMediaUriForDisplay } from '@/utils/memoryPhotos';
 import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
 import TabSceneTransition from '@/components/TabSceneTransition';
-import { setPendingFavorisAddToBookId } from '@/services/favorisBookAddFlow';
+import {
+  setFavorisAddToBookSession,
+  setPendingFavorisAddToBookId,
+} from '@/services/favorisBookAddFlow';
 
 /** Priorité au swipe horizontal « supprimer » (comme le fil). */
 const BOOK_SWIPE_AXIS_LOCK = {
@@ -85,6 +89,7 @@ function bookListRowPropsEqual(prev: BookListRowProps, next: BookListRowProps): 
   for (let i = 0; i < a.memoryIds.length; i++) {
     if (a.memoryIds[i] !== b.memoryIds[i]) return false;
   }
+  if (bookPageEntries(a).length !== bookPageEntries(b).length) return false;
   return resolveBookListRowCoverUri(a) === resolveBookListRowCoverUri(b);
 }
 
@@ -106,7 +111,7 @@ const BookListRow = memo(function BookListRow({
   const coverCropKey = coverCrop
     ? `${coverCrop.xPct}-${coverCrop.yPct}-${coverCrop.scale}`
     : '';
-  const count = book.memoryIds.length;
+  const count = bookPageEntries(book).length;
   const dateLabel = bookCoverPeriodLabelForBook(book);
 
   const handleRowPress = () => {
@@ -302,6 +307,7 @@ function LivresScreen() {
             {
               text: 'Ajouter des favoris',
               onPress: () => {
+                setFavorisAddToBookSession(book.id);
                 setPendingFavorisAddToBookId(book.id);
                 router.push({
                   pathname: '/(tabs)/favoris',

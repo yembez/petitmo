@@ -47,6 +47,14 @@ import {
   useMemoryEditorialBoldFont,
 } from '@/contexts/MemoryTextFontContext';
 import { loadMemoriesForFavorisTab, memoryShouldAppearInFavoris } from '@/services/favorisMemories';
+import {
+  buildFavorisGridItems,
+  buildMemoryPhotoRefsFromItems,
+  favorisItemWouldChangeBook,
+  isFavorisItemInBook,
+  pageEntryForFavorisGridItem,
+  type FavorisGridItem,
+} from '@/utils/favorisGridItems';
 import { requestMissingMediaDerivatives } from '@/services/media';
 import { healDeadLocalMediaPointersForMemories } from '@/services/memoryDisplayHeal';
 import FavorisVideoThumb from '@/components/feed/FavorisVideoThumb';
@@ -54,18 +62,19 @@ import { useFeedVideoPosterDisplayUrl } from '@/hooks/useFeedVideoPosterDisplayU
 import { useFeedVideoPlaybackUri } from '@/hooks/useFeedVideoPlaybackUri';
 import { normalizeVideoPlaybackUri } from '@/utils/videoMediaUri';
 import { getOrSelectFirstChild } from '@/services/children';
-import { getLocalMemoryById, getLocalBook } from '@/lib/localDb';
+import { getLocalMemoryById } from '@/lib/localDb';
 import {
   feedChildHydrationSnapshot,
   feedMemoriesHydrationSnapshot,
 } from '@/services/tabScreensCache';
 import type { Memory } from '@/types/local';
-import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
+import { isBareMediaBucketPath, useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { Image as ExpoImage } from 'expo-image';
 import {
   getAllPhotoUrls,
   getAllPhotoUrlsForFeed,
   parseFavoritePhotoUrls,
+  indexOfPhotoUrlInFeed,
   normalizePhotoUrlForCompare,
   mapPhotoUrlToThumb,
   getVoiceCoverUriForBookPreview,
@@ -80,103 +89,29 @@ import { clampAudioBookAnnotation } from '@/lib/audioBookAnnotation';
 import { AddToBookModal } from '@/components/AddToBookModal';
 import {
   addMemoriesToBook,
+  bookPageEntries,
   createBookWithMemories,
   dedupeMemoryIds,
+  getBookForFavorisAddTarget,
   upsertBook,
 } from '@/services/books';
 import {
   clearPendingFavorisAddToBookId,
   consumePendingFavorisAddToBookId,
+  peekFavorisAddToBookSession,
   setFavorisAddToBookSession,
   clearFavorisAddToBookSession,
+  subscribeFavorisAddToBookSession,
 } from '@/services/favorisBookAddFlow';
 
-type FavListItem = {
-  key: string;
-  memory: Memory;
-  thumbUrl: string;
-  kind: 'whole' | 'photo';
-  /** Pour `kind === 'photo'` : URL originale dans `favorite_photo_urls` (alignement index avec le fil). */
-  favPhotoOriginalUrl?: string;
-};
+type FavListItem = FavorisGridItem;
 
-function thumbUri(m: Memory): string | null {
-  if (m.type === 'voice') {
-    const u = getVoiceCoverUriForBookPreview(m);
-    return u.trim() || null;
-  }
-  if (m.type === 'video') {
-    const u = getVideoPosterUriForFeedAndViewer(m);
-    return u.trim() || null;
-  }
-  return null;
-}
-
-/** Identique à `FilMemoryRow` : vignette vidéo dans le fil. */
 function feedVideoPosterRaw(memory: Memory): string {
   return getVideoPosterUriForFeedAndViewer(memory);
 }
 
-/** Identique au fil : cover vocale rebasée + normalisée. */
 function feedVoiceCoverRaw(memory: Memory): string {
   return getVoiceCoverUriForFeedAndViewer(memory);
-}
-
-function primaryDisplayThumb(m: Memory): string {
-  if (m.type === 'photo') {
-    return getAllPhotoUrlsForFeed(m)[0]?.trim() || '';
-  }
-  if (m.type === 'video') {
-    const v = feedVideoPosterRaw(m);
-    if (v) return v;
-  }
-  if (m.type === 'voice') {
-    const c = feedVoiceCoverRaw(m);
-    if (c) return c;
-  }
-  return thumbUri(m) ?? '';
-}
-
-function buildFavoriteItems(memories: Memory[]): FavListItem[] {
-  const items: FavListItem[] = [];
-  for (const m of memories) {
-    const primary = primaryDisplayThumb(m);
-    const listed = memoryShouldAppearInFavoris(m);
-
-    if (listed && m.type !== 'photo') {
-      items.push({
-        key: `${m.id}-whole`,
-        memory: m,
-        thumbUrl: primary,
-        kind: 'whole',
-      });
-    } else if (m.is_favorite && m.type === 'photo') {
-      items.push({
-        key: `${m.id}-whole`,
-        memory: m,
-        thumbUrl: primary,
-        kind: 'whole',
-      });
-    }
-
-    if (m.type === 'photo') {
-      const favUrls = parseFavoritePhotoUrls(m);
-      const primaryNorm = normalizePhotoUrlForCompare(primary);
-      for (const url of favUrls) {
-        if (m.is_favorite && normalizePhotoUrlForCompare(url) === primaryNorm) continue;
-        items.push({
-          key: `${m.id}-photo-${normalizePhotoUrlForCompare(url)}`,
-          memory: m,
-          thumbUrl: mapPhotoUrlToThumb(m, url),
-          kind: 'photo',
-          favPhotoOriginalUrl: url,
-        });
-      }
-    }
-  }
-  return items.sort(
-    (a, b) => new Date(b.memory.created_at).getTime() - new Date(a.memory.created_at).getTime()
-  );
 }
 
 /** Items pour le diaporama (médias avec une vignette possible ; les photos résolvent comme le fil). */
@@ -284,10 +219,15 @@ function SlideshowSlideImage({
     memory.type === 'voice' ? (feedVoiceCoverRaw(memory) || item.thumbUrl.trim()).trim() : '';
 
   const signedVoice = useSignedMediaUrl(memory.type === 'voice' ? rawVoice || null : null);
+  const photoNorm = memory.type === 'photo' && rawPhoto
+    ? normalizeMemoryMediaUriForDisplay(rawPhoto)
+    : '';
+  const photoNeedsSign = !!photoNorm && isBareMediaBucketPath(photoNorm);
+  const signedPhoto = useSignedMediaUrl(photoNeedsSign ? photoNorm : null);
 
   const uriRaw =
     memory.type === 'photo'
-      ? rawPhoto
+      ? (signedPhoto?.trim() || (photoNeedsSign ? '' : photoNorm))
       : memory.type === 'voice'
         ? (signedVoice ?? rawVoice).trim()
         : '';
@@ -295,6 +235,9 @@ function SlideshowSlideImage({
 
   useEffect(() => {
     if (memory.type === 'video' || !uri) return;
+    if (isBareMediaBucketPath(uri) || uri.includes('/Bundle/Application/') || /\.app\//i.test(uri)) {
+      return;
+    }
     void ExpoImage.prefetch(uri).catch(() => {});
   }, [memory.type, uri]);
 
@@ -761,11 +704,7 @@ const GalleryTile = memo(function GalleryTile({
   let photoUri = '';
   if (memory.type === 'photo') {
     if (item.kind === 'photo' && item.favPhotoOriginalUrl) {
-      const slots = getAllPhotoUrlsForFeed(memory);
-      const fav = item.favPhotoOriginalUrl;
-      const idx = slots.findIndex(
-        u => normalizePhotoUrlForCompare(u) === normalizePhotoUrlForCompare(fav)
-      );
+      const idx = indexOfPhotoUrlInFeed(memory, item.favPhotoOriginalUrl);
       photoUri = ((idx >= 0 ? feedPhotoUrls[idx] : '') ?? '').trim() || thumbUrl.trim();
     } else {
       photoUri = feedPhotoUrls[0]?.trim() || thumbUrl.trim();
@@ -789,7 +728,7 @@ const GalleryTile = memo(function GalleryTile({
       ? normalizeMemoryMediaUriForDisplay((voiceCoverSigned ?? voiceCoverRaw).trim())
       : '';
 
-  const uri =
+  const uriRaw =
     memory.type === 'photo'
       ? normalizeMemoryMediaUriForDisplay(photoUri)
       : memory.type === 'video'
@@ -797,6 +736,14 @@ const GalleryTile = memo(function GalleryTile({
         : memory.type === 'voice'
           ? voiceCoverUri
           : normalizeMemoryMediaUriForDisplay(thumbUrl.trim());
+
+  const photoNeedsSign =
+    memory.type === 'photo' && !!uriRaw && isBareMediaBucketPath(uriRaw);
+  const photoSigned = useSignedMediaUrl(photoNeedsSign ? uriRaw : null);
+  const uri =
+    memory.type === 'photo'
+      ? (photoSigned?.trim() || (photoNeedsSign ? '' : uriRaw))
+      : uriRaw;
 
   const hasVideoThumb =
     memory.type === 'video' && (!!videoPosterUri.trim() || !!videoPlaybackUri);
@@ -1025,7 +972,20 @@ function FavorisScreen() {
   const [bookModalVisible, setBookModalVisible] = useState(false);
   const [createBookFlowTitle, setCreateBookFlowTitle] = useState<string | null>(null);
   const [addToBookTargetId, setAddToBookTargetId] = useState<string | null>(null);
+  /** Miroir de la session module (survive au blur / params perdues). */
+  const [addToBookSessionId, setAddToBookSessionId] = useState<string | null>(
+    () => peekFavorisAddToBookSession(),
+  );
   const createBookInFlightRef = useRef(false);
+
+  useEffect(() => {
+    return subscribeFavorisAddToBookSession(() => {
+      setAddToBookSessionId(peekFavorisAddToBookSession());
+    });
+  }, []);
+
+  const effectiveAddToBookTargetId =
+    (addToBookTargetId ?? addToBookSessionId)?.trim() || null;
 
   const load = useCallback(async (opts?: { background?: boolean }) => {
     const childId = await getOrSelectFirstChild();
@@ -1072,15 +1032,19 @@ function FavorisScreen() {
   const applyAddToBookIntent = useCallback((bookId: string) => {
     const id = bookId.trim();
     if (!id) return;
-    setAddToBookTargetId(id);
+    // Session déjà posée (depuis book-preview) : ne pas écraser une sélection en cours
+    // quand params/pending ré-appliquent le même intent.
+    const alreadySameTarget = peekFavorisAddToBookSession() === id;
     setFavorisAddToBookSession(id);
     setCreateBookFlowTitle(null);
     setSelectionMode(true);
-    setSelectedIds(new Set());
+    setAddToBookTargetId(id);
+    if (!alreadySameTarget) setSelectedIds(new Set());
   }, []);
 
   const handleExitSelection = useCallback(() => {
-    const returnBookId = addToBookTargetId;
+    const returnBookId =
+      (addToBookTargetId ?? peekFavorisAddToBookSession())?.trim() || null;
     exitSelection();
     if (returnBookId) {
       router.replace({ pathname: '/book-preview', params: { bookId: returnBookId } });
@@ -1112,6 +1076,14 @@ function FavorisScreen() {
       const pendingBookId = consumePendingFavorisAddToBookId();
       if (pendingBookId) {
         applyAddToBookIntent(pendingBookId);
+      } else {
+        // Reprise après blur : restaurer la cible sans vider la sélection en cours.
+        const sessionId = peekFavorisAddToBookSession();
+        if (sessionId) {
+          setAddToBookTargetId(sessionId);
+          setCreateBookFlowTitle(null);
+          setSelectionMode(true);
+        }
       }
 
       setStatusBarStyle('light');
@@ -1122,10 +1094,11 @@ function FavorisScreen() {
         return () => {
           setPullOverscrollPx(0);
           galleryScrollY.value = 0;
+          // Conserver sélection + livre cible pendant le flux « Ajouter au livre ».
+          if (peekFavorisAddToBookSession()) return;
           setSelectionMode(false);
           setSelectedIds(new Set());
           setAddToBookTargetId(null);
-          clearFavorisAddToBookSession();
         };
       }
 
@@ -1144,10 +1117,10 @@ function FavorisScreen() {
       return () => {
         setPullOverscrollPx(0);
         galleryScrollY.value = 0;
+        if (peekFavorisAddToBookSession()) return;
         setSelectionMode(false);
         setSelectedIds(new Set());
         setAddToBookTargetId(null);
-        clearFavorisAddToBookSession();
       };
     }, [applyAddToBookIntent, load])
   );
@@ -1211,25 +1184,32 @@ function FavorisScreen() {
     const id = typeof params.addToBookId === 'string' ? params.addToBookId.trim() : '';
     if (!id) return;
     applyAddToBookIntent(id);
-  }, [applyAddToBookIntent, params.addToBookId]);
+    router.setParams({ addToBookId: '' });
+  }, [applyAddToBookIntent, params.addToBookId, router]);
 
-  const favoriteItems = useMemo(() => buildFavoriteItems(memories), [memories]);
+  const favoriteItems = useMemo(() => buildFavorisGridItems(memories), [memories]);
 
   const galleryItems = useMemo(() => favoriteItems, [favoriteItems]);
 
-  const addToBookMemoryIdSet = useMemo(() => {
-    if (!addToBookTargetId) return null;
-    const book = getLocalBook(addToBookTargetId);
-    return new Set(book?.memoryIds ?? []);
-  }, [addToBookTargetId, memories]);
+  const addToBookTarget = useMemo(() => {
+    if (!effectiveAddToBookTargetId) return null;
+    return getBookForFavorisAddTarget(effectiveAddToBookTargetId);
+  }, [effectiveAddToBookTargetId, memories]);
 
-  const selectedMemoryIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const it of galleryItems) {
-      if (selectedIds.has(it.key)) ids.add(it.memory.id);
-    }
-    return [...ids];
-  }, [galleryItems, selectedIds]);
+  const selectedItems = useMemo(
+    () => galleryItems.filter(it => selectedIds.has(it.key)),
+    [galleryItems, selectedIds],
+  );
+
+  const selectedMemoryIds = useMemo(
+    () => dedupeMemoryIds(selectedItems.map(it => it.memory.id)),
+    [selectedItems],
+  );
+
+  const selectedMemoryPhotoRefs = useMemo(
+    () => buildMemoryPhotoRefsFromItems(galleryItems, selectedIds),
+    [galleryItems, selectedIds],
+  );
 
   const slideshowItems = useMemo(() => buildSlideshowItems(galleryItems), [galleryItems]);
 
@@ -1257,7 +1237,7 @@ function FavorisScreen() {
     return `${n} sélectionnés`;
   }, [selectedIds]);
 
-  const isBookAddFromSpreadFlow = addToBookTargetId != null;
+  const isBookAddFromSpreadFlow = effectiveAddToBookTargetId != null;
   const showSelectionBottomBar =
     isBookAddFromSpreadFlow || (selectionMode && selectedIds.size > 0);
 
@@ -1273,14 +1253,25 @@ function FavorisScreen() {
   }, [insets.bottom, isBookAddFromSpreadFlow, selectionMode, selectedIds.size]);
 
   const handleConfirmSelectionAction = useCallback(async () => {
-    if (selectedMemoryIds.length === 0) return;
     if (createBookInFlightRef.current) return;
+
+    const targetId = effectiveAddToBookTargetId;
+
+    if (selectedItems.length === 0) {
+      if (targetId) {
+        Alert.alert('Petitmo', 'Sélectionne au moins un souvenir à ajouter.');
+      }
+      return;
+    }
 
     if (createBookFlowTitle) {
       createBookInFlightRef.current = true;
       let updated: Awaited<ReturnType<typeof createBookWithMemories>> | null = null;
       try {
-        updated = await createBookWithMemories(createBookFlowTitle, selectedMemoryIds);
+        updated = await createBookWithMemories(createBookFlowTitle, selectedMemoryIds, {
+          pageEntries: selectedItems.map(pageEntryForFavorisGridItem),
+          memoryPhotoRefs: selectedMemoryPhotoRefs,
+        });
       } catch (e) {
         Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
         return;
@@ -1291,10 +1282,12 @@ function FavorisScreen() {
         Alert.alert('Petitmo', 'Livre introuvable.');
         return;
       }
-      for (const id of selectedMemoryIds) {
-        const m = getLocalMemoryById(id);
-        if (!m || m.type !== 'photo') continue;
-        const src = canonicalBookCoverPhotoRef(m).trim();
+      for (const item of selectedItems) {
+        const m = item.memory;
+        if (m.type !== 'photo') continue;
+        const src =
+          (item.kind === 'photo' ? item.favPhotoOriginalUrl : undefined)?.trim() ||
+          canonicalBookCoverPhotoRef(m).trim();
         if (src) {
           await upsertBook({ ...updated, coverPhotoUrl: src });
         }
@@ -1306,20 +1299,36 @@ function FavorisScreen() {
       return;
     }
 
-    if (addToBookTargetId) {
-      const targetId = addToBookTargetId;
-      const book = getLocalBook(targetId);
-      const inBook = new Set(book?.memoryIds ?? []);
-      const idsToAdd = dedupeMemoryIds(selectedMemoryIds.filter(id => !inBook.has(id)));
-      if (idsToAdd.length === 0) {
+    if (targetId) {
+      const book = getBookForFavorisAddTarget(targetId);
+      // APPEND : chaque tuile (y compris 2 photos du même album) = une page.
+      const changingItems = selectedItems.filter(it => favorisItemWouldChangeBook(it, book));
+      if (changingItems.length === 0) {
         Alert.alert('Petitmo', 'Ces souvenirs sont déjà dans le livre.');
         return;
       }
+      const pageEntriesToAdd = changingItems.map(pageEntryForFavorisGridItem);
+
       try {
-        const updated = await addMemoriesToBook(targetId, idsToAdd);
+        const beforePages = book ? bookPageEntries(book).length : 0;
+        const updated = await addMemoriesToBook(
+          targetId,
+          pageEntriesToAdd.map(e => e.memoryId),
+          { pageEntries: pageEntriesToAdd },
+        );
         if (!updated) {
           Alert.alert('Petitmo', 'Livre introuvable.');
           return;
+        }
+        const afterPages = bookPageEntries(updated).length;
+        if (__DEV__) {
+          console.log('[FavorisAddToBook]', {
+            targetId: targetId.slice(0, 8),
+            appended: pageEntriesToAdd.length,
+            newPages: Math.max(0, afterPages - beforePages),
+            beforePages,
+            afterPages,
+          });
         }
       } catch (e) {
         Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
@@ -1332,12 +1341,13 @@ function FavorisScreen() {
 
     setBookModalVisible(true);
   }, [
-    addToBookTargetId,
     createBookFlowTitle,
+    effectiveAddToBookTargetId,
     exitSelection,
-    galleryItems,
     router,
+    selectedItems,
     selectedMemoryIds,
+    selectedMemoryPhotoRefs,
   ]);
 
   const openMemory = useCallback(
@@ -1354,14 +1364,12 @@ function FavorisScreen() {
         tileSize={tileSize}
         selectionMode={selectionMode}
         isSelected={selectedIds.has(item.key)}
-        isAlreadyInTargetBook={
-          addToBookMemoryIdSet != null && addToBookMemoryIdSet.has(item.memory.id)
-        }
+        isAlreadyInTargetBook={addToBookTarget != null && isFavorisItemInBook(item, addToBookTarget)}
         onOpen={openMemory}
         onToggleSelect={toggleSelection}
       />
     ),
-    [tileSize, selectionMode, selectedIds, addToBookMemoryIdSet, openMemory, toggleSelection]
+    [tileSize, selectionMode, selectedIds, addToBookTarget, openMemory, toggleSelection]
   );
 
   const favoritesListHeader = useMemo(() => {
@@ -1429,7 +1437,13 @@ function FavorisScreen() {
                 showsVerticalScrollIndicator={false}
                 scrollEventThrottle={16}
                 ListHeaderComponent={favoritesListHeader}
-                extraData={{ heroHeight, selectionMode, selectionHeaderTitle, addToBookTargetId }}
+                extraData={{
+                  heroHeight,
+                  selectionMode,
+                  selectionHeaderTitle,
+                  addToBookTargetId: effectiveAddToBookTargetId,
+                  bookMemoryIds: addToBookTarget?.memoryIds ?? [],
+                }}
                 onScroll={e => {
                   const y = e.nativeEvent.contentOffset.y;
                   galleryScrollY.value = y;
@@ -1505,6 +1519,8 @@ function FavorisScreen() {
             visible={bookModalVisible}
             onClose={() => setBookModalVisible(false)}
             memoryIds={selectedMemoryIds}
+            memoryPhotoRefs={selectedMemoryPhotoRefs}
+            pageEntries={selectedItems.map(pageEntryForFavorisGridItem)}
             redirectToBooksOnDone
           />
         </View>

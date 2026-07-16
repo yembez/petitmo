@@ -4,6 +4,9 @@
  */
 import { NativeModules, Platform } from 'react-native';
 
+/** Évite un Promise qui ne se résout jamais (écran « Dernière étape » bloqué). */
+const DEFAULT_UPLOAD_TIMEOUT_MS = 8 * 60_000;
+
 export function isIosBackgroundSignedPutUploadAvailable(): boolean {
   return Platform.OS === 'ios' && !!NativeModules.VydiaRNFileUploader;
 }
@@ -19,6 +22,7 @@ export async function uploadFileToSignedPutUrlIosBackground(params: {
   signedUrl: string;
   localUri: string;
   mimeType: string;
+  timeoutMs?: number;
 }): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const Upload = require('react-native-background-upload').default as {
@@ -34,6 +38,7 @@ export async function uploadFileToSignedPutUrlIosBackground(params: {
       uploadId: string,
       listener: (data: Record<string, unknown>) => void
     ) => { remove: () => void };
+    cancelUpload?: (uploadId: string) => void;
   };
 
   const path = normalizeFileUri(params.localUri);
@@ -47,6 +52,8 @@ export async function uploadFileToSignedPutUrlIosBackground(params: {
     },
   });
 
+  const timeoutMs = params.timeoutMs ?? DEFAULT_UPLOAD_TIMEOUT_MS;
+
   return new Promise((resolve, reject) => {
     let settled = false;
     const subs: Array<{ remove: () => void }> = [];
@@ -58,9 +65,21 @@ export async function uploadFileToSignedPutUrlIosBackground(params: {
     const finish = (fn: () => void) => {
       if (settled) return;
       settled = true;
+      clearTimeout(timer);
       cleanup();
       fn();
     };
+
+    const timer = setTimeout(() => {
+      try {
+        Upload.cancelUpload?.(uploadId);
+      } catch {
+        // ignore
+      }
+      finish(() =>
+        reject(new Error(`SIGNED_UPLOAD_TIMEOUT (${Math.round(timeoutMs / 1000)}s)`)),
+      );
+    }, timeoutMs);
 
     subs.push(
       Upload.addListener('completed', uploadId, data => {
@@ -70,23 +89,23 @@ export async function uploadFileToSignedPutUrlIosBackground(params: {
         } else {
           const body = typeof data.responseBody === 'string' ? data.responseBody : '';
           finish(() =>
-            reject(new Error(`SIGNED_UPLOAD_FAILED (${code}) ${body}`.trim()))
+            reject(new Error(`SIGNED_UPLOAD_FAILED (${code}) ${body}`.trim())),
           );
         }
-      })
+      }),
     );
 
     subs.push(
       Upload.addListener('error', uploadId, data => {
         const msg = typeof data.error === 'string' ? data.error : 'BACKGROUND_UPLOAD_ERROR';
         finish(() => reject(new Error(msg)));
-      })
+      }),
     );
 
     subs.push(
       Upload.addListener('cancelled', uploadId, () => {
         finish(() => reject(new Error('SIGNED_UPLOAD_CANCELLED')));
-      })
+      }),
     );
   });
 }

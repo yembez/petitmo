@@ -1,6 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getInfoAsync } from 'expo-file-system/legacy';
 import { uploadAsync as uploadAsyncLegacy } from 'expo-file-system/legacy';
-import { isIosBackgroundSignedPutUploadAvailable, uploadFileToSignedPutUrlIosBackground } from '@/services/signedUrlIosBackgroundUpload';
+import {
+  isIosBackgroundSignedPutUploadAvailable,
+  uploadFileToSignedPutUrlIosBackground,
+} from '@/services/signedUrlIosBackgroundUpload';
 import { postGuestUploadUrls } from '@/services/initExportApi';
 
 type GuestRawKind = 'audio' | 'video';
@@ -31,8 +35,11 @@ type PendingGuestRawUpload = {
 const STORAGE_KEY = 'petitmo_pending_guest_raw_uploads_v1';
 const SOFT_CTA_AFTER_FAILS = 2;
 const SOFT_CTA_AFTER_MS = 10 * 60_000;
+/** En finalize forcée : abandonner un item après N échecs dans la fenêtre. */
+const FORCE_MAX_ATTEMPTS = 6;
 
 let processing = false;
+let processingWaiters: Array<() => void> = [];
 
 function now(): number {
   return Date.now();
@@ -71,6 +78,21 @@ export async function getPendingGuestRawUploadsCountForKeys(keys: string[]): Pro
   return list.filter(x => set.has(x.key)).length;
 }
 
+/** Dernière erreur connue (debug / UI finalize). */
+export async function getPendingGuestRawUploadLastErrors(
+  keys?: string[],
+): Promise<Array<{ key: string; lastError: string; attempts: number }>> {
+  const list = await readAll();
+  const set = keys && keys.length > 0 ? new Set(keys) : null;
+  return list
+    .filter(x => (set ? set.has(x.key) : true) && (x.lastError ?? '').trim())
+    .map(x => ({
+      key: x.key,
+      lastError: (x.lastError ?? '').trim(),
+      attempts: x.attempts ?? 0,
+    }));
+}
+
 async function writeAll(list: PendingGuestRawUpload[]): Promise<void> {
   try {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(list));
@@ -90,7 +112,22 @@ export async function getGuestRawUploadsAttentionRequired(): Promise<boolean> {
   return list.some(needsUserAttention);
 }
 
-async function putUploadToSignedUrl(params: { signedUrl: string; localUri: string; mimeType: string }): Promise<void> {
+async function localUriExists(uri: string): Promise<boolean> {
+  const t = uri.trim();
+  if (!t) return false;
+  try {
+    const info = await getInfoAsync(t);
+    return !!info.exists;
+  } catch {
+    return false;
+  }
+}
+
+async function putUploadToSignedUrl(params: {
+  signedUrl: string;
+  localUri: string;
+  mimeType: string;
+}): Promise<void> {
   if (isIosBackgroundSignedPutUploadAvailable()) {
     await uploadFileToSignedPutUrlIosBackground(params);
     return;
@@ -105,6 +142,33 @@ async function putUploadToSignedUrl(params: { signedUrl: string; localUri: strin
   }
 }
 
+function releaseProcessingLock(): void {
+  processing = false;
+  const waiters = processingWaiters;
+  processingWaiters = [];
+  for (const w of waiters) w();
+}
+
+async function waitForProcessingSlot(maxWaitMs: number): Promise<boolean> {
+  if (!processing) return true;
+  return new Promise(resolve => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      processingWaiters = processingWaiters.filter(w => w !== onFree);
+      resolve(false);
+    }, maxWaitMs);
+    const onFree = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(true);
+    };
+    processingWaiters.push(onFree);
+  });
+}
+
 export async function enqueueGuestRawUpload(params: {
   pdfTicket: string;
   kind: GuestRawKind;
@@ -116,6 +180,8 @@ export async function enqueueGuestRawUpload(params: {
   const key = `${params.kind}:${params.memoryId}`;
   const list = await readAll();
   const existingIdx = list.findIndex(x => x.key === key);
+  const policy =
+    params.policy ?? (existingIdx >= 0 ? list[existingIdx]!.policy : undefined) ?? 'auto';
   const item: PendingGuestRawUpload = {
     key,
     kind: params.kind,
@@ -127,12 +193,14 @@ export async function enqueueGuestRawUpload(params: {
     attempts: existingIdx >= 0 ? list[existingIdx]!.attempts : 0,
     nextAttemptAt: now(),
     lastError: existingIdx >= 0 ? list[existingIdx]!.lastError : undefined,
-    policy: params.policy ?? (existingIdx >= 0 ? list[existingIdx]!.policy : undefined) ?? 'auto',
+    policy,
   };
   const next = existingIdx >= 0 ? list.map(x => (x.key === key ? item : x)) : [...list, item];
   await writeAll(next);
-  // Best-effort : lance un traitement immédiat (sans await).
-  void processPendingGuestRawUploads();
+  // Ne pas lancer le worker fond pour finalize_only (évite course avec l’écran « Dernière étape »).
+  if (policy !== 'finalize_only') {
+    void processPendingGuestRawUploads();
+  }
 }
 
 export async function markGuestRawUploadDone(key: string): Promise<void> {
@@ -144,12 +212,22 @@ export async function markGuestRawUploadDone(key: string): Promise<void> {
 }
 
 /**
- * À appeler au démarrage / retour au premier plan.
+ * À appeler au démarrage / retour au premier plan / écran finalize (`force: true`).
  * - Regénère une signed URL via `guest-upload-urls` (car les signed URLs expirent)
  * - Puis upload PUT vers Supabase Storage
  */
 export async function processPendingGuestRawUploads(opts?: { force?: boolean }): Promise<void> {
-  if (processing) return;
+  const force = opts?.force === true;
+  if (processing) {
+    if (!force) return;
+    const gotSlot = await waitForProcessingSlot(120_000);
+    if (!gotSlot || processing) {
+      if (__DEV__) {
+        console.warn('[pendingRawGuestUploads] force: worker déjà occupé (timeout attente)');
+      }
+      return;
+    }
+  }
   processing = true;
   try {
     const list = await readAll();
@@ -157,29 +235,73 @@ export async function processPendingGuestRawUploads(opts?: { force?: boolean }):
 
     // Traitement séquentiel (évite plusieurs gros uploads en parallèle).
     for (const item of list) {
-      if (!opts?.force && item.policy === 'finalize_only') {
+      if (!force && item.policy === 'finalize_only') {
         continue;
       }
-      if (!opts?.force && needsUserAttention(item)) {
+      if (!force && needsUserAttention(item)) {
         // UX: après seuil (2 échecs ou 10 min), on évite de boucler en silence.
         continue;
       }
-      if (item.nextAttemptAt > now()) continue;
+      // En finalize forcée : ignorer le backoff (sinon l’UI tourne dans le vide des minutes).
+      if (!force && item.nextAttemptAt > now()) continue;
+      if (force && (item.attempts ?? 0) >= FORCE_MAX_ATTEMPTS) {
+        if (__DEV__) {
+          console.warn(
+            '[pendingRawGuestUploads] force: abandon item',
+            item.key,
+            item.lastError,
+          );
+        }
+        continue;
+      }
 
       try {
+        const exists = await localUriExists(item.localUri);
+        if (!exists) {
+          throw new Error(`LOCAL_FILE_MISSING ${item.localUri.slice(0, 120)}`);
+        }
+
+        if (__DEV__) {
+          console.log('[pendingRawGuestUploads] upload start', item.key, {
+            force,
+            attempts: item.attempts,
+          });
+        }
+
         const { status, json } = await postGuestUploadUrls({
           pdfTicket: item.pdfTicket,
           assets: [{ kind: item.kind, memoryId: item.memoryId }],
         });
         const row = (json as { uploads?: Array<{ signedUrl?: string }> })?.uploads?.[0];
         if (status !== 200 || !row?.signedUrl) {
-          throw new Error(`SIGNED_URL_REFRESH_FAILED (${status})`);
+          const errMsg =
+            typeof (json as { error?: unknown })?.error === 'string'
+              ? (json as { error: string }).error
+              : '';
+          throw new Error(
+            `SIGNED_URL_REFRESH_FAILED (${status})${errMsg ? ` ${errMsg}` : ''}`.trim(),
+          );
         }
 
-        await putUploadToSignedUrl({ signedUrl: row.signedUrl, localUri: item.localUri, mimeType: item.mimeType });
+        await putUploadToSignedUrl({
+          signedUrl: row.signedUrl,
+          localUri: item.localUri,
+          mimeType: item.mimeType,
+        });
         await markGuestRawUploadDone(item.key);
+        if (__DEV__) {
+          console.log('[pendingRawGuestUploads] upload ok', item.key);
+        }
       } catch (e) {
         const err = e instanceof Error ? e.message : String(e);
+        if (__DEV__) {
+          console.warn('[pendingRawGuestUploads] upload fail', item.key, err);
+        }
+        // Fichier introuvable : retirer de la file (retry inutile).
+        if (err.startsWith('LOCAL_FILE_MISSING')) {
+          await markGuestRawUploadDone(item.key);
+          continue;
+        }
         const latest = await readAll();
         const idx = latest.findIndex(x => x.key === item.key);
         if (idx < 0) continue;
@@ -189,13 +311,12 @@ export async function processPendingGuestRawUploads(opts?: { force?: boolean }):
           ...cur,
           attempts,
           lastError: err,
-          nextAttemptAt: now() + backoffMs(attempts),
+          nextAttemptAt: now() + (force ? 2_000 : backoffMs(attempts)),
         };
         await writeAll(latest);
       }
     }
   } finally {
-    processing = false;
+    releaseProcessingLock();
   }
 }
-

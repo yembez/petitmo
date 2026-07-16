@@ -384,7 +384,7 @@ export default function BookOrderScreen() {
         });
 
         const subscriptionTierPdf = subscriptionDb === 'paid' ? 'premium' : 'free';
-        const { localUri } = await generateBookPdfWithExportTicket({
+        const { localUri, response: pdfResponse } = await generateBookPdfWithExportTicket({
           ...payload,
           exportMode: 'print',
           exportTicket: res.exportTicket,
@@ -394,6 +394,29 @@ export default function BookOrderScreen() {
         await setBookOrderResultPdfUri(localUri);
         await setLastGuestExportEmail(mail);
         const pricePaid = res.priceCents / 100;
+
+        const gelato = pdfResponse.gelato;
+        if (__DEV__) {
+          console.log('[book-order] gelato', gelato ?? '(absent — serveur PDF pas encore redéployé ?)');
+        }
+        if (!gelato?.ok) {
+          const detail =
+            gelato?.message?.trim() ||
+            'Le PDF a été généré mais Gelato n’a pas reçu la commande (voir logs serveur / export_requests.last_error).';
+          Alert.alert(
+            'Gelato non envoyé',
+            `${detail}${
+              gelato?.skipped ? '\n\nSouvent : GELATO_* manquant sur Railway, ou GELATO_ORDER_TYPE.' : ''
+            }\n\nLe PDF local est quand même disponible.`,
+            [{ text: 'OK' }],
+          );
+        } else if (__DEV__ && gelato.orderId) {
+          Alert.alert(
+            'Gelato OK',
+            `Order ${gelato.orderType === 'draft' ? 'draft' : ''} ${gelato.orderId}`,
+            [{ text: 'OK' }],
+          );
+        }
 
         const memories = collectMemoriesFromPagesForPdf(payload.pages, payload.localEdits ?? {});
         const av = memories.filter(m => m.type === 'voice' || m.type === 'video');
@@ -610,6 +633,11 @@ export default function BookOrderScreen() {
               Pages mémoire : {billablePages} (facturation min. 20)
             </Text>
             <Text style={styles.price}>{printPriceEuros.toFixed(2).replace('.', ',')} € TTC</Text>
+            {__DEV__ ? (
+              <Text style={[styles.rowMuted, { marginTop: 8 }]}>
+                Dev : aucun paiement réel. Gelato draft si Railway a GELATO_ORDER_TYPE=draft.
+              </Text>
+            ) : null}
           </View>
         ) : (
           <View style={styles.card}>
@@ -650,6 +678,26 @@ export default function BookOrderScreen() {
           onChangeText={setFullName}
           placeholder="Prénom et nom"
         />
+
+        {exportMode === 'print' && __DEV__ ? (
+          <Pressable
+            style={styles.devFillBtn}
+            onPress={() => {
+              const stamp = Date.now().toString(36);
+              setEmail(`qa+gelato-${stamp}@example.com`);
+              setFullName('Test Petitmo Gelato');
+              setShippingName('Test Petitmo Gelato');
+              setLine1('12 rue Example');
+              setLine2('');
+              setCity('Paris');
+              setZip('75001');
+              setCountry('FR');
+              setFieldErrors({});
+            }}
+          >
+            <Text style={styles.devFillBtnText}>Dev : préremplir adresse test Gelato</Text>
+          </Pressable>
+        ) : null}
 
         {exportMode === 'print' ? (
           <>
@@ -776,6 +824,15 @@ const styles = StyleSheet.create({
     marginBottom: scale(16),
   },
   bannerText: { fontSize: scale(14), color: THEME.textPrimary, lineHeight: scale(20) },
+  devFillBtn: {
+    alignSelf: 'flex-start',
+    marginBottom: scale(12),
+    paddingVertical: scale(8),
+    paddingHorizontal: scale(12),
+    borderRadius: scale(8),
+    backgroundColor: 'rgba(37, 99, 235, 0.12)',
+  },
+  devFillBtnText: { fontSize: scale(13), fontWeight: '600', color: '#1D4ED8' },
   card: {
     backgroundColor: THEME.bg,
     borderRadius: scale(12),

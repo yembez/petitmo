@@ -8,12 +8,15 @@ export type PhotoFullVariant = 'FP' | 'M';
 export type BookPage =
   | { type: 'cover'; child: Child }
   | { type: 'chapter'; month: string; chapterNum: number }
-  | { type: 'photo-full'; memory: Memory; variant: PhotoFullVariant }
-  | { type: 'photo-note'; memory: Memory }
+  | { type: 'photo-full'; memory: Memory; variant: PhotoFullVariant; photoRef?: string }
+  | { type: 'photo-note'; memory: Memory; photoRef?: string }
   | { type: 'quote'; memory: Memory }
   | { type: 'audio'; memory: Memory }
   | { type: 'video'; memory: Memory }
   | { type: 'back-cover' };
+
+/** Une entrée livre (= une page contenu), éventuellement une photo d’album précise. */
+export type BookPageMemorySpec = { memory: Memory; photoRef?: string };
 
 /** Pages paire/impaire face à face dans un spread (hors couverture seule). */
 function isSpreadFacingWithPreviousPage(pageNum: number): boolean {
@@ -80,19 +83,31 @@ function assignPhotoFullVariant(
   return { variant, lastWasFP: variant === 'FP' };
 }
 
-export function buildBookPages(child: Child, memories: Memory[]): BookPage[] {
-  const sorted = [...memories].sort(
-    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+function toPageSpecs(input: Memory[] | BookPageMemorySpec[]): BookPageMemorySpec[] {
+  if (input.length === 0) return [];
+  const first = input[0] as Memory | BookPageMemorySpec;
+  if (first && typeof first === 'object' && 'memory' in first && !('type' in first)) {
+    return input as BookPageMemorySpec[];
+  }
+  return (input as Memory[]).map(memory => ({ memory }));
+}
+
+export function buildBookPages(child: Child, memories: Memory[] | BookPageMemorySpec[]): BookPage[] {
+  const specs = toPageSpecs(memories);
+  const sorted = [...specs].sort(
+    (a, b) => new Date(a.memory.created_at).getTime() - new Date(b.memory.created_at).getTime(),
   );
 
   const pages: BookPage[] = [{ type: 'cover', child }];
-  const chapterPlans = planBookChapters(sorted);
+  const chapterPlans = planBookChapters(sorted.map(s => s.memory));
   const chapterStarts = bookChapterStarts(chapterPlans);
+  const chapterEmitted = new Set<string>();
   let lastWasFP = false;
 
-  for (const memory of sorted) {
+  for (const { memory, photoRef } of sorted) {
     const chapterStart = chapterStarts.get(memory.id);
-    if (chapterStart) {
+    if (chapterStart && !chapterEmitted.has(memory.id)) {
+      chapterEmitted.add(memory.id);
       pages.push({
         type: 'chapter',
         month: chapterStart.label,
@@ -101,12 +116,16 @@ export function buildBookPages(child: Child, memories: Memory[]): BookPage[] {
     }
 
     const page = memoryToPage(memory);
+    const ref = photoRef?.trim() || undefined;
     if (page.type === 'photo-full') {
       const assigned = assignPhotoFullVariant(pages, lastWasFP);
       lastWasFP = assigned.lastWasFP;
-      pages.push({ ...page, variant: assigned.variant });
+      pages.push({ ...page, variant: assigned.variant, ...(ref ? { photoRef: ref } : {}) });
+    } else if (page.type === 'photo-note') {
+      lastWasFP = false;
+      pages.push({ ...page, ...(ref ? { photoRef: ref } : {}) });
     } else {
-      if (page.type === 'photo-note' || page.type === 'audio' || page.type === 'video') {
+      if (page.type === 'audio' || page.type === 'video') {
         lastWasFP = false;
       }
       pages.push(page);

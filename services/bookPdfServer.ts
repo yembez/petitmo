@@ -28,14 +28,16 @@ import {
   ensureLocalChildrenSyncedToSupabase,
 } from '@/services/children';
 import { ensureVoiceMemoryCloudForBookExport } from '@/services/migration';
-import { persistVideoPosterToCloudForPdfExport, persistVoiceCoverToCloudForPdfExport } from '@/services/media';
+import { persistVideoPosterToCloudForPdfExport, persistVoiceCoverToCloudForPdfExport, uploadFileToSupabase } from '@/services/media';
 import {
   collectPhotoLocalUploadUriCandidates,
   collectVideoPosterLocalUploadUriCandidates,
   collectVoiceCoverLocalUploadUriCandidates,
+  getBookPhotoPrintUri,
   getVideoPosterUriForBookPreview,
   getVoiceCoverUriForBookPreview,
   inferLocalDisplayPathFromPrint,
+  normalizePhotoUrlForCompare,
 } from '@/utils/memoryPhotos';
 import { pickFirstReadableLocalMediaUri } from '@/utils/localMediaReadable';
 import { resolveServerPdfEntitlements } from '@/lib/digitalExportPurchase';
@@ -46,6 +48,7 @@ import {
   MEDIA_BOOK_PDF_COVER_JPEG_QUALITY,
 } from '@/lib/limits';
 import { isInitExportConfigured, postInitExport, postGuestUploadUrls } from '@/services/initExportApi';
+import { enqueueGuestRawUpload } from '@/services/pendingRawGuestUploads';
 import { publicMediaBaseUrl } from '@/lib/publicMediaBaseUrl';
 
 /** Erreur HTTP / téléchargement après appel au service PDF. */
@@ -259,6 +262,75 @@ async function ensureVideoPostersPersistedForServerPdf(
       }
     } catch (e) {
       console.warn('[bookPdfServer] ensureVideoPostersPersistedForServerPdf', m.id, e);
+    }
+  }
+  return overrides;
+}
+
+/** Upload slot album (sans écraser `print_url` principal en base) — export PDF session premium. */
+async function resolveAlbumPhotoHttpsUrlForSessionPdf(
+  m: Memory,
+  photoRef: string,
+  childId: string,
+): Promise<string | null> {
+  const slotUri = getBookPhotoPrintUri(m, photoRef).trim();
+  if (slotUri && isHttps(slotUri)) return slotUri;
+  if (Platform.OS === 'web') return null;
+
+  const local = await pickFirstReadableLocalMediaUri(
+    slotUri
+      ? [slotUri, ...collectPhotoLocalUploadUriCandidates(m)]
+      : collectPhotoLocalUploadUriCandidates(m),
+  );
+  if (!local) return null;
+
+  const compressed = await compressLocalJpegForGuestUpload(local, {
+    maxWidth: MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH,
+    quality: MEDIA_BOOK_PDF_JPEG_QUALITY,
+  });
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const slotKey =
+    normalizePhotoUrlForCompare(photoRef)
+      .replace(/[^a-zA-Z0-9_-]/g, '_')
+      .slice(0, 24) || 'slot';
+  const path = `${user.id}/${childId}/pdf-export/${m.id}-${slotKey}.jpg`;
+  return await uploadFileToSupabase(compressed, path, { upsert: true });
+}
+
+/** Overrides `guestMemories` : URL print HTTPS pour le slot album choisi dans le livre. */
+async function ensurePhotoPrintUrlsForServerPdf(
+  pages: BookPage[],
+  localEdits: Record<string, Partial<Memory>>,
+  childId: string,
+  memoryPhotoRefs?: Record<string, string>,
+): Promise<GuestMemoryForPdfPayload[]> {
+  if (!memoryPhotoRefs || Object.keys(memoryPhotoRefs).length === 0) return [];
+  const overrides: GuestMemoryForPdfPayload[] = [];
+  const memories = collectMemoriesFromPagesForPdf(pages, localEdits);
+  for (const m of memories) {
+    if (m.type !== 'photo') continue;
+    const ref = memoryPhotoRefs[m.id]?.trim();
+    if (!ref) continue;
+    const ed = localEdits[m.id];
+    const merged = ed ? { ...m, ...ed } : m;
+    try {
+      const url = await resolveAlbumPhotoHttpsUrlForSessionPdf(merged, ref, childId);
+      if (url) {
+        overrides.push({
+          id: merged.id,
+          type: 'photo',
+          print_url: url,
+          display_url: url,
+          media_url: url,
+          created_at: merged.created_at,
+        });
+      }
+    } catch (e) {
+      console.warn('[bookPdfServer] ensurePhotoPrintUrlsForServerPdf', m.id, e);
     }
   }
   return overrides;
@@ -719,7 +791,8 @@ export function mapBookPagesToServerPayload(
   pages: BookPage[],
   rotations: Record<string, number>,
   photoCrops: Record<string, { xPct: number; yPct: number; scale: number }>,
-  localEdits: Record<string, Partial<Memory>>
+  localEdits: Record<string, Partial<Memory>>,
+  memoryPhotoRefs?: Record<string, string>,
 ): GenerateBookPdfPayload['pages'] {
   return pages.map(p => {
     switch (p.type) {
@@ -737,6 +810,7 @@ export function mapBookPagesToServerPayload(
         const textOverride = typeof ed?.content === 'string' ? ed.content : undefined;
         const rot = rotations[m.id] ?? 0;
         const crop = photoCrops[m.id];
+        const photoRef = p.photoRef?.trim() || memoryPhotoRefs?.[m.id]?.trim();
         return {
           type: p.type,
           memoryId: m.id,
@@ -744,6 +818,7 @@ export function mapBookPagesToServerPayload(
           ...(rot !== 0 ? { rotation: rot } : {}),
           ...(crop ? { crop } : {}),
           ...(textOverride !== undefined ? { textOverride } : {}),
+          ...(photoRef ? { photoRef } : {}),
         };
       }
       case 'photo-note':
@@ -755,12 +830,17 @@ export function mapBookPagesToServerPayload(
         const textOverride = typeof ed?.content === 'string' ? ed.content : undefined;
         const rot = rotations[m.id] ?? 0;
         const crop = photoCrops[m.id];
+        const photoRef =
+          p.type === 'photo-note'
+            ? p.photoRef?.trim() || memoryPhotoRefs?.[m.id]?.trim()
+            : undefined;
         return {
           type: p.type,
           memoryId: m.id,
           ...(rot !== 0 ? { rotation: rot } : {}),
           ...(crop ? { crop } : {}),
           ...(textOverride !== undefined ? { textOverride } : {}),
+          ...(photoRef ? { photoRef } : {}),
         };
       }
     }
@@ -781,6 +861,8 @@ export type GenerateBookPdfServerInput = {
   rotations: Record<string, number>;
   photoCrops: Record<string, { xPct: number; yPct: number; scale: number }>;
   localEdits: Record<string, Partial<Memory>>;
+  /** Slot photo album par souvenir — parité aperçu livre / SQLite `memoryPhotoRefs`. */
+  memoryPhotoRefs?: Record<string, string>;
   /** `screen` → digital, `print` → print */
   exportMode: 'screen' | 'print';
 };
@@ -838,7 +920,13 @@ export async function generateBookPdfViaServer(input: GenerateBookPdfServerInput
     input.localEdits,
     input.childId
   );
-  const guestMemoryOverrides = [...voiceCoverOverrides, ...videoPosterOverrides];
+  const photoPrintOverrides = await ensurePhotoPrintUrlsForServerPdf(
+    input.pages,
+    input.localEdits,
+    input.childId,
+    input.memoryPhotoRefs,
+  );
+  const guestMemoryOverrides = [...voiceCoverOverrides, ...videoPosterOverrides, ...photoPrintOverrides];
 
   const { subscriptionTier, digitalExportPaid } = await resolveServerPdfEntitlements();
 
@@ -858,7 +946,8 @@ export async function generateBookPdfViaServer(input: GenerateBookPdfServerInput
       input.pages,
       input.rotations,
       input.photoCrops,
-      input.localEdits
+      input.localEdits,
+      input.memoryPhotoRefs,
     ),
     subscriptionTier,
     ...(subscriptionTier === 'free' ? { digitalExportPaid } : {}),
@@ -1071,10 +1160,26 @@ export async function generateBookPdfWithExportTicket(
       }
       if (m.type !== 'photo') return g;
 
-      const main = (m.print_url ?? m.display_url ?? m.edited_media_url ?? m.media_url ?? '').trim();
+      const photoRef = input.memoryPhotoRefs?.[m.id]?.trim();
+      const slotPrint = getBookPhotoPrintUri(m, photoRef).trim();
+      const main = (
+        slotPrint ||
+        m.print_url ||
+        m.display_url ||
+        m.edited_media_url ||
+        m.media_url ||
+        ''
+      ).trim();
+      if (main && isHttps(main)) {
+        return { ...g, print_url: main, display_url: main, media_url: main };
+      }
       if (!main || isHttps(main)) return g;
 
-      const local = await pickFirstReadableLocalMediaUri(collectPhotoLocalUploadUriCandidates(m));
+      const local = await pickFirstReadableLocalMediaUri(
+        slotPrint
+          ? [slotPrint, ...collectPhotoLocalUploadUriCandidates(m)]
+          : collectPhotoLocalUploadUriCandidates(m),
+      );
       if (!local) throw new Error('PREP_NOT_READY');
 
       const compressed = await compressLocalJpegForGuestUpload(local);
@@ -1104,6 +1209,7 @@ export async function generateBookPdfWithExportTicket(
       input.rotations,
       input.photoCrops,
       input.localEdits,
+      input.memoryPhotoRefs,
     ),
     subscriptionTier,
     ...(subscriptionTier === 'free' ? { digitalExportPaid } : {}),

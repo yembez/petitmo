@@ -42,6 +42,7 @@ type BookSpreadSlideProps = {
   photoCrops: Record<string, PhotoCrop>;
   rotations: Record<string, number>;
   typography: BookMaquetteTypography;
+  memoryPhotoRefs?: Record<string, string>;
   getMemoryForPage: (page: BookPage) => Memory | null;
   onRequestTextEditForPage: (pageNum: number) => void;
 };
@@ -59,6 +60,7 @@ function SpreadMaquettePage({
   photoCrops,
   rotations,
   typography,
+  memoryPhotoRefs,
   getMemoryForPage,
   onRequestTextEditForPage,
 }: {
@@ -74,6 +76,7 @@ function SpreadMaquettePage({
   photoCrops: Record<string, PhotoCrop>;
   rotations: Record<string, number>;
   typography: BookMaquetteTypography;
+  memoryPhotoRefs?: Record<string, string>;
   getMemoryForPage: (page: BookPage) => Memory | null;
   onRequestTextEditForPage: (pageNum: number) => void;
 }) {
@@ -91,6 +94,14 @@ function SpreadMaquettePage({
         child={child}
         familyChildren={familyChildren}
         memory={mem}
+        memoryPhotoRef={
+          mem
+            ? ((row.page.type === 'photo-full' || row.page.type === 'photo-note'
+                ? row.page.photoRef
+                : undefined) ??
+              memoryPhotoRefs?.[mem.id])
+            : undefined
+        }
         rotation={mem ? rotations[mem.id] ?? 0 : 0}
         photoCrop={
           mem &&
@@ -133,6 +144,7 @@ function BookSpreadSlideInner({
   photoCrops,
   rotations,
   typography,
+  memoryPhotoRefs,
   getMemoryForPage,
   onRequestTextEditForPage,
 }: BookSpreadSlideProps) {
@@ -152,6 +164,7 @@ function BookSpreadSlideInner({
     photoCrops,
     rotations,
     typography,
+    memoryPhotoRefs,
     getMemoryForPage,
     onRequestTextEditForPage,
   };
@@ -202,6 +215,7 @@ function spreadSlidePropsEqual(a: BookSpreadSlideProps, b: BookSpreadSlideProps)
   if (a.cropDpiMetaCover !== b.cropDpiMetaCover) return false;
   if (a.photoCrops !== b.photoCrops || a.rotations !== b.rotations) return false;
   if (a.typography !== b.typography) return false;
+  if (a.memoryPhotoRefs !== b.memoryPhotoRefs) return false;
   if (a.getMemoryForPage !== b.getMemoryForPage) return false;
   if (a.onRequestTextEditForPage !== b.onRequestTextEditForPage) return false;
   return true;

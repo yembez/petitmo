@@ -163,12 +163,14 @@ export async function remapLegacyEntityIdsForCloudSync(): Promise<LegacyIdRemapR
     const newRotations = remapRecordKeys(book.rotations, memoryIdMap);
     const newPhotoCrops = remapRecordKeys(book.photoCrops, memoryIdMap);
     const newTextEdits = remapRecordKeys(book.textEdits, memoryIdMap);
+    const newMemoryPhotoRefs = remapRecordKeys(book.memoryPhotoRefs, memoryIdMap);
 
     const memChanged = newMemoryIds.some((id, i) => id !== (book.memoryIds ?? [])[i]);
     const metaChanged =
       newRotations !== book.rotations ||
       newPhotoCrops !== book.photoCrops ||
-      newTextEdits !== book.textEdits;
+      newTextEdits !== book.textEdits ||
+      newMemoryPhotoRefs !== book.memoryPhotoRefs;
 
     if (!memChanged && !metaChanged) continue;
 
@@ -178,6 +180,7 @@ export async function remapLegacyEntityIdsForCloudSync(): Promise<LegacyIdRemapR
       rotations: newRotations,
       photoCrops: newPhotoCrops,
       textEdits: newTextEdits,
+      memoryPhotoRefs: newMemoryPhotoRefs,
     });
     report.booksPatched += 1;
   }

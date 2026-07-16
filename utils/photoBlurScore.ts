@@ -160,6 +160,18 @@ function compositeSharpnessScore(pixels: Uint8Array | Float32Array, w: number, h
 export async function estimatePhotoBlurScore(uri: string): Promise<number | null> {
   const trimmed = uri.trim();
   if (!trimmed) return null;
+  // Skia / ImageManipulator : fichiers locaux seulement (HTTPS distant → « not readable »).
+  if (
+    trimmed.includes('/Bundle/Application/') ||
+    /\/[^/]+\.app\//i.test(trimmed) ||
+    /^https?:\/\//i.test(trimmed) ||
+    (!trimmed.startsWith('file:') &&
+      !trimmed.startsWith('content:') &&
+      !trimmed.startsWith('ph://') &&
+      !trimmed.startsWith('/'))
+  ) {
+    return null;
+  }
   const key = `${SCORE_CACHE_VERSION}:${trimmed}`;
   if (scoreCache.has(key)) return scoreCache.get(key) ?? null;
 

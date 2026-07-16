@@ -22,8 +22,8 @@ import type { BookMaquetteTypography } from '@/constants/bookMaquetteTypography'
 import { MEMORY_TEXT_FONT_FALLBACK } from '@/constants/memoryTextFont';
 import { bookPortraitPerfRender } from '@/utils/bookPortraitSpreadPerf';
 import { useBookVideoPosterDisplayUrl } from '@/hooks/useBookVideoPosterDisplayUrl';
+import { useBookMaquettePhotoDisplayUri } from '@/hooks/useBookMaquettePhotoDisplayUri';
 import {
-  getPrimaryPhotoUriForBookMaquetteDisplay,
   getVoiceCoverUriForBookEditorDisplay,
   getVoiceCoverUriForBookPreview,
   isDeviceLocalMediaUri,
@@ -690,6 +690,8 @@ type Props = {
   /** Tous les enfants famille (SQLite) — âges à la date du souvenir. Défaut : `[child]`. */
   familyChildren?: Child[];
   memory: Memory | null;
+  /** Slot photo album pour les pages photo (URL favorite / couverture). */
+  memoryPhotoRef?: string | null;
   rotation: number;
   /** Recadrage photo (pan + zoom). */
   photoCrop?: PhotoCrop;
@@ -704,6 +706,8 @@ type Props = {
   /** Dimensions fichier couverture (aperçu lecture seule au ratio réel). */
   coverPhotoImgPxW?: number;
   coverPhotoImgPxH?: number;
+  /** Force le remontage visuel après changement de couverture. */
+  coverPhotoRenderKey?: string;
   /** Ouvre le sélecteur de couverture. */
   onRequestCoverPhoto?: () => void;
   /** Recadrage in-place (éditeur livre) : pinch/pan dans le cadre de la page. */
@@ -728,6 +732,7 @@ function MaquetteBookPages(props: Props) {
     height,
     child,
     memory,
+    memoryPhotoRef,
     rotation,
     photoCrop,
     truncated,
@@ -737,6 +742,7 @@ function MaquetteBookPages(props: Props) {
     coverPhotoCrop,
     coverPhotoImgPxW,
     coverPhotoImgPxH,
+    coverPhotoRenderKey,
     onRequestCoverPhoto,
     inlineCropConfig,
     chapterDisplayTitle,
@@ -789,6 +795,7 @@ function MaquetteBookPages(props: Props) {
           coverPhotoCrop={coverPhotoCrop}
           coverPhotoImgPxW={coverPhotoImgPxW}
           coverPhotoImgPxH={coverPhotoImgPxH}
+          coverPhotoRenderKey={coverPhotoRenderKey}
           onPressCoverPhoto={onRequestCoverPhoto}
           inlineCropConfig={inlineCropConfig}
           onPressTitle={onRequestTextEdit}
@@ -841,6 +848,7 @@ function MaquetteBookPages(props: Props) {
       return (
         <MaquettePhotoSimple
           memory={memory}
+          memoryPhotoRef={memoryPhotoRef}
           familyChildren={familyChildren}
           width={width}
           height={height}
@@ -863,6 +871,7 @@ function MaquetteBookPages(props: Props) {
       return (
         <MaquettePhotoNote
           memory={memory}
+          memoryPhotoRef={memoryPhotoRef}
           familyChildren={familyChildren}
           width={width}
           height={height}
@@ -968,6 +977,7 @@ function MaquetteCover({
   coverPhotoCrop,
   coverPhotoImgPxW,
   coverPhotoImgPxH,
+  coverPhotoRenderKey,
   onPressCoverPhoto,
   inlineCropConfig,
   onPressTitle,
@@ -986,6 +996,7 @@ function MaquetteCover({
   coverPhotoCrop?: PhotoCrop;
   coverPhotoImgPxW?: number;
   coverPhotoImgPxH?: number;
+  coverPhotoRenderKey?: string;
   inlineCropConfig?: InlineCropConfig;
   onPressTitle: () => void;
 }) {
@@ -1000,29 +1011,43 @@ function MaquetteCover({
   const coverImgPxW = coverPhotoImgPxW ?? coverInline?.dpiMeta?.imgPxW;
   const coverImgPxH = coverPhotoImgPxH ?? coverInline?.dpiMeta?.imgPxH;
 
+  const coverHasDims = (coverImgPxW ?? 0) > 0 && (coverImgPxH ?? 0) > 0;
+  const coverUseInlineCrop = !!coverInline && coverHasDims;
+
   return (
     <View style={[styles.paper, styles.coverPaper, { width, height }]}>
       <View style={[styles.coverImgBlock, { height: imgH }]}>
         {photoUri ? (
-          coverInline ? (
-            <BookPagePhotoFrame
-              uri={photoUri}
-              frameW={width}
-              frameH={imgH}
-              crop={coverPhotoCrop}
-              inlineCrop={coverInline}
-              coverMode
-              imgPxW={coverImgPxW}
-              imgPxH={coverImgPxH}
-              recyclingKey="book-cover"
-            />
-          ) : canPickCover ? (
-            <Pressable
-              style={StyleSheet.absoluteFill}
-              onPress={() => onPressCoverPhoto?.()}
-              accessibilityRole="button"
-              accessibilityLabel="Choisir la photo de couverture"
-            >
+          <View key={coverPhotoRenderKey ?? photoUri} style={StyleSheet.absoluteFill}>
+            {coverUseInlineCrop ? (
+              <BookPagePhotoFrame
+                uri={photoUri}
+                frameW={width}
+                frameH={imgH}
+                crop={coverPhotoCrop}
+                inlineCrop={coverInline}
+                coverMode
+                imgPxW={coverImgPxW}
+                imgPxH={coverImgPxH}
+              />
+            ) : canPickCover ? (
+              <Pressable
+                style={StyleSheet.absoluteFill}
+                onPress={() => onPressCoverPhoto?.()}
+                accessibilityRole="button"
+                accessibilityLabel="Choisir la photo de couverture"
+              >
+                <CroppedPhotoDisplay
+                  uri={photoUri}
+                  width={width}
+                  height={imgH}
+                  crop={coverPhotoCrop}
+                  coverMode
+                  imgPxW={coverImgPxW}
+                  imgPxH={coverImgPxH}
+                />
+              </Pressable>
+            ) : (
               <CroppedPhotoDisplay
                 uri={photoUri}
                 width={width}
@@ -1032,18 +1057,8 @@ function MaquetteCover({
                 imgPxW={coverImgPxW}
                 imgPxH={coverImgPxH}
               />
-            </Pressable>
-          ) : (
-            <CroppedPhotoDisplay
-              uri={photoUri}
-              width={width}
-              height={imgH}
-              crop={coverPhotoCrop}
-              coverMode
-              imgPxW={coverImgPxW}
-              imgPxH={coverImgPxH}
-            />
-          )
+            )}
+          </View>
         ) : canPickCover ? (
           <Pressable
             style={StyleSheet.absoluteFill}
@@ -1079,6 +1094,7 @@ function MaquetteCover({
 
 function MaquettePhotoSimple({
   memory,
+  memoryPhotoRef,
   familyChildren,
   width,
   height,
@@ -1096,6 +1112,7 @@ function MaquettePhotoSimple({
   variant,
 }: {
   memory: Memory;
+  memoryPhotoRef?: string | null;
   familyChildren: Child[];
   width: number;
   height: number;
@@ -1112,7 +1129,7 @@ function MaquettePhotoSimple({
   garamond?: string;
   variant: PhotoFullVariant;
 }) {
-  const uri = getPrimaryPhotoUriForBookMaquetteDisplay(memory);
+  const uri = useBookMaquettePhotoDisplayUri(memory, memoryPhotoRef);
   const caption = (memory.content ?? '').trim();
   const mediaPad = Math.round(pdfMmToPreviewPxW(PDF_MEDIA_TEXT_PAD_X_MM, width));
   const isFp = variant === 'FP';
@@ -1224,6 +1241,7 @@ function MaquettePhotoSimple({
 
 function MaquettePhotoNote({
   memory,
+  memoryPhotoRef,
   familyChildren,
   width,
   height,
@@ -1241,6 +1259,7 @@ function MaquettePhotoNote({
   garamond,
 }: {
   memory: Memory;
+  memoryPhotoRef?: string | null;
   familyChildren: Child[];
   width: number;
   height: number;
@@ -1257,7 +1276,7 @@ function MaquettePhotoNote({
   memoryTextFont: string;
   garamond?: string;
 }) {
-  const uri = getPrimaryPhotoUriForBookMaquetteDisplay(memory);
+  const uri = useBookMaquettePhotoDisplayUri(memory, memoryPhotoRef);
   const legend = (memory.content ?? '').trim();
   const mediaPad = Math.round(pdfMmToPreviewPxW(PDF_MEDIA_TEXT_PAD_X_MM, width));
   const imgH = pdfMmToPreviewPxH(PHOTO_NOTE_BAND_HEIGHT_MM, height);

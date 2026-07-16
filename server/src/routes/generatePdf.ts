@@ -244,6 +244,17 @@ export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient,
             } else if (poster && /^https:\/\//i.test(poster)) {
               row.thumbnail_url = poster;
             }
+            continue;
+          }
+          if (g.type === 'photo') {
+            const print = typeof g.print_url === 'string' ? g.print_url.trim() : '';
+            if (print && /^https:\/\//i.test(print)) {
+              row.print_url = print;
+              const display = typeof g.display_url === 'string' ? g.display_url.trim() : '';
+              row.display_url = display && /^https:\/\//i.test(display) ? display : print;
+              row.media_url = print;
+              row.edited_media_url = print;
+            }
           }
         }
       }
@@ -741,24 +752,46 @@ async function handleTicketPrintPdf(
       })
       .eq('id', ticket.export_request_id);
 
-    void submitGelatoPrintOrder(supabase, {
+    // Attendre Gelato avant le 200 : sinon l’app affiche succès alors que l’order draft n’est jamais parti.
+    const gelatoResult = await submitGelatoPrintOrder(supabase, {
       exportRequestId: ticket.export_request_id,
       bookId: body.bookId,
       pdfStoragePath: saved.uploadedStoragePath,
       pdfPageCount,
       catalogPageCount: gelatoCatalogPageCount(body.pages),
-    }).then(result => {
-      if (!result.ok) {
-        console.error('[generate-pdf] gelato', ticket.export_request_id, result.message);
-      } else if (!result.skipped) {
-        console.log('[generate-pdf] gelato ok', ticket.export_request_id, result.gelatoOrderId);
-      }
     });
+    const gelatoOrderType = gelatoConfig?.orderType;
+    let gelatoOut: GenerateBookPdfResponse['gelato'];
+    if (!gelatoResult.ok) {
+      console.error('[generate-pdf] gelato', ticket.export_request_id, gelatoResult.message);
+      gelatoOut = { ok: false, message: gelatoResult.message };
+    } else if (gelatoResult.skipped) {
+      console.warn('[generate-pdf] gelato skipped', ticket.export_request_id, gelatoResult.reason);
+      gelatoOut = {
+        ok: false,
+        skipped: true,
+        message: gelatoResult.reason,
+        ...(gelatoOrderType ? { orderType: gelatoOrderType } : {}),
+      };
+    } else {
+      console.log(
+        '[generate-pdf] gelato ok',
+        ticket.export_request_id,
+        gelatoResult.gelatoOrderId,
+        gelatoOrderType === 'draft' ? '(draft)' : '',
+      );
+      gelatoOut = {
+        ok: true,
+        orderId: gelatoResult.gelatoOrderId,
+        ...(gelatoOrderType ? { orderType: gelatoOrderType } : {}),
+      };
+    }
 
     const out: GenerateBookPdfResponse = {
       pdfUrlSigned: saved.pdfUrlSigned,
       pdfStoragePath: saved.pdfStoragePath,
       qrTokensByMemoryId: qrTokensRecord(qrResult.tokensByMemoryId),
+      gelato: gelatoOut,
     };
     res.status(200).json(out);
   } catch (e) {

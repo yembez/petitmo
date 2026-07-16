@@ -147,6 +147,19 @@ export function initLocalDb(): void {
   } catch {
     /* migration douce */
   }
+
+  try {
+    const bookCols = db.getAllSync(`PRAGMA table_info(books)`, []) as { name?: string }[]
+    const bookNames = new Set(bookCols.map(c => (c?.name ?? '').trim()).filter(Boolean))
+    if (!bookNames.has('memoryPhotoRefs')) {
+      db.execSync(`ALTER TABLE books ADD COLUMN memoryPhotoRefs TEXT;`)
+    }
+    if (!bookNames.has('pageEntries')) {
+      db.execSync(`ALTER TABLE books ADD COLUMN pageEntries TEXT;`)
+    }
+  } catch {
+    /* migration douce */
+  }
 }
 
 export function getLocalMemories(childId: string): Memory[] {
@@ -169,11 +182,23 @@ export function getAllLocalMemories(): Memory[] {
   return rows.map(deserializeMemory)
 }
 
+export type LocalBookPageEntry = {
+  memoryId: string
+  photoRef?: string
+}
+
 export type LocalBookRow = {
   id: string
   title: string
   createdAt: string
   memoryIds: string[]
+  /** Photo d’album choisie par souvenir (memoryId → URL favorite / slot). */
+  memoryPhotoRefs?: Record<string, string>
+  /**
+   * Pages contenu ordonnées (1 entrée = 1 page).
+   * Permet plusieurs photos d’un même album (= même memoryId).
+   */
+  pageEntries?: LocalBookPageEntry[]
   coverPhotoUrl?: string | null
   rotations?: Record<string, number>
   photoCrops?: Record<string, { xPct: number; yPct: number; scale: number }>
@@ -215,6 +240,28 @@ function deserializeLocalBook(row: Record<string, unknown>): LocalBookRow {
     {} as Record<string, { xPct: number; yPct: number; scale: number }>
   )
   const textEdits = safeJsonParse(row.textEdits as string, {} as Record<string, { content?: string | null }>)
+  const memoryPhotoRefsRaw = safeJsonParse(row.memoryPhotoRefs as string, {} as Record<string, string>)
+  const memoryPhotoRefs: Record<string, string> = {}
+  for (const [k, v] of Object.entries(memoryPhotoRefsRaw)) {
+    const ref = typeof v === 'string' ? v.trim() : ''
+    if (k.trim() && ref) memoryPhotoRefs[k.trim()] = ref
+  }
+
+  const pageEntriesRaw = safeJsonParse(row.pageEntries as string, [] as unknown[])
+  const pageEntries: LocalBookPageEntry[] = []
+  if (Array.isArray(pageEntriesRaw)) {
+    for (const e of pageEntriesRaw) {
+      if (!e || typeof e !== 'object') continue
+      const mid = typeof (e as { memoryId?: unknown }).memoryId === 'string'
+        ? (e as { memoryId: string }).memoryId.trim()
+        : ''
+      if (!mid) continue
+      const pr = typeof (e as { photoRef?: unknown }).photoRef === 'string'
+        ? (e as { photoRef: string }).photoRef.trim()
+        : ''
+      pageEntries.push(pr ? { memoryId: mid, photoRef: pr } : { memoryId: mid })
+    }
+  }
 
   return {
     id: row.id as string,
@@ -222,6 +269,8 @@ function deserializeLocalBook(row: Record<string, unknown>): LocalBookRow {
     createdAt,
     updatedAt,
     memoryIds,
+    memoryPhotoRefs: Object.keys(memoryPhotoRefs).length ? memoryPhotoRefs : undefined,
+    pageEntries: pageEntries.length ? pageEntries : undefined,
     coverPhotoUrl: (row.coverPhotoUrl as string | null) ?? null,
     rotations: Object.keys(rotations).length ? rotations : undefined,
     photoCrops: Object.keys(photoCrops).length ? photoCrops : undefined,
@@ -248,15 +297,21 @@ export function upsertLocalBook(book: Omit<LocalBookRow, 'updatedAt'>): void {
   const memoryIds = uniq(book.memoryIds ?? [])
   db.runSync(
     `INSERT OR REPLACE INTO books (
-      id, title, createdAt, memoryIds, coverPhotoUrl,
+      id, title, createdAt, memoryIds, memoryPhotoRefs, pageEntries, coverPhotoUrl,
       rotations, photoCrops, textEdits, chapterTitle,
       updatedAt
-    ) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
       book.id,
       (book.title ?? '').trim() || 'Livre',
       book.createdAt ?? now,
       JSON.stringify(memoryIds),
+      book.memoryPhotoRefs && Object.keys(book.memoryPhotoRefs).length
+        ? JSON.stringify(book.memoryPhotoRefs)
+        : null,
+      book.pageEntries && book.pageEntries.length
+        ? JSON.stringify(book.pageEntries)
+        : null,
       book.coverPhotoUrl ?? null,
       book.rotations ? JSON.stringify(book.rotations) : null,
       book.photoCrops ? JSON.stringify(book.photoCrops) : null,

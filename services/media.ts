@@ -442,9 +442,14 @@ async function uploadVoiceCoverToStorage(
 
   const { error: uploadError } = await supabase.storage
     .from('media')
-    .upload(filePath, fileData, { contentType, upsert: false });
+    .upload(filePath, fileData, { contentType, upsert: true });
 
   if (uploadError) {
+    const msg = (uploadError.message ?? '').toLowerCase();
+    if (msg.includes('already exists') || msg.includes('duplicate')) {
+      const publicUrl = await getSignedUrlAfterMediaUpload(filePath);
+      return publicUrl ? { publicUrl, path: filePath } : null;
+    }
     console.error('Voice cover upload error:', uploadError);
     return null;
   }
@@ -2614,6 +2619,11 @@ export async function persistVoiceCoverToCloudForPdfExport(
     if (!user) return null;
 
     const row = getLocalMemoryById(memoryId);
+    const existingCover = (row?.voice_cover_url ?? '').trim();
+    if (existingCover && (/^https?:\/\//i.test(existingCover) || extractMediaBucketPath(existingCover))) {
+      return existingCover;
+    }
+
     const uploadUri =
       (row
         ? await pickFirstReadableLocalMediaUri(collectVoiceCoverLocalUploadUriCandidates(row))

@@ -109,14 +109,30 @@ function BookPagePhotoFrame({
   imgPxH,
 }: Props) {
   const rawUri = uri.trim();
+  // Bundle leak / chemin Storage nu : toujours passer par signature (jamais Image local).
+  const leakedBucket = extractMediaBucketPath(rawUri);
   const isDeviceLocal =
     !!rawUri &&
+    !leakedBucket &&
     (rawUri.startsWith('file:') ||
       rawUri.startsWith('content:') ||
       rawUri.startsWith('ph://') ||
-      (rawUri.startsWith('/') && !extractMediaBucketPath(rawUri)));
-  const signed = useSignedMediaUrl(!isDeviceLocal && rawUri ? rawUri : null);
-  const displayUri = (signed ?? rawUri).trim();
+      rawUri.startsWith('/'));
+  const needsCloudSign = !!rawUri && (!!leakedBucket || !isDeviceLocal);
+  const signed = useSignedMediaUrl(needsCloudSign ? (leakedBucket || rawUri) : null);
+  // Jamais un chemin Storage nu ni Bundle → Expo Image le résout sous Petitmo.app/
+  let displayUri = (
+    needsCloudSign
+      ? (signed ?? '').trim()
+      : rawUri
+  ).trim();
+  if (
+    displayUri.includes('/Bundle/Application/') ||
+    /\/[^/]+\.app\//i.test(displayUri) ||
+    (!!extractMediaBucketPath(displayUri) && !/^https?:\/\//i.test(displayUri))
+  ) {
+    displayUri = '';
+  }
 
   const dpiMeta = inlineCrop?.dpiMeta;
   const cropPxW = imgPxW ?? dpiMeta?.imgPxW ?? 0;
@@ -129,7 +145,7 @@ function BookPagePhotoFrame({
   return (
     <View style={styles.host}>
       <View style={[styles.rot, { transform: [{ rotate: `${rotation}deg` }] }]}>
-        {isInteractive && inlineCrop ? (
+        {displayUri && isInteractive && inlineCrop ? (
           <BookInlinePhotoCrop
             uri={displayUri}
             frameW={frameW}
@@ -145,7 +161,7 @@ function BookPagePhotoFrame({
             onChange={next => inlineCrop.onChange(inlineCrop.storageKey, next)}
             coverMode={coverMode}
           />
-        ) : (
+        ) : displayUri ? (
           <CroppedPhotoStatic
             uri={displayUri}
             width={frameW}
@@ -155,6 +171,8 @@ function BookPagePhotoFrame({
             imgPxW={cropPxW || undefined}
             imgPxH={cropPxH || undefined}
           />
+        ) : (
+          <View style={{ width: frameW, height: frameH, backgroundColor: '#F2F2F7' }} />
         )}
       </View>
 

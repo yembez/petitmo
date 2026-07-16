@@ -29,6 +29,37 @@ async function clearDeadSandboxPointer(
   return true;
 }
 
+async function clearDeadExtraPhotoPaths(memory: Memory): Promise<boolean> {
+  const extras = memory.extra_photo_paths;
+  if (!Array.isArray(extras) || extras.length === 0) return false;
+  let changed = false;
+  const next: (string | null)[] = [];
+  for (const raw of extras) {
+    const val = typeof raw === 'string' ? raw.trim() : '';
+    if (!val) {
+      next.push(null);
+      continue;
+    }
+    if (
+      isCloudMediaReference(val) ||
+      !isProbablyStalePetitmoSandboxPath(val) ||
+      (await isLocalMediaUriReadable(val))
+    ) {
+      next.push(val);
+      continue;
+    }
+    next.push(null);
+    changed = true;
+  }
+  if (!changed) return false;
+  const cleaned = next.filter((u): u is string => typeof u === 'string' && u.trim().length > 0);
+  upsertLocalMemory({
+    ...memory,
+    extra_photo_paths: cleaned.length > 0 ? cleaned : null,
+  });
+  return true;
+}
+
 /**
  * Efface les pointeurs sandbox morts, puis la materialisation cloud→sandbox reprend l’affichage local-first.
  */
@@ -48,6 +79,10 @@ export async function healDeadLocalMediaPointersForMemory(memory: Memory): Promi
       changed = true;
       current = getLocalMemoryById(memory.id) ?? current;
     }
+  }
+  if (await clearDeadExtraPhotoPaths(current)) {
+    changed = true;
+    current = getLocalMemoryById(memory.id) ?? current;
   }
   /** Vidéo pré-Petitmo+ : ne pas effacer poster_url / thumbnail_url — materialisation remplace en une fois. */
   if (changed) {

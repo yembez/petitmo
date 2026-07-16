@@ -23,6 +23,8 @@ export type BookPageServer = {
   textOverride?: string;
   /** Gabarit photo pleine page — rendu CSS Phase 2. */
   variant?: 'FP' | 'M';
+  /** Slot photo album (URL favorite) — parité aperçu livre / `memoryPhotoRefs`. */
+  photoRef?: string;
 };
 
 export type SubscriptionTier = 'free' | 'premium';
@@ -92,6 +94,14 @@ export type GenerateBookPdfResponse = {
   pdfStoragePath: string | null;
   /** Tokens QR stables par `memoryId` — à persister en SQLite local après export. */
   qrTokensByMemoryId?: Record<string, string>;
+  /** Résultat envoi Gelato (flux impression `print_order` uniquement). */
+  gelato?: {
+    ok: boolean;
+    skipped?: boolean;
+    orderId?: string;
+    orderType?: 'order' | 'draft';
+    message?: string;
+  };
 };
 
 /** Ligne attendue dans public.qr_links (migration Supabase). */

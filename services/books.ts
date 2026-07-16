@@ -24,18 +24,21 @@ import {
 } from '@/lib/limits';
 import { Platform } from 'react-native';
 import { copyAsync, documentDirectory, downloadAsync, makeDirectoryAsync } from 'expo-file-system/legacy';
-import { getSignedMediaDisplayUrl } from '@/lib/mediaSignedUrl';
+import { getSignedMediaDisplayUrl, extractMediaBucketPath } from '@/lib/mediaSignedUrl';
 import {
   canonicalBookCoverPhotoRef,
   getAlbumCanonicalFavoriteUrls,
   getAllPhotoUrlsForFeed,
   getBookPhotoPrintUri,
   getPrimaryPhotoUriForBookPreview,
+  getVideoPosterUriForFeedAndViewer,
+  getVoiceCoverUriForFeedAndViewer,
   indexOfPhotoUrlInFeed,
   isPhotoUrlFavoritedWithVariants,
   mapPhotoUrlToThumb,
   memoryPhotoMatchesUrl,
   normalizeMemoryMediaUriForDisplay,
+  normalizePhotoUrlForCompare,
   parseFavoritePhotoUrls,
   pickPhotoUriForOverlayPalette,
 } from '@/utils/memoryPhotos';
@@ -58,6 +61,8 @@ function looksLikeStaleLocalCoverRef(ref: string): boolean {
   return (
     t.includes('petitmo_memories/') ||
     t.startsWith('file://') ||
+    t.includes('/Bundle/Application/') ||
+    t.includes('.app/') ||
     isSandboxUriFromForeignContainer(t)
   );
 }
@@ -192,13 +197,27 @@ async function assertBookMemoriesAllowedForTier(allMemoryIds: readonly string[])
   await validateFreeTierBookMemoryLimits(memories);
 }
 
+export type BookPageEntry = {
+  memoryId: string;
+  /** Slot album Favoris ; absent = photo principale du souvenir. */
+  photoRef?: string;
+};
+
 export type Book = {
   id: string;
   /** Nom affiché dans les pilules / modales */
   title: string;
   createdAt: string;
-  /** Souvenirs inclus dans ce livre (un souvenir peut être dans plusieurs livres) */
+  /** Souvenirs distincts (dérivé de pageEntries — sync / quotas A/V). */
   memoryIds: string[];
+  /**
+   * Dernier slot photo par souvenir (compat). Source d’affichage = `pageEntries`.
+   */
+  memoryPhotoRefs?: Record<string, string>;
+  /**
+   * Source de vérité des pages contenu (ordre). Même memoryId + photoRefs distincts = N pages.
+   */
+  pageEntries?: BookPageEntry[];
   /** URL de la photo de couverture (sinon fallback photo enfant / souvenirs). */
   coverPhotoUrl?: string | null;
   /** Rotation appliquée à chaque photo (memoryId → degrés, multiples de 90). */
@@ -286,6 +305,57 @@ function safeId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+/**
+ * Identité d’une page contenu : `(memoryId, slot photo)`.
+ * Même souvenir + autre photo Favoris = autre page (APPEND, jamais REPLACE).
+ */
+export function bookPageEntryKey(entry: BookPageEntry): string {
+  const mid = entry.memoryId.trim();
+  if (!mid) return '';
+  const pr = entry.photoRef?.trim() ?? '';
+  return pr ? `${mid}::${normalizePhotoUrlForCompare(pr)}` : `${mid}::`;
+}
+
+/** Dédup pages sur (memoryId, photoRef) — conserve l’ordre ; ne fusionne plus deux photos d’album. */
+export function dedupeBookPageEntries(
+  entries: readonly BookPageEntry[],
+  memoryPhotoRefs?: Record<string, string>,
+): BookPageEntry[] {
+  const out: BookPageEntry[] = [];
+  const seen = new Set<string>();
+  for (const e of entries) {
+    const mid = e.memoryId.trim();
+    if (!mid) continue;
+    const photoRef =
+      e.photoRef?.trim() || memoryPhotoRefs?.[mid]?.trim() || undefined;
+    const next: BookPageEntry = photoRef ? { memoryId: mid, photoRef } : { memoryId: mid };
+    const key = bookPageEntryKey(next);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(next);
+  }
+  return out;
+}
+
+/** Dérive `memoryIds` + `memoryPhotoRefs` (dernier slot par id, compat) depuis les pages. */
+function deriveBookIdsAndRefsFromEntries(entries: readonly BookPageEntry[]): {
+  memoryIds: string[];
+  memoryPhotoRefs: Record<string, string> | undefined;
+} {
+  const memoryIds = uniq(entries.map(e => e.memoryId));
+  const memoryPhotoRefs: Record<string, string> = {};
+  for (const e of entries) {
+    const mid = e.memoryId.trim();
+    const pr = e.photoRef?.trim();
+    if (mid && pr) memoryPhotoRefs[mid] = pr;
+  }
+  return {
+    memoryIds,
+    memoryPhotoRefs: Object.keys(memoryPhotoRefs).length > 0 ? memoryPhotoRefs : undefined,
+  };
+}
+
+
 function normalizeBook(raw: unknown): Book | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
@@ -349,11 +419,63 @@ function normalizeBook(raw: unknown): Book | null {
       ? r.coverPhotoUrl.trim()
       : null;
 
+  const memoryPhotoRefs: Record<string, string> = {};
+  if (r.memoryPhotoRefs && typeof r.memoryPhotoRefs === 'object') {
+    for (const [k, v] of Object.entries(r.memoryPhotoRefs as Record<string, unknown>)) {
+      const id = k.trim();
+      const ref = typeof v === 'string' ? v.trim() : '';
+      if (id && ref) memoryPhotoRefs[id] = ref;
+    }
+  }
+
+  const pageEntries: BookPageEntry[] = [];
+  const rawEntries = (r as { pageEntries?: unknown }).pageEntries;
+  if (Array.isArray(rawEntries)) {
+    for (const e of rawEntries) {
+      if (!e || typeof e !== 'object') continue;
+      const mid =
+        typeof (e as { memoryId?: unknown }).memoryId === 'string'
+          ? (e as { memoryId: string }).memoryId.trim()
+          : '';
+      if (!mid) continue;
+      const pr =
+        typeof (e as { photoRef?: unknown }).photoRef === 'string'
+          ? (e as { photoRef: string }).photoRef.trim()
+          : '';
+      pageEntries.push(pr ? { memoryId: mid, photoRef: pr } : { memoryId: mid });
+    }
+  }
+
+  const uniqueIds = uniq(memoryIds);
+  // Source de vérité = pageEntries (1 entrée = 1 page, multi-photos album OK).
+  // Migration livres anciens : si pas de pageEntries, 1 page par memoryId.
+  let resolvedEntries: BookPageEntry[];
+  if (pageEntries.length > 0) {
+    resolvedEntries = dedupeBookPageEntries(pageEntries, memoryPhotoRefs);
+    // Ids présents en mémoire mais absents des entries (données partielles) → append.
+    const inEntries = new Set(resolvedEntries.map(e => e.memoryId.trim()));
+    for (const id of uniqueIds) {
+      if (inEntries.has(id)) continue;
+      const ref = memoryPhotoRefs[id]?.trim();
+      resolvedEntries.push(ref ? { memoryId: id, photoRef: ref } : { memoryId: id });
+      inEntries.add(id);
+    }
+  } else {
+    resolvedEntries = uniqueIds.map(id => {
+      const ref = memoryPhotoRefs[id]?.trim();
+      return ref ? { memoryId: id, photoRef: ref } : { memoryId: id };
+    });
+  }
+
+  const derived = deriveBookIdsAndRefsFromEntries(resolvedEntries);
+
   return {
     id: r.id,
     title: title.trim() || 'Livre',
     createdAt,
-    memoryIds: uniq(memoryIds),
+    memoryIds: derived.memoryIds,
+    memoryPhotoRefs: derived.memoryPhotoRefs,
+    pageEntries: resolvedEntries,
     coverPhotoUrl,
     rotations: Object.keys(rotations).length > 0 ? rotations : undefined,
     photoCrops: Object.keys(photoCrops).length > 0 ? photoCrops : undefined,
@@ -388,6 +510,8 @@ async function writeAll(books: Book[]): Promise<void> {
       title: normalized.title,
       createdAt: normalized.createdAt,
       memoryIds: normalized.memoryIds,
+      memoryPhotoRefs: normalized.memoryPhotoRefs,
+      pageEntries: normalized.pageEntries,
       coverPhotoUrl: normalized.coverPhotoUrl ?? null,
       rotations: normalized.rotations,
       photoCrops: normalized.photoCrops,
@@ -437,6 +561,28 @@ export function findPhotoMemoryByCoverRef(
   for (const memoryId of memoryIds) {
     const m = getLocalMemoryById(memoryId);
     if (m?.type === 'photo' && bookCoverMatchesMemory(m, ref)) return m;
+  }
+  return null;
+}
+
+function visualCoverRefForMemory(m: Memory): string {
+  if (m.type === 'video') return getVideoPosterUriForFeedAndViewer(m).trim();
+  if (m.type === 'voice') return getVoiceCoverUriForFeedAndViewer(m).trim();
+  return '';
+}
+
+/** Souvenir vidéo/audio dont le poster / cover correspond à `coverRef`. */
+export function findVisualCoverMemoryByRef(
+  coverRef: string,
+  memoryIds: readonly string[],
+): Memory | null {
+  const refNorm = normalizePhotoUrlForCompare(coverRef);
+  if (!refNorm) return null;
+  for (const memoryId of memoryIds) {
+    const m = getLocalMemoryById(memoryId);
+    if (!m || (m.type !== 'video' && m.type !== 'voice')) continue;
+    const visual = visualCoverRefForMemory(m);
+    if (visual && normalizePhotoUrlForCompare(visual) === refNorm) return m;
   }
   return null;
 }
@@ -698,11 +844,14 @@ export async function applyBookCoverFromUri(params: {
   } else {
     let owner = findPhotoMemoryByCoverRef(coverRef, book.memoryIds);
     if (!owner) {
+      owner = findVisualCoverMemoryByRef(coverRef, book.memoryIds);
+    }
+    if (!owner) {
       const all = await getFamilyMemories();
-      owner = findPhotoMemoryByCoverRef(
-        coverRef,
-        all.map(m => m.id),
-      );
+      const allIds = all.map(m => m.id);
+      owner =
+        findPhotoMemoryByCoverRef(coverRef, allIds) ??
+        findVisualCoverMemoryByRef(coverRef, allIds);
     }
     if (owner && !book.memoryIds.includes(owner.id)) {
       const withMemory = await addMemoriesToBook(params.bookId, [owner.id]);
@@ -850,7 +999,17 @@ async function persistHealedBookCoverIfChanged(before: Book, after: Book): Promi
 /** Remplace une ref couverture locale morte par une ref cloud ou canonique du souvenir photo. */
 function healStaleLocalCoverPhotoRef(book: Book): Book {
   const direct = (book.coverPhotoUrl ?? '').trim();
-  if (!direct || !looksLikeStaleLocalCoverRef(direct)) return book;
+  if (!direct) return book;
+
+  // Chemin Storage résolu à tort sous Bundle/…/Petitmo.app/ → récupérer le chemin bucket.
+  const bundleLeak = direct.match(
+    /\.app\/((?:guest\/|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/).+)$/i,
+  );
+  if (bundleLeak?.[1] && extractMediaBucketPath(bundleLeak[1])) {
+    return { ...book, coverPhotoUrl: bundleLeak[1] };
+  }
+
+  if (!looksLikeStaleLocalCoverRef(direct)) return book;
 
   const coverMem = findBookCoverMemory(book);
   if (coverMem?.type === 'photo') {
@@ -1000,6 +1159,7 @@ export function booksListVisualSignature(books: readonly Book[]): string {
         b.title,
         b.createdAt,
         b.memoryIds.join(','),
+        String(bookPageEntries(b).length),
         b.coverPhotoUrl ?? '',
         cover,
         cropSig,
@@ -1073,19 +1233,34 @@ export async function createBook(title?: string): Promise<Book> {
  * Crée un livre et y attache les souvenirs en une seule écriture SQLite.
  * Évite les livres vides orphelins si l’app redémarre entre `createBook` et `addMemoriesToBook`.
  */
-export async function createBookWithMemories(title: string | undefined, memoryIds: string[]): Promise<Book> {
-  const ids = uniq(memoryIds);
-  if (ids.length === 0) {
+export async function createBookWithMemories(
+  title: string | undefined,
+  memoryIds: string[],
+  opts?: AddMemoriesToBookOptions,
+): Promise<Book> {
+  const pageEntries: BookPageEntry[] = dedupeBookPageEntries(
+    opts?.pageEntries && opts.pageEntries.length > 0
+      ? opts.pageEntries.filter(e => e.memoryId.trim())
+      : uniq(memoryIds).map(id => {
+          const ref = opts?.memoryPhotoRefs?.[id]?.trim();
+          return ref ? { memoryId: id, photoRef: ref } : { memoryId: id };
+        }),
+    opts?.memoryPhotoRefs,
+  );
+  if (pageEntries.length === 0) {
     throw new Error('Sélectionne au moins un souvenir pour créer le livre.');
   }
-  await assertBookMemoriesAllowedForTier(ids);
+  const derived = deriveBookIdsAndRefsFromEntries(pageEntries);
+  await assertBookMemoriesAllowedForTier(derived.memoryIds);
 
   const books = await readAll();
   const book: Book = {
     id: safeId(),
     title: (title ?? '').trim() || `Livre ${books.length + 1}`,
     createdAt: new Date().toISOString(),
-    memoryIds: ids,
+    memoryIds: derived.memoryIds,
+    pageEntries,
+    memoryPhotoRefs: derived.memoryPhotoRefs,
   };
   await upsertBook(book);
   return book;
@@ -1126,6 +1301,8 @@ export async function upsertBook(next: Book): Promise<void> {
     title: normalized.title,
     createdAt: normalized.createdAt,
     memoryIds: normalized.memoryIds,
+    memoryPhotoRefs: normalized.memoryPhotoRefs,
+    pageEntries: normalized.pageEntries,
     coverPhotoUrl: normalized.coverPhotoUrl ?? null,
     rotations: normalized.rotations,
     photoCrops: normalized.photoCrops,
@@ -1135,27 +1312,161 @@ export async function upsertBook(next: Book): Promise<void> {
   void backupBooksToSupabaseIfPremium().catch(() => {});
 }
 
+/** Retire les pages dont le souvenir est introuvable en local. */
+export function pruneOrphanBookMemoryIds(book: Book): Book {
+  const prevEntries = bookPageEntries(book);
+  const entries = dedupeBookPageEntries(
+    prevEntries.filter(e => !!getLocalMemoryById(e.memoryId.trim())),
+  );
+  const derived = deriveBookIdsAndRefsFromEntries(entries);
+  const entriesUnchanged =
+    entries.length === prevEntries.length &&
+    entries.every((e, i) => {
+      const p = prevEntries[i];
+      return p && bookPageEntryKey(p) === bookPageEntryKey(e);
+    });
+  const idsUnchanged =
+    derived.memoryIds.length === (book.memoryIds ?? []).length &&
+    derived.memoryIds.every((id, i) => id === book.memoryIds[i]);
+  if (idsUnchanged && entriesUnchanged) return book;
+  return {
+    ...book,
+    memoryIds: derived.memoryIds,
+    pageEntries: entries,
+    memoryPhotoRefs: derived.memoryPhotoRefs,
+  };
+}
+
+/**
+ * Livre cible du flux Favoris → spread (lecture SQLite, sans mutation).
+ * Aligné sur les pages affichables : ids orphelins exclus (comme le prune preview).
+ */
+export function getBookForFavorisAddTarget(bookId: string): Book | null {
+  const raw = getLocalBook(bookId.trim());
+  if (!raw) return null;
+  const b = normalizeBook(raw);
+  if (!b) return null;
+  return pruneOrphanBookMemoryIds(b);
+}
+
+function mergeBookMemoryPhotoRefs(
+  book: Book,
+  incoming?: Record<string, string>,
+  finalMemoryIds?: string[],
+): Record<string, string> | undefined {
+  const ids = new Set(finalMemoryIds ?? book.memoryIds ?? []);
+  const merged = { ...(book.memoryPhotoRefs ?? {}), ...(incoming ?? {}) };
+  const out: Record<string, string> = {};
+  for (const [id, ref] of Object.entries(merged)) {
+    const mid = id.trim();
+    const url = ref.trim();
+    if (!mid || !url || !ids.has(mid)) continue;
+    out[mid] = url;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * Pages contenu d’un livre — source de vérité `pageEntries`
+ * (plusieurs pages possibles pour le même memoryId, slots photo distincts).
+ */
+export function bookPageEntries(book: Book): BookPageEntry[] {
+  if (book.pageEntries && book.pageEntries.length > 0) {
+    return dedupeBookPageEntries(book.pageEntries, book.memoryPhotoRefs);
+  }
+  // Migration : livres sans pageEntries persistées.
+  return dedupeBookPageEntries(
+    (book.memoryIds ?? []).map(id => {
+      const ref = book.memoryPhotoRefs?.[id]?.trim();
+      return ref ? { memoryId: id, photoRef: ref } : { memoryId: id };
+    }),
+  );
+}
+
+/** True si le souvenir (memoryId) a au moins une page. */
+export function bookHasMemoryPage(book: Book, memoryId: string): boolean {
+  const id = memoryId.trim();
+  if (!id) return false;
+  return bookPageEntries(book).some(e => e.memoryId.trim() === id);
+}
+
+/** True si cette page précise (souvenir + slot photo) est déjà dans le livre. */
+export function bookHasPageEntry(book: Book, entry: BookPageEntry): boolean {
+  const key = bookPageEntryKey(entry);
+  if (!key) return false;
+  return bookPageEntries(book).some(e => bookPageEntryKey(e) === key);
+}
+
+export type AddMemoriesToBookOptions = {
+  memoryPhotoRefs?: Record<string, string>;
+  /** Pages à ajouter (APPEND). Même memoryId + autre photoRef = nouvelle page. */
+  pageEntries?: BookPageEntry[];
+};
+
+/** Plafond pages contenu (pas le nombre de memoryIds uniques). */
+export const MAX_BOOK_PAGE_ENTRIES = 80;
+
 /** Ids de souvenirs uniques, ordre conservé (pour sélection / lots). */
 export function dedupeMemoryIds(ids: string[]): string[] {
   return uniq(ids);
 }
 
-/** Ajoute plusieurs souvenirs en une écriture ; jamais de doublons dans `memoryIds`. */
-export async function addMemoriesToBook(bookId: string, memoryIds: string[]): Promise<Book | null> {
-  const ids = uniq(memoryIds);
+/**
+ * Ajoute des pages au livre — **toujours APPEND**.
+ * Ne remplace jamais une page existante. Doublon exact (même memoryId + même photoRef) ignoré.
+ */
+export async function addMemoriesToBook(
+  bookId: string,
+  memoryIds: string[],
+  opts?: AddMemoriesToBookOptions,
+): Promise<Book | null> {
   const b = getLocalBook(bookId);
   if (!b) return null;
-  if (ids.length === 0) return b;
 
-  const existingIds = uniq(b.memoryIds ?? []);
-  const newIds = ids.filter(id => !existingIds.includes(id));
-  if (newIds.length === 0) return normalizeBook(b) ?? b;
+  const normalized = normalizeBook(b) ?? b;
+  const current = bookPageEntries(normalized);
+  const seen = new Set(current.map(bookPageEntryKey).filter(Boolean));
+  const toAppend: BookPageEntry[] = [];
 
-  await assertBookMemoriesAllowedForTier(uniq([...existingIds, ...newIds]));
+  const pushEntry = (raw: BookPageEntry) => {
+    const mid = raw.memoryId.trim();
+    if (!mid) return;
+    const photoRef = raw.photoRef?.trim() || undefined;
+    const next: BookPageEntry = photoRef ? { memoryId: mid, photoRef } : { memoryId: mid };
+    const key = bookPageEntryKey(next);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    toAppend.push(next);
+  };
+
+  if (opts?.pageEntries && opts.pageEntries.length > 0) {
+    for (const pe of opts.pageEntries) pushEntry(pe);
+  } else {
+    for (const id of uniq(memoryIds)) {
+      const ref = opts?.memoryPhotoRefs?.[id]?.trim();
+      pushEntry(ref ? { memoryId: id, photoRef: ref } : { memoryId: id });
+    }
+  }
+
+  if (toAppend.length === 0) {
+    return normalized;
+  }
+
+  const entries = [...current, ...toAppend];
+  if (entries.length > MAX_BOOK_PAGE_ENTRIES) {
+    throw new Error(
+      `Un livre peut contenir au maximum ${MAX_BOOK_PAGE_ENTRIES} pages (actuellement ${current.length}).`,
+    );
+  }
+
+  const derived = deriveBookIdsAndRefsFromEntries(entries);
+  await assertBookMemoriesAllowedForTier(derived.memoryIds);
 
   const next: Book = {
-    ...(normalizeBook(b) ?? b),
-    memoryIds: uniq([...existingIds, ...newIds]),
+    ...normalized,
+    memoryIds: derived.memoryIds,
+    pageEntries: entries,
+    memoryPhotoRefs: derived.memoryPhotoRefs,
   };
   await upsertBook(next);
   return next;
@@ -1165,13 +1476,21 @@ export async function addMemoryToBook(bookId: string, memoryId: string): Promise
   return addMemoriesToBook(bookId, [memoryId]);
 }
 
-/** Retire plusieurs souvenirs en une écriture. */
+/** Retire toutes les pages des souvenirs donnés (memoryIds). */
 export async function removeMemoriesFromBook(bookId: string, memoryIds: string[]): Promise<Book | null> {
   const remove = new Set(uniq(memoryIds));
   const b = getLocalBook(bookId);
   if (!b) return null;
   if (remove.size === 0) return b;
-  const next: Book = { ...(normalizeBook(b) ?? b), memoryIds: (b.memoryIds ?? []).filter(id => !remove.has(id)) };
+  const normalized = normalizeBook(b) ?? b;
+  const entries = bookPageEntries(normalized).filter(e => !remove.has(e.memoryId.trim()));
+  const derived = deriveBookIdsAndRefsFromEntries(entries);
+  const next: Book = {
+    ...normalized,
+    memoryIds: derived.memoryIds,
+    pageEntries: entries,
+    memoryPhotoRefs: derived.memoryPhotoRefs,
+  };
   await upsertBook(next);
   return next;
 }

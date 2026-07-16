@@ -34,7 +34,13 @@ export async function submitGelatoPrintOrder(
 ): Promise<SubmitGelatoPrintOrderResult> {
   const config = loadGelatoConfig();
   if (!config) {
-    return { ok: true, skipped: true, reason: 'GELATO_NOT_CONFIGURED' };
+    const reason = 'GELATO_NOT_CONFIGURED';
+    console.warn('[gelato] skip', params.exportRequestId, reason);
+    await supabase
+      .from('export_requests')
+      .update({ last_error: reason })
+      .eq('id', params.exportRequestId);
+    return { ok: true, skipped: true, reason };
   }
 
   const { data: row, error } = await supabase

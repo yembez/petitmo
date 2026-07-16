@@ -30,6 +30,7 @@ export type BookPortraitSpreadRowProps = {
   rotations: Record<string, number>;
   typography: BookMaquetteTypography;
   folioFont?: string;
+  memoryPhotoRefs?: Record<string, string>;
   getMemoryForPage: (page: BookPage) => Memory | null;
   getPrefetchUri: (row: PageRow) => string | null;
   onOpenEditor: (pageIndex: number) => void;
@@ -51,6 +52,7 @@ function BookPortraitSpreadRowInner({
   rotations,
   typography,
   folioFont,
+  memoryPhotoRefs,
   getMemoryForPage,
   getPrefetchUri,
   onOpenEditor,
@@ -82,6 +84,14 @@ function BookPortraitSpreadRowInner({
         rotations={rotations}
         typography={typography}
         folioFont={folioFont}
+        memoryPhotoRef={
+          mem
+            ? ((row.page.type === 'photo-full' || row.page.type === 'photo-note'
+                ? row.page.photoRef
+                : undefined) ??
+              memoryPhotoRefs?.[mem.id])
+            : undefined
+        }
         prefetchUri={getPrefetchUri(row)}
         onOpenEditor={onOpenEditor}
         onPrefetchImage={onPrefetchImage}

@@ -17,9 +17,10 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Check, Plus, X } from 'lucide-react-native';
 import { scale, verticalScale } from '@/utils/responsive';
-import type { Book } from '@/services/books';
+import type { Book, BookPageEntry } from '@/services/books';
 import {
   addMemoriesToBook,
+  bookHasPageEntry,
   createBookWithMemories,
   dedupeMemoryIds,
   listBooks,
@@ -38,6 +39,10 @@ export type AddToBookModalProps = {
   onClose: () => void;
   /** Ids de souvenirs à ajouter ou retirer (distincts). */
   memoryIds: string[];
+  /** Slot photo album par souvenir (depuis sélection Favoris). */
+  memoryPhotoRefs?: Record<string, string>;
+  /** Pages précises à APPEND (même memoryId + autre photo = nouvelle page). */
+  pageEntries?: BookPageEntry[];
   /** Fallback vignette livre (ex. photo profil enfant) si pas de coverPhotoUrl. */
   coverFallbackUrl?: string;
   /**
@@ -51,6 +56,8 @@ export function AddToBookModal({
   visible,
   onClose,
   memoryIds,
+  memoryPhotoRefs,
+  pageEntries,
   coverFallbackUrl = '',
   redirectToBooksOnDone = true,
 }: AddToBookModalProps) {
@@ -102,26 +109,38 @@ export function AddToBookModal({
 
   const allSelectionAlreadyInBook = useCallback(
     (b: Book) => {
+      if (pageEntries && pageEntries.length > 0) {
+        return pageEntries.every(e => bookHasPageEntry(b, e));
+      }
       if (selectionMemoryIds.length === 0) return false;
       const inBook = new Set(b.memoryIds);
       return selectionMemoryIds.every(id => inBook.has(id));
     },
-    [selectionMemoryIds]
+    [pageEntries, selectionMemoryIds]
   );
 
   const addAllToBook = useCallback(
     async (bookId: string) => {
       const b = (await listBooks()).find(x => x.id === bookId);
       if (!b) return;
-      const toAdd = selectionMemoryIds.filter(id => !b.memoryIds.includes(id));
-      if (toAdd.length === 0) {
-        await refreshBooks();
-        setAddedBookIds(prev => (prev.includes(bookId) ? prev : [...prev, bookId]));
-        setDidAdd(true);
-        return;
-      }
       try {
-        await addMemoriesToBook(bookId, toAdd);
+        if (pageEntries && pageEntries.length > 0) {
+          const updated = await addMemoriesToBook(
+            bookId,
+            pageEntries.map(e => e.memoryId),
+            { pageEntries },
+          );
+          if (!updated) return;
+        } else {
+          const toAdd = selectionMemoryIds.filter(id => !b.memoryIds.includes(id));
+          if (toAdd.length === 0 && !memoryPhotoRefs) {
+            await refreshBooks();
+            setAddedBookIds(prev => (prev.includes(bookId) ? prev : [...prev, bookId]));
+            setDidAdd(true);
+            return;
+          }
+          await addMemoriesToBook(bookId, toAdd, { memoryPhotoRefs });
+        }
       } catch (e) {
         Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
         return;
@@ -130,7 +149,7 @@ export function AddToBookModal({
       setAddedBookIds(prev => (prev.includes(bookId) ? prev : [...prev, bookId]));
       setDidAdd(true);
     },
-    [selectionMemoryIds, refreshBooks]
+    [memoryPhotoRefs, pageEntries, selectionMemoryIds, refreshBooks]
   );
 
   const removeAllFromBook = useCallback(
@@ -152,7 +171,10 @@ export function AddToBookModal({
   const createAndAddToNewBook = useCallback(async () => {
     let created: Book;
     try {
-      created = await createBookWithMemories(newBookTitle, selectionMemoryIds);
+      created = await createBookWithMemories(newBookTitle, selectionMemoryIds, {
+        pageEntries,
+        memoryPhotoRefs,
+      });
     } catch (e) {
       Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
       return;
@@ -172,7 +194,7 @@ export function AddToBookModal({
     setCreateBookMode(false);
     setAddedBookIds([created.id]);
     setDidAdd(true);
-  }, [newBookTitle, refreshBooks, selectionMemoryIds]);
+  }, [memoryPhotoRefs, newBookTitle, pageEntries, refreshBooks, selectionMemoryIds]);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={closeModalToBooks}>
