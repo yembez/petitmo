@@ -1196,7 +1196,11 @@ export function buildGelatoSpreadHtml(
   );
 }
 
-/** HTML bloc intérieur : garde avant + pages contenu + page de fin (texte 4ᵉ) ; plus de garde blanche finale vide. */
+/** HTML bloc intérieur Gelato : garde blanche + contenu (+ pad si impair) + garde blanche.
+ * Template officiel : 30 intérieures → PDF 33 pages ; pages 2 et dernière toujours vides.
+ * Le texte « Chaque moment compte. » est sur le panneau arrière du spread wraparound.
+ * @see https://support.gelato.com/en/articles/8996282-how-do-i-design-a-photo-book
+ */
 export function buildGelatoBlockHtml(input: BuildBookHtmlInput): string {
   const printInput: BuildBookHtmlInput = { ...input, exportMode: 'print' };
   const pageWmm = PRINT_PAGE_WIDTH_MM;
@@ -1205,9 +1209,8 @@ export function buildGelatoBlockHtml(input: BuildBookHtmlInput): string {
   const innerHtml = innerPages
     .map((p, i) => renderPage(p, printInput, i + 1, pageWmm))
     .join('');
-  // Parité maquette : dernière page = « Chaque moment compte. » (pas une garde blanche).
-  // La 4ᵉ de couverture physique porte aussi ce texte sur le spread wraparound.
-  const endPageNum = innerPages.length + 2;
-  const pagesHtml = `${pageGelatoBlankEndpaper()}${innerHtml}${pageBackCover(endPageNum)}`;
+  // Gelato exige un pageCount catalogue pair : une page blanche si N impair.
+  const padOdd = innerPages.length % 2 === 1 ? pageGelatoBlankEndpaper() : '';
+  const pagesHtml = `${pageGelatoBlankEndpaper()}${innerHtml}${padOdd}${pageGelatoBlankEndpaper()}`;
   return buildHtmlDocument(input.coverTitle, pagesHtml, pageWmm, pageHmm, true);
 }

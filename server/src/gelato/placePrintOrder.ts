@@ -108,6 +108,17 @@ export async function submitGelatoPrintOrder(
     return { ok: false, message: msg };
   }
 
+  if (gelatoPageCount % 2 !== 0) {
+    const msg =
+      `gelato skip: pageCount catalogue ${gelatoPageCount} est impair — Gelato photobook exige un nombre pair ` +
+      `(ex. 30, 32, 34). Pad côté generate-pdf manquant ?`;
+    await supabase
+      .from('export_requests')
+      .update({ last_error: msg.slice(0, 2000) })
+      .eq('id', params.exportRequestId);
+    return { ok: false, message: msg };
+  }
+
   const expectedPdfPages = gelatoPageCount + 3;
   if (pdfPageCount < expectedPdfPages) {
     const msg = `gelato skip: PDF ${pdfPageCount} page(s), attendu ≥ ${expectedPdfPages} (format spread + gardes + ${gelatoPageCount} intérieures)`;
@@ -117,6 +128,13 @@ export async function submitGelatoPrintOrder(
       .eq('id', params.exportRequestId);
     return { ok: false, message: msg };
   }
+
+  console.log(
+    '[gelato] pageCount',
+    `catalog=${gelatoPageCount}`,
+    `pdf=${pdfPageCount}`,
+    `expectedPdf≥${expectedPdfPages}`,
+  );
 
   const item: Record<string, unknown> = {
     itemReferenceId: params.bookId,

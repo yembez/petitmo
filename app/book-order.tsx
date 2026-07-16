@@ -42,6 +42,7 @@ import { DIGITAL_EXPORT_PDF_EUR } from '@/lib/bookExportPricing';
 import type { Child } from '@/types/local';
 import { getPendingGuestRawUploadsCountForKeys } from '@/services/pendingRawGuestUploads';
 import {
+  gelatoCatalogPageCount,
   gelatoInnerPageCount,
   gelatoMinInnerPagesAlertMessage,
   GELATO_MIN_INNER_PAGES,
@@ -353,11 +354,11 @@ export default function BookOrderScreen() {
     if (exportMode === 'print') {
       if (!isInitExportConfigured()) return;
       if (pendingPayload) {
-        const innerPagesForGelato = gelatoInnerPageCount(pendingPayload.pages);
-        if (innerPagesForGelato < GELATO_MIN_INNER_PAGES) {
+        const catalogPagesForGelato = gelatoCatalogPageCount(pendingPayload.pages);
+        if (catalogPagesForGelato < GELATO_MIN_INNER_PAGES) {
           Alert.alert(
             'Livre trop court pour l’impression',
-            gelatoMinInnerPagesAlertMessage(innerPagesForGelato),
+            gelatoMinInnerPagesAlertMessage(gelatoInnerPageCount(pendingPayload.pages)),
           );
           return;
         }

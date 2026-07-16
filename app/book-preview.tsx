@@ -73,6 +73,7 @@ import {
   type BookPhotoPageType,
 } from '@/utils/bookPhotoPrintDpi';
 import {
+  gelatoCatalogPageCount,
   gelatoInnerPageCount,
   gelatoMinInnerPagesAlertMessage,
   GELATO_MIN_INNER_PAGES,
@@ -2379,7 +2380,7 @@ export default function BookPreviewScreen() {
   const goToBookOrderPrint = useCallback(() => {
     if (exporting || guestExportSubmitting || !child) return;
     const innerPagesForGelato = gelatoInnerPageCount(pages);
-    if (innerPagesForGelato < GELATO_MIN_INNER_PAGES) {
+    if (gelatoCatalogPageCount(pages) < GELATO_MIN_INNER_PAGES) {
       Alert.alert('Livre trop court pour l’impression', gelatoMinInnerPagesAlertMessage(innerPagesForGelato));
       return;
     }
