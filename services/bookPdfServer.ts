@@ -343,11 +343,12 @@ async function resolveAlbumPhotoHttpsUrlForSessionPdf(
   } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const slotKey =
-    normalizePhotoUrlForCompare(photoRef)
-      .replace(/[^a-zA-Z0-9_-]/g, '_')
-      .slice(0, 24) || 'slot';
-  const path = `${user.id}/${childId}/pdf-export/${m.id}-${slotKey}.jpg`;
+  const slotKey = albumPdfSlotAssetKey(
+    m.id,
+    photoRef,
+    indexOfPhotoUrlInFeed(m, photoRef),
+  );
+  const path = `${user.id}/${childId}/pdf-export/${slotKey}.jpg`;
   return await uploadFileToSupabase(compressed, path, { upsert: true });
 }
 
@@ -486,11 +487,14 @@ async function buildPagePhotoRefHttpsMap(
         maxWidth: MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH,
         quality: MEDIA_BOOK_PDF_JPEG_QUALITY,
       });
-      const slotKey =
-        normalizePhotoUrlForCompare(ref).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 20) || 'slot';
+      const slotKey = albumPdfSlotAssetKey(
+        m.id,
+        ref,
+        indexOfPhotoUrlInFeed(m, ref),
+      );
       const { readUrl } = await guestUploadMediaImageThenReadUrl({
         pdfTicket,
-        asset: { kind: 'photo', memoryId: `${m.id}_${slotKey}` },
+        asset: { kind: 'photo', memoryId: slotKey },
         localUri: compressed,
         mimeType: 'image/jpeg',
       });
@@ -559,6 +563,21 @@ function applyHttpsPhotoRefsToServerPages(
 
 function isHttps(u: string | null | undefined): boolean {
   return typeof u === 'string' && /^https:\/\//i.test(u.trim());
+}
+
+/**
+ * Clé d’asset unique par slot album (évite collision sur le préfixe Storage
+ * `849bb9e8-2cb6-409d-…` tronqué à 20 car. → 3 pages = 1 fichier upsert).
+ */
+function albumPdfSlotAssetKey(memoryId: string, photoRef: string, slotIndex: number): string {
+  const norm = normalizePhotoUrlForCompare(photoRef);
+  let h = 2166136261;
+  for (let i = 0; i < norm.length; i++) {
+    h ^= norm.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  const idx = slotIndex >= 0 ? `s${slotIndex}` : 'sx';
+  return `${memoryId.slice(0, 8)}_${idx}_${(h >>> 0).toString(36)}`;
 }
 
 async function compressLocalJpegForGuestUpload(
