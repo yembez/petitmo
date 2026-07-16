@@ -188,6 +188,8 @@ function photoMainUrl(m: MemoryRow): string {
 function photoUrlForPage(m: MemoryRow, photoRef?: string | null): string {
   const ref = (photoRef ?? '').trim();
   if (/^https:\/\//i.test(ref)) return ref;
+  // photoRef présent mais non-HTTPS : ne JAMAIS retomber sur le primaire (album ×N identiques).
+  if (ref) return ref;
   return photoMainUrl(m);
 }
 

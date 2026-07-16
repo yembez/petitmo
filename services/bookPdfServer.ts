@@ -32,9 +32,11 @@ import { ensureVoiceMemoryCloudForBookExport } from '@/services/migration';
 import { persistVideoPosterToCloudForPdfExport, persistVoiceCoverToCloudForPdfExport, uploadFileToSupabase } from '@/services/media';
 import {
   collectPhotoLocalUploadUriCandidates,
+  collectPhotoSlotUploadUriCandidates,
   collectVideoPosterLocalUploadUriCandidates,
   collectVoiceCoverLocalUploadUriCandidates,
   getBookPhotoPrintUri,
+  getBookPhotoSlotUriStrict,
   getPhotoUriForBookMaquetteDisplay,
   getVideoPosterUriForBookPreview,
   getVoiceCoverUriForBookPreview,
@@ -272,21 +274,64 @@ async function ensureVideoPostersPersistedForServerPdf(
   return overrides;
 }
 
+/** Download cloud / Storage → fichier tmp local (slot album PDF). */
+async function downloadCloudMediaToTempUri(remoteOrPath: string): Promise<string | null> {
+  const raw = remoteOrPath.trim();
+  if (!raw || Platform.OS === 'web') return null;
+  try {
+    const signed =
+      isHttps(raw) ? raw : await getSignedMediaDisplayUrl(raw);
+    if (!signed || !isHttps(signed)) return null;
+    const baseDir = documentDirectory ?? '';
+    const tmpDir = `${baseDir}petitmo-pdf-slot-tmp`;
+    try {
+      await makeDirectoryAsync(tmpDir, { intermediates: true });
+    } catch {
+      /* exists */
+    }
+    const dest = `${tmpDir}/slot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+    const dl = await downloadAsync(signed, dest);
+    if (dl.status !== 200 || !dl.uri) return null;
+    return dl.uri;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Résout les bytes d’un **slot album** pour upload PDF.
+ * Interdit le dump primaire (`collectPhotoLocalUploadUriCandidates`) quand un photoRef est fourni.
+ */
+async function resolveAlbumSlotLocalUriForPdf(m: Memory, photoRef: string): Promise<string | null> {
+  const candidates = collectPhotoSlotUploadUriCandidates(m, photoRef);
+  const localOnly = candidates.filter(
+    u => u.trim().length > 0 && !isHttps(u) && !isBareMediaBucketPath(u),
+  );
+  const local = await pickFirstReadableLocalMediaUri(localOnly);
+  if (local) return local;
+
+  for (const c of candidates) {
+    const t = c.trim();
+    if (!t) continue;
+    if (isHttps(t) || isBareMediaBucketPath(t)) {
+      const dl = await downloadCloudMediaToTempUri(t);
+      if (dl) return dl;
+    }
+  }
+  return null;
+}
+
 /** Upload slot album (sans écraser `print_url` principal en base) — export PDF session premium. */
 async function resolveAlbumPhotoHttpsUrlForSessionPdf(
   m: Memory,
   photoRef: string,
   childId: string,
 ): Promise<string | null> {
-  const slotUri = getBookPhotoPrintUri(m, photoRef).trim();
+  const slotUri = getBookPhotoSlotUriStrict(m, photoRef).trim();
   if (slotUri && isHttps(slotUri)) return slotUri;
   if (Platform.OS === 'web') return null;
 
-  const local = await pickFirstReadableLocalMediaUri(
-    slotUri
-      ? [slotUri, ...collectPhotoLocalUploadUriCandidates(m)]
-      : collectPhotoLocalUploadUriCandidates(m),
-  );
+  const local = await resolveAlbumSlotLocalUriForPdf(m, photoRef);
   if (!local) return null;
 
   const compressed = await compressLocalJpegForGuestUpload(local, {
@@ -425,11 +470,17 @@ async function buildPagePhotoRefHttpsMap(
       out.set(mapKey, ref);
       continue;
     }
-    const slotPrint = getBookPhotoPrintUri(m, ref).trim();
-    const local = await pickFirstReadableLocalMediaUri(
-      [slotPrint, ref, inferLocalDisplayPathFromPrint(slotPrint || ref)].filter(u => u.trim().length > 0),
-    );
-    if (!local) continue;
+    const local = await resolveAlbumSlotLocalUriForPdf(m, ref);
+    if (!local) {
+      if (__DEV__) {
+        console.warn(
+          '[bookPdfServer] album slot: aucun fichier pour photoRef (pas de fallback primaire)',
+          m.id,
+          ref.slice(0, 80),
+        );
+      }
+      continue;
+    }
     try {
       const compressed = await compressLocalJpegForGuestUpload(local, {
         maxWidth: MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH,
@@ -449,6 +500,46 @@ async function buildPagePhotoRefHttpsMap(
     }
   }
   return out;
+}
+
+/**
+ * Garde-fou : pages album distinctes (même memoryId, photoRefs différents)
+ * doivent avoir des photoRef HTTPS distincts avant envoi serveur.
+ */
+function assertAlbumSlotsHaveDistinctHttpsPhotoRefs(
+  pages: GenerateBookPdfPayload['pages'],
+): void {
+  const byMemory = new Map<string, string[]>();
+  for (const p of pages) {
+    if (p.type !== 'photo-full' && p.type !== 'photo-note') continue;
+    const mid = (p.memoryId ?? '').trim();
+    const ref = (p.photoRef ?? '').trim();
+    if (!mid || !ref) continue;
+    const list = byMemory.get(mid) ?? [];
+    list.push(ref);
+    byMemory.set(mid, list);
+  }
+  for (const [mid, refs] of byMemory) {
+    if (refs.length < 2) continue;
+    const httpsRefs = refs.filter(r => isHttps(r));
+    if (httpsRefs.length !== refs.length) {
+      throw new Error(
+        appendDevExportHint(
+          'Impossible de préparer toutes les photos de cet album pour le PDF. Rouvre l’aperçu, vérifie les photos du livre, puis réessaie.',
+          `ALBUM_SLOT_PDF_INCOMPLETE memory=${mid} slots=${refs.length} https=${httpsRefs.length}`,
+        ),
+      );
+    }
+    const uniq = new Set(httpsRefs.map(r => r.split('?')[0]));
+    if (uniq.size < httpsRefs.length) {
+      throw new Error(
+        appendDevExportHint(
+          'Plusieurs pages du livre pointent vers la même photo d’album. Retire les doublons ou réajoute les photos depuis Favoris, puis réessaie.',
+          `ALBUM_SLOT_PDF_COLLAPSED memory=${mid} distinctUrls=${uniq.size} pages=${httpsRefs.length}`,
+        ),
+      );
+    }
+  }
 }
 
 function applyHttpsPhotoRefsToServerPages(
@@ -1033,6 +1124,7 @@ export async function generateBookPdfViaServer(input: GenerateBookPdfServerInput
     ),
     slotHttpsSession,
   );
+  assertAlbumSlotsHaveDistinctHttpsPhotoRefs(pagesPayload);
 
   const payload: GenerateBookPdfPayload = {
     bookId: input.bookId,
@@ -1342,8 +1434,8 @@ export async function generateBookPdfWithExportTicket(
       }
       if (m.type !== 'photo') return g;
 
-      const photoRef = input.memoryPhotoRefs?.[m.id]?.trim();
-      const slotPrint = getBookPhotoPrintUri(m, photoRef).trim();
+      // Une entrée guest par souvenir (primaire). Les slots album partent en `page.photoRef` HTTPS.
+      const slotPrint = getBookPhotoPrintUri(m).trim();
       const main = (
         slotPrint ||
         m.print_url ||
@@ -1357,11 +1449,7 @@ export async function generateBookPdfWithExportTicket(
       }
       if (!main || isHttps(main)) return g;
 
-      const local = await pickFirstReadableLocalMediaUri(
-        slotPrint
-          ? [slotPrint, ...collectPhotoLocalUploadUriCandidates(m)]
-          : collectPhotoLocalUploadUriCandidates(m),
-      );
+      const local = await pickFirstReadableLocalMediaUri(collectPhotoLocalUploadUriCandidates(m));
       if (!local) throw new Error('PREP_NOT_READY');
 
       const compressed = await compressLocalJpegForGuestUpload(local);
@@ -1386,6 +1474,7 @@ export async function generateBookPdfWithExportTicket(
     ),
     slotHttps,
   );
+  assertAlbumSlotsHaveDistinctHttpsPhotoRefs(pagesPayload);
 
   const payload: GenerateBookPdfPayload = {
     bookId: input.bookId,

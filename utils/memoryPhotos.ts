@@ -186,6 +186,81 @@ export function collectPhotoLocalUploadUriCandidates(memory: Memory): string[] {
   return out;
 }
 
+/**
+ * Candidats pour **un seul slot** album (favori / page livre).
+ * Ne retombe JAMAIS sur le print primaire quand `photoRef` cible une autre photo —
+ * c’était la cause du PDF « même souvenir ×3 ».
+ */
+export function collectPhotoSlotUploadUriCandidates(
+  memory: Memory,
+  photoRef?: string | null,
+): string[] {
+  if (memory.type !== 'photo') return [];
+  const ref = (photoRef ?? '').trim();
+  if (!ref) return collectPhotoLocalUploadUriCandidates(memory);
+
+  const idx = indexOfPhotoUrlInFeed(memory, ref);
+  if (idx === 0) return collectPhotoLocalUploadUriCandidates(memory);
+
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (u: string | null | undefined) => {
+    const t = (u ?? '').trim();
+    if (!t || seen.has(t)) return;
+    seen.add(t);
+    out.push(t);
+  };
+
+  if (idx > 0) {
+    const extraIdx = idx - 1;
+    const localExtras = asTrimmedStringArray(memory.extra_photo_paths);
+    const originals = asTrimmedStringArray(memory.extra_photo_urls);
+    const displays = asTrimmedStringArray(memory.extra_display_urls);
+    const thumbs = asTrimmedStringArray(memory.extra_thumb_urls);
+    const local = localExtras[extraIdx];
+    add(local);
+    if (local) {
+      add(inferLocalPrintPathFromDisplay(local));
+      add(inferLocalDisplayPathFromPrint(local));
+    }
+    add(originals[extraIdx]);
+    add(displays[extraIdx]);
+    add(thumbs[extraIdx]);
+  }
+
+  // Ref hors feed ou cloud-only : la ref elle-même (jamais le primaire).
+  add(ref);
+  add(inferLocalDisplayPathFromPrint(ref));
+  add(inferLocalPrintPathFromDisplay(ref));
+  return out;
+}
+
+/**
+ * URI print du slot ciblé — **sans** forcer le slot 0 si `photoRef` ne matche pas.
+ * Pour l’export PDF / upload guest (parité pages album).
+ */
+export function getBookPhotoSlotUriStrict(memory: Memory, photoRef: string): string {
+  if (memory.type !== 'photo') return '';
+  const ref = photoRef.trim();
+  if (!ref) return '';
+  const idx = indexOfPhotoUrlInFeed(memory, ref);
+  if (idx < 0) return normalizeMemoryMediaUriForDisplay(ref) || ref;
+  if (idx === 0) {
+    const raw = primarySlotPrintPathRaw(memory);
+    return raw ? normalizeMemoryMediaUriForDisplay(raw) : '';
+  }
+  const extraIdx = idx - 1;
+  const localExtras = asTrimmedStringArray(memory.extra_photo_paths);
+  const originals = asTrimmedStringArray(memory.extra_photo_urls);
+  const displays = asTrimmedStringArray(memory.extra_display_urls);
+  const raw = firstNonEmpty(
+    localExtras[extraIdx],
+    originals[extraIdx],
+    displays[extraIdx],
+  );
+  return raw ? normalizeMemoryMediaUriForDisplay(raw) : normalizeMemoryMediaUriForDisplay(ref) || ref;
+}
+
 function sandboxPhotoFileCandidatesForMemoryId(memoryId: string): string[] {
   if (Platform.OS === 'web' || !documentDirectory) return [];
   const base = `${documentDirectory}petitmo_memories/${memoryId.trim()}/`;
