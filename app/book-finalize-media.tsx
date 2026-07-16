@@ -11,18 +11,15 @@ import {
   getPendingExportUploadTicketRecord,
   setPendingExportUploadTicket,
 } from '@/lib/pendingExportUploadTicket';
-import type { Memory } from '@/types/local';
 import { collectMemoriesFromPagesForPdf } from '@/services/bookPdfServer';
+import { prepareBookQrAvUploads } from '@/services/bookQrAvUpload';
 import {
-  enqueueGuestRawUpload,
   getPendingGuestRawUploadsCountForKeys,
   getPendingGuestRawUploadsCount,
   getPendingGuestRawUploadLastErrors,
   processPendingGuestRawUploads,
   refreshAllPendingGuestRawUploadTickets,
-  markGuestRawUploadDone,
 } from '@/services/pendingRawGuestUploads';
-import { postGuestUploadUrls } from '@/services/initExportApi';
 
 const HARD_TIMEOUT_MS = 3 * 60_000;
 const SLOW_HINT_MS = 45_000;
@@ -33,24 +30,6 @@ function parsePriceEuros(raw: string | string[] | undefined): number {
   if (typeof s !== 'string') return 0;
   const n = Number.parseFloat(s);
   return Number.isFinite(n) ? n : 0;
-}
-
-function localUriForAv(m: Memory): string {
-  const fromLocal = (m.local_original_path ?? m.local_media_path ?? '').trim();
-  if (fromLocal) return fromLocal;
-  const fallback = (m.media_url ?? m.edited_media_url ?? '').trim();
-  if (fallback.toLowerCase().startsWith('file:')) return fallback;
-  return '';
-}
-
-function mimeTypeForAudio(): string {
-  return 'audio/mp4';
-}
-
-function mimeTypeForVideo(uri: string): string {
-  const u = uri.toLowerCase();
-  if (u.endsWith('.mov') || u.includes('.mov?')) return 'video/quicktime';
-  return 'video/mp4';
 }
 
 export default function BookFinalizeMediaScreen() {
@@ -130,48 +109,21 @@ export default function BookFinalizeMediaScreen() {
     const memories = payload
       ? collectMemoriesFromPagesForPdf(payload.pages, payload.localEdits ?? {})
       : [];
-    const av = memories.filter(m => m.type === 'voice' || m.type === 'video');
 
-    const tasks: Array<Promise<void>> = [];
-    const keys: string[] = [];
-
-    for (const m of av) {
-      const kind = m.type === 'voice' ? 'audio' : 'video';
-      const local = localUriForAv(m);
-      const key = `${kind}:${m.id}`;
-      keys.push(key);
-
-      // Souvenir déjà cloud + QR ready : ne pas re-uploader (évite blocage ~43 %).
-      try {
-        const { status, json } = await postGuestUploadUrls({
-          pdfTicket: exportTicket,
-          assets: [{ kind, memoryId: m.id }],
-        });
-        const row = (json as {
-          uploads?: Array<{ signedUrl?: string; alreadyReady?: boolean; token?: string }>;
-        })?.uploads?.[0];
-        if (status === 200 && (row?.alreadyReady || (!row?.signedUrl && row?.token))) {
-          await markGuestRawUploadDone(key);
-          continue;
-        }
-      } catch {
-        /* probe best-effort */
-      }
-
-      if (!local) continue;
-      tasks.push(
-        enqueueGuestRawUpload({
-          pdfTicket: exportTicket,
-          kind,
-          memoryId: m.id,
-          localUri: local,
-          mimeType: kind === 'video' ? mimeTypeForVideo(local) : mimeTypeForAudio(),
-          policy: 'finalize_only',
-        }),
-      );
+    const prepared = await prepareBookQrAvUploads({
+      pdfTicket: exportTicket,
+      memories,
+      policy: 'finalize_only',
+    });
+    if (prepared.pdfTicketUsed && prepared.pdfTicketUsed !== exportTicket) {
+      exportTicket = prepared.pdfTicketUsed;
+      resolvedTicketRef.current = exportTicket;
+      await setPendingExportUploadTicket(exportTicket, {
+        email: emailNorm || undefined,
+      });
     }
 
-    targetKeysRef.current = Array.from(new Set(keys));
+    targetKeysRef.current = Array.from(new Set(prepared.keys));
 
     // Payload déjà vidé : traiter la file persistée par generateBookPdfWithExportTicket.
     if (targetKeysRef.current.length === 0) {
@@ -182,17 +134,26 @@ export default function BookFinalizeMediaScreen() {
         return;
       }
       totalRef.current = pendingCount;
+      setProgressPct(0);
     } else {
       totalRef.current = targetKeysRef.current.length;
-    }
-
-    if (tasks.length > 0) {
-      await Promise.all(tasks);
+      // Skip déjà ready → barre part du réel (évite faux 0 % puis stuck ~43 %).
+      const preDone = prepared.alreadyReadyCount + prepared.skippedNoLocalCount;
+      const startPct = Math.round((preDone / Math.max(1, totalRef.current)) * 100);
+      setProgressPct(Math.min(100, startPct));
+      if (prepared.enqueuedCount === 0) {
+        setProgressPct(100);
+        setPhase('done');
+        return;
+      }
     }
 
     const startedAt = Date.now();
     let lastProgressAt = startedAt;
-    let lastDone = 0;
+    let lastDone =
+      targetKeysRef.current.length > 0
+        ? prepared.alreadyReadyCount + prepared.skippedNoLocalCount
+        : 0;
     const slowTimer = setTimeout(() => setSlowHint(true), SLOW_HINT_MS);
     try {
       while (!cancelledRef.current) {

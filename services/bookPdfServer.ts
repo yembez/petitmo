@@ -56,7 +56,7 @@ import {
   MEDIA_BOOK_PDF_COVER_JPEG_QUALITY,
 } from '@/lib/limits';
 import { isInitExportConfigured, postInitExport, postGuestUploadUrls } from '@/services/initExportApi';
-import { enqueueGuestRawUpload } from '@/services/pendingRawGuestUploads';
+import { prepareBookQrAvUploads } from '@/services/bookQrAvUpload';
 import { publicMediaBaseUrl } from '@/lib/publicMediaBaseUrl';
 
 /** Erreur HTTP / téléchargement après appel au service PDF. */
@@ -784,12 +784,6 @@ function localUriForAvRawUpload(m: Memory, kind: 'audio' | 'video'): string {
   return '';
 }
 
-function mimeTypeForVideoUpload(uri: string): string {
-  const u = uri.toLowerCase();
-  if (u.endsWith('.mov') || u.includes('.mov?')) return 'video/quicktime';
-  return 'video/mp4';
-}
-
 /**
  * Le payload commande passe par AsyncStorage : les champs locaux peuvent être incomplets.
  * On réhydrate depuis SQLite quand c’est possible (native).
@@ -834,99 +828,45 @@ async function downloadHttpsVideoToTempIfNeeded(m: Memory): Promise<string | nul
 }
 
 /**
- * Archi cible : PDF immédiat (QR déjà créé côté serveur) ; fichiers audio/vidéo bruts uploadés après succès generate-pdf.
+ * Archi cible : PDF immédiat (QR déjà créé côté serveur) ; fichiers audio/vidéo bruts
+ * enfilés après succès generate-pdf via `prepareBookQrAvUploads` (ready → skip).
  * Best-effort : ne bloque pas l’UX si échec réseau (le QR reste « en préparation » jusqu’au worker).
  */
 async function guestAvRawUploadAfterPdf(params: { pdfTicket: string; memories: Memory[] }): Promise<void> {
   const { pdfTicket, memories } = params;
-  const tasks: Promise<void>[] = [];
+  const hydrated: Memory[] = [];
 
   for (const m of memories) {
-    if (m.type === 'voice') {
-      const merged = mergeMemoryWithLocalRowForAv(m);
-      const local = localUriForAvRawUpload(merged, 'audio');
+    if (m.type !== 'voice' && m.type !== 'video') continue;
+    let merged = mergeMemoryWithLocalRowForAv(m);
+    if (merged.type === 'video') {
+      let local = localUriForAvRawUpload(merged, 'video');
       if (!local) {
-        if (__DEV__) console.warn('[guestAvRawUploadAfterPdf] audio: no uri', m.id);
-        continue;
+        local = (await downloadHttpsVideoToTempIfNeeded(merged)) ?? '';
+        if (local) {
+          merged = { ...merged, local_original_path: local };
+        }
       }
-      tasks.push(
-        (async () => {
-          try {
-            const { status, json } = await postGuestUploadUrls({
-              pdfTicket,
-              assets: [{ kind: 'audio', memoryId: m.id }],
-            });
-            const row = (json as {
-              uploads?: Array<{ signedUrl?: string; alreadyReady?: boolean; token?: string }>;
-            })?.uploads?.[0];
-            if (status === 200 && (row?.alreadyReady || (!row?.signedUrl && row?.token))) {
-              // QR déjà ready — rien à enfiler.
-              return;
-            }
-            if (status === 200 && row?.signedUrl) {
-              await enqueueGuestRawUpload({
-                pdfTicket,
-                kind: 'audio',
-                memoryId: m.id,
-                localUri: local,
-                mimeType: 'audio/mp4',
-                policy: 'finalize_only',
-              });
-              // Ne force pas l’upload ici : le plan gratuit le fait à la finalisation de commande.
-            } else if (__DEV__) {
-              console.warn('[guestAvRawUploadAfterPdf] audio signed URL failed', m.id, status, json);
-            }
-          } catch (e) {
-            if (__DEV__) console.warn('[guestAvRawUploadAfterPdf] audio', m.id, e);
-          }
-        })()
-      );
     }
-    // Vidéos : upload brut après PDF (QR activé à la finalisation commande, comme l’audio).
-    if (m.type === 'video') {
-      const merged = mergeMemoryWithLocalRowForAv(m);
-      tasks.push(
-        (async () => {
-          try {
-            let local = localUriForAvRawUpload(merged, 'video');
-            if (!local) {
-              local = (await downloadHttpsVideoToTempIfNeeded(merged)) ?? '';
-            }
-            if (!local) {
-              if (__DEV__) console.warn('[guestAvRawUploadAfterPdf] video: no uri', m.id);
-              return;
-            }
-            const { status, json } = await postGuestUploadUrls({
-              pdfTicket,
-              assets: [{ kind: 'video', memoryId: m.id }],
-            });
-            const row = (json as {
-              uploads?: Array<{ signedUrl?: string; alreadyReady?: boolean; token?: string }>;
-            })?.uploads?.[0];
-            if (status === 200 && (row?.alreadyReady || (!row?.signedUrl && row?.token))) {
-              return;
-            }
-            if (status === 200 && row?.signedUrl) {
-              await enqueueGuestRawUpload({
-                pdfTicket,
-                kind: 'video',
-                memoryId: m.id,
-                localUri: local,
-                mimeType: mimeTypeForVideoUpload(local),
-                policy: 'finalize_only',
-              });
-            } else if (__DEV__) {
-              console.warn('[guestAvRawUploadAfterPdf] video signed URL failed', m.id, status, json);
-            }
-          } catch (e) {
-            if (__DEV__) console.warn('[guestAvRawUploadAfterPdf] video', m.id, e);
-          }
-        })(),
-      );
-    }
+    hydrated.push(merged);
   }
 
-  await Promise.all(tasks);
+  try {
+    const result = await prepareBookQrAvUploads({
+      pdfTicket,
+      memories: hydrated,
+      policy: 'finalize_only',
+    });
+    if (__DEV__) {
+      console.log('[guestAvRawUploadAfterPdf]', {
+        alreadyReady: result.alreadyReadyCount,
+        enqueued: result.enqueuedCount,
+        skippedNoLocal: result.skippedNoLocalCount,
+      });
+    }
+  } catch (e) {
+    if (__DEV__) console.warn('[guestAvRawUploadAfterPdf]', e);
+  }
 }
 
 function httpsOrNull(u: string | null | undefined): string | null {

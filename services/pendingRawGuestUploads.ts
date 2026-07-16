@@ -5,11 +5,10 @@ import {
   isIosBackgroundSignedPutUploadAvailable,
   uploadFileToSignedPutUrlIosBackground,
 } from '@/services/signedUrlIosBackgroundUpload';
-import { postGuestUploadUrls } from '@/services/initExportApi';
 import {
-  ensureFreshExportUploadTicket,
-  getPendingExportUploadTicketRecord,
-} from '@/lib/pendingExportUploadTicket';
+  isGuestAvUploadAlreadyReady,
+  requestGuestAvUploadSlot,
+} from '@/services/bookQrAvUploadSlot';
 
 type GuestRawKind = 'audio' | 'video';
 
@@ -289,39 +288,17 @@ export async function processPendingGuestRawUploads(opts?: { force?: boolean }):
           });
         }
 
-        const { status, json } = await postGuestUploadUrls({
+        const slot = await requestGuestAvUploadSlot({
           pdfTicket: item.pdfTicket,
-          assets: [{ kind: item.kind, memoryId: item.memoryId }],
+          kind: item.kind,
+          memoryId: item.memoryId,
         });
-        let row = (json as {
-          uploads?: Array<{ signedUrl?: string; alreadyReady?: boolean; token?: string }>;
-        })?.uploads?.[0];
-        let statusEff = status;
-        let jsonEff = json;
 
-        // Ticket expiré / invalide → renouveler (même export_request, QR inchangé) puis retenter 1×.
-        if (statusEff === 401) {
-          const rec = await getPendingExportUploadTicketRecord();
-          const fresh = await ensureFreshExportUploadTicket({
-            email: rec?.email,
-            exportRequestId: rec?.exportRequestId,
-          });
-          if (fresh && fresh !== item.pdfTicket) {
-            await refreshAllPendingGuestRawUploadTickets(fresh);
-            const retry = await postGuestUploadUrls({
-              pdfTicket: fresh,
-              assets: [{ kind: item.kind, memoryId: item.memoryId }],
-            });
-            statusEff = retry.status;
-            jsonEff = retry.json;
-            row = (jsonEff as {
-              uploads?: Array<{ signedUrl?: string; alreadyReady?: boolean; token?: string }>;
-            })?.uploads?.[0];
-          }
+        if (slot.pdfTicketUsed && slot.pdfTicketUsed !== item.pdfTicket) {
+          await refreshAllPendingGuestRawUploadTickets(slot.pdfTicketUsed);
         }
 
-        // Token QR déjà ready (souvenir cloud depuis longtemps) : pas de PUT à faire.
-        if (statusEff === 200 && (row?.alreadyReady === true || (!row?.signedUrl && !!row?.token))) {
+        if (slot.status === 200 && isGuestAvUploadAlreadyReady(slot.row)) {
           await markGuestRawUploadDone(item.key);
           if (__DEV__) {
             console.log('[pendingRawGuestUploads] already ready, skip upload', item.key);
@@ -329,20 +306,15 @@ export async function processPendingGuestRawUploads(opts?: { force?: boolean }):
           continue;
         }
 
-        if (statusEff !== 200 || !row?.signedUrl) {
-          const errMsg =
-            typeof (jsonEff as { error?: unknown })?.error === 'string'
-              ? (jsonEff as { error: string }).error
-              : typeof (jsonEff as { message?: unknown })?.message === 'string'
-                ? (jsonEff as { message: string }).message
-                : '';
+        const signedUrl = slot.row?.signedUrl?.trim() ?? '';
+        if (slot.status !== 200 || !signedUrl) {
           throw new Error(
-            `SIGNED_URL_REFRESH_FAILED (${statusEff})${errMsg ? ` ${errMsg}` : ''}`.trim(),
+            `SIGNED_URL_REFRESH_FAILED (${slot.status})${slot.error ? ` ${slot.error}` : ''}`.trim(),
           );
         }
 
         await putUploadToSignedUrl({
-          signedUrl: row.signedUrl,
+          signedUrl,
           localUri: item.localUri,
           mimeType: item.mimeType,
         });

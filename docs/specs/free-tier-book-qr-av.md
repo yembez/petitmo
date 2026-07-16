@@ -79,9 +79,16 @@ sequenceDiagram
 | Edge ticket `print_order` | [`supabase/functions/init-export/index.ts`](../../supabase/functions/init-export/index.ts) |
 | PDF print + tokens QR | [`services/bookPdfServer.ts`](../../services/bookPdfServer.ts), [`server/src/routes/generatePdf.ts`](../../server/src/routes/generatePdf.ts) |
 | File upload `finalize_only` | [`services/pendingRawGuestUploads.ts`](../../services/pendingRawGuestUploads.ts) |
+| API unique skip/enqueue A/V | [`services/bookQrAvUpload.ts`](../../services/bookQrAvUpload.ts) + [`bookQrAvUploadSlot.ts`](../../services/bookQrAvUploadSlot.ts) |
 | Upload effectif post-commande | [`app/book-finalize-media.tsx`](../../app/book-finalize-media.tsx) |
 | Signed URLs upload | Edge [`guest-upload-urls`](../../supabase/functions/guest-upload-urls/index.ts) |
 | Pérennce token `ready` | [`docs/specs/qr-media-permanence.md`](./qr-media-permanence.md) |
+
+**Contrat upload A/V (consolidé)** :
+
+1. `guest-upload-urls` → si token déjà `ready` (`alreadyReady` / token sans `signedUrl`) → **skip**, pas de PUT.
+2. Sinon + fichier sandbox → enqueue file + PUT signed URL.
+3. Ticket JWT : refresh auto sur 401 (même `export_request_id`, QR inchangé).
 
 **Ordre non négociable** :
 
