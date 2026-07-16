@@ -6,6 +6,10 @@ import {
   uploadFileToSignedPutUrlIosBackground,
 } from '@/services/signedUrlIosBackgroundUpload';
 import { postGuestUploadUrls } from '@/services/initExportApi';
+import {
+  ensureFreshExportUploadTicket,
+  getPendingExportUploadTicketRecord,
+} from '@/lib/pendingExportUploadTicket';
 
 type GuestRawKind = 'audio' | 'video';
 
@@ -217,7 +221,15 @@ export async function refreshAllPendingGuestRawUploadTickets(pdfTicket: string):
   if (!t) return;
   const list = await readAll();
   if (list.length === 0) return;
-  await writeAll(list.map(x => ({ ...x, pdfTicket: t, nextAttemptAt: now() })));
+  await writeAll(
+    list.map(x => ({
+      ...x,
+      pdfTicket: t,
+      nextAttemptAt: now(),
+      attempts: 0,
+      lastError: undefined,
+    })),
+  );
 }
 
 /**
@@ -281,16 +293,38 @@ export async function processPendingGuestRawUploads(opts?: { force?: boolean }):
           pdfTicket: item.pdfTicket,
           assets: [{ kind: item.kind, memoryId: item.memoryId }],
         });
-        const row = (json as { uploads?: Array<{ signedUrl?: string }> })?.uploads?.[0];
-        if (status !== 200 || !row?.signedUrl) {
+        let row = (json as { uploads?: Array<{ signedUrl?: string }> })?.uploads?.[0];
+        let statusEff = status;
+        let jsonEff = json;
+
+        // Ticket expiré / invalide → renouveler (même export_request, QR inchangé) puis retenter 1×.
+        if (statusEff === 401) {
+          const rec = await getPendingExportUploadTicketRecord();
+          const fresh = await ensureFreshExportUploadTicket({
+            email: rec?.email,
+            exportRequestId: rec?.exportRequestId,
+          });
+          if (fresh && fresh !== item.pdfTicket) {
+            await refreshAllPendingGuestRawUploadTickets(fresh);
+            const retry = await postGuestUploadUrls({
+              pdfTicket: fresh,
+              assets: [{ kind: item.kind, memoryId: item.memoryId }],
+            });
+            statusEff = retry.status;
+            jsonEff = retry.json;
+            row = (jsonEff as { uploads?: Array<{ signedUrl?: string }> })?.uploads?.[0];
+          }
+        }
+
+        if (statusEff !== 200 || !row?.signedUrl) {
           const errMsg =
-            typeof (json as { error?: unknown })?.error === 'string'
-              ? (json as { error: string }).error
-              : typeof (json as { message?: unknown })?.message === 'string'
-                ? (json as { message: string }).message
+            typeof (jsonEff as { error?: unknown })?.error === 'string'
+              ? (jsonEff as { error: string }).error
+              : typeof (jsonEff as { message?: unknown })?.message === 'string'
+                ? (jsonEff as { message: string }).message
                 : '';
           throw new Error(
-            `SIGNED_URL_REFRESH_FAILED (${status})${errMsg ? ` ${errMsg}` : ''}`.trim(),
+            `SIGNED_URL_REFRESH_FAILED (${statusEff})${errMsg ? ` ${errMsg}` : ''}`.trim(),
           );
         }
 

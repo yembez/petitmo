@@ -7,7 +7,9 @@ import { scale } from '@/utils/responsive';
 import { getPendingBookOrderPdfPayload, clearPendingBookOrderPdfPayload } from '@/lib/pendingBookOrderPdf';
 import {
   clearPendingExportUploadTicket,
-  getPendingExportUploadTicket,
+  ensureFreshExportUploadTicket,
+  getPendingExportUploadTicketRecord,
+  setPendingExportUploadTicket,
 } from '@/lib/pendingExportUploadTicket';
 import type { Memory } from '@/types/local';
 import { collectMemoriesFromPagesForPdf } from '@/services/bookPdfServer';
@@ -96,12 +98,22 @@ export default function BookFinalizeMediaScreen() {
 
   const startFinalization = useCallback(async () => {
     cancelledRef.current = false;
-    const storedTicket = (await getPendingExportUploadTicket())?.trim() ?? '';
-    const exportTicket = storedTicket || exportTicketFromParams;
+    const emailNorm = email.trim().toLowerCase();
+    let exportTicket = '';
+    try {
+      exportTicket =
+        (await ensureFreshExportUploadTicket({ email: emailNorm }))?.trim() ?? '';
+    } catch (e) {
+      if (__DEV__) console.warn('[book-finalize-media] ensureFreshExportUploadTicket', e);
+    }
+    if (!exportTicket) {
+      const rec = await getPendingExportUploadTicketRecord();
+      exportTicket = rec?.ticket?.trim() ?? exportTicketFromParams;
+    }
     resolvedTicketRef.current = exportTicket;
     if (!exportTicket) {
       setPhase('needs_network');
-      setStatusLine('Jeton d’export manquant. Repars de la commande du livre.');
+      setStatusLine('Jeton d’export manquant ou expiré. Relance la commande du livre.');
       return;
     }
     // Ticket frais sur toute la file (évite un JWT expiré / tronqué resté en AsyncStorage).
@@ -220,7 +232,7 @@ export default function BookFinalizeMediaScreen() {
     } finally {
       clearTimeout(slowTimer);
     }
-  }, [exportTicketFromParams]);
+  }, [email, exportTicketFromParams]);
 
   useEffect(() => {
     void (async () => {

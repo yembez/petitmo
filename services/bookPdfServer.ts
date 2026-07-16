@@ -47,7 +47,7 @@ import {
 } from '@/utils/memoryPhotos';
 import { dedicatedBookCoverUriForBook, findPhotoMemoryByCoverRef } from '@/services/books';
 import { pickFirstReadableLocalMediaUri } from '@/utils/localMediaReadable';
-import { setPendingExportUploadTicket } from '@/lib/pendingExportUploadTicket';
+import { setPendingExportUploadTicket, peekExportTicketClaims } from '@/lib/pendingExportUploadTicket';
 import { resolveServerPdfEntitlements } from '@/lib/digitalExportPurchase';
 import {
   MEDIA_BOOK_PRINT_MAX_WIDTH,
@@ -1272,7 +1272,10 @@ export async function generateBookPdfWithExportTicket(
   await clearPdfExportTempDirs();
   try {
     try {
-      await setPendingExportUploadTicket(pdfTicket);
+      const claims = peekExportTicketClaims(pdfTicket);
+      await setPendingExportUploadTicket(pdfTicket, {
+        exportRequestId: claims?.export_request_id,
+      });
     } catch {
       /* ignore — disk / AsyncStorage */
     }

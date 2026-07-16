@@ -306,7 +306,9 @@ export default function BookOrderScreen() {
     (p: { pricePaidEuros: number; emailNorm: string; exportTicket: string }) => {
       void (async () => {
         try {
-          await setPendingExportUploadTicket(p.exportTicket);
+          await setPendingExportUploadTicket(p.exportTicket, {
+            email: p.emailNorm,
+          });
         } catch (e) {
           if (__DEV__) console.warn('[book-order] setPendingExportUploadTicket', e);
         }
@@ -412,7 +414,10 @@ export default function BookOrderScreen() {
 
         const subscriptionTierPdf = subscriptionDb === 'paid' ? 'premium' : 'free';
         try {
-          await setPendingExportUploadTicket(res.exportTicket);
+          await setPendingExportUploadTicket(res.exportTicket, {
+            exportRequestId: res.exportRequestId,
+            email: mail,
+          });
         } catch {
           /* disk plein éventuel — finalize tentera encore */
         }

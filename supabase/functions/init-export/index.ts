@@ -62,6 +62,8 @@ type InitBody = {
   billable_pages?: number;
   discount_percent?: number;
   printer_name?: string | null;
+  /** refresh_upload_ticket */
+  export_request_id?: string;
 };
 
 function parseShippingAddress(raw: unknown): { ok: true; value: Record<string, string> } | { ok: false; message: string } {
@@ -105,8 +107,98 @@ Deno.serve(async (req: Request) => {
   }
 
   const requestType = body.type;
+
+  // Renouvellement JWT upload QR (même export_request) — sans recréer une commande.
+  if (requestType === 'refresh_upload_ticket') {
+    const exportRequestId =
+      typeof body.export_request_id === 'string' ? body.export_request_id.trim() : '';
+    const email = normalizeEmail(body.email);
+    if (!exportRequestId || !email) {
+      return jsonRes({ error: 'export_request_id and email required' }, 400);
+    }
+
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+      { auth: { autoRefreshToken: false, persistSession: false } },
+    );
+
+    const { data: row, error: rowErr } = await supabase
+      .from('export_requests')
+      .select('id, type, book_id, subscription_tier, crm_contact_id')
+      .eq('id', exportRequestId)
+      .maybeSingle();
+
+    if (rowErr) {
+      console.error('[init-export] refresh lookup', rowErr.message);
+      return jsonRes({ error: 'Database error' }, 500);
+    }
+    if (!row?.id) {
+      return jsonRes({ error: 'export_request not found' }, 404);
+    }
+
+    const crmContactId = typeof row.crm_contact_id === 'string' ? row.crm_contact_id.trim() : '';
+    if (!crmContactId) {
+      return jsonRes({ error: 'export_request incomplete' }, 400);
+    }
+
+    const { data: contact, error: contactErr } = await supabase
+      .from('crm_contacts')
+      .select('email')
+      .eq('id', crmContactId)
+      .maybeSingle();
+
+    if (contactErr) {
+      console.error('[init-export] refresh crm', contactErr.message);
+      return jsonRes({ error: 'Database error' }, 500);
+    }
+
+    const crmEmail = (typeof contact?.email === 'string' ? contact.email : '').trim().toLowerCase();
+    if (!crmEmail || crmEmail !== email) {
+      return jsonRes({ error: 'email mismatch' }, 403);
+    }
+
+    const bookId = typeof row.book_id === 'string' ? row.book_id.trim() : '';
+    const tierRaw = row.subscription_tier;
+    const tier = tierRaw === 'paid' || tierRaw === 'free' ? tierRaw : 'free';
+    const rowType = row.type === 'print_order' ? 'print_order' : 'pdf_export';
+    if (!bookId) {
+      return jsonRes({ error: 'export_request incomplete' }, 400);
+    }
+
+    const secret = new TextEncoder().encode(jwtSecret);
+    const petitmo_ticket = rowType === 'print_order' ? 'export_print' : 'export_pdf';
+    const exportTicket = await new SignJWT({
+      petitmo_ticket,
+      export_request_id: exportRequestId,
+      crm_contact_id: crmContactId,
+      book_id: bookId,
+      subscription_tier: tier,
+    })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setIssuedAt()
+      .setExpirationTime('2h')
+      .setIssuer('petitmo-init-export')
+      .sign(secret);
+
+    return jsonRes(
+      {
+        exportRequestId,
+        crmContactId,
+        exportTicket,
+        pdfTicket: exportTicket,
+        expiresInSeconds: 2 * 60 * 60,
+        flow: 'refresh_upload_ticket',
+      },
+      200,
+    );
+  }
+
   if (requestType !== 'pdf_export' && requestType !== 'print_order') {
-    return jsonRes({ error: 'Unsupported type', supported: ['pdf_export', 'print_order'] }, 400);
+    return jsonRes(
+      { error: 'Unsupported type', supported: ['pdf_export', 'print_order', 'refresh_upload_ticket'] },
+      400,
+    );
   }
 
   const exportMode = body.export_mode;
