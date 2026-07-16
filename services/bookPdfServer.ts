@@ -47,6 +47,7 @@ import {
 } from '@/utils/memoryPhotos';
 import { dedicatedBookCoverUriForBook, findPhotoMemoryByCoverRef } from '@/services/books';
 import { pickFirstReadableLocalMediaUri } from '@/utils/localMediaReadable';
+import { setPendingExportUploadTicket } from '@/lib/pendingExportUploadTicket';
 import { resolveServerPdfEntitlements } from '@/lib/digitalExportPurchase';
 import {
   MEDIA_BOOK_PRINT_MAX_WIDTH,
@@ -1270,6 +1271,11 @@ export async function generateBookPdfWithExportTicket(
 
   await clearPdfExportTempDirs();
   try {
+    try {
+      await setPendingExportUploadTicket(pdfTicket);
+    } catch {
+      /* ignore — disk / AsyncStorage */
+    }
     return await generateBookPdfWithExportTicketBody(base, pdfTicket, input);
   } finally {
     await clearPdfExportTempDirs();

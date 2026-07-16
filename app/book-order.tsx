@@ -37,6 +37,7 @@ import {
   getPendingBookOrderPdfPayload,
   setBookOrderResultPdfUri,
 } from '@/lib/pendingBookOrderPdf';
+import { setPendingExportUploadTicket } from '@/lib/pendingExportUploadTicket';
 import { canExportBookPdfViaServer, grantDigitalExportPurchase, resolveServerPdfEntitlements } from '@/lib/digitalExportPurchase';
 import { DIGITAL_EXPORT_PDF_EUR } from '@/lib/bookExportPricing';
 import type { Child } from '@/types/local';
@@ -303,16 +304,22 @@ export default function BookOrderScreen() {
 
   const navigateToFinalizeMedia = useCallback(
     (p: { pricePaidEuros: number; emailNorm: string; exportTicket: string }) => {
-      router.replace({
-        pathname: '/book-finalize-media',
-        params: {
-          exportMode,
-          priceEuros: String(p.pricePaidEuros),
-          email: p.emailNorm,
-          marketingOptIn: marketingOptIn ? '1' : '0',
-          exportTicket: p.exportTicket,
-        },
-      });
+      void (async () => {
+        try {
+          await setPendingExportUploadTicket(p.exportTicket);
+        } catch (e) {
+          if (__DEV__) console.warn('[book-order] setPendingExportUploadTicket', e);
+        }
+        router.replace({
+          pathname: '/book-finalize-media',
+          params: {
+            exportMode,
+            priceEuros: String(p.pricePaidEuros),
+            email: p.emailNorm,
+            marketingOptIn: marketingOptIn ? '1' : '0',
+          },
+        });
+      })();
     },
     [exportMode, marketingOptIn, router]
   );
@@ -404,6 +411,11 @@ export default function BookOrderScreen() {
         });
 
         const subscriptionTierPdf = subscriptionDb === 'paid' ? 'premium' : 'free';
+        try {
+          await setPendingExportUploadTicket(res.exportTicket);
+        } catch {
+          /* disk plein éventuel — finalize tentera encore */
+        }
         const { localUri, response: pdfResponse } = await generateBookPdfWithExportTicket({
           ...payload,
           exportMode: 'print',

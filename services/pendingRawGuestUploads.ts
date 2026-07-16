@@ -211,6 +211,15 @@ export async function markGuestRawUploadDone(key: string): Promise<void> {
   }
 }
 
+/** Remplace le JWT sur toute la file (ticket frais après commande / AsyncStorage). */
+export async function refreshAllPendingGuestRawUploadTickets(pdfTicket: string): Promise<void> {
+  const t = pdfTicket.trim();
+  if (!t) return;
+  const list = await readAll();
+  if (list.length === 0) return;
+  await writeAll(list.map(x => ({ ...x, pdfTicket: t, nextAttemptAt: now() })));
+}
+
 /**
  * À appeler au démarrage / retour au premier plan / écran finalize (`force: true`).
  * - Regénère une signed URL via `guest-upload-urls` (car les signed URLs expirent)
@@ -277,7 +286,9 @@ export async function processPendingGuestRawUploads(opts?: { force?: boolean }):
           const errMsg =
             typeof (json as { error?: unknown })?.error === 'string'
               ? (json as { error: string }).error
-              : '';
+              : typeof (json as { message?: unknown })?.message === 'string'
+                ? (json as { message: string }).message
+                : '';
           throw new Error(
             `SIGNED_URL_REFRESH_FAILED (${status})${errMsg ? ` ${errMsg}` : ''}`.trim(),
           );

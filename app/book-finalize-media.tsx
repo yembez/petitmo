@@ -5,6 +5,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { THEME } from '@/constants/theme';
 import { scale } from '@/utils/responsive';
 import { getPendingBookOrderPdfPayload, clearPendingBookOrderPdfPayload } from '@/lib/pendingBookOrderPdf';
+import {
+  clearPendingExportUploadTicket,
+  getPendingExportUploadTicket,
+} from '@/lib/pendingExportUploadTicket';
 import type { Memory } from '@/types/local';
 import { collectMemoriesFromPagesForPdf } from '@/services/bookPdfServer';
 import {
@@ -13,6 +17,7 @@ import {
   getPendingGuestRawUploadsCount,
   getPendingGuestRawUploadLastErrors,
   processPendingGuestRawUploads,
+  refreshAllPendingGuestRawUploadTickets,
 } from '@/services/pendingRawGuestUploads';
 
 const HARD_TIMEOUT_MS = 3 * 60_000;
@@ -48,14 +53,18 @@ export default function BookFinalizeMediaScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{
-    exportTicket?: string;
+    exportTicket?: string | string[];
     priceEuros?: string;
     email?: string;
     marketingOptIn?: string;
     exportMode?: string;
   }>();
 
-  const exportTicket = typeof params.exportTicket === 'string' ? params.exportTicket.trim() : '';
+  const exportTicketFromParams = useMemo(() => {
+    const raw = params.exportTicket;
+    const s = Array.isArray(raw) ? raw[0] : raw;
+    return typeof s === 'string' ? s.trim() : '';
+  }, [params.exportTicket]);
   const priceEuros = useMemo(() => parsePriceEuros(params.priceEuros), [params.priceEuros]);
   const email = typeof params.email === 'string' ? params.email.trim() : '';
   const marketingOptIn = params.marketingOptIn === '1';
@@ -69,9 +78,11 @@ export default function BookFinalizeMediaScreen() {
 
   const targetKeysRef = useRef<string[]>([]);
   const totalRef = useRef<number>(0);
+  const resolvedTicketRef = useRef<string>('');
 
   const goToConfirmation = useCallback(() => {
     void clearPendingBookOrderPdfPayload();
+    void clearPendingExportUploadTicket();
     router.replace({
       pathname: '/book-order-confirmation',
       params: {
@@ -85,11 +96,17 @@ export default function BookFinalizeMediaScreen() {
 
   const startFinalization = useCallback(async () => {
     cancelledRef.current = false;
+    const storedTicket = (await getPendingExportUploadTicket())?.trim() ?? '';
+    const exportTicket = storedTicket || exportTicketFromParams;
+    resolvedTicketRef.current = exportTicket;
     if (!exportTicket) {
       setPhase('needs_network');
-      setStatusLine('Jeton d’export manquant.');
+      setStatusLine('Jeton d’export manquant. Repars de la commande du livre.');
       return;
     }
+    // Ticket frais sur toute la file (évite un JWT expiré / tronqué resté en AsyncStorage).
+    await refreshAllPendingGuestRawUploadTickets(exportTicket);
+
     setPhase('finalizing');
     setSlowHint(false);
     setStatusLine('');
@@ -203,7 +220,7 @@ export default function BookFinalizeMediaScreen() {
     } finally {
       clearTimeout(slowTimer);
     }
-  }, [exportTicket]);
+  }, [exportTicketFromParams]);
 
   useEffect(() => {
     void (async () => {

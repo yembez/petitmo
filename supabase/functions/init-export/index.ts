@@ -346,7 +346,7 @@ Deno.serve(async (req: Request) => {
     })
       .setProtectedHeader({ alg: 'HS256' })
       .setIssuedAt()
-      .setExpirationTime('20m')
+      .setExpirationTime('2h')
       .setIssuer('petitmo-init-export')
       .sign(secret);
 
@@ -358,7 +358,7 @@ Deno.serve(async (req: Request) => {
         priceCents,
         billablePages: bpRaw,
         discountPercent,
-        expiresInSeconds: 20 * 60,
+        expiresInSeconds: 2 * 60 * 60,
         flow: 'print_order',
       },
       200
@@ -399,7 +399,7 @@ Deno.serve(async (req: Request) => {
   })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
-    .setExpirationTime('20m')
+    .setExpirationTime('2h')
     .setIssuer('petitmo-init-export')
     .sign(secret);
 
@@ -408,7 +408,7 @@ Deno.serve(async (req: Request) => {
       exportRequestId,
       crmContactId,
       pdfTicket,
-      expiresInSeconds: 20 * 60,
+      expiresInSeconds: 2 * 60 * 60,
       flow: 'pdf_export',
     },
     200
