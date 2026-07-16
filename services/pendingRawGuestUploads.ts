@@ -293,7 +293,9 @@ export async function processPendingGuestRawUploads(opts?: { force?: boolean }):
           pdfTicket: item.pdfTicket,
           assets: [{ kind: item.kind, memoryId: item.memoryId }],
         });
-        let row = (json as { uploads?: Array<{ signedUrl?: string }> })?.uploads?.[0];
+        let row = (json as {
+          uploads?: Array<{ signedUrl?: string; alreadyReady?: boolean; token?: string }>;
+        })?.uploads?.[0];
         let statusEff = status;
         let jsonEff = json;
 
@@ -312,8 +314,19 @@ export async function processPendingGuestRawUploads(opts?: { force?: boolean }):
             });
             statusEff = retry.status;
             jsonEff = retry.json;
-            row = (jsonEff as { uploads?: Array<{ signedUrl?: string }> })?.uploads?.[0];
+            row = (jsonEff as {
+              uploads?: Array<{ signedUrl?: string; alreadyReady?: boolean; token?: string }>;
+            })?.uploads?.[0];
           }
+        }
+
+        // Token QR déjà ready (souvenir cloud depuis longtemps) : pas de PUT à faire.
+        if (statusEff === 200 && (row?.alreadyReady === true || (!row?.signedUrl && !!row?.token))) {
+          await markGuestRawUploadDone(item.key);
+          if (__DEV__) {
+            console.log('[pendingRawGuestUploads] already ready, skip upload', item.key);
+          }
+          continue;
         }
 
         if (statusEff !== 200 || !row?.signedUrl) {

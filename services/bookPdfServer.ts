@@ -856,9 +856,14 @@ async function guestAvRawUploadAfterPdf(params: { pdfTicket: string; memories: M
               pdfTicket,
               assets: [{ kind: 'audio', memoryId: m.id }],
             });
-            const row = (json as { uploads?: Array<{ signedUrl?: string }> })?.uploads?.[0];
+            const row = (json as {
+              uploads?: Array<{ signedUrl?: string; alreadyReady?: boolean; token?: string }>;
+            })?.uploads?.[0];
+            if (status === 200 && (row?.alreadyReady || (!row?.signedUrl && row?.token))) {
+              // QR déjà ready — rien à enfiler.
+              return;
+            }
             if (status === 200 && row?.signedUrl) {
-              const key = `audio:${m.id}`;
               await enqueueGuestRawUpload({
                 pdfTicket,
                 kind: 'audio',
@@ -868,7 +873,6 @@ async function guestAvRawUploadAfterPdf(params: { pdfTicket: string; memories: M
                 policy: 'finalize_only',
               });
               // Ne force pas l’upload ici : le plan gratuit le fait à la finalisation de commande.
-              // Les plans payants peuvent toujours finaliser en arrière-plan via `processPendingGuestRawUploads`.
             } else if (__DEV__) {
               console.warn('[guestAvRawUploadAfterPdf] audio signed URL failed', m.id, status, json);
             }
@@ -896,7 +900,12 @@ async function guestAvRawUploadAfterPdf(params: { pdfTicket: string; memories: M
               pdfTicket,
               assets: [{ kind: 'video', memoryId: m.id }],
             });
-            const row = (json as { uploads?: Array<{ signedUrl?: string }> })?.uploads?.[0];
+            const row = (json as {
+              uploads?: Array<{ signedUrl?: string; alreadyReady?: boolean; token?: string }>;
+            })?.uploads?.[0];
+            if (status === 200 && (row?.alreadyReady || (!row?.signedUrl && row?.token))) {
+              return;
+            }
             if (status === 200 && row?.signedUrl) {
               await enqueueGuestRawUpload({
                 pdfTicket,

@@ -20,7 +20,9 @@ import {
   getPendingGuestRawUploadLastErrors,
   processPendingGuestRawUploads,
   refreshAllPendingGuestRawUploadTickets,
+  markGuestRawUploadDone,
 } from '@/services/pendingRawGuestUploads';
+import { postGuestUploadUrls } from '@/services/initExportApi';
 
 const HARD_TIMEOUT_MS = 3 * 60_000;
 const SLOW_HINT_MS = 45_000;
@@ -136,9 +138,27 @@ export default function BookFinalizeMediaScreen() {
     for (const m of av) {
       const kind = m.type === 'voice' ? 'audio' : 'video';
       const local = localUriForAv(m);
-      if (!local) continue;
       const key = `${kind}:${m.id}`;
       keys.push(key);
+
+      // Souvenir déjà cloud + QR ready : ne pas re-uploader (évite blocage ~43 %).
+      try {
+        const { status, json } = await postGuestUploadUrls({
+          pdfTicket: exportTicket,
+          assets: [{ kind, memoryId: m.id }],
+        });
+        const row = (json as {
+          uploads?: Array<{ signedUrl?: string; alreadyReady?: boolean; token?: string }>;
+        })?.uploads?.[0];
+        if (status === 200 && (row?.alreadyReady || (!row?.signedUrl && row?.token))) {
+          await markGuestRawUploadDone(key);
+          continue;
+        }
+      } catch {
+        /* probe best-effort */
+      }
+
+      if (!local) continue;
       tasks.push(
         enqueueGuestRawUpload({
           pdfTicket: exportTicket,
