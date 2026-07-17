@@ -18,6 +18,18 @@ export type SaveBookPdfResult = {
   uploadedStoragePath: string;
 };
 
+function formatBooksPdfUploadError(upErr: { message?: string }): string {
+  const msg = (upErr.message ?? '').trim() || 'upload failed';
+  if (/exceeded the maximum allowed size|EntityTooLarge|Payload too large|413/i.test(msg)) {
+    return (
+      `books-pdf upload failed: PDF trop volumineux pour le stockage (${msg}). ` +
+      `Augmente la limite du bucket books-pdf et le Global file size limit Storage (ex. 200 Mo), ` +
+      `puis réessaie.`
+    );
+  }
+  return `books-pdf upload failed: ${msg}`;
+}
+
 /**
  * Premium : chemin persistant. Free : fichier temporaire (pas de chemin « livre » retourné).
  */
@@ -39,13 +51,16 @@ export async function saveBookPdfAndSign(
     persistentPath = null;
   }
 
+  console.log(
+    `[pdfStorage] upload books-pdf path=${storagePath} bytes=${pdfBytes.byteLength} (~${(pdfBytes.byteLength / (1024 * 1024)).toFixed(1)} MiB)`
+  );
   const { error: upErr } = await supabase.storage.from('books-pdf').upload(storagePath, pdfBytes, {
     contentType: 'application/pdf',
     upsert: subscriptionTier === 'premium',
   });
 
   if (upErr) {
-    throw new Error(`books-pdf upload failed: ${upErr.message}`);
+    throw new Error(formatBooksPdfUploadError(upErr));
   }
 
   const { data: signed, error: signErr } = await supabase.storage
@@ -113,13 +128,16 @@ export async function saveBookPdfForExportRequest(
     persistentPath = null;
   }
 
+  console.log(
+    `[pdfStorage] upload books-pdf path=${storagePath} bytes=${pdfBytes.byteLength} (~${(pdfBytes.byteLength / (1024 * 1024)).toFixed(1)} MiB)`
+  );
   const { error: upErr } = await supabase.storage.from('books-pdf').upload(storagePath, pdfBytes, {
     contentType: 'application/pdf',
     upsert: subscriptionPaid,
   });
 
   if (upErr) {
-    throw new Error(`books-pdf upload failed: ${upErr.message}`);
+    throw new Error(formatBooksPdfUploadError(upErr));
   }
 
   const { data: signed, error: signErr } = await supabase.storage

@@ -133,6 +133,7 @@ export default function BookOrderScreen() {
     childId?: string;
     memoryPageCount?: string;
     avPageCount?: string;
+    gelatoPageCount?: string;
     exportMode?: string;
   }>();
 
@@ -140,6 +141,7 @@ export default function BookOrderScreen() {
   const childId = typeof params.childId === 'string' ? params.childId : '';
   const memoryPageCountParam = parseIntParam(params.memoryPageCount, -1);
   const avPageCountParam = parseIntParam(params.avPageCount, 0);
+  const gelatoPageCountParam = parseIntParam(params.gelatoPageCount, -1);
   const exportMode = params.exportMode === 'pdf' ? 'pdf' : 'print';
 
   const [loading, setLoading] = useState(true);
@@ -484,6 +486,15 @@ export default function BookOrderScreen() {
             submit:
               'Une photo du livre est introuvable sur cet appareil. Rouvre l’aperçu du livre, attends quelques secondes, puis réessaie.',
           });
+        } else if (
+          e instanceof Error &&
+          /exceeded the maximum allowed size|PDF trop volumineux/i.test(e.message)
+        ) {
+          setFieldErrors({
+            submit:
+              'Le PDF du livre est trop volumineux pour le stockage (limite actuelle trop basse). ' +
+              'Contacte le support ou réessaie après mise à jour des limites Storage (books-pdf).',
+          });
         } else {
           setFieldErrors({ submit: e instanceof Error ? e.message : 'Échec de la commande.' });
         }
@@ -566,6 +577,15 @@ export default function BookOrderScreen() {
         setFieldErrors({
           submit:
             'Une photo du livre est introuvable sur cet appareil. Rouvre l’aperçu du livre, attends quelques secondes, puis réessaie.',
+        });
+      } else if (
+        e instanceof Error &&
+        /exceeded the maximum allowed size|PDF trop volumineux/i.test(e.message)
+      ) {
+        setFieldErrors({
+          submit:
+            'Le PDF du livre est trop volumineux pour le stockage (limite actuelle trop basse). ' +
+            'Contacte le support ou réessaie après mise à jour des limites Storage (books-pdf).',
         });
       } else {
         setFieldErrors({ submit: e instanceof Error ? e.message : 'Export impossible.' });
@@ -668,7 +688,14 @@ export default function BookOrderScreen() {
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Tarif impression</Text>
             <Text style={styles.rowMuted}>
-              Pages mémoire : {billablePages} (facturation min. 20)
+              {gelatoPageCountParam >= 0 ? gelatoPageCountParam : '—'} pages
+              {gelatoPageCountParam >= 0 && gelatoPageCountParam < GELATO_MIN_INNER_PAGES
+                ? ` (min. ${GELATO_MIN_INNER_PAGES})`
+                : ''}
+            </Text>
+            <Text style={styles.rowMuted}>
+              Tarif basé sur {billablePages} page{billablePages > 1 ? 's' : ''} souvenir
+              {billablePages < 20 ? ' (min. 20 facturées)' : ''}
             </Text>
             <Text style={styles.price}>{printPriceEuros.toFixed(2).replace('.', ',')} € TTC</Text>
             {__DEV__ ? (
