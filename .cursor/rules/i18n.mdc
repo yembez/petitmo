@@ -1,0 +1,16 @@
+---
+description: i18n UI — clés FR/EN, pas de texte utilisateur en dur dans le nouveau code.
+alwaysApply: true
+---
+
+# Internationalisation (FR + EN)
+
+- **Init** : `import '@/lib/i18n'` (déjà dans `app/_layout.tsx`).
+- **Hook** : `useAppTranslation('common')` → `t('maCle')` depuis `@/hooks/useAppTranslation`.
+- **Fichiers** : `locales/fr/<namespace>.json` et miroir `locales/en/…`. Namespaces actuels : `common` (ajouter `paywall`, `book`, etc. au fil de la migration).
+- **Règle** : tout **nouveau** texte visible utilisatrice (UI, `Alert`, placeholders, `accessibilityLabel`, erreurs affichées) passe par `t(…)` + entrée JSON **fr** (et **en** si la clé est migrée ; sinon repli FR automatique).
+- **Ne pas traduire** : contenu saisi par l’utilisatrice (souvenirs, titres de livre), logs dev, commentaires code.
+- **Dates / € / pays** : `formatAppDate`, `formatAppCurrency`, `formatAppCountryName` dans `@/utils/appLocale` — pas de `'fr-FR'` en dur dans les nouveaux écrans.
+- **Clés** : `domaine.sousDomaine` (ex. `book.order.title`), pas la phrase française comme clé.
+- **Interpolation** : `t('paywall.hero', { name: child.name })`.
+- Code existant en français : migrer **écran par écran** ; pas obligatoire dans le même PR qu’une feature unrelated.

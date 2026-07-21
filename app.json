@@ -14,7 +14,8 @@
       "backgroundColor": "#D9683A"
     },
     "locales": {
-      "fr": "./locales/fr.json"
+      "fr": "./locales/fr.json",
+      "en": "./locales/en.json"
     },
     "ios": {
       "bundleIdentifier": "com.petitmo.app",

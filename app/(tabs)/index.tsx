@@ -66,12 +66,10 @@ import { childDisplayGivenName, childDisplayInitial } from '@/utils/childDisplay
 import { formatCaptureChildAge, formatCaptureHeaderDate } from '@/utils/date';
 import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 import { CaptureFamilyMosaic } from '@/components/CaptureFamilyMosaic';
-import { CAPTURE_HERO_COLOR_MATRIX } from '@/utils/captureHeroColorMatrix';
 import {
   CAPTURE_HERO_IMAGE_CONTENT_POSITION,
   CAPTURE_HERO_IMAGE_OBJECT_POSITION,
 } from '@/utils/captureHeroMetrics';
-import { ColorMatrix } from 'react-native-color-matrix-image-filters';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -582,7 +580,6 @@ function CapturerScreen() {
                     reactKey={`capture-hero-${child.id}`}
                     imageRevision={heroPhotoCacheKey}
                     isTabFocused={isTabFocused}
-                    instantReveal={heroIsLocalAsset}
                   />
                 ) : (
                   <View style={[StyleSheet.absoluteFillObject, styles.heroPlaceholder]}>
@@ -990,7 +987,8 @@ const styles = StyleSheet.create({
     fontSize: scale(12),
     lineHeight: scale(15),
   },
-  heroImageMatrixWrap: {
+  heroImageClip: {
+    overflow: 'hidden',
     backgroundColor: CAPTURE_SCREEN_BG,
   },
   heroImageCover: {
@@ -1032,8 +1030,7 @@ function CaptureHeroImageStack({
   reactKey,
   imageRevision,
   isTabFocused,
-  instantReveal = false,
-}: CaptureHeroImageStackProps & { isTabFocused: boolean; instantReveal?: boolean }) {
+}: CaptureHeroImageStackProps & { isTabFocused: boolean }) {
   const breatheScale = useRef(new Animated.Value(CAPTURE_HERO_BREATHE_MIN)).current;
 
   useEffect(() => {
@@ -1062,11 +1059,16 @@ function CaptureHeroImageStack({
     };
   }, [reactKey, breatheScale, isTabFocused]);
 
+  /**
+   * Pas de ColorMatrix ici : avec ExpoImage il flashait une miniature en bas à gauche
+   * à chaque focus de l’onglet (taille intrinsèque hors layout).
+   */
   return (
-    <View style={StyleSheet.absoluteFillObject} pointerEvents="box-none">
+    <View style={[StyleSheet.absoluteFillObject, styles.heroImageClip]} pointerEvents="box-none" collapsable={false}>
       <Animated.View
         key={reactKey}
         style={[StyleSheet.absoluteFillObject, { transform: [{ scale: breatheScale }] }]}
+        collapsable={false}
       >
         {Platform.OS === 'web' ? (
           <ImageBackground
@@ -1076,22 +1078,17 @@ function CaptureHeroImageStack({
             resizeMode="cover"
           />
         ) : (
-          <ColorMatrix
-            matrix={CAPTURE_HERO_COLOR_MATRIX}
-            style={[StyleSheet.absoluteFillObject, styles.heroImageMatrixWrap]}
-          >
-            <ExpoImage
-              source={{ uri: photoUri }}
-              style={[StyleSheet.absoluteFillObject, styles.heroImageCover]}
-              contentFit="cover"
-              contentPosition={CAPTURE_HERO_IMAGE_CONTENT_POSITION}
-              cachePolicy="memory-disk"
-              recyclingKey={`${reactKey}-${imageRevision}`}
-              priority="high"
-              transition={instantReveal ? 0 : 200}
-              accessibilityIgnoresInvertColors
-            />
-          </ColorMatrix>
+          <ExpoImage
+            source={{ uri: photoUri }}
+            style={[StyleSheet.absoluteFillObject, styles.heroImageCover]}
+            contentFit="cover"
+            contentPosition={CAPTURE_HERO_IMAGE_CONTENT_POSITION}
+            cachePolicy="memory-disk"
+            recyclingKey={`${reactKey}-${imageRevision}`}
+            priority="high"
+            transition={0}
+            accessibilityIgnoresInvertColors
+          />
         )}
       </Animated.View>
     </View>

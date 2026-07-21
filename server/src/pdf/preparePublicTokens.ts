@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { BookPageServer } from '../types/contracts';
 import type { MemoryRow } from './memoryRow';
 import { ensurePublicMediaToken } from '../publicMediaTokens';
-import { bookPublicMediaExpiresAtIso, FREE_TIER_QR_AV_MAX_PER_BOOK } from '../constants/spec';
+import { bookPublicMediaExpiresAtIso } from '../constants/spec';
 import { linkPublicMediaTokenToMemorySource } from './linkPublicMediaTokenSource';
 import { syncPublicMediaTokenDisplayContext } from '../publicMediaDisplayContext';
 
@@ -10,13 +10,10 @@ export type PrepareTokensResult =
   | { ok: true; tokensByMemoryId: Map<string, string> }
   | { ok: false; status: number; message: string };
 
-function countAudioVideoPages(pages: BookPageServer[]): number {
-  return pages.filter(p => p.type === 'audio' || p.type === 'video').length;
-}
-
 /**
  * Crée/assure l’existence de tokens stables (public) pour audio/vidéo d’un livre.
  * IMPORTANT: ne dépend pas de l’existence des fichiers (PDF immédiat).
+ * V1 : plus de plafond 5+5 — composition libre ; facturation au checkout.
  */
 export async function preparePublicTokensForBook(params: {
   supabase: SupabaseClient;
@@ -31,14 +28,7 @@ export async function preparePublicTokensForBook(params: {
   previewOnly?: boolean;
 }): Promise<PrepareTokensResult> {
   const { supabase, pages, memoriesById, subscriptionTier, childBirthdate, previewOnly } = params;
-  const avCount = countAudioVideoPages(pages);
-  if (subscriptionTier === 'free' && avCount > FREE_TIER_QR_AV_MAX_PER_BOOK) {
-    return {
-      ok: false,
-      status: 400,
-      message: `Free tier: maximum ${FREE_TIER_QR_AV_MAX_PER_BOOK} pages audio/vidéo avec QR par livre.`,
-    };
-  }
+  void subscriptionTier;
 
   const tokensByMemoryId = new Map<string, string>();
   const seen = new Set<string>();
@@ -87,14 +77,8 @@ export async function preparePublicTokensForExportRequest(params: {
   childBirthdate?: string | null;
 }): Promise<PrepareTokensResult> {
   const { supabase, pages, memoriesById, subscriptionTier, childBirthdate } = params;
-  const avCount = countAudioVideoPages(pages);
-  if (subscriptionTier === 'free' && avCount > FREE_TIER_QR_AV_MAX_PER_BOOK) {
-    return {
-      ok: false,
-      status: 400,
-      message: `Free tier: maximum ${FREE_TIER_QR_AV_MAX_PER_BOOK} pages audio/vidéo avec QR par livre.`,
-    };
-  }
+  void subscriptionTier;
+
   const tokensByMemoryId = new Map<string, string>();
   const seen = new Set<string>();
   const orderedAvIds: string[] = [];

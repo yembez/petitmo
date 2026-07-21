@@ -212,7 +212,12 @@ function spreadSlidePropsEqual(a: BookSpreadSlideProps, b: BookSpreadSlideProps)
   if (a.coverYearLabel !== b.coverYearLabel) return false;
   if (a.coverTitleLine !== b.coverTitleLine || a.chapterTitleLine !== b.chapterTitleLine) return false;
   if (a.coverPhotoBrowseUri !== b.coverPhotoBrowseUri) return false;
-  if (a.cropDpiMetaCover !== b.cropDpiMetaCover) return false;
+  if (
+    a.cropDpiMetaCover?.imgPxW !== b.cropDpiMetaCover?.imgPxW ||
+    a.cropDpiMetaCover?.imgPxH !== b.cropDpiMetaCover?.imgPxH
+  ) {
+    return false;
+  }
   if (a.photoCrops !== b.photoCrops || a.rotations !== b.rotations) return false;
   if (a.typography !== b.typography) return false;
   if (a.memoryPhotoRefs !== b.memoryPhotoRefs) return false;

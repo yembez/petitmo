@@ -12,19 +12,16 @@ import { Image as ExpoImage } from 'expo-image';
 import BookPhotoDpiBadge from '@/components/BookPhotoDpiBadge';
 import { defaultPhotoCrop, type PhotoCrop } from '@/src/book/photoCrop';
 import { bookPhotoCoverBaseSize, clampBookPhotoCropPan } from '@/utils/bookPhotoCropLayout';
-import {
-  effectiveBlurScoreForCropScale,
-  estimatePhotoBlurScore,
-} from '@/utils/photoBlurScore';
 
 const SPRING = { damping: 22, stiffness: 220, mass: 0.7 } as const;
+const ZOOM_PAN_EPS = 1.02;
 
 function clamp(v: number, min: number, max: number): number {
   'worklet';
   return Math.max(min, Math.min(max, v));
 }
 
-/** Bornes de pan max selon le mode (couverture au ratio réel vs page intérieure historique). */
+/** Bornes de pan max selon le mode (ratio réel vs transform historique). */
 function panMaxWorklet(
   useAspect: boolean,
   baseW: number,
@@ -60,14 +57,15 @@ type Props = {
   dpiPxH?: number;
   printMmW: number;
   printMmH: number;
-  /** Score netteté (Laplacien) pour le badge qualité. */
-  blurScore?: number | null;
   onChange: (crop: PhotoCrop) => void;
   /**
-   * Couverture : cale l'image sur son ratio réel dans le cadre (au lieu de `contentFit="cover"`),
-   * pour pouvoir atteindre toute la photo en zoomant / glissant. `false` = comportement page intérieure.
+   * Couverture : cale l'image sur son ratio réel dans le cadre.
+   * Si absent mais `imgPxW/H` connus, on utilise aussi le ratio réel (pages souvenirs)
+   * pour pouvoir glisser comme sur la cover.
    */
   coverMode?: boolean;
+  /** `true` tant que scale > 1 — le parent désactive le swipe entre pages. */
+  onZoomActiveChange?: (active: boolean) => void;
 };
 
 function cropFromShared(tx: number, ty: number, scale: number, frameW: number, frameH: number): PhotoCrop {
@@ -89,44 +87,24 @@ export function BookInlinePhotoCrop({
   dpiPxH,
   printMmW,
   printMmH,
-  blurScore,
   onChange,
   coverMode = false,
+  onZoomActiveChange,
 }: Props) {
-  const badgePxW = dpiPxW && dpiPxW > 0 ? dpiPxW : imgPxW;
-  const badgePxH = dpiPxH && dpiPxH > 0 ? dpiPxH : imgPxH;
-  /** Mesure sur l’URI affichée (pas l’original bruyant du prefetch). */
-  const [measuredBlur, setMeasuredBlur] = useState<number | null>(
-    typeof blurScore === 'number' ? blurScore : null,
-  );
-
-  useEffect(() => {
-    let cancelled = false;
-    const u = uri.trim();
-    if (!u) {
-      setMeasuredBlur(null);
-      return;
-    }
-    void estimatePhotoBlurScore(u).then(score => {
-      if (!cancelled) setMeasuredBlur(score);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [uri]);
+  const badgePxW = dpiPxW && dpiPxW > 0 ? dpiPxW : 0;
+  const badgePxH = dpiPxH && dpiPxH > 0 ? dpiPxH : 0;
 
   /**
-   * En `coverMode`, l'image est calée à sa taille « cover » réelle (déborde le cadre sur un axe)
-   * et déplaçable : on peut atteindre toute la photo. Sinon, comportement page intérieure
-   * historique (`contentFit="cover"` + transform).
+   * Ratio réel dès que les dims sont connues (cover + pages souvenirs) :
+   * l’image déborde sur un axe → pan utile même à scale 1.
    */
-  const useAspect = coverMode && imgPxW > 0 && imgPxH > 0;
+  const useAspect = (coverMode || (imgPxW > 0 && imgPxH > 0)) && imgPxW > 0 && imgPxH > 0;
   const { baseW, baseH } = useMemo(
     () =>
       useAspect
         ? bookPhotoCoverBaseSize(frameW, frameH, imgPxW, imgPxH)
         : { baseW: frameW, baseH: frameH },
-    [useAspect, frameW, frameH, imgPxW, imgPxH]
+    [useAspect, frameW, frameH, imgPxW, imgPxH],
   );
 
   const scale = useSharedValue(1);
@@ -158,30 +136,63 @@ export function BookInlinePhotoCrop({
       if (next === prev) return;
       runOnJS(setLiveScale)(next);
     },
-    [scale]
+    [scale],
   );
 
-  const panGesture = useMemo(
-    () =>
-      Gesture.Pan()
-        .failOffsetX([-14, 14])
-        .onBegin(() => {
-          panStartX.value = tx.value;
-          panStartY.value = ty.value;
-        })
-        .onUpdate(e => {
-          const { maxTx, maxTy } = panMaxWorklet(useAspect, baseW, baseH, frameW, frameH, scale.value);
-          tx.value = clamp(panStartX.value + e.translationX, -maxTx, maxTx);
-          ty.value = clamp(panStartY.value + e.translationY, -maxTy, maxTy);
-        })
-        .onEnd(() => {
-          const { maxTx, maxTy } = panMaxWorklet(useAspect, baseW, baseH, frameW, frameH, scale.value);
-          tx.value = withSpring(clamp(tx.value, -maxTx, maxTx), SPRING);
-          ty.value = withSpring(clamp(ty.value, -maxTy, maxTy), SPRING);
-          runOnJS(commitCrop)();
-        }),
-    [commitCrop, useAspect, baseW, baseH, frameW, frameH, panStartX, panStartY, scale, tx, ty]
-  );
+  const isZoomed = liveScale > ZOOM_PAN_EPS;
+  useEffect(() => {
+    onZoomActiveChange?.(isZoomed);
+    return () => {
+      onZoomActiveChange?.(false);
+    };
+  }, [isZoomed, onZoomActiveChange]);
+
+  /**
+   * - Zoomé : pan libre (plus de `failOffsetX` qui tuait le déplacement horizontal
+   *   au profit du FlatList pages).
+   * - Scale 1 + aspect : `failOffsetX` pour laisser le swipe changer de page ;
+   *   le pan vertical (débord fréquent) reste possible.
+   * - Scale 1 sans aspect : pan désactivé (aucune marge).
+   */
+  const panGesture = useMemo(() => {
+    const core = Gesture.Pan()
+      .onBegin(() => {
+        panStartX.value = tx.value;
+        panStartY.value = ty.value;
+      })
+      .onUpdate(e => {
+        const { maxTx, maxTy } = panMaxWorklet(useAspect, baseW, baseH, frameW, frameH, scale.value);
+        tx.value = clamp(panStartX.value + e.translationX, -maxTx, maxTx);
+        ty.value = clamp(panStartY.value + e.translationY, -maxTy, maxTy);
+      })
+      .onEnd(() => {
+        const { maxTx, maxTy } = panMaxWorklet(useAspect, baseW, baseH, frameW, frameH, scale.value);
+        tx.value = withSpring(clamp(tx.value, -maxTx, maxTx), SPRING);
+        ty.value = withSpring(clamp(ty.value, -maxTy, maxTy), SPRING);
+        runOnJS(commitCrop)();
+      });
+
+    if (isZoomed) {
+      return core;
+    }
+    if (useAspect) {
+      return core.failOffsetX([-18, 18]);
+    }
+    return core.enabled(false);
+  }, [
+    commitCrop,
+    useAspect,
+    isZoomed,
+    baseW,
+    baseH,
+    frameW,
+    frameH,
+    panStartX,
+    panStartY,
+    scale,
+    tx,
+    ty,
+  ]);
 
   const pinchGesture = useMemo(
     () =>
@@ -199,7 +210,7 @@ export function BookInlinePhotoCrop({
           scale.value = withSpring(scale.value, SPRING);
           runOnJS(commitCrop)();
         }),
-    [commitCrop, useAspect, baseW, baseH, frameW, frameH, pinchStartScale, scale, tx, ty]
+    [commitCrop, useAspect, baseW, baseH, frameW, frameH, pinchStartScale, scale, tx, ty],
   );
 
   const doubleTap = useMemo(
@@ -212,18 +223,14 @@ export function BookInlinePhotoCrop({
           ty.value = withSpring(0, SPRING);
           runOnJS(commitCrop)();
         }),
-    [commitCrop, scale, tx, ty]
+    [commitCrop, scale, tx, ty],
   );
 
   const composed = useMemo(
     () => Gesture.Exclusive(Gesture.Simultaneous(panGesture, pinchGesture), doubleTap),
-    [doubleTap, panGesture, pinchGesture]
+    [doubleTap, panGesture, pinchGesture],
   );
 
-  /**
-   * Pan + zoom : en `coverMode` + ratio connu, position absolue identique à `bookPhotoCropImageRect`
-   * (parité éditeur ↔ spread). Sinon transform historique page intérieure.
-   */
   const coverRectStyle = useAnimatedStyle(() => {
     'worklet';
     const s = Math.max(1, scale.value);
@@ -251,7 +258,7 @@ export function BookInlinePhotoCrop({
     () => ({
       transform: [{ translateX: tx.value }, { translateY: ty.value }, { scale: scale.value }],
     }),
-    []
+    [],
   );
 
   return (
@@ -279,13 +286,8 @@ export function BookInlinePhotoCrop({
           printMmW={printMmW}
           printMmH={printMmH}
           scale={liveScale}
-          blurScore={effectiveBlurScoreForCropScale(
-            measuredBlur ?? blurScore,
-            liveScale,
-          )}
         />
       </View>
-
     </View>
   );
 }

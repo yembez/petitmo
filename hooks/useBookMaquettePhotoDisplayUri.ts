@@ -1,31 +1,36 @@
 import { useMemo } from 'react';
 import type { Memory } from '@/types/local';
-import { useFeedPhotoDisplayUrls } from '@/hooks/useFeedPhotoDisplayUrls';
-import {
-  getPhotoUriForBookMaquetteDisplay,
-  indexOfPhotoUrlInFeed,
-} from '@/utils/memoryPhotos';
+import { getPhotoUriForBookMaquetteDisplay } from '@/utils/memoryPhotos';
+import { useSignedMediaUrl, extractMediaBucketPath } from '@/lib/mediaSignedUrl';
 
 /**
- * URI photo maquette livre — même résolution que le fil Favoris (sandbox lisible + repli cloud).
+ * URI photo maquette livre — sync local-first, signature cloud lazy.
+ * Pas de pipeline fil (`useFeedPhotoDisplayUrls`) : trop lourd pour N pages montées.
  */
 export function useBookMaquettePhotoDisplayUri(
   memory: Memory | null | undefined,
   photoRef?: string | null,
 ): string {
-  const photoMemory = memory?.type === 'photo' ? memory : null;
-  const feedUrls = useFeedPhotoDisplayUrls(photoMemory ?? ({ id: '', type: 'text' } as Memory));
+  const raw = useMemo(() => {
+    if (!memory || memory.type !== 'photo') return '';
+    return getPhotoUriForBookMaquetteDisplay(memory, photoRef).trim();
+  }, [memory, photoRef]);
+
+  const leakedBucket = extractMediaBucketPath(raw);
+  const isDeviceLocal =
+    !!raw &&
+    !leakedBucket &&
+    (raw.startsWith('file:') ||
+      raw.startsWith('content:') ||
+      raw.startsWith('ph://') ||
+      raw.startsWith('/'));
+  const needsCloudSign = !!raw && (!!leakedBucket || !isDeviceLocal);
+  const signed = useSignedMediaUrl(needsCloudSign ? leakedBucket || raw : null);
 
   return useMemo(() => {
-    if (!photoMemory) return '';
-    const ref = photoRef?.trim() ?? '';
-    if (ref) {
-      const idx = indexOfPhotoUrlInFeed(photoMemory, ref);
-      const fromFeed = idx >= 0 ? feedUrls[idx]?.trim() : '';
-      if (fromFeed) return fromFeed;
-    } else if (feedUrls[0]?.trim()) {
-      return feedUrls[0].trim();
-    }
-    return getPhotoUriForBookMaquetteDisplay(photoMemory, ref || undefined).trim();
-  }, [feedUrls, photoMemory, photoRef]);
+    if (!raw) return '';
+    if (!needsCloudSign) return raw;
+    const s = (signed ?? '').trim();
+    return s || '';
+  }, [needsCloudSign, raw, signed]);
 }

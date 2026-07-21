@@ -68,7 +68,8 @@ function filePathFor(memoryId: string, slotIndex: number): string {
 }
 
 /**
- * Copie le JPEG déjà compressé (post-manipulation) pour affichage fil hors réseau / avant dérivés worker.
+ * Copie un JPEG **déjà compressé** (thumb 480 / display) pour affichage fil hors réseau.
+ * Ne jamais passer l’original picker / `original.jpg` — risque OOM au scroll.
  * `slotIndex` : 0 = photo principale, 1+ = extras album (mosaïque).
  */
 export async function persistFeedLocalThumbnail(

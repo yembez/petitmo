@@ -1,4 +1,4 @@
-import { DeviceEventEmitter, Platform, Image } from 'react-native';
+import { DeviceEventEmitter, InteractionManager, Platform, Image } from 'react-native';
 import { copyAsync, documentDirectory, makeDirectoryAsync } from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as VideoThumbnails from 'expo-video-thumbnails';
@@ -159,10 +159,34 @@ export async function ensureLocalPhotoDisplayPrintDerivatives(params: {
 }
 
 const heavyDerivativesInFlight = new Set<string>();
+/** File globale : un seul decode ImageManipulator lourds à la fois (évite OOM sur import lot). */
+const HEAVY_DERIVATIVES_GLOBAL_CONCURRENCY = 1;
+let heavyDerivativesActive = 0;
+const heavyDerivativesWaitQueue: Array<() => void> = [];
+
+function acquireHeavyDerivativesSlot(): Promise<void> {
+  if (heavyDerivativesActive < HEAVY_DERIVATIVES_GLOBAL_CONCURRENCY) {
+    heavyDerivativesActive += 1;
+    return Promise.resolve();
+  }
+  return new Promise(resolve => {
+    heavyDerivativesWaitQueue.push(() => {
+      heavyDerivativesActive += 1;
+      resolve();
+    });
+  });
+}
+
+function releaseHeavyDerivativesSlot(): void {
+  heavyDerivativesActive = Math.max(0, heavyDerivativesActive - 1);
+  const next = heavyDerivativesWaitQueue.shift();
+  if (next) next();
+}
 
 /**
  * Génère display + print sans bloquer la navigation fil / favoris après capture.
  * Met à jour SQLite puis notifie le fil quand c’est prêt.
+ * Concurrence globale = 1 pour éviter jetsam OOM sur import multi-photos.
  */
 export function scheduleLocalPhotoHeavyDerivatives(memoryId: string, localOriginalUri: string): void {
   const id = memoryId.trim();
@@ -172,7 +196,11 @@ export function scheduleLocalPhotoHeavyDerivatives(memoryId: string, localOrigin
   heavyDerivativesInFlight.add(id);
 
   void (async () => {
+    await acquireHeavyDerivativesSlot();
     try {
+      await new Promise<void>(resolve => {
+        InteractionManager.runAfterInteractions(() => resolve());
+      });
       const heavy = await ensureLocalPhotoDisplayPrintDerivatives({
         memoryId: id,
         localOriginalUri: src,
@@ -212,6 +240,7 @@ export function scheduleLocalPhotoHeavyDerivatives(memoryId: string, localOrigin
       console.warn('[memoryLocalStore] heavy derivatives', id, e);
     } finally {
       heavyDerivativesInFlight.delete(id);
+      releaseHeavyDerivativesSlot();
     }
   })();
 }

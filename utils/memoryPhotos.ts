@@ -361,10 +361,16 @@ function primarySlotPrintPathRaw(memory: Memory): string {
   );
 }
 
-/** URIs à tester pour le badge DPI (print, original, voisin de display…). */
+/** True si l’URI pointe vers un dérivé display (pas le fichier d’impression). */
+export function isBookDisplayDerivativeUri(uri: string): boolean {
+  return /\/display\.(jpe?g|webp|png)(\?|#|$)/i.test((uri ?? '').trim());
+}
+
+/** URIs **print uniquement** pour le badge / contrôle DPI (jamais display / thumb). */
 export function collectBookPhotoDpiUriCandidates(args: {
   memory: Memory | null;
   photoRef?: string;
+  /** URI affichée éditeur — utilisée seulement pour déduire le voisin `print.jpg`. */
   displayUri?: string;
   bookPrintUri?: string | null;
 }): string[] {
@@ -372,7 +378,7 @@ export function collectBookPhotoDpiUriCandidates(args: {
   const out: string[] = [];
   const add = (u: string | null | undefined) => {
     const t = (u ?? '').trim();
-    if (!t || seen.has(t)) return;
+    if (!t || seen.has(t) || isBookDisplayDerivativeUri(t)) return;
     seen.add(t);
     out.push(t);
   };
@@ -382,51 +388,37 @@ export function collectBookPhotoDpiUriCandidates(args: {
     add(memory.local_print_path);
     const cover = (memory.voice_cover_path ?? '').trim();
     if (cover) add(inferLocalVoiceCoverPrintPath(cover));
-    add(memory.voice_cover_path);
-    add(memory.voice_cover_url);
-    if (displayUri) add(displayUri);
+    add(bookPrintUri ?? undefined);
+    if (displayUri) add(inferLocalPrintPathFromDisplay(displayUri));
     return out;
   }
-  if (memory) {
-    add(memory.local_original_path);
+  if (memory?.type === 'photo') {
     add(memory.local_print_path);
     add(getBookPhotoPrintUri(memory, photoRef));
     if (memory.local_display_path) {
       add(inferLocalPrintPathFromDisplay(memory.local_display_path));
     }
     add(memory.print_url);
-    add(memory.local_media_path);
   }
-  if (displayUri) {
-    add(inferLocalPrintPathFromDisplay(displayUri));
-  }
+  // Jamais `displayUri` lui-même — seulement le frère `print.jpg` s’il existe.
+  if (displayUri) add(inferLocalPrintPathFromDisplay(displayUri));
   add(bookPrintUri ?? undefined);
   return out;
 }
 
-/** Pixels effectifs du fichier print (pour badge DPI — évite de décoder un display 1400px). */
+/**
+ * Pixels du fichier **print** (colonne SQLite) — pas original, pas display.
+ * Sinon `null` : il faut mesurer l’URI print via `collectBookPhotoDpiUriCandidates`.
+ */
 export function getBookPhotoPrintPixelSize(
   memory: Memory,
   _photoRef?: string,
 ): { w: number; h: number } | null {
-  if (memory.type === 'voice') {
-    const pw = memory.print_px_w;
-    const ph = memory.print_px_h;
-    if (typeof pw === 'number' && typeof ph === 'number' && pw > 0 && ph > 0) {
-      return { w: pw, h: ph };
-    }
-    return null;
-  }
-  if (memory.type !== 'photo') return null;
+  if (memory.type !== 'photo' && memory.type !== 'voice') return null;
   const pw = memory.print_px_w;
   const ph = memory.print_px_h;
   if (typeof pw === 'number' && typeof ph === 'number' && pw > 0 && ph > 0) {
     return { w: pw, h: ph };
-  }
-  const ow = memory.original_px_w;
-  const oh = memory.original_px_h;
-  if (typeof ow === 'number' && typeof oh === 'number' && ow > 0 && oh > 0) {
-    return { w: ow, h: oh };
   }
   return null;
 }
@@ -450,14 +442,9 @@ export function getBookPhotoPrintUri(memory: Memory, photoRef?: string): string 
   const extraIdx = slotIndex - 1;
   const localExtras = asTrimmedStringArray(memory.extra_photo_paths);
   const originals = asTrimmedStringArray(memory.extra_photo_urls);
-  const displays = asTrimmedStringArray(memory.extra_display_urls);
   const paths = asTrimmedStringArray(memory.extra_photo_paths);
-  const raw = firstNonEmpty(
-    localExtras[extraIdx],
-    originals[extraIdx],
-    displays[extraIdx],
-    paths[extraIdx],
-  );
+  // Pas de `extra_display_urls` : le print / original seulement (DPI + export).
+  const raw = firstNonEmpty(localExtras[extraIdx], originals[extraIdx], paths[extraIdx]);
   return raw ? normalizeMemoryMediaUriForDisplay(raw) : '';
 }
 
@@ -991,7 +978,8 @@ function sameStorageObject(a: string, b: string): boolean {
   return !!(pa && pb && pa === pb);
 }
 
-function urlsInSamePhotoVariantGroup(memory: Memory, a: string, b: string): boolean {
+/** True si deux URLs désignent le même slot photo (display/print/thumb/original…). */
+export function urlsInSamePhotoVariantGroup(memory: Memory, a: string, b: string): boolean {
   const A = normalizePhotoUrlForCompare(a);
   const B = normalizePhotoUrlForCompare(b);
   if (!A || !B) return false;

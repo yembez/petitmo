@@ -10,14 +10,12 @@ import {
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { ColorMatrix } from 'react-native-color-matrix-image-filters';
 import { scale, verticalScale } from '@/utils/responsive';
 import { THEME } from '@/constants/theme';
 import type { Child } from '@/types/local';
 import { resolveChildProfileImageDisplayUri } from '@/utils/childPhotoUri';
 import { childDisplayGivenName, childDisplayInitial } from '@/utils/childDisplayName';
 import { formatCaptureChildAge } from '@/utils/date';
-import { CAPTURE_HERO_COLOR_MATRIX } from '@/utils/captureHeroColorMatrix';
 import {
   CAPTURE_HERO_IMAGE_CONTENT_POSITION,
   CAPTURE_HERO_IMAGE_OBJECT_POSITION,
@@ -97,17 +95,15 @@ const CaptureMosaicTile = memo(function CaptureMosaicTile({
             contentPosition={CAPTURE_HERO_IMAGE_OBJECT_POSITION}
           />
         ) : (
-          <ColorMatrix matrix={CAPTURE_HERO_COLOR_MATRIX} style={StyleSheet.absoluteFillObject}>
-            <ExpoImage
-              source={{ uri: photoUri }}
-              style={StyleSheet.absoluteFillObject}
-              contentFit="cover"
-              contentPosition={CAPTURE_HERO_IMAGE_CONTENT_POSITION}
-              cachePolicy="memory-disk"
-              recyclingKey={`capture-mosaic-${child.id}-${captureTilePhotoRevision(child)}`}
-              transition={isLocal ? 0 : 180}
-            />
-          </ColorMatrix>
+          <ExpoImage
+            source={{ uri: photoUri }}
+            style={StyleSheet.absoluteFillObject}
+            contentFit="cover"
+            contentPosition={CAPTURE_HERO_IMAGE_CONTENT_POSITION}
+            cachePolicy="memory-disk"
+            recyclingKey={`capture-mosaic-${child.id}-${captureTilePhotoRevision(child)}`}
+            transition={0}
+          />
         )
       ) : (
         <View style={[StyleSheet.absoluteFillObject, styles.tilePlaceholder]}>

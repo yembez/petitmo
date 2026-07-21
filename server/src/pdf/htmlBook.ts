@@ -10,7 +10,9 @@ import {
   PDF_MEDIA_TEXT_PAD_X_MM,
   PHOTO_FULL_BAND_HEIGHT_RATIO,
   PHOTO_NOTE_INNER_MM,
+  PHOTO_NOTE_BAND_HEIGHT_MM,
   PHOTO_FULL_FP_FOOTER_MM,
+  PHOTO_FULL_FP_IMAGE_HEIGHT_MM,
 } from '../constants/pdfDigitalSpec';
 import type { BookPageServer } from '../types/contracts';
 import type { ChildRow, MemoryRow } from './memoryRow';
@@ -78,6 +80,27 @@ function cropCss(crop?: PhotoCrop): string {
   const y = crop?.yPct ?? 0;
   const s = Math.max(1, crop?.scale ?? 1);
   return `transform: translate(${x}%, ${y}%) scale(${s}); transform-origin:center center;`;
+}
+
+/** Crop aspect (parité éditeur / cover) si dims connues, sinon transform historique. */
+function photoCropImgStyle(
+  crop: PhotoCrop | undefined,
+  imgPxW: number | undefined,
+  imgPxH: number | undefined,
+  frameWmm: number,
+  frameHmm: number,
+  rotCss: string,
+): string {
+  const hasDims =
+    typeof imgPxW === 'number' &&
+    typeof imgPxH === 'number' &&
+    imgPxW > 0 &&
+    imgPxH > 0;
+  if (hasDims) {
+    const base = coverCropImgInlineStyle(crop, imgPxW, imgPxH, frameWmm, frameHmm);
+    return rotCss ? `${base};${rotCss}` : base;
+  }
+  return `${cropCss(crop)}${rotCss}`;
 }
 
 function sanitizeText(s: string): string {
@@ -256,6 +279,8 @@ function pagePhotoFull(
   variant: 'FP' | 'M' | undefined,
   printBleed: boolean,
   photoRef?: string | null,
+  cropImgPxW?: number,
+  cropImgPxH?: number,
 ): string {
   const src = imgAttr(photoUrlForPage(m, photoRef));
   const captionRaw = sanitizeText((m.content ?? '').trim());
@@ -265,11 +290,25 @@ function pagePhotoFull(
   const isFp = variant === 'FP';
   const variantCls = isFp ? ' pf-variant-fp' : ' pf-variant-m';
   const bleedCls = isFp && printBleed ? ' bleed-x' : '';
+  const pageWmm = printBleed ? PRINT_PAGE_WIDTH_MM : DIGITAL_PAGE_WIDTH_MM;
+  const pageHmm = printBleed ? PRINT_PAGE_HEIGHT_MM : DIGITAL_PAGE_HEIGHT_MM;
+  let frameWmm: number;
+  let frameHmm: number;
+  if (isFp) {
+    frameWmm = printBleed ? pageWmm + 2 * PRINT_BLEED_MM : pageWmm;
+    frameHmm = printBleed
+      ? PRINT_PAGE_HEIGHT_MM - PHOTO_FULL_FP_FOOTER_MM
+      : PHOTO_FULL_FP_IMAGE_HEIGHT_MM;
+  } else {
+    frameWmm = pageWmm - 2 * BOOK_VISUAL_MARGIN_MM;
+    frameHmm = pageHmm * PHOTO_FULL_BAND_HEIGHT_RATIO - 2 * BOOK_VISUAL_MARGIN_MM;
+  }
+  const imgStyle = photoCropImgStyle(crop, cropImgPxW, cropImgPxH, frameWmm, frameHmm, rotCss);
   return `<div class="page photo-full-stack${variantCls}">
   <div class="pf-image${bleedCls}">
     ${
       src
-        ? `<div class="crop-frame" style="width:100%;height:100%;"><img class="crop-img" src="${src}" alt="" style="${cropCss(crop)}${rotCss}" /></div>`
+        ? `<div class="crop-frame" style="width:100%;height:100%;"><img class="crop-img" src="${src}" alt="" style="${imgStyle}" /></div>`
         : '<div class="placeholder" style="width:100%;height:100%;"></div>'
     }
   </div>
@@ -291,15 +330,21 @@ function pagePhotoNote(
   crop: PhotoCrop | undefined,
   birthdate: string | null | undefined,
   photoRef?: string | null,
+  cropImgPxW?: number,
+  cropImgPxH?: number,
 ): string {
   const src = imgAttr(photoUrlForPage(m, photoRef));
   const legend = sanitizeText((m.content ?? '').trim());
   const rotCss = rot ? `transform: rotate(${rot}deg); transform-origin: center;` : '';
   const locLabel = bookPdfLocationLabel(m.location);
+  const pageWmm = DIGITAL_PAGE_WIDTH_MM;
+  const frameWmm = pageWmm - 2 * BOOK_VISUAL_MARGIN_MM;
+  const frameHmm = PHOTO_NOTE_BAND_HEIGHT_MM - 2 * BOOK_VISUAL_MARGIN_MM;
+  const imgStyle = photoCropImgStyle(crop, cropImgPxW, cropImgPxH, frameWmm, frameHmm, rotCss);
   return `<div class="page photo-note">
   <div class="pn-image">
     ${src
-      ? `<div class="crop-frame" style="width:100%;height:100%;"><img class="crop-img" src="${src}" alt="" style="${cropCss(crop)}${rotCss}" /></div>`
+      ? `<div class="crop-frame" style="width:100%;height:100%;"><img class="crop-img" src="${src}" alt="" style="${imgStyle}" /></div>`
       : '<div class="placeholder" style="width:100%;height:100%;"></div>'}
   </div>
   <div class="pn-text">
@@ -407,7 +452,9 @@ function pageMediaQr(
   pageNum: number,
   rot: number,
   crop: PhotoCrop | undefined,
-  birthdate: string | null | undefined
+  birthdate: string | null | undefined,
+  cropImgPxW?: number,
+  cropImgPxH?: number,
 ): string {
   const captionRaw = clampMediaBookCaption(sanitizeText((m.content ?? '').trim()));
   const captionHtml = captionRaw ? romanHtml(captionRaw) : '';
@@ -418,9 +465,14 @@ function pageMediaQr(
   const typeLabel = kind === 'audio' ? 'Audio' : 'Video';
   const qrHint = kind === 'audio' ? 'Scanner pour écouter' : 'Scanner pour visionner';
 
+  const pageWmm = DIGITAL_PAGE_WIDTH_MM;
+  const frameWmm = pageWmm - 2 * BOOK_VISUAL_MARGIN_MM;
+  const frameHmm = PHOTO_NOTE_BAND_HEIGHT_MM - 2 * BOOK_VISUAL_MARGIN_MM;
+  const audioImgStyle = photoCropImgStyle(crop, cropImgPxW, cropImgPxH, frameWmm, frameHmm, rotCss);
+
   const visualInner = visualUrl
     ? kind === 'audio'
-      ? `<div class="crop-frame" style="width:100%;height:100%;"><img class="crop-img" src="${visualUrl}" alt="" style="${cropCss(crop)}${rotCss}" /></div>`
+      ? `<div class="crop-frame" style="width:100%;height:100%;"><img class="crop-img" src="${visualUrl}" alt="" style="${audioImgStyle}" /></div>`
       : `<img src="${visualUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;" />`
     : mediaQrVisualFallbackHtml(kind, m.id);
 
@@ -458,9 +510,11 @@ function pageAudio(
   pageNum: number,
   rot: number,
   crop: PhotoCrop | undefined,
-  birthdate: string | null | undefined
+  birthdate: string | null | undefined,
+  cropImgPxW?: number,
+  cropImgPxH?: number,
 ): string {
-  return pageMediaQr('audio', m, qrUrl, pageNum, rot, crop, birthdate);
+  return pageMediaQr('audio', m, qrUrl, pageNum, rot, crop, birthdate, cropImgPxW, cropImgPxH);
 }
 
 function pageVideo(
@@ -580,15 +634,35 @@ function renderPage(page: BookPageServer, input: BuildBookHtmlInput, pageNum: nu
       const birthdate = child.birthdate;
       switch (page.type) {
         case 'photo-full':
-          return pagePhotoFull(m, rot, pageNum, crop, birthdate, page.variant, printBleed, page.photoRef);
+          return pagePhotoFull(
+            m,
+            rot,
+            pageNum,
+            crop,
+            birthdate,
+            page.variant,
+            printBleed,
+            page.photoRef,
+            page.cropImgPxW,
+            page.cropImgPxH,
+          );
         case 'photo-note':
-          return pagePhotoNote(m, rot, pageNum, crop, birthdate, page.photoRef);
+          return pagePhotoNote(
+            m,
+            rot,
+            pageNum,
+            crop,
+            birthdate,
+            page.photoRef,
+            page.cropImgPxW,
+            page.cropImgPxH,
+          );
         case 'quote':
           return pageQuote(m, pageNum, birthdate);
         case 'audio': {
           const tok = qrTokensByMemoryId.get(id) ?? '';
           const qrTarget = tok ? `${qrBaseUrl}/${tok}` : '';
-          return pageAudio(m, qrTarget, pageNum, rot, crop, birthdate);
+          return pageAudio(m, qrTarget, pageNum, rot, crop, birthdate, page.cropImgPxW, page.cropImgPxH);
         }
         case 'video': {
           const tok = qrTokensByMemoryId.get(id) ?? '';

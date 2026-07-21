@@ -193,7 +193,7 @@ export async function captureMemoryLocalOnly(params: {
     const { localOriginalUri } = await persistOriginalToSandbox({ memoryId: id, type: 'photo', sourceUri: uri });
     const src = (localOriginalUri ?? uri).trim();
     const d = await ensureLocalPhotoFeedThumbOnly({ memoryId: id, localOriginalUri: src });
-    await persistFeedLocalThumbnail(id, uri, 0);
+    await persistFeedLocalThumbnail(id, d.localThumbUri ?? src, 0);
     scheduleLocalPhotoHeavyDerivatives(id, src);
     const size = await readBytesSize(src).catch(() => 0);
     const mem = emptyMemoryShell({
@@ -422,7 +422,7 @@ export async function capturePhotoAlbumLocalOnly(params: {
   const { localOriginalUri } = await persistOriginalToSandbox({ memoryId: id, type: 'photo', sourceUri: first });
   const src = (localOriginalUri ?? first).trim();
   const d = await ensureLocalPhotoFeedThumbOnly({ memoryId: id, localOriginalUri: src });
-  await persistFeedLocalThumbnail(id, first, 0);
+  await persistFeedLocalThumbnail(id, d.localThumbUri ?? src, 0);
   scheduleLocalPhotoHeavyDerivatives(id, src);
 
   const extraUris: string[] = [];

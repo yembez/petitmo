@@ -1,6 +1,11 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.58.0';
 import { SignJWT } from 'npm:jose@5.9.6';
-import { calculateBookPriceCents, type DiscountPercent } from './calculateBookPrice.ts';
+import {
+  calculateBookPriceCents,
+  PRINT_V1_BASE_PAGES,
+  PRINT_V1_PAID_DISCOUNT_PERCENT,
+  type DiscountPercent,
+} from './calculateBookPrice.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -59,6 +64,8 @@ type InitBody = {
   /** print_order */
   shipping_name?: string;
   shipping_address_json?: Record<string, unknown>;
+  /** Pages catalogue Gelato (V1). Fallback legacy : `billable_pages`. */
+  gelato_pages?: number;
   billable_pages?: number;
   discount_percent?: number;
   printer_name?: string | null;
@@ -377,25 +384,46 @@ Deno.serve(async (req: Request) => {
     if (!addrParsed.ok) {
       return jsonRes({ error: addrParsed.message }, 400);
     }
-    const bpRaw = body.billable_pages;
-    if (typeof bpRaw !== 'number' || !Number.isInteger(bpRaw) || bpRaw < 1 || bpRaw > 200) {
-      return jsonRes({ error: 'billable_pages invalid (1–200)' }, 400);
+    // V1 : pages = catalogue Gelato ; QR = audio_video_page_count. Prix recalculé ici (pas le client).
+    const gelatoRaw =
+      typeof body.gelato_pages === 'number' && Number.isInteger(body.gelato_pages)
+        ? body.gelato_pages
+        : typeof body.billable_pages === 'number' && Number.isInteger(body.billable_pages)
+          ? body.billable_pages
+          : null;
+    if (gelatoRaw === null || gelatoRaw < PRINT_V1_BASE_PAGES || gelatoRaw > 200) {
+      return jsonRes(
+        { error: `gelato_pages invalid (${PRINT_V1_BASE_PAGES}–200)` },
+        400,
+      );
     }
-    const discRaw = body.discount_percent;
-    if (discRaw != null && discRaw !== 0 && discRaw !== 20) {
-      return jsonRes({ error: 'discount_percent must be 0, 20 or omitted' }, 400);
-    }
-    let discountPercent: DiscountPercent = 0;
-    if (tier === 'free') {
-      if (discRaw === 20) {
-        return jsonRes({ error: 'discount_percent 20 requires paid subscription' }, 400);
-      }
-      discountPercent = 0;
-    } else {
-      discountPercent = discRaw === 20 ? 20 : 0;
+    if (gelatoRaw % 2 !== 0) {
+      return jsonRes({ error: 'gelato_pages must be even (Gelato catalogue)' }, 400);
     }
 
-    const priceCents = calculateBookPriceCents(bpRaw, discountPercent);
+    const discRaw = body.discount_percent;
+    if (
+      discRaw != null &&
+      discRaw !== 0 &&
+      discRaw !== PRINT_V1_PAID_DISCOUNT_PERCENT &&
+      discRaw !== 20
+    ) {
+      return jsonRes(
+        { error: 'discount_percent must be 0, 10 or omitted (20 legacy rejected)' },
+        400,
+      );
+    }
+    if (discRaw === 20) {
+      return jsonRes({ error: 'discount_percent 20 is deprecated; use 10 for paid' }, 400);
+    }
+    // Remise dérivée du tier — le client ne peut pas s’auto-accorder −10 %.
+    const discountPercent: DiscountPercent =
+      tier === 'paid' ? PRINT_V1_PAID_DISCOUNT_PERCENT : 0;
+    if (tier === 'free' && discRaw === PRINT_V1_PAID_DISCOUNT_PERCENT) {
+      return jsonRes({ error: 'discount_percent 10 requires paid subscription' }, 400);
+    }
+
+    const priceCents = calculateBookPriceCents(gelatoRaw, avCount, discountPercent);
     const printerName =
       typeof body.printer_name === 'string' && body.printer_name.trim() ? body.printer_name.trim() : null;
 
@@ -414,7 +442,8 @@ Deno.serve(async (req: Request) => {
         client_ip_hash: ipHash,
         shipping_name: shipName,
         shipping_address_json: addrParsed.value,
-        billable_pages: bpRaw,
+        // Colonne historique : stocke désormais le compteur Gelato (V1).
+        billable_pages: gelatoRaw,
         price_cents: priceCents,
         discount_percent: discountPercent,
         printer_name: printerName,
@@ -448,7 +477,9 @@ Deno.serve(async (req: Request) => {
         crmContactId,
         exportTicket,
         priceCents,
-        billablePages: bpRaw,
+        billablePages: gelatoRaw,
+        gelatoPages: gelatoRaw,
+        qrCount: avCount,
         discountPercent,
         expiresInSeconds: 2 * 60 * 60,
         flow: 'print_order',

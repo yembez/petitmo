@@ -107,12 +107,21 @@ export async function hasReadableBookVideoPoster(memory: Memory): Promise<boolea
 }
 
 /**
- * Sync : cache session ou URL distante https uniquement (pas de chemin local non vérifié).
+ * Sync local-first : cache session, puis candidats sandbox / file://, puis https.
+ * La lisibilité FS est confirmée en async (`resolveBookVideoPosterDisplayUri`).
  */
 export function peekSyncBookVideoPosterDisplayUri(memory: Memory): string {
   if (memory.type !== 'video') return '';
   const cached = peekBookVideoPosterStableCache(memory.id);
   if (cached) return normalizePosterDisplay(cached);
+
+  for (const u of collectVideoFeedPosterLocalUriCandidates(memory)) {
+    const t = (u ?? '').trim();
+    if (!t || !isDeviceLocalMediaUri(t)) continue;
+    if (isSandboxUriFromForeignContainer(t)) continue;
+    return normalizePosterDisplay(t);
+  }
+
   for (const u of [memory.poster_print_url, memory.poster_url, memory.thumbnail_url]) {
     const t = (u ?? '').trim();
     if (t && /^https?:\/\//i.test(t)) return normalizePosterDisplay(t);

@@ -7,11 +7,13 @@ import {
   Pressable,
   ActivityIndicator,
   Platform,
-  Dimensions,
+  useWindowDimensions,
   DeviceEventEmitter,
   FlatList,
   TouchableOpacity,
   Alert,
+  BackHandler,
+  InteractionManager,
   type ListRenderItem,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -28,7 +30,8 @@ import Reanimated, {
   withTiming,
 } from 'react-native-reanimated';
 import type { SharedValue } from 'react-native-reanimated';
-import { BookOpen, Check, Heart, Type, Mic, Video, Camera, PenLine, Play } from 'lucide-react-native';
+import { useFonts, DMSans_700Bold } from '@expo-google-fonts/dm-sans';
+import { BookOpen, Check, ChevronLeft, Heart, Type, Mic, Video, Camera, PenLine, Play } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
@@ -481,8 +484,10 @@ type FavorisFixedTopChromeProps = {
   insetTop: number;
   gradientHeight: number;
   selectionMode: boolean;
-  /** Flux spread livre → favoris : pas d’« Annuler » en haut (CTA bas). */
+  /** Flux spread livre → favoris : flèche Retour en haut à gauche (toujours). */
   bookAddFromSpreadFlow: boolean;
+  /** Picker livre sans héros : chrome clair (texte sombre), sans bandeau opaque. */
+  pickerLightChrome?: boolean;
   selectionHeaderTitle: string;
   onExitSelection: () => void;
   onEnterSelection: () => void;
@@ -494,23 +499,35 @@ function FavorisFixedTopChrome({
   gradientHeight,
   selectionMode,
   bookAddFromSpreadFlow,
+  pickerLightChrome = false,
   selectionHeaderTitle,
   onExitSelection,
   onEnterSelection,
 }: FavorisFixedTopChromeProps) {
+  const titleStyle = pickerLightChrome
+    ? styles.topChromeCenterTitleDark
+    : styles.topChromeCenterTitleLight;
+  const btnStyle = pickerLightChrome ? styles.topChromeBtnTextDark : styles.topChromeBtnTextLight;
+  const backIconColor = pickerLightChrome ? INK : '#FFFFFF';
+
   return (
     <View style={styles.favorisFixedTopChrome} pointerEvents="box-none">
       <View
-        style={[styles.stickyChromeInner, { minHeight: gradientHeight }]}
+        style={[
+          styles.stickyChromeInner,
+          pickerLightChrome ? null : { minHeight: gradientHeight },
+        ]}
         collapsable={false}
         pointerEvents="box-none"
       >
-        <LinearGradient
-          colors={FAVORIS_TOP_GRADIENT_COLORS}
-          locations={FAVORIS_TOP_GRADIENT_LOCATIONS}
-          pointerEvents="none"
-          style={[styles.favorisFloatingChromeGradient, { height: gradientHeight }]}
-        />
+        {pickerLightChrome ? null : (
+          <LinearGradient
+            colors={FAVORIS_TOP_GRADIENT_COLORS}
+            locations={FAVORIS_TOP_GRADIENT_LOCATIONS}
+            pointerEvents="none"
+            style={[styles.favorisFloatingChromeGradient, { height: gradientHeight }]}
+          />
+        )}
         <View
           style={[
             styles.topChromeRow,
@@ -523,19 +540,29 @@ function FavorisFixedTopChrome({
           {selectionMode ? (
             <>
               {bookAddFromSpreadFlow ? (
-                <View style={styles.topChromeSideSpacer} />
+                <Pressable
+                  onPress={onExitSelection}
+                  style={styles.topChromeBackBtn}
+                  hitSlop={14}
+                  delayPressIn={0}
+                  accessibilityRole="button"
+                  accessibilityLabel="Retour au livre"
+                >
+                  <ChevronLeft size={scale(28)} color={backIconColor} strokeWidth={2.4} />
+                </Pressable>
               ) : (
                 <Pressable
                   onPress={onExitSelection}
                   style={styles.topChromeSideBtn}
                   hitSlop={12}
+                  delayPressIn={0}
                   accessibilityRole="button"
                   accessibilityLabel="Annuler la sélection"
                 >
-                  <Text style={styles.topChromeBtnTextLight}>Annuler</Text>
+                  <Text style={btnStyle}>Annuler</Text>
                 </Pressable>
               )}
-              <Text style={styles.topChromeCenterTitleLight} numberOfLines={1}>
+              <Text style={titleStyle} numberOfLines={1}>
                 {selectionHeaderTitle}
               </Text>
               <View style={styles.topChromeSideSpacer} />
@@ -558,6 +585,7 @@ function FavorisFixedTopChrome({
               <Pressable
                 onPress={onEnterSelection}
                 hitSlop={8}
+                delayPressIn={0}
                 style={({ pressed }) => [styles.topChromeSelectCta, pressed && { opacity: 0.88 }]}
                 accessibilityRole="button"
                 accessibilityLabel="Mode sélection"
@@ -575,16 +603,9 @@ function FavorisFixedTopChrome({
   );
 }
 
-const SCREEN_W = Dimensions.get('window').width;
-const SCREEN_H = Dimensions.get('window').height;
-
-/** Overscroll (px) : agrandit légèrement la zone héros par-dessus la hauteur de base */
-const SLIDESHOW_PULL_MAX_PX = 168;
 /** Hauteur de base du héros / diaporama : ~50 % de l’écran (jusqu’à la moitié). */
 const HERO_BASE_RATIO = 0.5;
-/** Bonus de hauteur max quand on tire (fraction de l’écran) */
-const HERO_BONUS_RATIO = 0.1;
-/** Zoom léger quand on tire au-delà du haut (rubber-band proche iOS) */
+/** Zoom léger au rubber-band (UI thread uniquement — pas de changement de layout). */
 const HERO_PULL_SCALE_PER_PX = 0.00135;
 /**
  * Écart entre les tuiles (`galleryRow`) ; ligne fine sous le diaporama pour l’alignement grille.
@@ -685,6 +706,256 @@ function galleryTilePropsEqual(a: GalleryTileProps, b: GalleryTileProps): boolea
     a.onToggleSelect === b.onToggleSelect
   );
 }
+
+/**
+ * Picker « Ajouter au livre » : même rendu que la grille Favoris (audio/vidéo/texte),
+ * sans `useFeedPhotoDisplayUrls` (sondes disque = scroll saccadé).
+ */
+const GalleryTilePicker = memo(function GalleryTilePicker({
+  item,
+  tileSize,
+  isSelected,
+  isAlreadyInTargetBook,
+  onToggleSelect,
+}: {
+  item: FavListItem;
+  tileSize: number;
+  isSelected: boolean;
+  isAlreadyInTargetBook: boolean;
+  onToggleSelect: (key: string) => void;
+}) {
+  const memoryTextFont = useMemoryTextFont();
+  const memoryEditorialFont = useMemoryEditorialFont();
+  const memoryEditorialBoldFont = useMemoryEditorialBoldFont();
+  const { memory, thumbUrl } = item;
+
+  const videoPosterUri = useFeedVideoPosterDisplayUrl(memory);
+  const videoPlaybackUri = normalizeVideoPlaybackUri(useFeedVideoPlaybackUri(memory)).trim();
+  const voiceCoverRaster = useFeedRasterMediaUrl(memory, 'voice-cover');
+
+  const voiceCoverRaw = memory.type === 'voice' ? voiceCoverRaster : '';
+  const voiceCoverSigned = useSignedMediaUrl(
+    memory.type === 'voice' && voiceCoverRaw && !voiceCoverRaw.startsWith('file:')
+      ? voiceCoverRaw
+      : null,
+  );
+  const voiceCoverUri =
+    memory.type === 'voice'
+      ? normalizeMemoryMediaUriForDisplay((voiceCoverSigned ?? voiceCoverRaw).trim())
+      : '';
+
+  const photoUriRaw =
+    memory.type === 'photo'
+      ? normalizeMemoryMediaUriForDisplay(
+          item.kind === 'photo' && item.favPhotoOriginalUrl
+            ? mapPhotoUrlToThumb(memory, item.favPhotoOriginalUrl) || thumbUrl.trim()
+            : thumbUrl.trim(),
+        )
+      : '';
+  const photoNeedsSign = !!photoUriRaw && isBareMediaBucketPath(photoUriRaw);
+  const photoSigned = useSignedMediaUrl(photoNeedsSign ? photoUriRaw : null);
+  const photoUri = (photoSigned?.trim() || (photoNeedsSign ? '' : photoUriRaw)).trim();
+
+  const uri =
+    memory.type === 'photo'
+      ? photoUri
+      : memory.type === 'video'
+        ? videoPosterUri
+        : memory.type === 'voice'
+          ? voiceCoverUri
+          : '';
+
+  const hasVideoThumb =
+    memory.type === 'video' && (!!videoPosterUri.trim() || !!videoPlaybackUri);
+  const showRasterThumb =
+    (memory.type === 'photo' && !!uri) ||
+    (memory.type === 'voice' && !!uri) ||
+    hasVideoThumb;
+
+  const isText = memory.type === 'text';
+  const isAudio = memory.type === 'voice';
+  const isMedia = memory.type === 'photo' || memory.type === 'video';
+  const tileCaptionSnippet = galleryTileCaptionSnippet(memory);
+
+  return (
+    <Pressable
+      onPress={() => {
+        if (isAlreadyInTargetBook) return;
+        onToggleSelect(item.key);
+      }}
+      delayPressIn={0}
+      style={({ pressed }) => [
+        styles.galleryTile,
+        { width: tileSize, height: tileSize },
+        pressed && !isAlreadyInTargetBook ? { opacity: 0.92 } : null,
+      ]}
+      accessibilityRole="button"
+      accessibilityLabel={
+        isAlreadyInTargetBook
+          ? 'Déjà dans le livre'
+          : isSelected
+            ? 'Désélectionner'
+            : 'Sélectionner'
+      }
+    >
+      <View style={styles.galleryTileInner}>
+        {memory.type === 'video' ? (
+          <View style={[styles.galleryPh, styles.galleryVideoPlaceholder]}>
+            <FavorisVideoThumb
+              memory={memory}
+              recyclingKey={`${item.key}|picker|video|${memory.id}`}
+              posterUri={videoPosterUri}
+            />
+          </View>
+        ) : isMedia && showRasterThumb ? (
+          <>
+            <ExpoImage
+              source={{ uri }}
+              style={StyleSheet.absoluteFillObject}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              recyclingKey={`${item.key}|picker|${memory.type}|${uri.slice(0, 120)}`}
+              transition={0}
+            />
+            {tileCaptionSnippet ? (
+              <View
+                style={[styles.galleryPhotoCaptionBand, styles.galleryPhotoCaptionBandSelection]}
+                pointerEvents="none"
+              >
+                <LinearGradient
+                  colors={['rgba(55,55,55,0)', 'rgba(28,28,28,0.78)']}
+                  locations={[0, 1]}
+                  start={{ x: 0.5, y: 0 }}
+                  end={{ x: 0.5, y: 1 }}
+                  style={StyleSheet.absoluteFillObject}
+                />
+                <Text
+                  style={[styles.galleryPhotoCaptionText, { fontFamily: memoryTextFont }]}
+                  numberOfLines={2}
+                  ellipsizeMode="tail"
+                >
+                  {tileCaptionSnippet}
+                </Text>
+              </View>
+            ) : null}
+          </>
+        ) : isAudio ? (
+          <View style={styles.audioThumb}>
+            {showRasterThumb ? (
+              <>
+                <ExpoImage
+                  source={{ uri }}
+                  style={StyleSheet.absoluteFillObject}
+                  contentFit="cover"
+                  cachePolicy="memory-disk"
+                  recyclingKey={`${item.key}|picker|voice|${uri.slice(0, 120)}`}
+                  transition={0}
+                />
+                <View style={styles.audioThumbScrim} pointerEvents="none" />
+              </>
+            ) : null}
+            <View
+              style={[
+                styles.audioThumbContent,
+                tileCaptionSnippet ? styles.audioThumbContentWithCaption : null,
+              ]}
+              pointerEvents="none"
+            >
+              <View
+                style={[styles.audioThumbPlay, !showRasterThumb ? styles.audioThumbPlayOnLight : null]}
+                pointerEvents="none"
+              >
+                <Play
+                  size={scale(18)}
+                  color={showRasterThumb ? '#FFFFFF' : INK}
+                  fill={showRasterThumb ? '#FFFFFF' : INK}
+                  strokeWidth={0}
+                />
+              </View>
+              <View style={styles.audioThumbWaveRow}>
+                {AUDIO_WAVE_BARS.map((h, i) => (
+                  <View
+                    key={i}
+                    style={[
+                      styles.audioThumbWaveBar,
+                      !showRasterThumb ? styles.audioThumbWaveBarOnLight : null,
+                      { height: verticalScale(h) },
+                    ]}
+                  />
+                ))}
+              </View>
+            </View>
+            {tileCaptionSnippet ? (
+              <View
+                style={[styles.galleryPhotoCaptionBand, styles.galleryPhotoCaptionBandSelection]}
+                pointerEvents="none"
+              >
+                <LinearGradient
+                  colors={['rgba(55,55,55,0)', 'rgba(28,28,28,0.78)']}
+                  locations={[0, 1]}
+                  start={{ x: 0.5, y: 0 }}
+                  end={{ x: 0.5, y: 1 }}
+                  style={StyleSheet.absoluteFillObject}
+                />
+                <Text
+                  style={[styles.galleryPhotoCaptionText, { fontFamily: memoryTextFont }]}
+                  numberOfLines={2}
+                  ellipsizeMode="tail"
+                >
+                  {tileCaptionSnippet}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+        ) : isText ? (
+          <View style={[styles.galleryPh, styles.galleryTextTile]}>
+            {!!memory.text_title?.trim() ? (
+              <Text
+                style={[styles.galleryTextTitle, { fontFamily: memoryEditorialBoldFont }]}
+                numberOfLines={2}
+                ellipsizeMode="tail"
+              >
+                {memory.text_title.trim()}
+              </Text>
+            ) : null}
+            <Text
+              style={[styles.galleryTextSnippet, { fontFamily: memoryEditorialFont }]}
+              numberOfLines={memory.text_title?.trim() ? 4 : 6}
+            >
+              {(memory.content ?? '').trim() || 'Petits mots'}
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.galleryPh}>
+            <TypeGlyph type={memory.type} />
+          </View>
+        )}
+
+        {memory.type === 'video' ? (
+          <View style={styles.galleryVideoBadge} pointerEvents="none">
+            <Video size={scale(18)} color="#FFFFFF" strokeWidth={2.2} />
+          </View>
+        ) : null}
+
+        {isAlreadyInTargetBook ? (
+          <View style={styles.inBookNotch} pointerEvents="none">
+            <Check size={scale(12)} color="#FFFFFF" strokeWidth={3} />
+          </View>
+        ) : (
+          <View
+            style={[
+              styles.selectionRing,
+              isSelected ? styles.selectionRingSelected : styles.selectionRingIdle,
+            ]}
+            pointerEvents="none"
+          >
+            {isSelected ? <Check size={scale(13)} color="#FFFFFF" strokeWidth={3} /> : null}
+          </View>
+        )}
+      </View>
+    </Pressable>
+  );
+});
 
 const GalleryTile = memo(function GalleryTile({
   item,
@@ -860,12 +1131,27 @@ const GalleryTile = memo(function GalleryTile({
               ]}
               pointerEvents="none"
             >
-              <View style={styles.audioThumbPlay} pointerEvents="none">
-                <Play size={scale(18)} color="#FFFFFF" fill="#FFFFFF" strokeWidth={0} />
+              <View
+                style={[styles.audioThumbPlay, !showRasterThumb ? styles.audioThumbPlayOnLight : null]}
+                pointerEvents="none"
+              >
+                <Play
+                  size={scale(18)}
+                  color={showRasterThumb ? '#FFFFFF' : INK}
+                  fill={showRasterThumb ? '#FFFFFF' : INK}
+                  strokeWidth={0}
+                />
               </View>
               <View style={styles.audioThumbWaveRow}>
                 {AUDIO_WAVE_BARS.map((h, i) => (
-                  <View key={i} style={[styles.audioThumbWaveBar, { height: verticalScale(h) }]} />
+                  <View
+                    key={i}
+                    style={[
+                      styles.audioThumbWaveBar,
+                      !showRasterThumb ? styles.audioThumbWaveBarOnLight : null,
+                      { height: verticalScale(h) },
+                    ]}
+                  />
                 ))}
               </View>
             </View>
@@ -947,9 +1233,25 @@ const GalleryTile = memo(function GalleryTile({
   );
 }, galleryTilePropsEqual);
 
-function FavorisScreen() {
+export const FavorisScreen = memo(function FavorisScreen({
+  bookAddModalBookId,
+  onBookAddClose,
+}: {
+  /** Overlay book-preview : instance préchauffée, livre reste vivant dessous. */
+  bookAddModalBookId?: string;
+  onBookAddClose?: (result?: { didAdd?: boolean }) => void;
+} = {}) {
   const router = useRouter();
   const isTabFocused = useIsFocused();
+  const [ctaFontLoaded] = useFonts({ DMSans_700Bold });
+  /** Parité CTA spread « Ajouter » : DM Sans Bold 14, sans fontWeight système. */
+  const ctaFontFamily = ctaFontLoaded ? 'DMSans_700Bold' : undefined;
+  const isBookAddModal = !!(bookAddModalBookId?.trim() && onBookAddClose);
+  /**
+   * Overlay livre : le parent gère StatusBar / BackHandler.
+   * Ne pas basculer isScreenActive à l’ouverture → évite un re-render qui mange le slide-in.
+   */
+  const isScreenActive = isBookAddModal ? false : isTabFocused;
   const params = useLocalSearchParams<{
     bookId?: string;
     createBookTitle?: string;
@@ -962,8 +1264,6 @@ function FavorisScreen() {
   const memoriesRef = useRef(memories);
   memoriesRef.current = memories;
   const [hasChild, setHasChild] = useState(() => feedChildHydrationSnapshot !== null);
-  /** Pixels d’overscroll en haut (y négatif → valeur positive), suit le doigt */
-  const [pullOverscrollPx, setPullOverscrollPx] = useState(0);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const galleryListRef = useRef<FlatList<FavListItem> | null>(null);
@@ -998,27 +1298,54 @@ function FavorisScreen() {
     setHasChild(true);
 
     const list = await loadMemoriesForFavorisTab();
-    await healDeadLocalMediaPointersForMemories(
-      list.filter(m => memoryShouldAppearInFavoris(m)),
-      { max: 64 },
-    );
-    const refreshed = await loadMemoriesForFavorisTab();
     setMemories(prev => {
       if (
-        prev.length === refreshed.length &&
+        prev.length === list.length &&
         prev.every(
           (m, i) =>
-            m.id === refreshed[i]?.id &&
-            m.updated_at === refreshed[i]?.updated_at &&
-            m.is_favorite === refreshed[i]?.is_favorite,
+            m.id === list[i]?.id &&
+            m.updated_at === list[i]?.updated_at &&
+            m.is_favorite === list[i]?.is_favorite,
         )
       ) {
         return prev;
       }
-      return refreshed;
+      return list;
     });
-    void requestMissingMediaDerivatives(refreshed);
     setLoading(false);
+
+    const bookAddSession = peekFavorisAddToBookSession() != null;
+    const healList = list.filter(m => memoryShouldAppearInFavoris(m));
+    const runHeavy = async () => {
+      await healDeadLocalMediaPointersForMemories(healList, {
+        max: bookAddSession ? 16 : 64,
+      });
+      const refreshed = await loadMemoriesForFavorisTab();
+      setMemories(prev => {
+        if (
+          prev.length === refreshed.length &&
+          prev.every(
+            (m, i) =>
+              m.id === refreshed[i]?.id &&
+              m.updated_at === refreshed[i]?.updated_at &&
+              m.is_favorite === refreshed[i]?.is_favorite,
+          )
+        ) {
+          return prev;
+        }
+        return refreshed;
+      });
+      if (!bookAddSession) {
+        void requestMissingMediaDerivatives(refreshed);
+      }
+    };
+    if (bookAddSession || opts?.background) {
+      InteractionManager.runAfterInteractions(() => {
+        void runHeavy();
+      });
+    } else {
+      await runHeavy();
+    }
   }, []);
 
   const exitSelection = useCallback(() => {
@@ -1043,13 +1370,24 @@ function FavorisScreen() {
   }, []);
 
   const handleExitSelection = useCallback(() => {
+    if (isBookAddModal) {
+      // Parent ferme l’overlay + clear session (livre reste monté).
+      onBookAddClose?.({ didAdd: false });
+      return;
+    }
     const returnBookId =
       (addToBookTargetId ?? peekFavorisAddToBookSession())?.trim() || null;
-    exitSelection();
+    clearPendingFavorisAddToBookId();
+    clearFavorisAddToBookSession();
     if (returnBookId) {
       router.replace({ pathname: '/book-preview', params: { bookId: returnBookId } });
     }
-  }, [addToBookTargetId, exitSelection, router]);
+    InteractionManager.runAfterInteractions(() => {
+      setSelectionMode(false);
+      setSelectedIds(new Set());
+      setAddToBookTargetId(null);
+    });
+  }, [addToBookTargetId, isBookAddModal, onBookAddClose, router]);
 
   const toggleSelection = useCallback((key: string) => {
     setSelectedIds(prev => {
@@ -1061,7 +1399,6 @@ function FavorisScreen() {
   }, []);
 
   const enterSelectionMode = useCallback(() => {
-    setPullOverscrollPx(0);
     setSelectionMode(true);
     setSelectedIds(new Set());
   }, []);
@@ -1070,9 +1407,16 @@ function FavorisScreen() {
     () => insets.top + verticalScale(104),
     [insets.top]
   );
+  /** Picker livre : safe area + rangée Retour/compteur (photos sous le notch). */
+  const bookAddChromeHeight = useMemo(
+    () => insets.top + verticalScale(12) + scale(44) + verticalScale(10),
+    [insets.top],
+  );
 
   useFocusEffect(
     useCallback(() => {
+      if (isBookAddModal) return;
+
       const pendingBookId = consumePendingFavorisAddToBookId();
       if (pendingBookId) {
         applyAddToBookIntent(pendingBookId);
@@ -1086,13 +1430,12 @@ function FavorisScreen() {
         }
       }
 
-      setStatusBarStyle('light');
+      setStatusBarStyle(peekFavorisAddToBookSession() ? 'dark' : 'light');
       /** Déjà hydraté → resync SQLite légère (favoris modifiés depuis le fil). */
       if (memoriesRef.current.length > 0) {
         setLoading(false);
         void load({ background: true });
         return () => {
-          setPullOverscrollPx(0);
           galleryScrollY.value = 0;
           // Conserver sélection + livre cible pendant le flux « Ajouter au livre ».
           if (peekFavorisAddToBookSession()) return;
@@ -1115,15 +1458,26 @@ function FavorisScreen() {
         void load();
       }
       return () => {
-        setPullOverscrollPx(0);
         galleryScrollY.value = 0;
         if (peekFavorisAddToBookSession()) return;
         setSelectionMode(false);
         setSelectedIds(new Set());
         setAddToBookTargetId(null);
       };
-    }, [applyAddToBookIntent, load])
+    }, [applyAddToBookIntent, isBookAddModal, load]),
   );
+
+  /** Précharge overlay : cible + données locales, sans session globale (tab bar intacte). */
+  useEffect(() => {
+    if (!isBookAddModal) return;
+    const id = bookAddModalBookId?.trim();
+    if (!id) return;
+    setLoading(false);
+    setCreateBookFlowTitle(null);
+    setSelectionMode(true);
+    setAddToBookTargetId(id);
+    void load({ background: true });
+  }, [bookAddModalBookId, isBookAddModal, load]);
 
   useEffect(() => {
     const subInvalidate = DeviceEventEmitter.addListener('petitmo:memories-invalidate', () => {
@@ -1160,15 +1514,17 @@ function FavorisScreen() {
   }, [load]);
 
   useEffect(() => {
+    if (isBookAddModal) return;
+    // Compat: si on arrive ici avec un bookId (ex. depuis un lien),
+    // on ouvre l’aperçu du livre directement.
     const id = typeof params.bookId === 'string' ? params.bookId : null;
     if (id) {
-      // Compat: si on arrive ici avec un bookId (ex. depuis un lien),
-      // on ouvre l’aperçu du livre directement.
       router.push({ pathname: '/book-preview', params: { bookId: id } });
     }
-  }, [params.bookId, router]);
+  }, [isBookAddModal, params.bookId, router]);
 
   useEffect(() => {
+    if (isBookAddModal) return;
     const t = typeof params.createBookTitle === 'string' ? params.createBookTitle.trim() : '';
     if (!t) return;
     setCreateBookFlowTitle(t);
@@ -1178,14 +1534,15 @@ function FavorisScreen() {
     setSelectedIds(new Set());
     // Évite de réouvrir le flux « créer livre » après redémarrage (param persistant expo-router).
     router.setParams({ createBookTitle: '' });
-  }, [params.createBookTitle, router]);
+  }, [isBookAddModal, params.createBookTitle, router]);
 
   useEffect(() => {
+    if (isBookAddModal) return;
     const id = typeof params.addToBookId === 'string' ? params.addToBookId.trim() : '';
     if (!id) return;
     applyAddToBookIntent(id);
     router.setParams({ addToBookId: '' });
-  }, [applyAddToBookIntent, params.addToBookId, router]);
+  }, [applyAddToBookIntent, isBookAddModal, params.addToBookId, router]);
 
   const favoriteItems = useMemo(() => buildFavorisGridItems(memories), [memories]);
 
@@ -1195,6 +1552,16 @@ function FavorisScreen() {
     if (!effectiveAddToBookTargetId) return null;
     return getBookForFavorisAddTarget(effectiveAddToBookTargetId);
   }, [effectiveAddToBookTargetId, memories]);
+
+  /** Précalc encoches : évite bookHasPageEntry sur chaque tuile à chaque toggle sélection. */
+  const inBookItemKeys = useMemo(() => {
+    if (!addToBookTarget) return null;
+    const keys = new Set<string>();
+    for (const it of galleryItems) {
+      if (isFavorisItemInBook(it, addToBookTarget)) keys.add(it.key);
+    }
+    return keys;
+  }, [addToBookTarget, galleryItems]);
 
   const selectedItems = useMemo(
     () => galleryItems.filter(it => selectedIds.has(it.key)),
@@ -1213,22 +1580,34 @@ function FavorisScreen() {
 
   const slideshowItems = useMemo(() => buildSlideshowItems(galleryItems), [galleryItems]);
 
-  /** Icônes claires sur le hero sombre : seulement quand cet onglet est au premier plan (pas sous memory-view / autre stack). */
+  const isBookAddFromSpreadFlow = effectiveAddToBookTargetId != null || isBookAddModal;
+
+  /** Icônes : sombre sur fond clair en mode picker livre ; claires sur héros sinon. */
   useEffect(() => {
-    if (!isTabFocused || loading) return;
-    setStatusBarStyle('light');
-  }, [loading, isTabFocused]);
+    if (!isScreenActive || loading) return;
+    setStatusBarStyle(isBookAddFromSpreadFlow ? 'dark' : 'light');
+  }, [loading, isScreenActive, isBookAddFromSpreadFlow]);
+
+  /** Android : Retour matériel = retour au livre (même chemin que chevron / Annuler). */
+  useEffect(() => {
+    if (!isScreenActive || !isBookAddFromSpreadFlow) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      handleExitSelection();
+      return true;
+    });
+    return () => sub.remove();
+  }, [handleExitSelection, isBookAddFromSpreadFlow, isScreenActive]);
 
   const columns = 3;
   const gridGap = GALLERY_TILE_GAP;
-  const tileSize = Math.floor((SCREEN_W - gridGap * (columns - 1)) / columns);
-  const heroBaseH = slideshowItems.length > 0 ? SCREEN_H * HERO_BASE_RATIO : 0;
-  const heroBonusH =
-    slideshowItems.length > 0
-      ? (Math.min(pullOverscrollPx, SLIDESHOW_PULL_MAX_PX) / SLIDESHOW_PULL_MAX_PX) *
-        (SCREEN_H * HERO_BONUS_RATIO)
-      : 0;
-  const heroHeight = heroBaseH + heroBonusH;
+  const { width: windowW, height: windowH } = useWindowDimensions();
+  const tileSize = Math.floor((windowW - gridGap * (columns - 1)) / columns);
+  /**
+   * Flux « Ajouter » depuis l’éditeur livre : pas de diaporama héros
+   * (évite scroll hyper-saccadé — ce n’est pas l’onglet Favoris « vitrine »).
+   */
+  const heroHeight =
+    isBookAddFromSpreadFlow || slideshowItems.length === 0 ? 0 : windowH * HERO_BASE_RATIO;
 
   const selectionHeaderTitle = useMemo(() => {
     const n = selectedIds.size;
@@ -1237,7 +1616,6 @@ function FavorisScreen() {
     return `${n} sélectionnés`;
   }, [selectedIds]);
 
-  const isBookAddFromSpreadFlow = effectiveAddToBookTargetId != null;
   const showSelectionBottomBar =
     isBookAddFromSpreadFlow || (selectionMode && selectedIds.size > 0);
 
@@ -1294,8 +1672,15 @@ function FavorisScreen() {
         break;
       }
       setCreateBookFlowTitle(null);
-      exitSelection();
-      router.push({ pathname: '/book-preview', params: { bookId: updated.id } });
+      if (isBookAddModal) {
+        onBookAddClose?.({ didAdd: true });
+        return;
+      }
+      const newBookId = updated.id;
+      router.replace({ pathname: '/book-preview', params: { bookId: newBookId } });
+      InteractionManager.runAfterInteractions(() => {
+        exitSelection();
+      });
       return;
     }
 
@@ -1309,6 +1694,7 @@ function FavorisScreen() {
       }
       const pageEntriesToAdd = changingItems.map(pageEntryForFavorisGridItem);
 
+      createBookInFlightRef.current = true;
       try {
         const beforePages = book ? bookPageEntries(book).length : 0;
         const updated = await addMemoriesToBook(
@@ -1333,9 +1719,17 @@ function FavorisScreen() {
       } catch (e) {
         Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
         return;
+      } finally {
+        createBookInFlightRef.current = false;
       }
-      exitSelection();
+      if (isBookAddModal) {
+        onBookAddClose?.({ didAdd: true });
+        return;
+      }
       router.replace({ pathname: '/book-preview', params: { bookId: targetId } });
+      InteractionManager.runAfterInteractions(() => {
+        exitSelection();
+      });
       return;
     }
 
@@ -1344,6 +1738,8 @@ function FavorisScreen() {
     createBookFlowTitle,
     effectiveAddToBookTargetId,
     exitSelection,
+    isBookAddModal,
+    onBookAddClose,
     router,
     selectedItems,
     selectedMemoryIds,
@@ -1358,22 +1754,39 @@ function FavorisScreen() {
   );
 
   const renderGalleryItem: ListRenderItem<FavListItem> = useCallback(
-    ({ item }) => (
-      <GalleryTile
-        item={item}
-        tileSize={tileSize}
-        selectionMode={selectionMode}
-        isSelected={selectedIds.has(item.key)}
-        isAlreadyInTargetBook={addToBookTarget != null && isFavorisItemInBook(item, addToBookTarget)}
-        onOpen={openMemory}
-        onToggleSelect={toggleSelection}
-      />
-    ),
-    [tileSize, selectionMode, selectedIds, addToBookTarget, openMemory, toggleSelection]
+    ({ item }) =>
+      isBookAddFromSpreadFlow ? (
+        <GalleryTilePicker
+          item={item}
+          tileSize={tileSize}
+          isSelected={selectedIds.has(item.key)}
+          isAlreadyInTargetBook={!!inBookItemKeys?.has(item.key)}
+          onToggleSelect={toggleSelection}
+        />
+      ) : (
+        <GalleryTile
+          item={item}
+          tileSize={tileSize}
+          selectionMode={selectionMode}
+          isSelected={selectedIds.has(item.key)}
+          isAlreadyInTargetBook={!!inBookItemKeys?.has(item.key)}
+          onOpen={openMemory}
+          onToggleSelect={toggleSelection}
+        />
+      ),
+    [
+      isBookAddFromSpreadFlow,
+      tileSize,
+      selectionMode,
+      selectedIds,
+      inBookItemKeys,
+      openMemory,
+      toggleSelection,
+    ],
   );
 
   const favoritesListHeader = useMemo(() => {
-    if (slideshowItems.length === 0) return null;
+    if (isBookAddFromSpreadFlow || slideshowItems.length === 0 || heroHeight < 2) return null;
     return (
       <HeroSlideshowListHeader
         scrollY={galleryScrollY}
@@ -1382,11 +1795,35 @@ function FavorisScreen() {
         isTabFocused={isTabFocused}
       />
     );
-  }, [slideshowItems, heroHeight, isTabFocused]);
+  }, [isBookAddFromSpreadFlow, slideshowItems, heroHeight, isTabFocused, galleryScrollY]);
+
+  const galleryExtraData = useMemo(
+    () => ({
+      selectionMode,
+      selectionHeaderTitle,
+      addToBookTargetId: effectiveAddToBookTargetId,
+      inBookCount: inBookItemKeys?.size ?? 0,
+      selectedCount: selectedIds.size,
+    }),
+    [
+      selectionMode,
+      selectionHeaderTitle,
+      effectiveAddToBookTargetId,
+      inBookItemKeys,
+      selectedIds.size,
+    ],
+  );
+
+  const onGalleryScroll = useCallback(
+    (e: { nativeEvent: { contentOffset: { y: number } } }) => {
+      galleryScrollY.value = e.nativeEvent.contentOffset.y;
+    },
+    [galleryScrollY],
+  );
 
   return (
     <View style={styles.container}>
-      {isTabFocused ? <StatusBar style="light" /> : null}
+      {isScreenActive ? <StatusBar style={isBookAddFromSpreadFlow ? 'dark' : 'light'} /> : null}
       {loading ? (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={THEME.brandCtaOrange} />
@@ -1432,25 +1869,20 @@ function FavorisScreen() {
                 contentContainerStyle={[
                   styles.galleryContent,
                   { paddingBottom: galleryListPaddingBottom },
+                  // Pas de ListHeader en mode picker : le padding doit être ici (sinon 1re rangée sous le notch).
+                  isBookAddFromSpreadFlow ? { paddingTop: bookAddChromeHeight } : null,
                 ]}
                 style={styles.gallery}
                 showsVerticalScrollIndicator={false}
-                scrollEventThrottle={16}
+                scrollEventThrottle={isBookAddFromSpreadFlow ? 64 : 16}
+                windowSize={isBookAddFromSpreadFlow ? 5 : 7}
+                maxToRenderPerBatch={isBookAddFromSpreadFlow ? 4 : 6}
+                updateCellsBatchingPeriod={50}
+                initialNumToRender={isBookAddFromSpreadFlow ? 15 : 12}
+                removeClippedSubviews={Platform.OS === 'android'}
                 ListHeaderComponent={favoritesListHeader}
-                extraData={{
-                  heroHeight,
-                  selectionMode,
-                  selectionHeaderTitle,
-                  addToBookTargetId: effectiveAddToBookTargetId,
-                  bookMemoryIds: addToBookTarget?.memoryIds ?? [],
-                }}
-                onScroll={e => {
-                  const y = e.nativeEvent.contentOffset.y;
-                  galleryScrollY.value = y;
-                  setPullOverscrollPx(
-                    y < 0 ? Math.min(-y, SLIDESHOW_PULL_MAX_PX) : 0
-                  );
-                }}
+                extraData={galleryExtraData}
+                onScroll={isBookAddFromSpreadFlow ? undefined : onGalleryScroll}
                 {...Platform.select({
                   android: { overScrollMode: 'always' as const },
                 })}
@@ -1458,9 +1890,10 @@ function FavorisScreen() {
               {/** Titre + Sélectionner au-dessus du scroll : ne réserve plus de hauteur — la photo du header va jusqu’en haut. */}
               <FavorisFixedTopChrome
                 insetTop={insets.top}
-                gradientHeight={heroGradientHeight}
-                selectionMode={selectionMode}
+                gradientHeight={isBookAddFromSpreadFlow ? bookAddChromeHeight : heroGradientHeight}
+                selectionMode={selectionMode || isBookAddFromSpreadFlow}
                 bookAddFromSpreadFlow={isBookAddFromSpreadFlow}
+                pickerLightChrome={isBookAddFromSpreadFlow}
                 selectionHeaderTitle={selectionHeaderTitle}
                 onExitSelection={handleExitSelection}
                 onEnterSelection={enterSelectionMode}
@@ -1470,8 +1903,8 @@ function FavorisScreen() {
 
           {showSelectionBottomBar ? (
             <Reanimated.View
-              entering={SlideInDown.duration(280)}
-              exiting={SlideOutDown.duration(200)}
+              entering={isBookAddFromSpreadFlow ? undefined : SlideInDown.duration(220)}
+              exiting={isBookAddFromSpreadFlow ? undefined : SlideOutDown.duration(160)}
               style={[
                 styles.selectionActionBar,
                 {
@@ -1482,35 +1915,59 @@ function FavorisScreen() {
               ]}
             >
               {isBookAddFromSpreadFlow && selectedIds.size === 0 ? (
-                <TouchableOpacity
-                  style={[styles.selectionActionBtn, styles.selectionActionBtnOutline]}
-                  activeOpacity={0.9}
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.selectionActionBtn,
+                    styles.selectionActionBtnOutline,
+                    pressed && { opacity: 0.85 },
+                  ]}
+                  delayPressIn={0}
                   onPress={handleExitSelection}
                   accessibilityRole="button"
                   accessibilityLabel="Annuler et retourner au livre"
                 >
-                  <Text style={[styles.selectionActionBtnText, styles.selectionActionBtnOutlineText]}>
+                  <Text
+                    style={[
+                      styles.selectionActionBtnText,
+                      styles.selectionActionBtnOutlineText,
+                      ctaFontFamily
+                        ? { fontFamily: ctaFontFamily, fontWeight: '400' }
+                        : { fontWeight: '600' },
+                    ]}
+                  >
                     Annuler
                   </Text>
-                </TouchableOpacity>
+                </Pressable>
               ) : (
-                <TouchableOpacity
-                  style={styles.selectionActionBtn}
-                  activeOpacity={0.9}
-                  onPress={handleConfirmSelectionAction}
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.selectionActionBtn,
+                    pressed && { opacity: 0.9 },
+                  ]}
+                  delayPressIn={0}
+                  onPress={() => {
+                    void handleConfirmSelectionAction();
+                  }}
                   accessibilityRole="button"
                   accessibilityLabel={
                     isBookAddFromSpreadFlow ? 'Ajouter au livre' : 'Ajouter au livre'
                   }
                 >
-                  <Text style={styles.selectionActionBtnText}>
+                  <Text
+                    style={[
+                      styles.selectionActionBtnText,
+                      ctaFontFamily
+                        ? { fontFamily: ctaFontFamily, fontWeight: '400' }
+                        : { fontWeight: '600' },
+                    ]}
+                  >
                     {createBookFlowTitle
                       ? `Créer « ${createBookFlowTitle} » →`
                       : isBookAddFromSpreadFlow
                         ? 'Ajouter'
                         : 'Ajouter au livre →'}
                   </Text>
-                </TouchableOpacity>
+                </Pressable>
               )}
             </Reanimated.View>
           ) : null}
@@ -1527,7 +1984,7 @@ function FavorisScreen() {
       )}
     </View>
   );
-}
+});
 
 export default function FavorisScreenTab() {
   return (
@@ -1717,6 +2174,13 @@ const styles = StyleSheet.create({
     minWidth: scale(76),
     paddingVertical: verticalScale(6),
   },
+  topChromeBackBtn: {
+    minWidth: scale(76),
+    height: scale(40),
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    marginLeft: scale(-6),
+  },
   /** CTA « Sélectionner » sur le héros — fond gris translucide sur la photo. */
   topChromeSelectCta: {
     minWidth: scale(76),
@@ -1747,9 +2211,21 @@ const styles = StyleSheet.create({
     fontSize: scale(16),
     fontWeight: '600',
   },
+  topChromeBtnTextDark: {
+    color: INK,
+    fontSize: scale(16),
+    fontWeight: '600',
+  },
   topChromeCenterTitleLight: {
     flex: 1,
     color: '#FFFFFF',
+    fontSize: scale(16),
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  topChromeCenterTitleDark: {
+    flex: 1,
+    color: INK,
     fontSize: scale(16),
     fontWeight: '700',
     textAlign: 'center',
@@ -1800,8 +2276,7 @@ const styles = StyleSheet.create({
   },
   selectionActionBtn: {
     alignSelf: 'center',
-    width: '100%',
-    maxWidth: scale(320),
+    /** Pilule = largeur du libellé (plus de pleine largeur). */
     backgroundColor: THEME.brandArdoise,
     borderRadius: scale(999),
     paddingVertical: verticalScale(12),
@@ -1811,8 +2286,8 @@ const styles = StyleSheet.create({
   },
   selectionActionBtnText: {
     color: '#FFFFFF',
-    fontSize: scale(16),
-    fontWeight: '800',
+    /** Même corps que le CTA « Ajouter » du spread livre. */
+    fontSize: 14,
   },
   selectionActionBtnOutline: {
     backgroundColor: THEME.bg,
@@ -1867,6 +2342,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  /** Sans vignette : pastille claire pour faire ressortir le play noir. */
+  audioThumbPlayOnLight: {
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,0,0,0.12)',
+  },
   audioThumbWaveRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -1888,6 +2369,10 @@ const styles = StyleSheet.create({
     width: scale(2),
     borderRadius: scale(999),
     backgroundColor: 'rgba(255,255,255,0.92)',
+  },
+  /** Sans vignette audio : fond clair → barre d’onde sombre. */
+  audioThumbWaveBarOnLight: {
+    backgroundColor: 'rgba(28,28,30,0.55)',
   },
   galleryTextTile: {
     backgroundColor: '#FFFFFF',

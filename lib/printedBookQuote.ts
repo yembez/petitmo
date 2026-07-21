@@ -1,28 +1,43 @@
 /**
- * Tarif livre imprimé incrémental (aligné avec `supabase/functions/init-export/calculateBookPrice.ts`
- * et `server/src/pricing/printedBookQuote.ts`).
+ * Tarif livre imprimé V1 — façade client.
+ * Canon : `lib/pricingV1.ts` · Edge / server miroirs.
  */
 
-export type DiscountPercent = 0 | 20;
+import {
+  quotePrintOrderV1,
+  quotePrintOrderV1Cents,
+  PRINT_V1_PAID_DISCOUNT_PERCENT,
+  type PrintDiscountPercent,
+  type PrintTier,
+} from '@/lib/pricingV1';
+
+export type DiscountPercent = PrintDiscountPercent;
+export { PRINT_V1_PAID_DISCOUNT_PERCENT };
+
+export type PrintedBookQuoteInput = {
+  gelatoPages: number;
+  qrCount: number;
+  tier: PrintTier;
+};
 
 /** Montant TTC en centimes (entier). */
-export function calculateBookPriceCents(billablePages: number, discountPercent: DiscountPercent): number {
-  const raw = Math.max(0, Math.floor(billablePages));
-  const p = Math.max(20, raw);
-  let euros = 32;
-  if (p <= 20) {
-    // forfait 20 pages
-  } else if (p <= 40) {
-    euros += (p - 20) * 1.2;
-  } else {
-    euros += 20 * 1.2 + (p - 40) * 1.0;
-  }
-  if (discountPercent === 20) {
-    euros *= 0.8;
-  }
-  return Math.round(euros * 100);
+export function calculateBookPriceCents(
+  gelatoPages: number,
+  qrCount: number,
+  discountPercent: DiscountPercent,
+): number {
+  const tier: PrintTier = discountPercent === PRINT_V1_PAID_DISCOUNT_PERCENT ? 'paid' : 'free';
+  return quotePrintOrderV1Cents({ gelatoPages, qrCount, tier }).priceCents;
 }
 
-export function calculateBookPriceEuros(billablePages: number, discountPercent: DiscountPercent): number {
-  return calculateBookPriceCents(billablePages, discountPercent) / 100;
+export function calculateBookPriceEuros(
+  gelatoPages: number,
+  qrCount: number,
+  discountPercent: DiscountPercent,
+): number {
+  return calculateBookPriceCents(gelatoPages, qrCount, discountPercent) / 100;
+}
+
+export function quotePrintedBookV1(input: PrintedBookQuoteInput) {
+  return quotePrintOrderV1(input);
 }

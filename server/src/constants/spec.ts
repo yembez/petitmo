@@ -1,5 +1,9 @@
-/** Max pages audio + vidéo avec QR par livre (tier free). 5 audio + 5 vidéo. */
-export const FREE_TIER_QR_AV_MAX_PER_BOOK = 10;
+/**
+ * V1 : plus de plafond 5+5 pages A/V par livre en free.
+ * Composition libre ; monétisation QR au checkout (2 inclus + 0,70 €).
+ * Conservé pour imports legacy — ne plus utiliser comme garde-fou bloquant.
+ */
+export const FREE_TIER_QR_AV_MAX_PER_BOOK = Number.MAX_SAFE_INTEGER;
 
 /** Durée URL signée PDF renvoyée au client (secondes). Spec ~10 min. */
 export const PDF_SIGNED_URL_SECONDS = 600;

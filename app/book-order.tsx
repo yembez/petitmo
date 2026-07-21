@@ -18,8 +18,9 @@ import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmo
 import { scale } from '@/utils/responsive';
 import { getUserTier } from '@/lib/userTier';
 import { getLastGuestExportEmail, setLastGuestExportEmail } from '@/lib/guestExportPrefs';
-import { calculateBookPriceEuros, type DiscountPercent } from '@/lib/printedBookQuote';
-import { getBook, resolveBookCoverPrintUri, validateFreeTierBookMemoryLimits } from '@/services/books';
+import { PRINT_V1_INCLUDED_QR, quotePrintOrderV1 } from '@/lib/pricingV1';
+import { PRINT_V1_PAID_DISCOUNT_PERCENT, type DiscountPercent } from '@/lib/printedBookQuote';
+import { getBook, resolveBookCoverPrintUri } from '@/services/books';
 import { getChildren } from '@/services/children';
 import { isInitExportConfigured } from '@/services/initExportApi';
 import { initPrintOrderExport } from '@/services/printBookOrder';
@@ -166,12 +167,21 @@ export default function BookOrderScreen() {
   const [country, setCountry] = useState<CountryCode>('FR');
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<FieldKey, string>>>({});
 
-  const billablePages = Math.max(0, memoryPageCount);
-  const discountPercent: DiscountPercent = tier === 'paid' ? 20 : 0;
-  const printPriceEuros = useMemo(
-    () => calculateBookPriceEuros(billablePages, discountPercent),
-    [billablePages, discountPercent]
+  const gelatoPagesForQuote =
+    gelatoPageCountParam >= 0 ? gelatoPageCountParam : Math.max(GELATO_MIN_INNER_PAGES, 0);
+  const qrCountForQuote = Math.max(0, avPageCountParam);
+  const discountPercent: DiscountPercent =
+    tier === 'paid' ? PRINT_V1_PAID_DISCOUNT_PERCENT : 0;
+  const printQuote = useMemo(
+    () =>
+      quotePrintOrderV1({
+        gelatoPages: gelatoPagesForQuote,
+        qrCount: qrCountForQuote,
+        tier,
+      }),
+    [gelatoPagesForQuote, qrCountForQuote, tier],
   );
+  const printPriceEuros = printQuote.totalEuros;
   const subscriptionDb: 'free' | 'paid' = tier === 'paid' ? 'paid' : 'free';
 
   const displayPriceEuros = useMemo(() => {
@@ -240,7 +250,10 @@ export default function BookOrderScreen() {
           setEmail(startEmail);
           const pre = await fetchCrmPrefillByEmail(startEmail);
           if (pre) {
-            if (pre.full_name) setFullName(pre.full_name);
+            if (pre.full_name) {
+              setFullName(pre.full_name);
+              setShippingName(prev => (prev.trim() ? prev : pre.full_name!.trim()));
+            }
             const addr = pickAddressFromJson(
               pre.address_json && typeof pre.address_json === 'object' ? pre.address_json : null
             );
@@ -330,7 +343,7 @@ export default function BookOrderScreen() {
 
   const submitOrder = useCallback(async () => {
     if (!bookId || !childId || !child) return;
-    if (billablePages < 1) {
+    if (memoryPageCount < 1) {
       Alert.alert('Livre vide', 'Ajoute au moins un souvenir pour créer un livre.', [
         { text: 'OK', onPress: () => router.replace('/(tabs)/fil') },
       ]);
@@ -350,20 +363,11 @@ export default function BookOrderScreen() {
 
     const mail = email.trim().toLowerCase();
     const nowIso = new Date().toISOString();
+    // Contact CRM : prénom/nom connu (préremplissage) sinon nom sur le colis.
+    const contactFullName = fullName.trim() || shippingName.trim() || null;
 
-    // Plan gratuit : quotas audio/vidéo livre ; QR cloud après paiement (spec free-tier-book-qr-av.md).
+    // V1 : pas de plafond 5+5 A/V — facturation QR au checkout uniquement.
     const pendingPayload = await getPendingBookOrderPdfPayload();
-    if (subscriptionDb === 'free' && pendingPayload) {
-      const memories = collectMemoriesFromPagesForPdf(pendingPayload.pages, pendingPayload.localEdits ?? {});
-      try {
-        await validateFreeTierBookMemoryLimits(memories);
-      } catch (e) {
-        setFieldErrors({
-          submit: e instanceof Error ? e.message : 'Limite plan gratuit atteinte pour ce livre.',
-        });
-        return;
-      }
-    }
 
     if (exportMode === 'print') {
       if (!isInitExportConfigured()) return;
@@ -392,14 +396,19 @@ export default function BookOrderScreen() {
           child: payload.child,
         });
 
+        const gelatoPages = gelatoCatalogPageCount(payload.pages);
+        const qrCount = payload.pages.filter(
+          (p: { type: string }) => p.type === 'audio' || p.type === 'video',
+        ).length;
+
         const res = await initPrintOrderExport({
           bookId,
           childLocalId: childId,
           subscriptionTierDb: subscriptionDb,
-          audioVideoPageCount: avPageCountParam,
+          audioVideoPageCount: qrCount,
           email: mail,
           gdprConsentAtIso: nowIso,
-          fullName: fullName.trim() || null,
+          fullName: contactFullName,
           marketingOptIn: marketingOptIn,
           shippingName: shippingName.trim(),
           shippingAddress: {
@@ -409,7 +418,7 @@ export default function BookOrderScreen() {
             zip: zip.trim(),
             country,
           },
-          billablePages: Math.min(200, billablePages),
+          gelatoPages,
           discountPercent,
           printerName: 'gelato',
         });
@@ -537,7 +546,7 @@ export default function BookOrderScreen() {
         consent: {
           email: mail,
           gdprConsentAtIso: nowIso,
-          fullName: fullName.trim() || null,
+          fullName: contactFullName,
           marketingOptIn: marketingOptIn === true,
         },
       });
@@ -594,8 +603,6 @@ export default function BookOrderScreen() {
       setSubmitting(false);
     }
   }, [
-    avPageCountParam,
-    billablePages,
     bookId,
     child,
     childId,
@@ -608,6 +615,7 @@ export default function BookOrderScreen() {
     line1,
     line2,
     marketingOptIn,
+    memoryPageCount,
     navigateToConfirmation,
     navigateToFinalizeMedia,
     router,
@@ -679,7 +687,7 @@ export default function BookOrderScreen() {
             }
           >
             <Text style={styles.bannerText}>
-              Petitmo+ : −20 % sur l’impression. Touche ici pour en profiter.
+              Petitmo+ : −10 % sur l’impression et QR audio/vidéo illimités. Touche ici pour en profiter.
             </Text>
           </Pressable>
         ) : null}
@@ -688,16 +696,52 @@ export default function BookOrderScreen() {
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Tarif impression</Text>
             <Text style={styles.rowMuted}>
-              {gelatoPageCountParam >= 0 ? gelatoPageCountParam : '—'} pages
+              {printQuote.billedPages} pages
               {gelatoPageCountParam >= 0 && gelatoPageCountParam < GELATO_MIN_INNER_PAGES
                 ? ` (min. ${GELATO_MIN_INNER_PAGES})`
                 : ''}
             </Text>
             <Text style={styles.rowMuted}>
-              Tarif basé sur {billablePages} page{billablePages > 1 ? 's' : ''} souvenir
-              {billablePages < 20 ? ' (min. 20 facturées)' : ''}
+              Livre : {printQuote.bookPartEuros.toFixed(2).replace('.', ',')} €
+              {printQuote.extraPages > 0
+                ? ` (39 € + ${printQuote.extraPages} × 0,70 €)`
+                : ' (forfait 30 pages)'}
             </Text>
+            {tier === 'free' ? (
+              <Text style={styles.rowMuted}>
+                QR audio/vidéo : {printQuote.qrCount} (
+                {PRINT_V1_INCLUDED_QR} inclus
+                {printQuote.extraQr > 0
+                  ? ` + ${printQuote.extraQr} × 0,70 € = ${printQuote.qrPartEuros.toFixed(2).replace('.', ',')} €`
+                  : ''}
+                )
+              </Text>
+            ) : (
+              <Text style={styles.rowMuted}>
+                QR audio/vidéo : {printQuote.qrCount} · inclus Petitmo+
+              </Text>
+            )}
+            {tier === 'paid' ? (
+              <Text style={styles.rowMuted}>Remise abonnée −10 % sur le livre</Text>
+            ) : null}
             <Text style={styles.price}>{printPriceEuros.toFixed(2).replace('.', ',')} € TTC</Text>
+            {tier === 'free' && printQuote.premiumUpsell ? (
+              <View style={{ marginTop: scale(12) }}>
+                <Text style={styles.cardTitle}>Avec Petitmo+</Text>
+                <Text style={styles.rowMuted}>
+                  Livre −10 % : {printQuote.premiumUpsell.bookPartEuros.toFixed(2).replace('.', ',')} €
+                </Text>
+                {printQuote.qrPartEuros > 0 ? (
+                  <Text style={styles.rowMuted}>
+                    QR inclus : −{printQuote.qrPartEuros.toFixed(2).replace('.', ',')} €
+                  </Text>
+                ) : null}
+                <Text style={styles.rowMuted}>
+                  Total : {printQuote.premiumUpsell.totalEuros.toFixed(2).replace('.', ',')} € ·
+                  économie {printQuote.premiumUpsell.savingsEuros.toFixed(2).replace('.', ',')} €
+                </Text>
+              </View>
+            ) : null}
             {__DEV__ ? (
               <Text style={[styles.rowMuted, { marginTop: 8 }]}>
                 Dev : aucun paiement réel. Gelato draft si Railway a GELATO_ORDER_TYPE=draft.
@@ -736,21 +780,12 @@ export default function BookOrderScreen() {
           Utilisé uniquement pour le suivi de ta commande.
         </Text>
 
-        <Text style={styles.sectionLabel}>Prénom et nom (optionnel)</Text>
-        <TextInput
-          style={styles.input}
-          value={fullName}
-          onChangeText={setFullName}
-          placeholder="Prénom et nom"
-        />
-
         {exportMode === 'print' && __DEV__ ? (
           <Pressable
             style={styles.devFillBtn}
             onPress={() => {
               const stamp = Date.now().toString(36);
               setEmail(`qa+gelato-${stamp}@example.com`);
-              setFullName('Test Petitmo Gelato');
               setShippingName('Test Petitmo Gelato');
               setLine1('12 rue Example');
               setLine2('');
@@ -774,7 +809,7 @@ export default function BookOrderScreen() {
                 setShippingName(t);
                 clearError('shippingName');
               }}
-              placeholder="Prénom Nom (peut être différent si c'est un cadeau)"
+              placeholder="Prénom et nom"
             />
             {fieldErrors.shippingName ? <Text style={styles.err}>{fieldErrors.shippingName}</Text> : null}
 

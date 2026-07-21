@@ -1,4 +1,4 @@
-import { memo, useMemo, type ReactNode } from 'react';
+import { memo, useMemo, useRef, type ReactNode } from 'react';
 import {
   View,
   Text,
@@ -24,6 +24,7 @@ import { bookPortraitPerfRender } from '@/utils/bookPortraitSpreadPerf';
 import { useBookVideoPosterDisplayUrl } from '@/hooks/useBookVideoPosterDisplayUrl';
 import { useBookMaquettePhotoDisplayUri } from '@/hooks/useBookMaquettePhotoDisplayUri';
 import {
+  getBookPhotoPrintPixelSize,
   getVoiceCoverUriForBookEditorDisplay,
   getVoiceCoverUriForBookPreview,
   isDeviceLocalMediaUri,
@@ -522,6 +523,8 @@ function CroppedPhotoDisplay({
   coverMode = false,
   imgPxW,
   imgPxH,
+  /** Clé stable (ex. cover) — évite un flash blanc quand l’URI change (sign / heal). */
+  imageRecyclingKey,
 }: {
   uri: string;
   width: number;
@@ -530,19 +533,29 @@ function CroppedPhotoDisplay({
   coverMode?: boolean;
   imgPxW?: number;
   imgPxH?: number;
+  imageRecyclingKey?: string;
 }) {
-  if (coverMode && imgPxW && imgPxH) {
-    const rect = bookPhotoCropImageRect(width, height, imgPxW, imgPxH, crop);
+  const recycleKey = imageRecyclingKey?.trim() || uri;
+  /** Une fois en layout aspect, on y reste (sinon fill→aspect = bandeau blanc). */
+  const stickyAspectRef = useRef<{ w: number; h: number } | null>(null);
+  if (coverMode && imgPxW && imgPxH && imgPxW > 0 && imgPxH > 0) {
+    stickyAspectRef.current = { w: imgPxW, h: imgPxH };
+  }
+  const aspectW = imgPxW && imgPxW > 0 ? imgPxW : stickyAspectRef.current?.w;
+  const aspectH = imgPxH && imgPxH > 0 ? imgPxH : stickyAspectRef.current?.h;
+
+  if (coverMode && aspectW && aspectH) {
+    const rect = bookPhotoCropImageRect(width, height, aspectW, aspectH, crop);
     return (
-      <View style={{ width, height, overflow: 'hidden', backgroundColor: '#F2F2F7' }}>
+      <View style={{ width, height, overflow: 'hidden', backgroundColor: '#FFFFFF' }}>
         <ExpoImage
           source={{ uri }}
-          recyclingKey={uri}
+          recyclingKey={recycleKey}
           cachePolicy="memory-disk"
           transition={0}
           priority="high"
           style={{ position: 'absolute', width: rect.width, height: rect.height, left: rect.left, top: rect.top }}
-          contentFit="cover"
+          contentFit="fill"
         />
       </View>
     );
@@ -551,10 +564,10 @@ function CroppedPhotoDisplay({
   const y = ((crop?.yPct ?? 0) / 100) * height;
   const s = Math.max(1, crop?.scale ?? 1);
   return (
-    <View style={{ width, height, overflow: 'hidden', backgroundColor: '#F2F2F7' }}>
+    <View style={{ width, height, overflow: 'hidden', backgroundColor: '#FFFFFF' }}>
       <ExpoImage
         source={{ uri }}
-        recyclingKey={uri}
+        recyclingKey={recycleKey}
         cachePolicy="memory-disk"
         transition={0}
         priority="high"
@@ -582,10 +595,10 @@ type InlineCropConfig = {
       dpiPxH?: number;
       printMmW: number;
       printMmH: number;
-      blurScore?: number | null;
     }
   >;
   onChange: (storageKey: string, crop: PhotoCrop) => void;
+  onZoomActiveChange?: (active: boolean) => void;
 };
 
 function buildInlineCropProps(config: InlineCropConfig | undefined, storageKey: string) {
@@ -594,6 +607,7 @@ function buildInlineCropProps(config: InlineCropConfig | undefined, storageKey: 
     storageKey,
     dpiMeta: config.dpiMetaByKey[storageKey],
     onChange: config.onChange,
+    onZoomActiveChange: config.onZoomActiveChange,
   };
 }
 
@@ -1020,7 +1034,8 @@ function MaquetteCover({
     <View style={[styles.paper, styles.coverPaper, { width, height }]}>
       <View style={[styles.coverImgBlock, { height: imgH }]}>
         {photoUri ? (
-          <View key={coverPhotoRenderKey ?? photoUri} style={StyleSheet.absoluteFill}>
+          // Clé stable : un `key={uri}` remonte le bloc à chaque heal/sign → bandeau blanc.
+          <View style={StyleSheet.absoluteFill}>
             {coverUseInlineCrop ? (
               <BookPagePhotoFrame
                 uri={photoUri}
@@ -1047,6 +1062,7 @@ function MaquetteCover({
                   coverMode
                   imgPxW={coverImgPxW}
                   imgPxH={coverImgPxH}
+                  imageRecyclingKey="book-cover-browse"
                 />
               </Pressable>
             ) : (
@@ -1058,6 +1074,7 @@ function MaquetteCover({
                 coverMode
                 imgPxW={coverImgPxW}
                 imgPxH={coverImgPxH}
+                imageRecyclingKey="book-cover-browse"
               />
             )}
           </View>
@@ -1150,6 +1167,9 @@ function MaquettePhotoSimple({
   const footerH = isFp ? pdfMmToPreviewPxH(PHOTO_FULL_FP_FOOTER_MM, height) : undefined;
   const bookLoc = bookMaquetteLocationLabel(memory);
   const photoInline = buildInlineCropProps(inlineCropConfig, memory.id);
+  const printPx = getBookPhotoPrintPixelSize(memory, memoryPhotoRef);
+  const frameImgPxW = photoInline?.dpiMeta?.imgPxW ?? printPx?.w;
+  const frameImgPxH = photoInline?.dpiMeta?.imgPxH ?? printPx?.h;
 
   const imageBand = isFp ? (
     <FullBleedBand width={width} bandH={imgH}>
@@ -1165,7 +1185,8 @@ function MaquettePhotoSimple({
             showRotateButton={!!photoInline}
             onRotate={onRotate}
             typoScale={typoScale}
-            recyclingKey={`book-photo-${memory.id}`}
+            imgPxW={frameImgPxW}
+            imgPxH={frameImgPxH}
           />
         ) : null
       }
@@ -1184,7 +1205,8 @@ function MaquettePhotoSimple({
             showRotateButton={!!photoInline}
             onRotate={onRotate}
             typoScale={typoScale}
-            recyclingKey={`book-photo-${memory.id}`}
+            imgPxW={frameImgPxW}
+            imgPxH={frameImgPxH}
           />
         ) : null
       }
@@ -1293,6 +1315,9 @@ function MaquettePhotoNote({
   const imgH = pdfMmToPreviewPxH(PHOTO_NOTE_BAND_HEIGHT_MM, height);
   const bookLoc = bookMaquetteLocationLabel(memory);
   const photoInline = buildInlineCropProps(inlineCropConfig, memory.id);
+  const printPx = getBookPhotoPrintPixelSize(memory, memoryPhotoRef);
+  const frameImgPxW = photoInline?.dpiMeta?.imgPxW ?? printPx?.w;
+  const frameImgPxH = photoInline?.dpiMeta?.imgPxH ?? printPx?.h;
 
   return (
     <View style={[styles.paper, { width, height }]}>
@@ -1309,7 +1334,8 @@ function MaquettePhotoNote({
               showRotateButton={!!photoInline}
               onRotate={onRotate}
               typoScale={typoScale}
-              recyclingKey={`book-photo-${memory.id}`}
+              imgPxW={frameImgPxW}
+              imgPxH={frameImgPxH}
             />
           ) : null
         }
@@ -1713,11 +1739,12 @@ function MaquetteMediaQr({
   const mediaPad = Math.round(pdfMmToPreviewPxUniform(PDF_MEDIA_TEXT_PAD_X_MM, width, height));
   const qrCard = pdfMediaQrCardLayoutPx(width, height);
   const photoInline = kind === 'audio' ? buildInlineCropProps(inlineCropConfig, memory.id) : undefined;
+  const voicePrintPx = kind === 'audio' ? getBookPhotoPrintPixelSize(memory) : null;
+  const voiceImgPxW = photoInline?.dpiMeta?.imgPxW ?? voicePrintPx?.w;
+  const voiceImgPxH = photoInline?.dpiMeta?.imgPxH ?? voicePrintPx?.h;
   const voiceVisualUri =
     kind === 'audio'
-      ? photoInline
-        ? getVoiceCoverUriForBookEditorDisplay(memory)
-        : getVoiceCoverUriForBookPreview(memory)
+      ? getVoiceCoverUriForBookEditorDisplay(memory) || getVoiceCoverUriForBookPreview(memory)
       : '';
   const imgH = pdfMmToPreviewPxH(PHOTO_NOTE_BAND_HEIGHT_MM, height);
   const bookLoc = bookMaquetteLocationLabel(memory);
@@ -1761,7 +1788,8 @@ function MaquetteMediaQr({
                 showRotateButton={!!photoInline}
                 onRotate={onRotate}
                 typoScale={typoScale}
-                recyclingKey={`book-voice-${memory.id}`}
+                imgPxW={voiceImgPxW}
+                imgPxH={voiceImgPxH}
               />
             );
           }

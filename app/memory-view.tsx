@@ -423,6 +423,7 @@ export default function MemoryViewScreen() {
                       duration={memory.duration || 0}
                       playbackStartSec={memory.voice_playback_start_sec ?? null}
                       variant={voiceCoverDetailUri ? 'coverBottom' : 'default'}
+                      controlIconColor={voiceCoverDetailUri ? '#FFFFFF' : '#1C1C1E'}
                     />
                   </View>
                 </View>

@@ -17,8 +17,6 @@ import { materializeCloudMediaToSandboxForMemory } from '@/services/memoryCloudM
 import { getUserTier } from '@/lib/userTier';
 import { supabase } from '@/lib/supabase';
 import {
-  FREE_TIER_BOOK_AUDIO_MAX_COUNT,
-  FREE_TIER_BOOK_VIDEO_MAX_COUNT,
   FREE_TIER_BOOK_VOICE_MAX_DURATION,
   FREE_TIER_VIDEO_MAX_DURATION,
 } from '@/lib/limits';
@@ -42,6 +40,7 @@ import {
   normalizePhotoUrlForCompare,
   parseFavoritePhotoUrls,
   pickPhotoUriForOverlayPalette,
+  urlsInSamePhotoVariantGroup,
 } from '@/utils/memoryPhotos';
 
 export type BookCoverUriVariant = 'list' | 'editor' | 'print';
@@ -173,8 +172,10 @@ export type FreeTierBookMemoryRow = {
 };
 
 /**
- * Garde-fou plan gratuit : quotas audio/vidéo **dans un livre** (composition locale OK).
- * QR cloud (audio + vidéo) : upload **après paiement** commande livre ou export PDF uniquement.
+ * Garde-fou plan gratuit : durées audio/vidéo **dans un livre**.
+ * V1 : plus de plafond 5+5 — composition libre ; facturation QR au checkout
+ * (2 inclus + 0,70 €) — `lib/pricingV1.ts`, `docs/specs/pricing-v1-migration.md`.
+ * QR cloud : upload **après paiement** commande livre imprimée.
  * Spec : docs/specs/free-tier-book-qr-av.md
  */
 export async function validateFreeTierBookMemoryLimits(
@@ -184,11 +185,6 @@ export async function validateFreeTierBookMemoryLimits(
   if (tier !== 'free') return;
 
   const videos = memories.filter(m => m.type === 'video');
-  if (videos.length > FREE_TIER_BOOK_VIDEO_MAX_COUNT) {
-    throw new Error(
-      `Avec le plan gratuit, ce livre peut contenir au maximum ${FREE_TIER_BOOK_VIDEO_MAX_COUNT} souvenirs vidéo.`,
-    );
-  }
   const tooLongVideo = videos.find(m => (m.duration ?? 0) > FREE_TIER_VIDEO_MAX_DURATION);
   if (tooLongVideo) {
     throw new Error(
@@ -197,11 +193,6 @@ export async function validateFreeTierBookMemoryLimits(
   }
 
   const audios = memories.filter(m => m.type === 'voice');
-  if (audios.length > FREE_TIER_BOOK_AUDIO_MAX_COUNT) {
-    throw new Error(
-      `Avec le plan gratuit, ce livre peut contenir au maximum ${FREE_TIER_BOOK_AUDIO_MAX_COUNT} souvenirs audio.`,
-    );
-  }
   const tooLongAudio = audios.find(m => (m.duration ?? 0) > FREE_TIER_BOOK_VOICE_MAX_DURATION);
   if (tooLongAudio) {
     throw new Error(
@@ -329,12 +320,59 @@ function safeId(): string {
 /**
  * Identité d’une page contenu : `(memoryId, slot photo)`.
  * Même souvenir + autre photo Favoris = autre page (APPEND, jamais REPLACE).
+ * Clé stricte (persist / logs) — pour l’égalité UI / dédup, préférer `bookPageEntriesEquivalent`.
  */
 export function bookPageEntryKey(entry: BookPageEntry): string {
   const mid = entry.memoryId.trim();
   if (!mid) return '';
   const pr = entry.photoRef?.trim() ?? '';
   return pr ? `${mid}::${normalizePhotoUrlForCompare(pr)}` : `${mid}::`;
+}
+
+/**
+ * Résout une photoRef absente = photo principale du souvenir (legacy pages sans slot).
+ */
+function resolveBookPagePhotoRef(entry: BookPageEntry, memory: Memory | null | undefined): string {
+  const pr = entry.photoRef?.trim() ?? '';
+  if (pr) return pr;
+  if (memory?.type === 'photo') {
+    return getAllPhotoUrlsForFeed(memory)[0]?.trim() || '';
+  }
+  return '';
+}
+
+/**
+ * True si deux entrées désignent la même page (même souvenir + même slot photo),
+ * en tenant compte des variantes display/print/thumb et des pages legacy sans photoRef.
+ */
+export function bookPageEntriesEquivalent(
+  a: BookPageEntry,
+  b: BookPageEntry,
+  memory?: Memory | null,
+): boolean {
+  const midA = a.memoryId.trim();
+  const midB = b.memoryId.trim();
+  if (!midA || midA !== midB) return false;
+
+  const prA = a.photoRef?.trim() ?? '';
+  const prB = b.photoRef?.trim() ?? '';
+  if (!prA && !prB) return true;
+
+  const mem = memory === undefined ? getLocalMemoryById(midA) : memory;
+  if (mem && mem.type !== 'photo') {
+    // Vidéo / audio / texte : une page = le souvenir entier (photoRef ignoré).
+    return true;
+  }
+
+  const resolvedA = resolveBookPagePhotoRef(a, mem);
+  const resolvedB = resolveBookPagePhotoRef(b, mem);
+  if (!resolvedA && !resolvedB) return true;
+  if (!resolvedA || !resolvedB) return false;
+
+  if (mem) {
+    return urlsInSamePhotoVariantGroup(mem, resolvedA, resolvedB);
+  }
+  return normalizePhotoUrlForCompare(resolvedA) === normalizePhotoUrlForCompare(resolvedB);
 }
 
 /** Dédup pages sur (memoryId, photoRef) — conserve l’ordre ; ne fusionne plus deux photos d’album. */
@@ -1419,10 +1457,15 @@ export function bookHasMemoryPage(book: Book, memoryId: string): boolean {
 }
 
 /** True si cette page précise (souvenir + slot photo) est déjà dans le livre. */
-export function bookHasPageEntry(book: Book, entry: BookPageEntry): boolean {
-  const key = bookPageEntryKey(entry);
-  if (!key) return false;
-  return bookPageEntries(book).some(e => bookPageEntryKey(e) === key);
+export function bookHasPageEntry(
+  book: Book,
+  entry: BookPageEntry,
+  memory?: Memory | null,
+): boolean {
+  const mid = entry.memoryId.trim();
+  if (!mid) return false;
+  const mem = memory === undefined ? getLocalMemoryById(mid) : memory;
+  return bookPageEntries(book).some(e => bookPageEntriesEquivalent(e, entry, mem));
 }
 
 export type AddMemoriesToBookOptions = {
@@ -1453,17 +1496,21 @@ export async function addMemoriesToBook(
 
   const normalized = normalizeBook(b) ?? b;
   const current = bookPageEntries(normalized);
-  const seen = new Set(current.map(bookPageEntryKey).filter(Boolean));
   const toAppend: BookPageEntry[] = [];
+
+  const isAlreadyPresent = (candidate: BookPageEntry, mem: Memory | null) => {
+    if (current.some(e => bookPageEntriesEquivalent(e, candidate, mem))) return true;
+    if (toAppend.some(e => bookPageEntriesEquivalent(e, candidate, mem))) return true;
+    return false;
+  };
 
   const pushEntry = (raw: BookPageEntry) => {
     const mid = raw.memoryId.trim();
     if (!mid) return;
     const photoRef = raw.photoRef?.trim() || undefined;
     const next: BookPageEntry = photoRef ? { memoryId: mid, photoRef } : { memoryId: mid };
-    const key = bookPageEntryKey(next);
-    if (!key || seen.has(key)) return;
-    seen.add(key);
+    const mem = getLocalMemoryById(mid);
+    if (isAlreadyPresent(next, mem)) return;
     toAppend.push(next);
   };
 

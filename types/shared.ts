@@ -20,6 +20,9 @@ export type BookPageServer = {
   chapterNum?: number;
   rotation?: number;
   crop?: { xPct: number; yPct: number; scale: number };
+  /** Pixels source pour crop aspect (parité cover / éditeur). */
+  cropImgPxW?: number;
+  cropImgPxH?: number;
   textOverride?: string;
   /** Gabarit photo pleine page — rendu CSS Phase 2. */
   variant?: 'FP' | 'M';

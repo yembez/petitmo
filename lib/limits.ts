@@ -3,21 +3,23 @@ import { getCachedUserMode } from '@/lib/userMode'
 import { getAllLocalMemories } from '@/lib/localDb'
 import { pullFamilyMemoriesFromRemoteToLocal } from '@/services/memoriesLocalSync'
 
-/** TEST ONLY — prod : 50. Valeur réduite à 20 pour faciliter les tests en développement. Ne pas changer sans décision produit explicite. */
-export const FREE_TIER_LIMIT = 20
+/** Prod : 50. Valeur de test éventuelle à documenter ici si on baisse temporairement. */
+export const FREE_TIER_LIMIT = 50
 /** TEST ONLY — prod : 5. */
 export const FREE_TIER_VIDEO_LIMIT = 5
 export const FREE_TIER_VIDEO_MAX_DURATION = 30 // secondes
 export const FREE_TIER_VOICE_LIMIT = 5 // max souvenirs audio en gratuit
 export const FREE_TIER_VOICE_MAX_DURATION = 60 // secondes (création de souvenirs audio)
 export const FREE_TIER_BOOK_VOICE_MAX_DURATION = 60 // secondes (livres : QR audio)
-/** Max souvenirs audio avec QR dans un livre / PDF (plan gratuit). */
-export const FREE_TIER_BOOK_AUDIO_MAX_COUNT = 5
-/** Max souvenirs vidéo dans un livre (plan gratuit). QR cloud après paiement commande/export — spec free-tier-book-qr-av.md */
-export const FREE_TIER_BOOK_VIDEO_MAX_COUNT = 5
-/** Pages audio+vidéo avec QR par livre (gratuit) = audio max + vidéo max. Aligné `server/src/constants/spec.ts`. */
-export const FREE_TIER_BOOK_QR_AV_MAX_PER_BOOK =
-  FREE_TIER_BOOK_AUDIO_MAX_COUNT + FREE_TIER_BOOK_VIDEO_MAX_COUNT
+/**
+ * @deprecated V1 : plus de plafond composition A/V par livre.
+ * Facturation QR au checkout (2 inclus + 0,70 €) — `lib/pricingV1.ts`.
+ */
+export const FREE_TIER_BOOK_AUDIO_MAX_COUNT = Number.MAX_SAFE_INTEGER
+/** @deprecated V1 — voir FREE_TIER_BOOK_AUDIO_MAX_COUNT. */
+export const FREE_TIER_BOOK_VIDEO_MAX_COUNT = Number.MAX_SAFE_INTEGER
+/** @deprecated V1 — plus de plafond serveur 5+5. */
+export const FREE_TIER_BOOK_QR_AV_MAX_PER_BOOK = Number.MAX_SAFE_INTEGER
 
 /**
  * Largeur max (px) du dérivé **print** livre — local, upload guest PDF, et cloud.

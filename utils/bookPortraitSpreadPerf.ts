@@ -201,6 +201,12 @@ export function diffPortraitRowProps(
   ];
   const changed: string[] = [];
   for (const k of keys) {
+    if (k === 'cropDpiMetaCover') {
+      const ca = a.cropDpiMetaCover as { imgPxW?: number; imgPxH?: number } | undefined;
+      const cb = b.cropDpiMetaCover as { imgPxW?: number; imgPxH?: number } | undefined;
+      if (ca?.imgPxW !== cb?.imgPxW || ca?.imgPxH !== cb?.imgPxH) changed.push(k);
+      continue;
+    }
     if (a[k] !== b[k]) changed.push(k);
   }
   return changed;
@@ -233,6 +239,12 @@ export function diffBrowseLeafProps(
   ];
   const changed: string[] = [];
   for (const k of keys) {
+    if (k === 'cropDpiMetaCover') {
+      const ca = a.cropDpiMetaCover as { imgPxW?: number; imgPxH?: number } | undefined;
+      const cb = b.cropDpiMetaCover as { imgPxW?: number; imgPxH?: number } | undefined;
+      if (ca?.imgPxW !== cb?.imgPxW || ca?.imgPxH !== cb?.imgPxH) changed.push(k);
+      continue;
+    }
     if (a[k] !== b[k]) changed.push(k);
   }
   return changed;

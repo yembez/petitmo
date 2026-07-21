@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Test print — health → init-export print_order → generate-pdf print → téléchargement
-# PDF format seulement (3 pages). Pour Gelato draft : ./scripts/qa/smoke-gelato-draft.sh
+# Test print — health → init-export print_order (V1 gelato_pages≥30) → generate-pdf print → téléchargement.
+# Pour vérifier Gelato draft + order id : ./scripts/qa/smoke-gelato-draft.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -10,6 +10,12 @@ source "${SCRIPT_DIR}/lib.sh"
 require_cmd curl
 require_cmd jq
 load_env
+
+# Email unique (évite RATE_LIMIT_EMAIL)
+QA_TEST_EMAIL="qa+print-$(date +%Y%m%d-%H%M%S)-${RANDOM}@example.com"
+# Tarif V1 + Railway Gelato : catalogue pair ≥ 30
+GELATO_QA_INNER_PAGES="${GELATO_QA_INNER_PAGES:-30}"
+GELATO_QA_MAQUETTE_PAGES=$((GELATO_QA_INNER_PAGES + 2))
 
 OUT_DIR="${SCRIPT_DIR}/out"
 mkdir -p "$OUT_DIR"
@@ -24,7 +30,7 @@ HEALTH="$(curl -sS "${PUBLIC_PDF_URL}/health")"
 echo "$HEALTH" | jq -e '.ok == true' >/dev/null
 ok "Service PDF en ligne"
 
-info "2/4 init-export (print_order)"
+info "2/4 init-export (print_order, gelato_pages=${GELATO_QA_INNER_PAGES})"
 NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 INIT_RESP="$(curl -sS "${SUPABASE_URL}/functions/v1/init-export" \
   -H "content-type: application/json" \
@@ -35,6 +41,7 @@ INIT_RESP="$(curl -sS "${SUPABASE_URL}/functions/v1/init-export" \
     --arg child_id "$CHILD_ID" \
     --arg email "$QA_TEST_EMAIL" \
     --arg now "$NOW" \
+    --argjson pages "$GELATO_QA_INNER_PAGES" \
     '{
       type: "print_order",
       export_mode: "print",
@@ -51,20 +58,29 @@ INIT_RESP="$(curl -sS "${SUPABASE_URL}/functions/v1/init-export" \
         zip: "75001",
         country: "FR"
       },
-      billable_pages: 20,
-      discount_percent: 0,
+      gelato_pages: $pages,
+      billable_pages: $pages,
+      discount_percent: 10,
       printer_name: "gelato"
     }')")"
 
 TICKET="$(assert_jq_field "$INIT_RESP" '.exportTicket' 'exportTicket absent dans init-export')"
 EXPORT_ID="$(assert_jq_field "$INIT_RESP" '.exportRequestId' 'exportRequestId absent')"
-ok "Ticket obtenu (exportRequestId=$EXPORT_ID)"
+PRICE_CENTS="$(echo "$INIT_RESP" | jq -r '.priceCents // empty')"
+ok "Ticket obtenu (exportRequestId=$EXPORT_ID, priceCents=${PRICE_CENTS:-?})"
 
-info "3/4 generate-pdf (exportMode print)"
+info "3/4 generate-pdf (exportMode print, ${GELATO_QA_MAQUETTE_PAGES} pages maquette)"
+PAGES_JSON="$(jq -nc --argjson n "$GELATO_QA_MAQUETTE_PAGES" '
+  [{ type: "cover" }]
+  + (if $n >= 2 then [{ type: "chapter", month: "juillet", chapterNum: 1 }] else [] end)
+  + [range(2; ($n - 1)) | { type: "chapter", month: "juillet", chapterNum: . }]
+  + (if $n >= 2 then [{ type: "back-cover" }] else [] end)
+')"
 PAYLOAD="$(jq -nc \
   --arg bookId "$BOOK_ID" \
   --arg childId "$CHILD_ID" \
   --arg qrBaseUrl "$PUBLIC_MEDIA_BASE_URL" \
+  --argjson pages "$PAGES_JSON" \
   '{
     bookId: $bookId,
     childId: $childId,
@@ -75,11 +91,7 @@ PAYLOAD="$(jq -nc \
     exportMode: "print",
     subscriptionTier: "premium",
     coverPhotoUrl: null,
-    pages: [
-      { type: "cover" },
-      { type: "chapter", month: "juillet", chapterNum: 1 },
-      { type: "back-cover" }
-    ],
+    pages: $pages,
     guestChild: { name: "Lina", photo_url: null, birthdate: "2024-01-15" },
     guestMemories: []
   }')"

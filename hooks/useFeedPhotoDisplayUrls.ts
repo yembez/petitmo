@@ -76,6 +76,12 @@ function nonEmptyUrls(urls: string[]): string[] {
   return urls.map(u => u.trim()).filter(Boolean);
 }
 
+function isSandboxFeedDerivativeUri(u: string): boolean {
+  const t = u.trim();
+  if (!t) return false;
+  return /\/(thumb|display)\.jpe?g(\?|$)/i.test(t) || /\/petitmo_memories\/[^/]+\/thumb\.jpe?g/i.test(t);
+}
+
 /**
  * URLs affichées dans le fil — local-first (`getAllPhotoUrlsForFeed`).
  * Passe async : cache fil disque, signature cloud, repli réinstall si fichier sandbox confirmé mort.
@@ -105,7 +111,8 @@ export function useFeedPhotoDisplayUrls(memory: Memory): string[] {
     const task = InteractionManager.runAfterInteractions(() => {
       void (async () => {
         const remRaw = getAllPhotoUrlsForFeed(memory);
-        const maxProbe = Math.max(remRaw.length, 6);
+        /** Ne pas sonder 6 slots vides (rafale getInfoAsync) pour une mono-photo. */
+        const maxProbe = Math.max(remRaw.length, 1);
 
         const localPromises: Promise<string>[] = [];
         for (let i = 0; i < maxProbe; i++) {
@@ -145,6 +152,7 @@ export function useFeedPhotoDisplayUrls(memory: Memory): string[] {
         for (let i = 0; i < resolvedRaw.length; i++) {
           const raw = resolvedRaw[i]?.trim() || '';
           if (!raw) continue;
+          if (isSandboxFeedDerivativeUri(raw)) continue;
           if (localsVerified[i] && Platform.OS !== 'web') continue;
           if (isLikelyDeviceLocalAsset(raw)) continue;
           if (isHttpUrl(raw) || extractMediaBucketPath(raw)) {
@@ -155,10 +163,15 @@ export function useFeedPhotoDisplayUrls(memory: Memory): string[] {
         if (!alive) return;
 
         const rem: string[] = [];
-        for (let i = 0; i < resolvedRaw.length; i++) {
-          const raw = resolvedRaw[i]?.trim() || '';
+        for (let i = 0; i < maxProbe; i++) {
+          const raw = (resolvedRaw[i]?.trim() || '') || '';
           if (!raw) {
             rem.push('');
+            continue;
+          }
+          /** Thumb/display sandbox gagne toujours sur le cache fil (anciens originaux plein format). */
+          if (isSandboxFeedDerivativeUri(raw)) {
+            rem.push(await resolveFeedSlotRemoteUrl(raw));
             continue;
           }
           if (localsVerified[i] && Platform.OS !== 'web') {
@@ -181,14 +194,19 @@ export function useFeedPhotoDisplayUrls(memory: Memory): string[] {
           const next: string[] = [];
           for (let i = 0; i < maxProbe; i++) {
             const { remote, local } = slots[i] ?? { remote: '', local: '' };
-            let chosen = (local || remote || '').trim();
+            /** Préférer dérivé sandbox (480/1400) au cache fil éventuellement plein format. */
+            let chosen = (remote || local || '').trim();
+            if (remote && local && isSandboxFeedDerivativeUri(remote)) {
+              chosen = remote;
+            }
             const prevU = (prev[i]?.trim() || '');
             if (
               prevU &&
               isLikelyDeviceLocalAsset(prevU) &&
               chosen &&
               isLikelyDeviceLocalAsset(chosen) &&
-              prevU !== chosen
+              prevU !== chosen &&
+              !isSandboxFeedDerivativeUri(chosen)
             ) {
               chosen = prevU;
             }

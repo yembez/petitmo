@@ -27,7 +27,27 @@
         "EXPO_PUBLIC_PDF_SERVER_URL": "https://petitmo-production.up.railway.app",
         "EXPO_PUBLIC_PUBLIC_MEDIA_BASE_URL": "https://petitmo-production.up.railway.app/m"
       }
+    },
+    "production": {
+      "distribution": "store",
+      "autoIncrement": true,
+      "environment": "production",
+      "ios": {
+        "simulator": false
+      },
+      "env": {
+        "EXPO_PUBLIC_PDF_SERVER_URL": "https://petitmo-production.up.railway.app",
+        "EXPO_PUBLIC_PUBLIC_MEDIA_BASE_URL": "https://petitmo-production.up.railway.app/m"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "appleId": "2speek@gmail.com",
+        "ascAppId": "6793081650",
+        "appleTeamId": "2T5LBZP7LM"
+      }
     }
   }
 }
-

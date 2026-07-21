@@ -6,7 +6,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     // ExpoConfig exige `name` (et souvent `slug`) non optionnels au niveau type.
     name: config.name ?? 'petitmo',
     slug: config.slug ?? 'petitmo',
-    plugins: [...(config.plugins ?? []), 'expo-sqlite'],
+    plugins: [...(config.plugins ?? []), 'expo-sqlite', 'expo-localization'],
     extra: {
       ...(config.extra ?? {}),
       EXPO_PUBLIC_SUPABASE_URL: process.env.EXPO_PUBLIC_SUPABASE_URL,

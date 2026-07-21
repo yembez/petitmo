@@ -35,7 +35,7 @@ type ImportStickerPreview = {
 
 const MAX_PHOTOS_AT_ONCE = 10;
 /** Copie sandbox + miniatures en parallèle (le cloud n’est pas attendu ici). */
-const SEPARATE_PHOTOS_IMPORT_CONCURRENCY = 3;
+const SEPARATE_PHOTOS_IMPORT_CONCURRENCY = 2;
 
 async function importSeparatePhotosWithConcurrency(
   assets: ImagePicker.ImagePickerAsset[],

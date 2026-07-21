@@ -13,13 +13,13 @@ type CropDpiMeta = {
   dpiPxH?: number;
   printMmW: number;
   printMmH: number;
-  blurScore?: number | null;
 };
 
 type InlineCropProps = {
   storageKey: string;
   dpiMeta?: CropDpiMeta;
   onChange: (storageKey: string, crop: PhotoCrop) => void;
+  onZoomActiveChange?: (active: boolean) => void;
 };
 
 type Props = {
@@ -35,7 +35,7 @@ type Props = {
   typoScale?: number;
   /** Couverture : recadrage au ratio réel de la photo (atteint toute la photo en zoomant). */
   coverMode?: boolean;
-  /** Dimensions fichier (aperçu couverture lecture seule au ratio réel). */
+  /** Dimensions fichier (aperçu / crop aspect). */
   imgPxW?: number;
   imgPxH?: number;
 };
@@ -57,7 +57,8 @@ function CroppedPhotoStatic({
   imgPxW?: number;
   imgPxH?: number;
 }) {
-  if (coverMode && imgPxW && imgPxH) {
+  // Même layout aspect que l’éditeur dès que les dims sont connues (cover + pages).
+  if ((coverMode || (imgPxW && imgPxH)) && imgPxW && imgPxH) {
     const rect = bookPhotoCropImageRect(width, height, imgPxW, imgPxH, crop);
     return (
       <View style={{ width, height, overflow: 'hidden', backgroundColor: '#F2F2F7' }}>
@@ -141,6 +142,8 @@ function BookPagePhotoFrame({
   const hasDpiMeta = !!(dpiMeta?.printMmW && dpiMeta?.printMmH);
   const isInteractive = !!inlineCrop && hasCropDims && hasDpiMeta;
   const isLoadingMeta = !!inlineCrop && !isInteractive && !(coverMode && hasCropDims);
+  /** Aspect crop : cover explicite, ou toute page dès que dims connues. */
+  const useAspectCrop = coverMode || hasCropDims;
 
   return (
     <View style={styles.host}>
@@ -157,9 +160,9 @@ function BookPagePhotoFrame({
             dpiPxH={dpiMeta?.dpiPxH}
             printMmW={dpiMeta.printMmW}
             printMmH={dpiMeta.printMmH}
-            blurScore={dpiMeta?.blurScore}
             onChange={next => inlineCrop.onChange(inlineCrop.storageKey, next)}
-            coverMode={coverMode}
+            coverMode={useAspectCrop}
+            onZoomActiveChange={inlineCrop.onZoomActiveChange}
           />
         ) : displayUri ? (
           <CroppedPhotoStatic
@@ -167,7 +170,7 @@ function BookPagePhotoFrame({
             width={frameW}
             height={frameH}
             crop={crop}
-            coverMode={coverMode}
+            coverMode={useAspectCrop}
             imgPxW={cropPxW || undefined}
             imgPxH={cropPxH || undefined}
           />

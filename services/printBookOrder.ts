@@ -1,4 +1,8 @@
 import { postInitExport } from '@/services/initExportApi';
+import {
+  PRINT_V1_PAID_DISCOUNT_PERCENT,
+  type DiscountPercent,
+} from '@/lib/printedBookQuote';
 
 export type PrintShippingAddress = {
   line1: string;
@@ -12,6 +16,7 @@ export type InitPrintOrderParams = {
   bookId: string;
   childLocalId: string | null;
   subscriptionTierDb: 'free' | 'paid';
+  /** Pages livre audio + vidéo (= QR facturables). */
   audioVideoPageCount: number;
   email: string;
   gdprConsentAtIso: string;
@@ -19,9 +24,9 @@ export type InitPrintOrderParams = {
   marketingOptIn?: boolean;
   shippingName: string;
   shippingAddress: PrintShippingAddress;
-  /** Nombre réel de pages mémoire dans le livre (1–200) ; le tarif est calculé côté Edge. */
-  billablePages: number;
-  discountPercent: 0 | 20;
+  /** Compteur catalogue Gelato (pair, ≥ 30). */
+  gelatoPages: number;
+  discountPercent: DiscountPercent;
   printerName?: string | null;
 };
 
@@ -31,8 +36,9 @@ export type InitPrintOrderResult = {
   /** JWT Bearer pour `POST /generate-pdf` (Railway), comme `pdfTicket` pour l’export PDF. */
   exportTicket: string;
   priceCents: number;
-  billablePages: number;
-  discountPercent: 0 | 20;
+  gelatoPages: number;
+  qrCount: number;
+  discountPercent: DiscountPercent;
   expiresInSeconds: number;
 };
 
@@ -58,7 +64,9 @@ export async function initPrintOrderExport(params: InitPrintOrderParams): Promis
       zip: params.shippingAddress.zip,
       country: params.shippingAddress.country,
     },
-    billable_pages: params.billablePages,
+    gelato_pages: params.gelatoPages,
+    // Compat Edge legacy : même valeur que gelato_pages (V1).
+    billable_pages: params.gelatoPages,
     discount_percent: params.discountPercent,
     ...(params.printerName?.trim() ? { printer_name: params.printerName.trim() } : {}),
   };
@@ -78,16 +86,24 @@ export async function initPrintOrderExport(params: InitPrintOrderParams): Promis
   const crmContactId = typeof json.crmContactId === 'string' ? json.crmContactId : '';
   const exportTicket = typeof json.exportTicket === 'string' ? json.exportTicket : '';
   const priceCents = typeof json.priceCents === 'number' ? json.priceCents : NaN;
-  const billablePages = typeof json.billablePages === 'number' ? json.billablePages : NaN;
+  const gelatoPages =
+    typeof json.gelatoPages === 'number'
+      ? json.gelatoPages
+      : typeof json.billablePages === 'number'
+        ? json.billablePages
+        : NaN;
+  const qrCount =
+    typeof json.qrCount === 'number' ? json.qrCount : params.audioVideoPageCount;
   const disc = json.discountPercent;
-  const discountPercent: 0 | 20 = disc === 20 ? 20 : 0;
+  const discountPercent: DiscountPercent =
+    disc === PRINT_V1_PAID_DISCOUNT_PERCENT ? PRINT_V1_PAID_DISCOUNT_PERCENT : 0;
   const expiresInSeconds = typeof json.expiresInSeconds === 'number' ? json.expiresInSeconds : 0;
   if (
     !exportRequestId ||
     !exportTicket ||
     json.flow !== 'print_order' ||
     !Number.isFinite(priceCents) ||
-    !Number.isFinite(billablePages)
+    !Number.isFinite(gelatoPages)
   ) {
     throw new Error('Réponse init-export (impression) invalide.');
   }
@@ -97,7 +113,8 @@ export async function initPrintOrderExport(params: InitPrintOrderParams): Promis
     crmContactId,
     exportTicket,
     priceCents,
-    billablePages,
+    gelatoPages,
+    qrCount,
     discountPercent,
     expiresInSeconds,
   };

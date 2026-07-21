@@ -134,7 +134,7 @@ const PAYWALL_MESSAGES: Record<
   BOOK_ORDER: {
     eyebrow: 'Petitmo+',
     title: n => `Le livre de ${n} est prêt.`,
-    subtitle: "Abonne-toi et profite de -20% sur les livres.",
+    subtitle: 'Abonne-toi : −10 % sur l’impression et QR audio/vidéo illimités.',
   },
   DAY_30: {
     eyebrow: 'Petitmo+',
@@ -144,7 +144,7 @@ const PAYWALL_MESSAGES: Record<
   DAY_60: {
     eyebrow: 'Petitmo+',
     title: n => `${n} grandit vite — ne perds aucun moment.`,
-    subtitle: 'Souvenirs illimités, cloud sécurisé, livres avec -20%.',
+    subtitle: 'Souvenirs illimités, cloud sécurisé, livres −10 % et QR illimités.',
   },
   DAY_90: {
     eyebrow: 'Petitmo+',
@@ -527,8 +527,8 @@ export default function PaywallScreen() {
           <View style={styles.benefitRule} />
           <BenefitRow
             icon={<BookOpen size={13} color={ACCENT} strokeWidth={1.75} />}
-            title="–20 % de réduction"
-            desc="Sur vos livres de souvenirs"
+            title="–10 % + QR illimités"
+            desc="Sur vos livres imprimés"
             dm600={dm600}
             dm500={dm500}
           />

@@ -6,7 +6,7 @@ import type { Child, Memory } from '@/types/local';
 import type { PhotoCrop } from '@/src/book/photoCrop';
 import type { BookMaquetteTypography } from '@/constants/bookMaquetteTypography';
 import { BookBrowseLeaf } from '@/components/BookBrowseLeaf';
-import { PORTRAIT_BROWSE_SPINE_W, type BookSpreadRow } from '@/utils/bookSpreadLayout';
+import { PORTRAIT_BROWSE_ROW_GAP, PORTRAIT_BROWSE_SPINE_W, type BookSpreadRow } from '@/utils/bookSpreadLayout';
 import {
   bookPortraitPerfMemoBreak,
   bookPortraitPerfRender,
@@ -155,6 +155,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'center',
+    /** Doit matcher `computePortraitBrowseLayout().rowHeight` (gap inclus dans getItemLayout). */
+    marginBottom: PORTRAIT_BROWSE_ROW_GAP,
   },
   browseRowSingle: {
     justifyContent: 'center',

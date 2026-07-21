@@ -1,3 +1,4 @@
+import '@/lib/i18n';
 import { useEffect, useLayoutEffect, useState } from 'react';
 import { Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -48,7 +49,7 @@ export default function RootLayout() {
   const [isAuthReady, setIsAuthReady] = useState(false);
   const pathname = usePathname();
 
-  /** Portrait partout sauf prévisualisation livre (paysage au pivot). Évite la course avec `book-preview` : une seule source selon la route. */
+  /** Portrait partout sauf prévisualisation livre (paysage au pivot). */
   useEffect(() => {
     if (!isAuthReady) return;
     void ensurePlaybackAudioForListening();
@@ -234,6 +235,15 @@ export default function RootLayout() {
             animationTypeForReplace: 'pop',
             gestureEnabled: true,
             fullScreenGestureEnabled: true,
+            contentStyle: { flex: 1, backgroundColor: THEME.bg },
+          }}
+        />
+        <Stack.Screen
+          name="book-add-favoris"
+          options={{
+            presentation: 'fullScreenModal',
+            animation: 'none',
+            gestureEnabled: true,
             contentStyle: { flex: 1, backgroundColor: THEME.bg },
           }}
         />

@@ -35,6 +35,7 @@ import {
   collectPhotoSlotUploadUriCandidates,
   collectVideoPosterLocalUploadUriCandidates,
   collectVoiceCoverLocalUploadUriCandidates,
+  getBookPhotoPrintPixelSize,
   getBookPhotoPrintUri,
   getBookPhotoSlotUriStrict,
   getPhotoUriForBookMaquetteDisplay,
@@ -598,19 +599,57 @@ async function compressLocalJpegForGuestUpload(
   opts?: { maxWidth?: number; quality?: number }
 ): Promise<string> {
   if (Platform.OS === 'web') return localUri;
+  const src = localUri.trim();
+  if (!src) return localUri;
+  /**
+   * Dérivés print déjà à ~3200px : ne pas re-décoder (OOM sur livres longs).
+   * `print.jpg` / `poster_print` / `voice_cover_print` sont produits par memoryLocalStore.
+   */
+  if (
+    /\/print\.jpe?g(\?|$)/i.test(src) ||
+    /poster_print/i.test(src) ||
+    /voice_cover_print/i.test(src)
+  ) {
+    return src;
+  }
   const maxWidth = opts?.maxWidth ?? MEDIA_BOOK_PRINT_MAX_WIDTH;
   const quality = opts?.quality ?? MEDIA_BOOK_PDF_JPEG_QUALITY;
   try {
     const manipulated = await ImageManipulator.manipulateAsync(
-      localUri,
+      src,
       [{ resize: { width: maxWidth } }],
       { compress: quality, format: ImageManipulator.SaveFormat.JPEG }
     );
-    return manipulated?.uri || localUri;
+    return manipulated?.uri || src;
   } catch {
-    return localUri;
+    return src;
   }
 }
+
+/** Pool async borné — évite Promise.all sur N photos print (jetsam ~50+ pages). */
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const n = items.length;
+  if (n === 0) return [];
+  const limit = Math.max(1, Math.min(concurrency, n));
+  const out = new Array<R>(n);
+  let next = 0;
+  const workers = Array.from({ length: limit }, async () => {
+    while (true) {
+      const i = next++;
+      if (i >= n) return;
+      out[i] = await mapper(items[i]!, i);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
+/** Concurrence guest PDF : 1 = sûr mémoire ; 2 = un peu plus rapide si RAM ok. */
+const GUEST_PDF_MEDIA_UPLOAD_CONCURRENCY = 1;
 
 /** Même règle que le bucket `media` côté serveur : ce n’est pas un fichier local à ré-uploader. */
 const BARE_MEDIA_PATH_RE =
@@ -975,12 +1014,14 @@ export function mapBookPagesToServerPayload(
         const rot = rotations[m.id] ?? 0;
         const crop = photoCrops[m.id];
         const photoRef = p.photoRef?.trim() || memoryPhotoRefs?.[m.id]?.trim();
+        const px = getBookPhotoPrintPixelSize(m, photoRef);
         return {
           type: p.type,
           memoryId: m.id,
           variant: p.variant,
           ...(rot !== 0 ? { rotation: rot } : {}),
           ...(crop ? { crop } : {}),
+          ...(px ? { cropImgPxW: px.w, cropImgPxH: px.h } : {}),
           ...(textOverride !== undefined ? { textOverride } : {}),
           ...(photoRef ? { photoRef } : {}),
         };
@@ -998,11 +1039,16 @@ export function mapBookPagesToServerPayload(
           p.type === 'photo-note'
             ? p.photoRef?.trim() || memoryPhotoRefs?.[m.id]?.trim()
             : undefined;
+        const px =
+          p.type === 'photo-note' || p.type === 'audio'
+            ? getBookPhotoPrintPixelSize(m, photoRef)
+            : null;
         return {
           type: p.type,
           memoryId: m.id,
           ...(rot !== 0 ? { rotation: rot } : {}),
           ...(crop ? { crop } : {}),
+          ...(px ? { cropImgPxW: px.w, cropImgPxH: px.h } : {}),
           ...(textOverride !== undefined ? { textOverride } : {}),
           ...(photoRef ? { photoRef } : {}),
         };
@@ -1358,8 +1404,10 @@ async function generateBookPdfWithExportTicketBody(
     }
   }
 
-  const guestMemories = await Promise.all(
-    memories.map(async m => {
+  const guestMemories = await mapWithConcurrency(
+    memories,
+    GUEST_PDF_MEDIA_UPLOAD_CONCURRENCY,
+    async m => {
       const merged = m.type === 'voice' ? mergeMemoryWithLocalRowForVoiceCover(m) : m;
       const g = memoryToGuestPayload(merged);
       if (merged.type === 'voice') {
@@ -1462,7 +1510,7 @@ async function generateBookPdfWithExportTicketBody(
         mimeType: 'image/jpeg',
       });
       return { ...g, print_url: readUrl, display_url: readUrl, media_url: readUrl, media_path: path };
-    }),
+    },
   );
 
   const slotHttps = await buildPagePhotoRefHttpsMap(input.pages, pdfTicket);

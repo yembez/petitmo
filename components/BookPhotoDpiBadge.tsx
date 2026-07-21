@@ -6,11 +6,6 @@ import {
   effectiveBookPhotoPrintDpi,
   type BookPhotoDpiStatus,
 } from '@/utils/bookPhotoPrintDpi';
-import {
-  photoBlurStatus,
-  photoBlurStatusLabel,
-  type PhotoBlurStatus,
-} from '@/utils/photoBlurScore';
 
 type Props = {
   imgPxW: number;
@@ -18,24 +13,7 @@ type Props = {
   printMmW: number;
   printMmH: number;
   scale: number;
-  /** Variance Laplacien (optionnel) — netteté optique. */
-  blurScore?: number | null;
 };
-
-function worstStatus(
-  dpi: BookPhotoDpiStatus,
-  blur: PhotoBlurStatus,
-): BookPhotoDpiStatus {
-  const rank = (s: BookPhotoDpiStatus | PhotoBlurStatus): number => {
-    if (s === 'block' || s === 'blurry') return 3;
-    if (s === 'warn' || s === 'soft') return 2;
-    if (s === 'ok' || s === 'sharp') return 1;
-    return 0;
-  };
-  const blurAsDpi: BookPhotoDpiStatus =
-    blur === 'blurry' ? 'block' : blur === 'soft' ? 'warn' : blur === 'sharp' ? 'ok' : 'unknown';
-  return rank(blurAsDpi) >= rank(dpi) ? blurAsDpi : dpi;
-}
 
 function statusColors(status: BookPhotoDpiStatus): { bg: string; text: string } {
   switch (status) {
@@ -50,11 +28,10 @@ function statusColors(status: BookPhotoDpiStatus): { bg: string; text: string } 
   }
 }
 
-function BookPhotoDpiBadge({ imgPxW, imgPxH, printMmW, printMmH, scale, blurScore }: Props) {
+function BookPhotoDpiBadge({ imgPxW, imgPxH, printMmW, printMmH, scale }: Props) {
   const dpi = effectiveBookPhotoPrintDpi({ imgPxW, imgPxH, printMmW, printMmH, scale });
   const dpiStatus = bookPhotoDpiStatus(dpi);
-  const blur = photoBlurStatus(blurScore);
-  const colors = statusColors(worstStatus(dpiStatus, blur));
+  const colors = statusColors(dpiStatus);
 
   return (
     <View style={[styles.wrap, { backgroundColor: colors.bg }]} pointerEvents="none">
@@ -62,7 +39,6 @@ function BookPhotoDpiBadge({ imgPxW, imgPxH, printMmW, printMmH, scale, blurScor
         Impression : {dpi > 0 ? `${dpi} DPI` : '—'}
       </Text>
       <Text style={[styles.subline, { color: colors.text }]}>{bookPhotoDpiStatusLabel(dpiStatus)}</Text>
-      <Text style={[styles.subline, { color: colors.text }]}>{photoBlurStatusLabel(blur)}</Text>
     </View>
   );
 }
@@ -78,14 +54,11 @@ const styles = StyleSheet.create({
   },
   line: {
     fontSize: 12,
-    textAlign: 'left',
-    fontWeight: '400',
+    fontWeight: '600',
   },
   subline: {
     fontSize: 11,
-    textAlign: 'left',
-    fontWeight: '400',
     marginTop: 2,
-    opacity: 0.92,
+    opacity: 0.95,
   },
 });

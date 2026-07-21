@@ -1635,7 +1635,7 @@ export async function uploadMedia({
       });
       const src = (localOriginalUri ?? uri).trim();
       const d = await ensureLocalPhotoFeedThumbOnly({ memoryId, localOriginalUri: src });
-      await persistFeedLocalThumbnail(memoryId, uri, 0);
+      await persistFeedLocalThumbnail(memoryId, d.localThumbUri ?? src, 0);
       scheduleLocalPhotoHeavyDerivatives(memoryId, src);
 
       let fileSize = 0;
@@ -1983,9 +1983,6 @@ export async function uploadMedia({
     if (insertError) throw insertError;
     if (!insertedRow?.id) return null;
 
-    if (memoryType === 'photo' && Platform.OS !== 'web') {
-      await persistFeedLocalThumbnail(insertedRow.id, uri, 0);
-    }
     if (memoryType === 'video' && Platform.OS !== 'web') {
       await persistFeedLocalVideo(insertedRow.id, uri);
     }
@@ -2016,6 +2013,9 @@ export async function uploadMedia({
         originalPxH = d.originalPx?.h ?? null;
         printPxW = d.printPx?.w ?? null;
         printPxH = d.printPx?.h ?? null;
+        if (localThumb) {
+          await persistFeedLocalThumbnail(insertedRow.id, localThumb, 0);
+        }
       }
     }
 

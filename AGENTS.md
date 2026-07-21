@@ -52,7 +52,7 @@ Le compte Supabase ne se crée **jamais** avant l'étape 4. Tout compte créé a
 - Afficher pendant l'upload : **"Merci de t'être abonnée 🤍 Nous sécurisons tous tes souvenirs sur petitmo cloud. Merci de ne pas fermer l'app pendant quelques instants."**
 - Ordre d'upload : textes → photos → audios → vidéos (du plus léger au plus lourd).
 - Si coupure réseau : reprendre silencieusement à la reconnexion, sans re-solliciter l'utilisatrice.
-- Volume garanti raisonnable en gratuit : max 50 souvenirs (20 en test), 5 vidéos de 30s max, 5 audios de 60s max.
+- Volume garanti raisonnable en gratuit : max **50** souvenirs, 5 vidéos de 30s max, 5 audios de 60s max (quotas **fil**). Livre : composition A/V **libre** ; QR facturés au checkout (2 inclus + 0,70 €).
 
 ---
 
@@ -119,7 +119,7 @@ Aucune autre écriture cloud n'est permise en gratuit. Pas de "petite sync genti
   pour les exceptions ci-dessus ; il n'est **jamais** présenté à l'utilisatrice comme un compte.
 - Tout texte qui suggère "tes souvenirs sont sauvegardés" en gratuit est **interdit**.
   Le badge actuel "Confidentialité 100% préservée" est OK.
-- En gratuit : **vidéo dans un livre autorisée** (max 5 par livre, 30 s) ; QR audio/vidéo cloud **uniquement après paiement** commande livre ou export PDF — spec [`docs/specs/free-tier-book-qr-av.md`](docs/specs/free-tier-book-qr-av.md), garde-fou [`validateFreeTierBookMemoryLimits`](services/books.ts).
+- En gratuit : **vidéo dans un livre autorisée** (composition libre) ; QR audio/vidéo cloud **uniquement après paiement** commande livre — spec [`docs/specs/free-tier-book-qr-av.md`](docs/specs/free-tier-book-qr-av.md), durées [`validateFreeTierBookMemoryLimits`](services/books.ts), tarif [`docs/specs/pricing-v1-migration.md`](docs/specs/pricing-v1-migration.md).
 
 ### Paywall — hero selon le contexte (`app/paywall.tsx`)
 
@@ -135,10 +135,13 @@ Aucune autre écriture cloud n'est permise en gratuit. Pas de "petite sync genti
 | Concept | Fichier |
 |---|---|
 | Mode `local` vs `cloud` (dérivé du tier) | [`lib/userMode.ts`](lib/userMode.ts) |
+| i18n FR/EN (init, clés) — migration EN **gelée** pendant bêta FR | [`lib/i18n.ts`](lib/i18n.ts) · [`docs/specs/i18n-en-roadmap.md`](docs/specs/i18n-en-roadmap.md) |
+| Go / no-go bêta FR (prod réelle) | [`docs/qa/BETA_FR_GO_NOGO.md`](docs/qa/BETA_FR_GO_NOGO.md) |
 | Tier `free` vs `paid` (source de vérité) | [`lib/userTier.ts`](lib/userTier.ts) |
 | Limites plan gratuit (souvenirs, audio, vidéo) | [`lib/limits.ts`](lib/limits.ts) |
 | Capture 100% locale (gratuit) | [`services/localOnlyMemoryCapture.ts`](services/localOnlyMemoryCapture.ts) |
-| Garde-fou livre gratuit (quotas A/V) | [`services/books.ts`](services/books.ts) `validateFreeTierBookMemoryLimits` |
+| Garde-fou livre gratuit (durées A/V) | [`services/books.ts`](services/books.ts) `validateFreeTierBookMemoryLimits` |
+| Tarif impression V1 | [`lib/pricingV1.ts`](lib/pricingV1.ts) · [`docs/specs/pricing-v1-migration.md`](docs/specs/pricing-v1-migration.md) |
 | QR audio/vidéo gratuit (exception cloud) | [`docs/specs/free-tier-book-qr-av.md`](docs/specs/free-tier-book-qr-av.md) |
 | Materialisation cloud → sandbox (Petitmo+) | [`services/memoryCloudMaterialize.ts`](services/memoryCloudMaterialize.ts) |
 | Création device-user Supabase (mécanique technique) | [`app/_layout.tsx`](app/_layout.tsx) |

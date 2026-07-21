@@ -8,7 +8,6 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { BookPageServer } from '../types/contracts';
 import type { MemoryRow } from './memoryRow';
 import {
-  FREE_TIER_QR_AV_MAX_PER_BOOK,
   qrLinkExpiresAtIso,
   qrLinkExpiresAtIsoForExportRequest,
 } from '../constants/spec';
@@ -17,10 +16,6 @@ const execFileAsync = promisify(execFile);
 
 function newQrToken(): string {
   return randomBytes(27).toString('base64url');
-}
-
-function countAudioVideoPages(pages: BookPageServer[]): number {
-  return pages.filter(p => p.type === 'audio' || p.type === 'video').length;
 }
 
 function isLinkUsable(expiresAt: string, revokedAt: string | null): boolean {
@@ -124,14 +119,7 @@ export async function prepareQrTokensForBook(
   }
 ): Promise<PrepareQrResult> {
   const { userId, childId, bookId, pages, memoriesById, subscriptionTier } = params;
-  const avCount = countAudioVideoPages(pages);
-  if (subscriptionTier === 'free' && avCount > FREE_TIER_QR_AV_MAX_PER_BOOK) {
-    return {
-      ok: false,
-      status: 400,
-      message: `Free tier: maximum ${FREE_TIER_QR_AV_MAX_PER_BOOK} pages audio/vidéo avec QR par livre.`,
-    };
-  }
+  // V1 : plus de plafond 5+5 — composition libre ; facturation au checkout.
 
   const tokensByMemoryId = new Map<string, string>();
   const premium = subscriptionTier === 'premium';
@@ -250,14 +238,7 @@ export async function prepareQrTokensForExportRequest(
   }
 ): Promise<PrepareQrResult> {
   const { exportRequestId, bookId, pages, memoriesById, subscriptionTier } = params;
-  const avCount = countAudioVideoPages(pages);
-  if (subscriptionTier === 'free' && avCount > FREE_TIER_QR_AV_MAX_PER_BOOK) {
-    return {
-      ok: false,
-      status: 400,
-      message: `Free tier: maximum ${FREE_TIER_QR_AV_MAX_PER_BOOK} pages audio/vidéo avec QR par livre.`,
-    };
-  }
+  // V1 : plus de plafond 5+5 — composition libre ; facturation au checkout.
 
   const tokensByMemoryId = new Map<string, string>();
   const premium = subscriptionTier === 'premium';

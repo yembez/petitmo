@@ -29,7 +29,7 @@ info "1/5 Healthcheck ${PUBLIC_PDF_URL}/health"
 curl -sS "${PUBLIC_PDF_URL}/health" | jq -e '.ok == true' >/dev/null
 ok "Service PDF en ligne"
 
-info "2/5 init-export (print_order, billable_pages=${GELATO_QA_INNER_PAGES})"
+info "2/5 init-export (print_order, gelato_pages=${GELATO_QA_INNER_PAGES})"
 NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 INIT_RESP="$(curl -sS "${SUPABASE_URL}/functions/v1/init-export" \
   -H "content-type: application/json" \
@@ -57,8 +57,9 @@ INIT_RESP="$(curl -sS "${SUPABASE_URL}/functions/v1/init-export" \
         zip: "75001",
         country: "FR"
       },
+      gelato_pages: $pages,
       billable_pages: $pages,
-      discount_percent: 0,
+      discount_percent: 10,
       printer_name: "gelato"
     }')")"
 

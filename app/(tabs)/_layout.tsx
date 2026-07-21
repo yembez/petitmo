@@ -1,4 +1,4 @@
-import { useFonts, DMSans_400Regular, DMSans_500Medium } from '@expo-google-fonts/dm-sans';
+import { useFonts, DMSans_400Regular, DMSans_500Medium, DMSans_700Bold } from '@expo-google-fonts/dm-sans';
 import { Tabs } from 'expo-router';
 import { TabTransitionProvider, useTabTransition } from '@/contexts/TabTransitionContext';
 import { MemoryTextFontProvider } from '@/contexts/MemoryTextFontContext';
@@ -20,6 +20,7 @@ function TabLayoutInner() {
   const [tabFontsLoaded] = useFonts({
     DMSans_400Regular,
     DMSans_500Medium,
+    DMSans_700Bold,
   });
   const tabLabelFontRegular = tabFontsLoaded ? 'DMSans_400Regular' : undefined;
   const tabLabelFontMedium = tabFontsLoaded ? 'DMSans_500Medium' : undefined;

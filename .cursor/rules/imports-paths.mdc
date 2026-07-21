@@ -23,6 +23,7 @@ alwaysApply: true
 | `utils/` | Helpers purs, sans état, sans I/O réseau. |
 | `types/` | Types TS partagés (`local.ts`, `database.ts`, `shared.ts`). |
 | `constants/` | Valeurs gelées (`theme`, `sizes`, `feedLayout`, `iconSizes`). |
+| `locales/` | Chaînes i18n (`fr/`, `en/` par namespace) + `fr.json` / `en.json` métadonnées Expo. |
 | `contexts/` | React contexts. |
 | `assets/` | Images / SVG / fonts statiques. |
 | `supabase/migrations/` | Migrations SQL. |

@@ -138,7 +138,7 @@ export function isFavorisItemInBook(
   book: Book | null | undefined,
 ): boolean {
   if (!book) return false;
-  return bookHasPageEntry(book, pageEntryForFavorisGridItem(item));
+  return bookHasPageEntry(book, pageEntryForFavorisGridItem(item), item.memory);
 }
 
 /** True si l’ajout de cette tuile créerait une nouvelle page. */
