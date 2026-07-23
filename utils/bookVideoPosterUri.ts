@@ -79,9 +79,6 @@ async function resolveReadableBookPoster(memory: Memory): Promise<string> {
 export async function resolveBookVideoPosterDisplayUri(memory: Memory): Promise<string> {
   if (memory.type !== 'video') return '';
 
-  const cached = peekBookVideoPosterStableCache(memory.id);
-  if (cached) return normalizePosterDisplay(cached);
-
   let resolved = await resolveReadableBookPoster(memory);
   if (resolved) return resolveBookVideoPosterStableCache(memory.id, resolved);
 
@@ -107,13 +104,20 @@ export async function hasReadableBookVideoPoster(memory: Memory): Promise<boolea
 }
 
 /**
- * Sync local-first : cache session, puis candidats sandbox / file://, puis https.
+ * Sync local-first : print custom d’abord, puis feed, puis https.
  * La lisibilité FS est confirmée en async (`resolveBookVideoPosterDisplayUri`).
  */
 export function peekSyncBookVideoPosterDisplayUri(memory: Memory): string {
   if (memory.type !== 'video') return '';
   const cached = peekBookVideoPosterStableCache(memory.id);
   if (cached) return normalizePosterDisplay(cached);
+
+  for (const u of collectVideoPrintPosterLocalUriCandidates(memory)) {
+    const t = (u ?? '').trim();
+    if (!t || !isDeviceLocalMediaUri(t)) continue;
+    if (isSandboxUriFromForeignContainer(t)) continue;
+    return normalizePosterDisplay(t);
+  }
 
   for (const u of collectVideoFeedPosterLocalUriCandidates(memory)) {
     const t = (u ?? '').trim();

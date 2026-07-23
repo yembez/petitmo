@@ -16,11 +16,11 @@ import { useStableViewabilityPairsMulti } from '@/hooks/useStableViewabilityPair
 /** Backup après fin de scroll si la viewability n’a pas re-tiré (immédiat). */
 const FEED_SCROLL_IDLE_MS = 0;
 
-/** Présence à l’écran : arrêt lecture quand la vidéo sort complètement du viewport. */
-export const FEED_VIDEO_ON_SCREEN_VISIBLE_PCT = 1;
+/** Arrêt lecture : sous ce % de la ligne visible, la vidéo n’est plus « à l’écran ». */
+export const FEED_VIDEO_ON_SCREEN_VISIBLE_PCT = 50;
 
-/** Déclenchement lecture : au moins 25 % de la vignette visible. */
-export const FEED_VIDEO_AUTOPLAY_START_VISIBLE_PCT = 25;
+/** Déclenchement lecture : au moins ce % de la vignette visible. */
+export const FEED_VIDEO_AUTOPLAY_START_VISIBLE_PCT = 50;
 
 function memoryFromFeedListItem(item: ViewToken['item']): Memory | null {
   if (!item || typeof item !== 'object') return null;
@@ -75,7 +75,7 @@ function pickBestVideoId(eligible: Map<string, number>): string | null {
 
 /**
  * Prefetch médias + sélection d’**une** vidéo « active » dans le fil (lecture auto muette).
- * Lecture à ≥25 % visible ; arrêt uniquement quand la vidéo n’est plus du tout à l’écran.
+ * Lecture / arrêt à ≥50 % de la ligne visible ; si plusieurs éligibles, la plus haute (index bas) gagne.
  */
 export function useFeedVideoAutoplay(
   onPrefetchViewable: (info: { viewableItems: ViewToken[]; changed: ViewToken[] }) => void,
@@ -111,15 +111,12 @@ export function useFeedVideoAutoplay(
 
     if (current && !onScreen.has(current)) {
       setFeedAutoplayActiveMemoryId(null);
-      return;
-    }
-
-    if (current && eligible.has(current)) {
-      return;
+      if (!allowNewPick) return;
     }
 
     if (!allowNewPick) return;
 
+    /** Toujours la plus haute éligible — évite qu’un bandeau du post précédent garde la lecture. */
     setFeedAutoplayActiveMemoryId(pickBestVideoId(eligible));
   }, []);
 

@@ -108,8 +108,8 @@ function CaptureTabDisc() {
       >
         <Plus
           size={CAPTURE_TAB_DISC_ICON_SIZE}
-          color="#0A0A0A"
-          strokeWidth={2.35}
+          color={THEME.brandCtaOrange}
+          strokeWidth={2.4}
         />
       </View>
     </View>
@@ -439,9 +439,9 @@ const styles = StyleSheet.create({
   captureTabDisc: {
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: THEME.tabBarBackground,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#000000',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: THEME.brandCtaOrange,
     ...Platform.select({
       ios: {
         shadowColor: '#3C3126',

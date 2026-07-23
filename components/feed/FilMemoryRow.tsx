@@ -272,7 +272,8 @@ function FilMemoryRow({
     useSignedMediaUrl(memory.type === 'voice' ? (memory.media_url ?? null) : null) ?? '';
   const videoPlaybackUri = useFeedVideoPlaybackUri(memory);
   const ageAtMemory = formatFamilyAgesLine(familyChildren, memory.created_at);
-  const addedAtIso = memory.inserted_at || memory.created_at;
+  /** Date d’événement / prise (EXIF) — pas la date d’ajout dans l’app. */
+  const addedAtIso = memory.created_at;
   const addedAtLabel = formatDateLong(addedAtIso);
   const locationLabelRaw = memory.location?.trim() || '';
   const locationCore = locationLabelRaw.replace(/\s*\([^)]*\)\s*$/, '').trim();
@@ -708,7 +709,13 @@ function FilMemoryRow({
           )}
 
           {memory.type === 'text' && (
-            <View style={styles.textBody}>
+            <Pressable
+              style={styles.textBody}
+              onPress={() => launchImmersive()}
+              disabled={skipImmersive}
+              accessibilityRole="button"
+              accessibilityLabel="Ouvrir en plein écran"
+            >
               {!!memory.text_title?.trim() && (
                 <Text
                   style={[styles.textTitle, { fontFamily: memoryEditorialBoldFont }]}
@@ -717,7 +724,10 @@ function FilMemoryRow({
                   {memory.text_title.trim()}
                 </Text>
               )}
-              <ScrollableTextBlock maxHeight={FEED_TEXT_POST_SCROLL_MAX_H}>
+              <ScrollableTextBlock
+                maxHeight={FEED_TEXT_POST_SCROLL_MAX_H}
+                onPress={skipImmersive ? undefined : () => launchImmersive()}
+              >
                 {bookParagraphs.map((para, idx) => (
                   <Text
                     key={idx}
@@ -733,7 +743,7 @@ function FilMemoryRow({
                   </Text>
                 ))}
               </ScrollableTextBlock>
-            </View>
+            </Pressable>
           )}
           </View>
         </Swipeable>

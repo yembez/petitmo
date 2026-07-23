@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { StyleSheet, View, Pressable, type StyleProp, type ViewStyle } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
 
 type Props = {
@@ -8,6 +8,8 @@ type Props = {
   style?: StyleProp<ViewStyle>;
   contentContainerStyle?: StyleProp<ViewStyle>;
   showsVerticalScrollIndicator?: boolean;
+  /** Tap (sans scroll) — ex. ouvrir la vue immersive depuis un souvenir texte. */
+  onPress?: () => void;
   /** Bloque le scroll parent (ex. FlatList paging) pendant un scroll interne. */
   onInnerScrollLock?: () => void;
   onInnerScrollUnlock?: () => void;
@@ -23,6 +25,7 @@ export function ScrollableTextBlock({
   style,
   contentContainerStyle,
   showsVerticalScrollIndicator = true,
+  onPress,
   onInnerScrollLock,
   onInnerScrollUnlock,
 }: Props) {
@@ -49,6 +52,18 @@ export function ScrollableTextBlock({
     if (scrollableRef.current) onInnerScrollUnlock?.();
   }, [onInnerScrollUnlock]);
 
+  const content = onPress ? (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel="Ouvrir en plein écran"
+    >
+      {children}
+    </Pressable>
+  ) : (
+    children
+  );
+
   return (
     <View style={[styles.host, { maxHeight }, style]}>
       <ScrollView
@@ -63,7 +78,7 @@ export function ScrollableTextBlock({
         onMomentumScrollEnd={handleScrollEnd}
         scrollEventThrottle={16}
       >
-        {children}
+        {content}
       </ScrollView>
     </View>
   );

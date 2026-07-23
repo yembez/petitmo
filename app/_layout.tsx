@@ -21,6 +21,8 @@ import { supabaseAnonKey, supabaseUrl } from '@/lib/supabase';
 import { PendingMediaUploadsProvider } from '@/contexts/PendingMediaUploadsContext';
 import { initLocalDb } from '@/lib/localDb';
 import { resetUserTierForTesting } from '@/lib/userTier';
+import { getUserTier } from '@/lib/userTier';
+import { getUserMode } from '@/lib/userMode';
 import { cleanOrphanedLocalFiles } from '@/lib/localCleanup';
 import { getOrSelectFirstChild } from '@/services/children';
 import { processPendingGuestRawUploads } from '@/services/pendingRawGuestUploads';
@@ -42,8 +44,11 @@ import {
 } from '@/services/tabScreensHydrate';
 import { flushPendingCloudUploadsOnce } from '@/services/pendingCloudFlush';
 import { FEED_META_FONT_SOURCES } from '@/constants/feedMetaFont';
+import { enrichSentryUserContext, initPetitmoSentry, Sentry } from '@/lib/sentry';
 
-export default function RootLayout() {
+initPetitmoSentry();
+
+function RootLayout() {
   useFrameworkReady();
   useFonts(FEED_META_FONT_SOURCES);
   const [isAuthReady, setIsAuthReady] = useState(false);
@@ -194,6 +199,14 @@ export default function RootLayout() {
     })();
   }, [isAuthReady]);
 
+  useEffect(() => {
+    if (!isAuthReady) return;
+    void (async () => {
+      const [tier, userMode] = await Promise.all([getUserTier(), getUserMode()]);
+      await enrichSentryUserContext({ tier, userMode });
+    })();
+  }, [isAuthReady]);
+
   if (!isAuthReady) {
     return <View style={styles.bootShell} />;
   }
@@ -209,6 +222,7 @@ export default function RootLayout() {
       >
         <Stack.Screen name="index" />
         <Stack.Screen name="onboarding" />
+        <Stack.Screen name="auth" />
         <Stack.Screen name="create-child" />
         <Stack.Screen name="edit-child" />
         <Stack.Screen name="parent-space" />
@@ -267,3 +281,5 @@ const styles = StyleSheet.create({
     backgroundColor: THEME.bgScreen,
   },
 });
+
+export default Sentry.wrap(RootLayout);

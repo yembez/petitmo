@@ -1,15 +1,11 @@
 import { Platform, DeviceEventEmitter } from 'react-native';
-import { copyAsync, documentDirectory, makeDirectoryAsync } from 'expo-file-system/legacy';
-import * as VideoThumbnails from 'expo-video-thumbnails';
 import type { Memory } from '@/types/local';
 import { getLocalMemoryById, upsertLocalMemory } from '@/lib/localDb';
 import { resolveReadableVideoPlaybackUri } from '@/utils/videoMediaUri';
-import { invalidateBookVideoPosterStableCache } from '@/hooks/bookVideoPosterStableCache';
-import { getVideoPosterPrintUriForBookPreview } from '@/utils/memoryPhotos';
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+import { invalidateBookVideoPosterStableCache, setBookVideoPosterStableCache } from '@/hooks/bookVideoPosterStableCache';
+import { getVideoPosterPrintUriForBookPreview, getBookVideoPosterDisplayUri } from '@/utils/memoryPhotos';
+import { persistVideoPosterFiles } from '@/services/videoPosterLocal';
+import { VIDEO_POSTER_PRINT_JPEG_QUALITY } from '@/lib/limits';
 
 /**
  * Extrait une frame vidéo et persiste `poster_print.jpg` (impression livre).
@@ -40,27 +36,28 @@ export async function persistVideoPosterPrintAtTimeMs(
       : Math.max(0, Math.round(timeMs));
 
   try {
-    await sleep(opts?.settleMs ?? 160);
-    const { uri: thumbTmp } = await VideoThumbnails.getThumbnailAsync(videoUri, {
-      time: clampedMs,
-      quality: 0.92,
+    const { printPath } = await persistVideoPosterFiles({
+      memoryId: id,
+      videoUri,
+      timeMs: clampedMs,
+      writeFeed: false,
+      writePrint: true,
+      quality: VIDEO_POSTER_PRINT_JPEG_QUALITY,
+      settleMs: opts?.settleMs ?? 160,
     });
-    if (!thumbTmp?.trim() || !documentDirectory) return null;
-
-    const dir = `${documentDirectory}petitmo_memories/${id}/`;
-    await makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
-    const dest = `${dir}poster_print.jpg`;
-    await copyAsync({ from: thumbTmp, to: dest });
+    if (!printPath) return null;
 
     const now = new Date().toISOString();
     const next: Memory = {
       ...cur,
-      local_poster_print_path: dest,
-      poster_print_url: dest,
+      local_poster_print_path: printPath,
+      poster_print_url: printPath,
       updated_at: now,
     };
     upsertLocalMemory(next);
     invalidateBookVideoPosterStableCache(id);
+    const displayUri = getBookVideoPosterDisplayUri(next).trim() || printPath;
+    setBookVideoPosterStableCache(id, displayUri);
     DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId: id });
     return next;
   } catch (e) {

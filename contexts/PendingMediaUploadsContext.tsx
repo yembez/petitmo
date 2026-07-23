@@ -6,6 +6,7 @@ import { setFeedBootstrapDisplayUrls, setFeedBootstrapVideoUri } from '@/service
 import { armSilentInitialFilLoadAfterMediaImport } from '@/services/feedAfterImportFlags';
 import { armFeedSnapToLatestOnFocus } from '@/services/feedScrollRestore';
 import { IMPORT_DUPLICATE_ASSET } from '@/lib/importDuplicate';
+import { setFeedAutoplayActiveMemoryId } from '@/lib/feedAutoplayStore';
 
 export type PendingMediaKind = 'photo' | 'video';
 
@@ -64,6 +65,10 @@ export function PendingMediaUploadsProvider({ children }: { children: React.Reac
       armSilentInitialFilLoadAfterMediaImport();
       armFeedSnapToLatestOnFocus();
       const tempId = `pending_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      /** Pendant la copie / insert vidéo : pas d’autoplay (évite saccades fil). */
+      if (kind === 'video') {
+        setFeedAutoplayActiveMemoryId(null);
+      }
       /** Dès la carte « envoi » : mêmes URI que `FilMemoryRow` optimiste → pas d’attente du serveur pour le 1er pixel. */
       if (kind === 'video' && previewUris[0]?.trim()) {
         setFeedBootstrapVideoUri(tempId, previewUris[0]);

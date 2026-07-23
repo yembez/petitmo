@@ -1,8 +1,18 @@
 /** Poster vidéo livre stabilisé par souvenir (spread + éditeur, distinct du fil). */
 const bookVideoPosterStableCache = new Map<string, string>();
 
-function shouldReplaceCachedPoster(_cached: string, _next: string): boolean {
-  return false;
+function isPrintPosterUri(uri: string): boolean {
+  return uri.includes('poster_print');
+}
+
+/** Remplace le cache si l’URI change, surtout vers / depuis un `poster_print` custom. */
+function shouldReplaceCachedPoster(cached: string, next: string): boolean {
+  if (!cached || !next) return true;
+  if (cached === next) return false;
+  // Bust cache (`?t=`) ou nouveau fichier print → toujours prendre le live.
+  if (isPrintPosterUri(next) || isPrintPosterUri(cached)) return true;
+  const base = (u: string) => (u.split('?')[0] ?? u).trim();
+  return base(cached) !== base(next);
 }
 
 export function peekBookVideoPosterStableCache(memoryId: string): string | undefined {

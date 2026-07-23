@@ -2,5 +2,36 @@
   "back": "Retour",
   "cancel": "Annuler",
   "ok": "OK",
-  "error": "Erreur"
+  "error": "Erreur",
+  "auth": {
+    "signupTitle": "Créez votre espace Petitmo",
+    "signupSubtitle": "Compte gratuit pour sauvegarder vos souvenirs et les retrouver sur un autre appareil. Ensuite, vous ajouterez le profil de votre enfant.",
+    "loginTitle": "Bon retour",
+    "loginSubtitle": "Connectez-vous pour retrouver vos souvenirs sauvegardés.",
+    "signupCta": "Créer mon compte",
+    "loginCta": "Se connecter",
+    "continueGoogle": "Continuer avec Google",
+    "continueApple": "Continuer avec Apple",
+    "orEmail": "ou par e-mail",
+    "email": "E-mail",
+    "password": "Mot de passe",
+    "forgotPassword": "Mot de passe oublié ?",
+    "forgotNeedEmail": "Indique d’abord ton adresse e-mail.",
+    "forgotSentTitle": "E-mail envoyé",
+    "forgotSentBody": "Si un compte existe pour cette adresse, tu recevras un lien pour réinitialiser ton mot de passe.",
+    "confirmEmailTitle": "Vérifie ta boîte mail",
+    "confirmEmailBody": "Un e-mail de confirmation peut être requis selon la configuration. Tu pourras te connecter ensuite.",
+    "switchToLogin": "J’ai déjà un compte — me connecter",
+    "switchToSignup": "Pas encore de compte — en créer un"
+  },
+  "parent": {
+    "report": {
+      "cta": "Signaler un problème",
+      "openedTitle": "Merci",
+      "openedBody": "Un e-mail est prêt avec les infos techniques. Décris ce qui s’est passé puis envoie.",
+      "fallbackTitle": "Infos techniques prêtes",
+      "fallbackBody": "Impossible d’ouvrir Mail. Envoie un message à contact@petitmo.app avec le bloc technique partagé.",
+      "failed": "Impossible de préparer le signalement. Réessaie ou écris à contact@petitmo.app."
+    }
+  }
 }

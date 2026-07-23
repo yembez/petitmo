@@ -54,6 +54,15 @@ export function filMemoryLiteKey(m: Memory): string {
   });
 }
 
+function compareMemoriesByEventDateDesc(a: Memory, b: Memory): number {
+  const ta = new Date(a.created_at).getTime();
+  const tb = new Date(b.created_at).getTime();
+  if (tb !== ta) return tb - ta;
+  const ia = new Date(a.inserted_at ?? a.created_at).getTime();
+  const ib = new Date(b.inserted_at ?? b.created_at).getTime();
+  return ib - ia;
+}
+
 /**
  * Quand `getMemories` revient juste après un import, on recevait une **nouvelle** liste d’objets :
  * même contenu visible, références différentes → React / FlatList recyclaient les cellules → flash.
@@ -64,13 +73,9 @@ export function filMemoryLiteKey(m: Memory): string {
  * fusionnés via `petitmo:memories-inserted` → une seule carte ou fil vide (ex. texte non encore pull).
  */
 export function mergeMemoriesListPreservingVisualRowRefs(prev: Memory[], server: Memory[]): Memory[] {
-  if (prev.length === 0) return server;
+  if (prev.length === 0) return [...server].sort(compareMemoriesByEventDateDesc);
   if (server.length === 0) {
-    return [...prev].sort((a, b) => {
-      const ta = new Date(a.inserted_at ?? a.created_at).getTime();
-      const tb = new Date(b.inserted_at ?? b.created_at).getTime();
-      return tb - ta;
-    });
+    return [...prev].sort(compareMemoriesByEventDateDesc);
   }
 
   const prevById = new Map(prev.map(m => [m.id, m]));
@@ -91,11 +96,7 @@ export function mergeMemoriesListPreservingVisualRowRefs(prev: Memory[], server:
     }
   }
 
-  return [...mergedById.values()].sort((a, b) => {
-    const ta = new Date(a.inserted_at ?? a.created_at).getTime();
-    const tb = new Date(b.inserted_at ?? b.created_at).getTime();
-    return tb - ta;
-  });
+  return [...mergedById.values()].sort(compareMemoriesByEventDateDesc);
 }
 
 /** Souvenir factice pendant l’upload : même `FilMemoryRow` que le souvenir final (pas de carte « envoi » différente). */

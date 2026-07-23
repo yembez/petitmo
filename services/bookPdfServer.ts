@@ -55,6 +55,7 @@ import {
   MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH,
   MEDIA_BOOK_PDF_JPEG_QUALITY,
   MEDIA_BOOK_PDF_COVER_JPEG_QUALITY,
+  VIDEO_POSTER_PRINT_JPEG_QUALITY,
 } from '@/lib/limits';
 import { isInitExportConfigured, postInitExport, postGuestUploadUrls } from '@/services/initExportApi';
 import { prepareBookQrAvUploads } from '@/services/bookQrAvUpload';
@@ -1448,7 +1449,10 @@ async function generateBookPdfWithExportTicketBody(
           /* ok */
         } else if (Platform.OS !== 'web' && local && !thumbLocal) {
           try {
-            const { uri: t } = await VideoThumbnails.getThumbnailAsync(local, { time: 0, quality: 0.7 });
+            const { uri: t } = await VideoThumbnails.getThumbnailAsync(local, {
+              time: 0,
+              quality: VIDEO_POSTER_PRINT_JPEG_QUALITY,
+            });
             thumbLocal = t;
           } catch {
             thumbLocal = '';

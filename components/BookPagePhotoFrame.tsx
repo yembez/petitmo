@@ -1,5 +1,5 @@
-import { memo } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { memo, useEffect, useState } from 'react';
+import { Image as RNImage, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { BookInlinePhotoCrop } from '@/components/BookInlinePhotoCrop';
 import type { PhotoCrop } from '@/src/book/photoCrop';
@@ -57,11 +57,11 @@ function CroppedPhotoStatic({
   imgPxW?: number;
   imgPxH?: number;
 }) {
-  // Même layout aspect que l’éditeur dès que les dims sont connues (cover + pages).
+  // Recadrage précis uniquement si dims fichier connues (sinon transform pan/scale laisse un bandeau gris).
   if ((coverMode || (imgPxW && imgPxH)) && imgPxW && imgPxH) {
     const rect = bookPhotoCropImageRect(width, height, imgPxW, imgPxH, crop);
     return (
-      <View style={{ width, height, overflow: 'hidden', backgroundColor: '#F2F2F7' }}>
+      <View style={{ width, height, overflow: 'hidden', backgroundColor: '#FFFFFF' }}>
         <ExpoImage
           source={{ uri }}
           recyclingKey={uri}
@@ -74,21 +74,16 @@ function CroppedPhotoStatic({
       </View>
     );
   }
-  const x = ((crop?.xPct ?? 0) / 100) * width;
-  const y = ((crop?.yPct ?? 0) / 100) * height;
-  const s = Math.max(1, crop?.scale ?? 1);
+  /** Sans dims : cover plein cadre (ignore pan/scale tant que le DPI n’est pas prêt). */
   return (
-    <View style={{ width, height, overflow: 'hidden', backgroundColor: '#F2F2F7' }}>
+    <View style={{ width, height, overflow: 'hidden', backgroundColor: '#FFFFFF' }}>
       <ExpoImage
         source={{ uri }}
         recyclingKey={uri}
         cachePolicy="memory-disk"
         transition={0}
         priority="high"
-        style={[
-          StyleSheet.absoluteFillObject,
-          { transform: [{ translateX: x }, { translateY: y }, { scale: s }] },
-        ]}
+        style={StyleSheet.absoluteFillObject}
         contentFit="cover"
       />
     </View>
@@ -136,8 +131,35 @@ function BookPagePhotoFrame({
   }
 
   const dpiMeta = inlineCrop?.dpiMeta;
-  const cropPxW = imgPxW ?? dpiMeta?.imgPxW ?? 0;
-  const cropPxH = imgPxH ?? dpiMeta?.imgPxH ?? 0;
+  const [measuredPx, setMeasuredPx] = useState<{ w: number; h: number } | null>(null);
+
+  useEffect(() => {
+    setMeasuredPx(null);
+  }, [displayUri]);
+
+  useEffect(() => {
+    const propW = imgPxW ?? dpiMeta?.imgPxW ?? 0;
+    const propH = imgPxH ?? dpiMeta?.imgPxH ?? 0;
+    if (propW > 0 && propH > 0) return;
+    if (!displayUri) return;
+    let cancelled = false;
+    RNImage.getSize(
+      displayUri,
+      (w, h) => {
+        if (cancelled || !(w > 0 && h > 0)) return;
+        setMeasuredPx({ w, h });
+      },
+      () => {
+        /* ignore — rester en cover plein cadre */
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [displayUri, dpiMeta?.imgPxH, dpiMeta?.imgPxW, imgPxH, imgPxW]);
+
+  const cropPxW = imgPxW ?? dpiMeta?.imgPxW ?? measuredPx?.w ?? 0;
+  const cropPxH = imgPxH ?? dpiMeta?.imgPxH ?? measuredPx?.h ?? 0;
   const hasCropDims = cropPxW > 0 && cropPxH > 0;
   const hasDpiMeta = !!(dpiMeta?.printMmW && dpiMeta?.printMmH);
   const isInteractive = !!inlineCrop && hasCropDims && hasDpiMeta;
@@ -175,7 +197,7 @@ function BookPagePhotoFrame({
             imgPxH={cropPxH || undefined}
           />
         ) : (
-          <View style={{ width: frameW, height: frameH, backgroundColor: '#F2F2F7' }} />
+          <View style={{ width: frameW, height: frameH, backgroundColor: '#FFFFFF' }} />
         )}
       </View>
 

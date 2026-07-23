@@ -11,6 +11,7 @@ export const MEMORY_TEXT_FONT_FAMILY = 'Roboto_400Regular';
  * Typo **éditoriale** des souvenirs texte (titre + corps) dans le fil — Charter.
  * Charter est une police **système iOS** (aucun package à charger) ; sur Android
  * elle n’existe pas → repli serif.
+ * Garder le nom de famille `Charter` (validé sur le fil) — pas `Charter-Roman`.
  */
 export const MEMORY_EDITORIAL_FONT_FAMILY = Platform.select({
   ios: 'Charter',

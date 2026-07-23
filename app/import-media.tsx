@@ -25,8 +25,13 @@ import { IMPORT_PHOTO_PICKER_OPTS } from '@/constants/importPicker';
 import { buildImportMetadataFromPickerAsset } from '@/utils/mediaExif';
 import { getUserTier } from '@/lib/userTier';
 import { checkMemoryLimit, checkVideoLimit, FREE_TIER_VIDEO_MAX_DURATION } from '@/lib/limits';
+import { mediaDurationToSeconds } from '@/utils/mediaDuration';
 import { IMPORT_DUPLICATE_ASSET } from '@/lib/importDuplicate';
 import { buildAlbumImportFingerprint, dedupePickerAssetsByLibraryId } from '@/utils/importLibraryDedupe';
+import {
+  openVideoTrimEditorOnUri,
+  VideoTrimNativeMissingError,
+} from '@/services/videoTrimEditor';
 
 type ImportStickerPreview = {
   capturedAtIso?: string | null;
@@ -130,12 +135,15 @@ export default function ImportMediaScreen() {
     preview: ImportStickerPreview;
   } | null>(null);
   const autoGalleryLaunchedRef = useRef(false);
-  /** Tier lu une fois au montage — évite `await getUserTier()` avant d’ouvrir la galerie. */
-  const videoMaxDurationRef = useRef(FREE_TIER_VIDEO_MAX_DURATION);
+  /** 0 = pas de plafond picker (gratuit : on gère le message 20 s après sélection). */
+  const videoMaxDurationRef = useRef(0);
+  const isFreeTierRef = useRef(true);
 
   useEffect(() => {
     void getUserTier().then(tier => {
-      videoMaxDurationRef.current = tier === 'free' ? FREE_TIER_VIDEO_MAX_DURATION : 0;
+      isFreeTierRef.current = tier === 'free';
+      /** Payant : pas de plafond. Gratuit : 1ʳᵉ sélection libre, puis message + trim système si > 20 s. */
+      videoMaxDurationRef.current = 0;
     });
   }, []);
 
@@ -334,7 +342,7 @@ export default function ImportMediaScreen() {
         const pickedAsset = assets[0];
         const durationSec =
           kind === 'video' && pickedAsset.duration != null
-            ? Math.max(1, Math.round(pickedAsset.duration / 1000))
+            ? mediaDurationToSeconds(pickedAsset.duration)
             : undefined;
 
         if (kind === 'photo') {
@@ -440,6 +448,107 @@ export default function ImportMediaScreen() {
       if (videoCount === 1) {
         const v = assets.find(a => assetIsVideo(a));
         if (!v) return 'not_committed';
+
+        const durationSec = mediaDurationToSeconds(v.duration);
+
+        /** +1 s de marge : métadonnées galerie souvent arrondies (ex. 20,4 → 21). */
+        if (
+          isFreeTierRef.current &&
+          durationSec > FREE_TIER_VIDEO_MAX_DURATION + 1
+        ) {
+          const trimmedAsset = await new Promise<ImagePicker.ImagePickerAsset | null>(resolve => {
+            const runTrimLoop = () => {
+              Alert.alert(
+                'Vidéo trop longue',
+                `En mode gratuit, la vidéo ne peut pas dépasser ${FREE_TIER_VIDEO_MAX_DURATION} secondes pour des raisons de coût de stockage.`,
+                [
+                  {
+                    text: 'Annuler',
+                    style: 'cancel',
+                    onPress: () => resolve(null),
+                  },
+                  {
+                    text: 'Passer à Petitmo+',
+                    onPress: () => {
+                      router.replace({
+                        pathname: '/paywall',
+                        params: { context: 'VIDEO_LIMIT_REACHED', returnTo: 'fil' },
+                      });
+                      resolve(null);
+                    },
+                  },
+                  {
+                    text: 'Raccourcir la vidéo',
+                    onPress: () => {
+                      void (async () => {
+                        try {
+                          /** Éditeur natif sur la même URI — pas de 2ᵉ passage galerie. */
+                          const trimmed = await openVideoTrimEditorOnUri(v.uri, {
+                            maxDurationSec: FREE_TIER_VIDEO_MAX_DURATION,
+                          });
+                          if (!trimmed?.uri) {
+                            /** Annulé dans l’éditeur → on propose encore le choix. */
+                            runTrimLoop();
+                            return;
+                          }
+                          const outSec = trimmed.durationSec > 0
+                            ? trimmed.durationSec
+                            : FREE_TIER_VIDEO_MAX_DURATION;
+                          if (outSec > FREE_TIER_VIDEO_MAX_DURATION + 1) {
+                            Alert.alert(
+                              'Encore trop longue',
+                              `Garde un extrait d’au plus ${FREE_TIER_VIDEO_MAX_DURATION} secondes.`,
+                              [
+                                { text: 'Réessayer', onPress: () => runTrimLoop() },
+                                { text: 'Annuler', style: 'cancel', onPress: () => resolve(null) },
+                              ],
+                            );
+                            return;
+                          }
+                          resolve({
+                            ...v,
+                            uri: trimmed.uri,
+                            duration: outSec * 1000,
+                            type: 'video',
+                            fileName: v.fileName ?? `trim-${Date.now()}.mp4`,
+                            mimeType: v.mimeType ?? 'video/mp4',
+                          });
+                        } catch (e) {
+                          if (e instanceof VideoTrimNativeMissingError) {
+                            Alert.alert(
+                              'Mise à jour requise',
+                              'Le coupe-vidéo nécessite un nouveau build de l’app (dev ou TestFlight). Relance npm run dev:ios:build ou npm run tf:ios, puis réessaie.',
+                              [{ text: 'OK', onPress: () => resolve(null) }],
+                            );
+                            return;
+                          }
+                          console.warn('[import-media] trim', e);
+                          Alert.alert(
+                            'Impossible de raccourcir',
+                            'Réessaie ou passe à Petitmo+.',
+                            [
+                              { text: 'Réessayer', onPress: () => runTrimLoop() },
+                              { text: 'Annuler', style: 'cancel', onPress: () => resolve(null) },
+                            ],
+                          );
+                        }
+                      })();
+                    },
+                  },
+                ],
+              );
+            };
+            runTrimLoop();
+          });
+          if (!trimmedAsset) return 'not_committed';
+          const metaTrim = await buildImportMetadataFromPickerAsset(trimmedAsset, { isVideo: true });
+          commitSelection([trimmedAsset], 'video', {
+            capturedAtIso: metaTrim.capturedAtIso ?? null,
+            locationLabel: metaTrim.locationLabel ?? null,
+          });
+          return 'committed';
+        }
+
         const meta = await buildImportMetadataFromPickerAsset(v, { isVideo: true });
         commitSelection([v], 'video', {
           capturedAtIso: meta.capturedAtIso ?? null,
@@ -472,7 +581,7 @@ export default function ImportMediaScreen() {
       Alert.alert('Erreur', 'Impossible d’ouvrir la bibliothèque média.');
       return 'not_committed';
     }
-  }, [commitSelection, setBatchChoice]);
+  }, [commitSelection, setBatchChoice, router]);
 
   /** Ouvre la galerie dès le montage (permission + picker enchaînés, sans attendre un 2e rendu). */
   useEffect(() => {

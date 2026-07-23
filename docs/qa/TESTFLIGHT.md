@@ -178,8 +178,35 @@ Sur l’iPhone avec TestFlight, parcours :
 
 ## Corriger et renvoyer une nouvelle version
 
+### A) Correctif JS / UI seulement (rapide — EAS Update / OTA)
+
+Une fois qu’un build TestFlight **avec OTA** est installé (après la mise en place `expo-updates`) :
+
 1. On corrige le code (toi + assistant).  
-2. Tu relances **uniquement** :
+2. Tu lances :
+
+```bash
+cd /Users/yem/SWEETOO_PROJECT/PETITMO_LOCAL_DEV/petitmo_local_dev
+npm run ota:production -- --message "fix: cold start Capturer"
+```
+
+3. Sur l’iPhone : **ferme complètement** Petitmo (swipe up) puis rouvre. L’update se télécharge au lancement ; parfois un **2ᵉ redémarrage** est nécessaire pour l’appliquer.  
+4. Pas de nouveau build Apple, pas d’attente TestFlight « Mettre à jour » binaire.
+
+**OTA OK** : textes, styles, écrans, logique JS, anim Capturer, etc.  
+**OTA KO** → rebuild (section B) : nouveau module natif, bump SDK Expo, permissions, plugins `app.json` natifs.  
+**Bare workflow** : `runtimeVersion` est une chaîne fixe dans `app.json` (ex. `"1.0.0"`). À **incrémenter manuellement** (ex. `"1.0.1"`) quand tu changes du natif, sinon un OTA incompatible pourrait cibler d’anciens binaires.
+
+### B) Changement natif ou 1ʳᵉ build avec OTA (lent)
+
+1. On corrige le code (toi + assistant).  
+2. Tu relances :
+
+```bash
+npm run tf:ios
+```
+
+équivalent à :
 
 ```bash
 eas build --platform ios --profile production --auto-submit
@@ -187,6 +214,8 @@ eas build --platform ios --profile production --auto-submit
 
 3. Quand Apple a traité la nouvelle build → dans TestFlight, les testeurs voient **Mettre à jour**.  
 4. Tu n’as **pas** besoin de republier sur l’App Store public.
+
+> **Important** : les builds TestFlight **avant** l’ajout d’OTA ne reçoivent pas les updates. Il faut **un** rebuild (`npm run tf:ios`) pour activer OTA, puis les correctifs JS suivants passent par `npm run ota:production`.
 
 ---
 
@@ -214,8 +243,9 @@ eas build --platform ios --profile production --auto-submit
 1. Créer l’app App Store Connect (`com.petitmo.app`)  
 2. Coller App ID + Team ID dans `eas.json`  
 3. Secrets Supabase avec `eas env:create`  
-4. `eas build --platform ios --profile production`  
-5. `eas submit --platform ios --profile production --latest`  
-6. TestFlight → installer → tester → corriger → rebuild  
+4. `npm run tf:ios` (build + submit TestFlight)  
+5. TestFlight → installer → tester  
+6. Correctifs JS : `npm run ota:production -- --message "…"` (fermer / rouvrir l’app)  
+7. Changement natif : refaire `npm run tf:ios`
 
 Quand tu as fait les étapes **1** et **2** (numéros prêts), dis-le : on pourra vérifier `eas.json` et lancer le premier build avec toi.

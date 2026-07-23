@@ -32,6 +32,8 @@ export type BookBrowseLeafProps = {
   typography: BookMaquetteTypography;
   folioFont?: string;
   memoryPhotoRef?: string | null;
+  memoryImgPxW?: number;
+  memoryImgPxH?: number;
   prefetchUri: string | null;
   onOpenEditor: (pageIndex: number) => void;
   onPrefetchImage: (uri: string | null) => void;
@@ -54,6 +56,8 @@ function BookBrowseLeafInner({
   typography,
   folioFont,
   memoryPhotoRef,
+  memoryImgPxW,
+  memoryImgPxH,
   prefetchUri,
   onOpenEditor,
   onPrefetchImage,
@@ -100,10 +104,13 @@ function BookBrowseLeafInner({
               memory &&
               (row.page.type === 'photo-full' ||
                 row.page.type === 'photo-note' ||
-                row.page.type === 'audio')
+                row.page.type === 'audio' ||
+                row.page.type === 'video')
                 ? photoCrops[memory.id]
                 : undefined
             }
+            photoImgPxW={memoryImgPxW}
+            photoImgPxH={memoryImgPxH}
             truncated={false}
             coverYearLabel={coverYearLabel}
             coverDisplayTitle={

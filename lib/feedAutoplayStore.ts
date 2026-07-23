@@ -4,7 +4,7 @@ import { useSyncExternalStore } from 'react';
 let activeMemoryId: string | null = null;
 const autoplayListeners = new Set<() => void>();
 
-/** Vidéos encore visibles à l’écran (seuil 0 % — sortie = arrêt). */
+/** Vidéos encore visibles à l’écran (seuil fil — sous ce % → arrêt lecture). */
 let onScreenVideoIds = new Set<string>();
 const onScreenListeners = new Set<() => void>();
 

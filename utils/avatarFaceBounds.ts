@@ -3,20 +3,20 @@ import type { FaceBounds } from '@/utils/detectFace';
 
 const DEFAULT_PORTRAIT_ASPECT = 9 / 16;
 
-/** Part de la hauteur de l’avatar que le visage doit occuper. */
-export const AVATAR_FACE_FILL_RATIO = 0.62;
+/** Part de la hauteur de l’avatar que le visage doit occuper (plus bas = moins de zoom). */
+export const AVATAR_FACE_FILL_RATIO = 0.46;
 
 /**
  * Hauteur d’image affichée minimale (× taille avatar) — zoom si le calcul naturel
  * ferait tenir presque toute la photo dans le cercle (bounds trop « larges »).
  */
-const AVATAR_MIN_IMAGE_HEIGHT_RATIO = 1.2;
+const AVATAR_MIN_IMAGE_HEIGHT_RATIO = 1.05;
 
 /** Plafond de zoom pour éviter un grain excessif sur petits avatars (fil). */
-const AVATAR_MAX_IMAGE_HEIGHT_RATIO = 3;
+const AVATAR_MAX_IMAGE_HEIGHT_RATIO = 2.1;
 
 /** Au-delà, on considère que le visage remplit déjà l’image (crop hero serré). */
-const AVATAR_MAX_EFFECTIVE_FACE_H = 0.58;
+const AVATAR_MAX_EFFECTIVE_FACE_H = 0.72;
 
 export function isValidFaceBounds(
   bounds: Pick<Child, 'face_cx' | 'face_cy' | 'face_h' | 'face_img_aspect'> | null | undefined,
@@ -50,8 +50,8 @@ export function heuristicFaceBoundsForAvatar(aspect: number): FaceBounds {
   if (a >= 0.42 && a <= 0.98) {
     return {
       face_cx: 0.5,
-      face_cy: 0.38,
-      face_h: 0.3,
+      face_cy: 0.42,
+      face_h: 0.48,
       face_img_aspect: a,
     };
   }
@@ -59,16 +59,16 @@ export function heuristicFaceBoundsForAvatar(aspect: number): FaceBounds {
   if (a > 1.05) {
     return {
       face_cx: 0.5,
-      face_cy: 0.36,
-      face_h: 0.34,
+      face_cy: 0.4,
+      face_h: 0.45,
       face_img_aspect: a,
     };
   }
 
   return {
     face_cx: 0.5,
-    face_cy: 0.36,
-    face_h: 0.32,
+    face_cy: 0.4,
+    face_h: 0.46,
     face_img_aspect: a,
   };
 }
@@ -90,7 +90,8 @@ export function isLegacyHeroHeuristicOnProfileCrop(
   const isProfileCrop = aspect >= 0.42 && aspect <= 0.98;
   const cy = child.face_cy as number;
   const fh = child.face_h as number;
-  return isProfileCrop && (cy <= 0.37 || fh >= 0.42);
+  /** Ancien héros plein écran / zoom trop serré → heuristique avatar adoucie. */
+  return isProfileCrop && (cy <= 0.34 || fh <= 0.34 || fh >= 0.55);
 }
 
 export function resolveAvatarFaceBounds(

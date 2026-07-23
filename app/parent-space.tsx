@@ -9,11 +9,11 @@ import {
   Linking,
   Alert,
   ActivityIndicator,
+  Share,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { usePathname, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft, Plus } from 'lucide-react-native';
-import Constants from 'expo-constants';
 import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
 import { getChildren, setSelectedChild } from '@/services/children';
@@ -21,11 +21,19 @@ import { useFocusEffect } from '@react-navigation/native';
 import type { Child } from '@/types/local';
 import { scale, verticalScale } from '@/utils/responsive';
 import { calculateAge } from '@/utils/date';
-import { getUserTier, setUserTier, type UserTier } from '@/lib/userTier';
+import { getUserTier, type UserTier } from '@/lib/userTier';
 import { supabase } from '@/lib/supabase';
 import { getLocalMemoriesPendingCloudSync } from '@/lib/localDb';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
 import { ChildAvatar } from '@/components/ChildAvatar';
+import {
+  buildBugReportMailto,
+  collectBugReportContext,
+  formatAppVersionLabel,
+  formatBugReportTechBlock,
+} from '@/lib/bugReportContext';
+import { captureUserBugReport, isSentryEnabled } from '@/lib/sentry';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
 
 const CONTACT_EMAIL = 'contact@petitmo.app';
 const URL_PRIVACY = 'https://petitmo.app/privacy';
@@ -38,10 +46,6 @@ function manageSubscriptionUrl(): string {
     : 'https://play.google.com/store/account/subscriptions';
 }
 
-function appVersionLabel(): string {
-  return Constants.expoConfig?.version?.trim() || '—';
-}
-
 async function openUrl(url: string): Promise<void> {
   const supported = await Linking.canOpenURL(url);
   if (!supported) return;
@@ -50,21 +54,31 @@ async function openUrl(url: string): Promise<void> {
 
 export default function ParentSpaceScreen() {
   const router = useRouter();
+  const pathname = usePathname();
   const insets = useSafeAreaInsets();
+  const { t } = useAppTranslation('common');
   const { loaded: fontsLoaded, dm500, dm600, dm700 } = useDmSansFamilyFlowFonts();
   const [children, setChildrenState] = useState<Child[]>([]);
   const [tier, setTierState] = useState<UserTier>('free');
   const [accountEmail, setAccountEmail] = useState('');
   const [backupStatus, setBackupStatus] = useState('');
+  const [versionLabel, setVersionLabel] = useState('—');
+  const [reportBusy, setReportBusy] = useState(false);
 
   const load = useCallback(async () => {
     const list = await getChildren();
     setChildrenState(list);
 
-    const t = await getUserTier();
-    setTierState(t);
+    const tTier = await getUserTier();
+    setTierState(tTier);
 
-    if (t === 'paid') {
+    const ctx = await collectBugReportContext({
+      pathname,
+      sentryEnabled: isSentryEnabled(),
+    });
+    setVersionLabel(formatAppVersionLabel(ctx));
+
+    if (tTier === 'paid') {
       const { data: { session } } = await supabase.auth.getSession();
       const u = session?.user;
       const rawEmail =
@@ -79,7 +93,7 @@ export default function ParentSpaceScreen() {
       setAccountEmail('');
       setBackupStatus('');
     }
-  }, []);
+  }, [pathname]);
 
   useFocusEffect(
     useCallback(() => {
@@ -89,13 +103,48 @@ export default function ParentSpaceScreen() {
 
   const handleSignOut = useCallback(async () => {
     try {
-      await supabase.auth.signOut();
-      await setUserTier('free');
+      const { signOutRealAccount } = await import('@/lib/authAccount');
+      await signOutRealAccount();
       router.replace('/onboarding');
     } catch {
       Alert.alert('Erreur', 'Impossible de te déconnecter pour le moment.');
     }
   }, [router]);
+
+  const handleReportProblem = useCallback(async () => {
+    if (reportBusy) return;
+    setReportBusy(true);
+    try {
+      const ctx = await collectBugReportContext({
+        pathname,
+        sentryEnabled: isSentryEnabled(),
+      });
+      const eventId = captureUserBugReport('Signalement utilisateur (bêta)', { ...ctx });
+      const { url, body } = buildBugReportMailto({
+        email: CONTACT_EMAIL,
+        ctx,
+        sentryEventId: eventId,
+      });
+      const opened = await Linking.canOpenURL(url);
+      if (opened) {
+        await Linking.openURL(url);
+        Alert.alert(t('parent.report.openedTitle'), t('parent.report.openedBody'));
+      } else {
+        try {
+          await Share.share({ message: body });
+        } catch {
+          Alert.alert(
+            t('parent.report.fallbackTitle'),
+            `${t('parent.report.fallbackBody')}\n\n${formatBugReportTechBlock(ctx, eventId)}`,
+          );
+        }
+      }
+    } catch {
+      Alert.alert(t('error'), t('parent.report.failed'));
+    } finally {
+      setReportBusy(false);
+    }
+  }, [pathname, reportBusy, t]);
 
   const paid = tier === 'paid';
 
@@ -228,6 +277,22 @@ export default function ParentSpaceScreen() {
         <Section title="Aide" titleFontFamily={dm600}>
           <TouchableOpacity
             style={styles.row}
+            onPress={() => void handleReportProblem()}
+            activeOpacity={0.85}
+            disabled={reportBusy}
+            accessibilityRole="button"
+            accessibilityLabel={t('parent.report.cta')}
+          >
+            <View style={styles.rowIconPlaceholder} />
+            <View style={styles.rowText}>
+              <Text style={[styles.rowLabel, dm500 ? { fontFamily: dm500 } : null]}>
+                {t('parent.report.cta')}
+              </Text>
+            </View>
+            <Text style={styles.rowValue}>{reportBusy ? '…' : '›'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.row, styles.rowBorderTop]}
             onPress={() => void openUrl(`mailto:${CONTACT_EMAIL}`)}
             activeOpacity={0.85}
             accessibilityRole="link"
@@ -285,7 +350,7 @@ export default function ParentSpaceScreen() {
         </Section>
 
         <Text style={[styles.versionText, dm500 ? { fontFamily: dm500 } : null]} accessibilityRole="text">
-          Version {appVersionLabel()}
+          Version {versionLabel}
         </Text>
       </ScrollView>
     </View>

@@ -1,34 +1,44 @@
 import { useEffect, useState } from 'react';
+import { DeviceEventEmitter } from 'react-native';
 import type { Memory } from '@/types/local';
-import { peekBookVideoPosterStableCache } from '@/hooks/bookVideoPosterStableCache';
+import { getLocalMemoryById } from '@/lib/localDb';
+import {
+  invalidateBookVideoPosterStableCache,
+  peekBookVideoPosterStableCache,
+  setBookVideoPosterStableCache,
+} from '@/hooks/bookVideoPosterStableCache';
 import {
   peekSyncBookVideoPosterDisplayUri,
   resolveBookVideoPosterDisplayUri,
 } from '@/utils/bookVideoPosterUri';
 import { bookPortraitPerfNetwork, bookPortraitPerfTiming, isBookPortraitPerfEnabled } from '@/utils/bookPortraitSpreadPerf';
 
-function stickyPosterUri(prev: string, next: string): string {
-  const n = next.trim();
-  if (n) return n;
-  return prev.trim();
-}
-
 /**
  * Poster vidéo maquette livre (spread + éditeur).
- * Custom `poster_print` si lisible, sinon poster fil ; chemins morts ignorés.
+ * Re-résout à chaque changement de chemins / `updated_at` et sur `petitmo:memories-updated`
+ * en relisant SQLite (les FlatList/mémo du spread gardent souvent une Memory stale).
  */
 export function useBookVideoPosterDisplayUrl(memory: Memory): string {
   const [uri, setUri] = useState(() => peekSyncBookVideoPosterDisplayUri(memory));
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    if (memory.type !== 'video') return;
+    const sub = DeviceEventEmitter.addListener(
+      'petitmo:memories-updated',
+      (payload: { memoryId?: string }) => {
+        if (payload?.memoryId === memory.id) {
+          invalidateBookVideoPosterStableCache(memory.id);
+          setTick(t => t + 1);
+        }
+      },
+    );
+    return () => sub.remove();
+  }, [memory.id, memory.type]);
 
   useEffect(() => {
     if (memory.type !== 'video') {
       setUri('');
-      return;
-    }
-
-    const cached = peekBookVideoPosterStableCache(memory.id);
-    if (cached) {
-      setUri(prev => stickyPosterUri(prev, cached));
       return;
     }
 
@@ -37,18 +47,28 @@ export function useBookVideoPosterDisplayUrl(memory: Memory): string {
     if (isBookPortraitPerfEnabled()) {
       bookPortraitPerfNetwork('useBookVideoPoster:resolve-start', {
         memoryId: memory.id.slice(0, 8),
+        tick,
       });
     }
     void (async () => {
-      const resolved = await resolveBookVideoPosterDisplayUri(memory);
+      /** Toujours la ligne SQLite fraîche — props `memory` du spread peuvent être périmées. */
+      const live = (getLocalMemoryById(memory.id) as Memory | null) ?? memory;
+      const resolved = await resolveBookVideoPosterDisplayUri(live);
       if (isBookPortraitPerfEnabled()) {
         bookPortraitPerfTiming('useBookVideoPoster:resolve-done', startedAt, {
           memoryId: memory.id.slice(0, 8),
           hasUri: Boolean(resolved.trim()),
         });
       }
-      if (!alive || !resolved.trim()) return;
-      setUri(prev => stickyPosterUri(prev, resolved));
+      if (!alive) return;
+      const next = resolved.trim();
+      if (next) {
+        setBookVideoPosterStableCache(memory.id, next);
+        setUri(next);
+      } else {
+        const sync = peekSyncBookVideoPosterDisplayUri(live).trim();
+        if (sync) setUri(sync);
+      }
     })();
 
     return () => {
@@ -63,9 +83,11 @@ export function useBookVideoPosterDisplayUrl(memory: Memory): string {
     memory.poster_print_url,
     memory.thumbnail_url,
     memory.updated_at,
+    tick,
   ]);
 
   if (memory.type !== 'video') return '';
-  const cachedLive = peekBookVideoPosterStableCache(memory.id);
-  return uri.trim() || (cachedLive?.trim() ?? '');
+  const live = uri.trim();
+  if (live) return live;
+  return peekBookVideoPosterStableCache(memory.id)?.trim() ?? '';
 }

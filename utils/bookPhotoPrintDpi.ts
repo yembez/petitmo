@@ -19,7 +19,7 @@ export const BOOK_PRINT_BLEED_MM = 4;
 export const BOOK_PRINT_PAGE_W_MM = BOOK_PAGE_W_MM + 2 * BOOK_PRINT_BLEED_MM;
 export const BOOK_PRINT_PAGE_H_MM = BOOK_PAGE_H_MM + 2 * BOOK_PRINT_BLEED_MM;
 
-export type BookPhotoPageType = 'cover' | 'photo-full' | 'photo-note' | 'audio';
+export type BookPhotoPageType = 'cover' | 'photo-full' | 'photo-note' | 'audio' | 'video';
 
 export function bookPrintFrameMmFor(
   pageType: BookPhotoPageType,
@@ -34,7 +34,7 @@ export function bookPrintFrameMmFor(
     return { w: BOOK_PAGE_W_MM, h: PHOTO_FULL_FP_IMAGE_HEIGHT_MM };
   }
   const bandHmm =
-    pageType === 'photo-note' || pageType === 'audio'
+    pageType === 'photo-note' || pageType === 'audio' || pageType === 'video'
       ? PHOTO_NOTE_BAND_HEIGHT_MM
       : BOOK_PAGE_H_MM * PHOTO_FULL_BAND_HEIGHT_RATIO;
   return { w: BOOK_PAGE_W_MM - 2 * m, h: bandHmm - 2 * m };

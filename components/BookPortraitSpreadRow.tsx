@@ -26,6 +26,7 @@ export type BookPortraitSpreadRowProps = {
   chapterTitleLine: string | null;
   coverPhotoBrowseUri: string | null;
   cropDpiMetaCover?: { imgPxW: number; imgPxH: number };
+  cropDpiMetaByKey?: Record<string, { imgPxW: number; imgPxH: number }>;
   photoCrops: Record<string, PhotoCrop>;
   rotations: Record<string, number>;
   typography: BookMaquetteTypography;
@@ -48,6 +49,7 @@ function BookPortraitSpreadRowInner({
   chapterTitleLine,
   coverPhotoBrowseUri,
   cropDpiMetaCover,
+  cropDpiMetaByKey,
   photoCrops,
   rotations,
   typography,
@@ -67,6 +69,7 @@ function BookPortraitSpreadRowInner({
 
   const renderLeaf = (row: PageRow) => {
     const mem = getMemoryForPage(row.page);
+    const dpi = mem ? cropDpiMetaByKey?.[mem.id] : undefined;
     return (
       <BookBrowseLeaf
         row={row}
@@ -92,6 +95,8 @@ function BookPortraitSpreadRowInner({
               memoryPhotoRefs?.[mem.id])
             : undefined
         }
+        memoryImgPxW={dpi?.imgPxW}
+        memoryImgPxH={dpi?.imgPxH}
         prefetchUri={getPrefetchUri(row)}
         onOpenEditor={onOpenEditor}
         onPrefetchImage={onPrefetchImage}

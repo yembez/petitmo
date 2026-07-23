@@ -7,7 +7,7 @@ import { pullFamilyMemoriesFromRemoteToLocal } from '@/services/memoriesLocalSyn
 export const FREE_TIER_LIMIT = 50
 /** TEST ONLY — prod : 5. */
 export const FREE_TIER_VIDEO_LIMIT = 5
-export const FREE_TIER_VIDEO_MAX_DURATION = 30 // secondes
+export const FREE_TIER_VIDEO_MAX_DURATION = 20 // secondes (fil gratuit)
 export const FREE_TIER_VOICE_LIMIT = 5 // max souvenirs audio en gratuit
 export const FREE_TIER_VOICE_MAX_DURATION = 60 // secondes (création de souvenirs audio)
 export const FREE_TIER_BOOK_VOICE_MAX_DURATION = 60 // secondes (livres : QR audio)
@@ -29,6 +29,19 @@ export const MEDIA_BOOK_PRINT_MAX_WIDTH = 3200
 
 /** Alias historique — même cible que `MEDIA_BOOK_PRINT_MAX_WIDTH`. */
 export const MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH = MEDIA_BOOK_PRINT_MAX_WIDTH
+
+/**
+ * JPEG poster vidéo **fil** (`poster.jpg`) — compression un peu plus légère que le print
+ * (poids fil). La résolution suit la frame native.
+ */
+export const VIDEO_POSTER_FEED_JPEG_QUALITY = 0.9
+
+/**
+ * JPEG poster vidéo **livre** (`poster_print.jpg`) — extraction frame max, puis
+ * resize largeur 3200 px (comme `print.jpg` photos). Sans upscale, une frame 1080p
+ * sur le cadre 186 mm ≈ 147 DPI (bloquant).
+ */
+export const VIDEO_POSTER_PRINT_JPEG_QUALITY = 1
 
 /**
  * JPEG upload guest PDF (pages intérieures) : 3200 px + qualité un peu plus basse

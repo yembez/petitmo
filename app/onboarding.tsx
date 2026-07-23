@@ -1,5 +1,4 @@
 import {
-  Alert,
   ImageBackground,
   StyleSheet,
   Text,
@@ -17,12 +16,13 @@ import { SPACING, FONT_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
 import { LinearGradient } from 'expo-linear-gradient';
 import { getChildren } from '@/services/children';
+import { hasRealAuthAccount } from '@/lib/authAccount';
 
 /**
- * Règle d'or (cf. AGENTS.md / docs/specs/architecture-locale-cloud.md) :
- * - Gratuit = local pur, pas de compte obligatoire → "Commencer gratuitement".
- * - Petitmo+ = paywall puis compte → "S'abonner maintenant" (/paywall).
- * - Déjà abonnée → lien discret "J'ai déjà un compte" (login / restore — flux dédié).
+ * Règle d'or V2 (AGENTS.md) :
+ * - Soft gate : présentation → compte gratuit → profil enfant.
+ * - « J'ai déjà un compte » → login / restore.
+ * - Promesse : souvenirs privés et sauvegardés (pas « sans compte »).
  */
 export default function OnboardingScreen() {
   const router = useRouter();
@@ -39,23 +39,22 @@ export default function OnboardingScreen() {
   );
 
   useEffect(() => {
-    const checkExistingChild = async () => {
+    const checkExisting = async () => {
+      const hasAccount = await hasRealAuthAccount();
+      if (!hasAccount) return;
       const children = await getChildren();
       if (children.length > 0) {
         router.replace('/(tabs)');
+      } else {
+        router.replace('/create-child');
       }
     };
 
-    checkExistingChild();
-  }, []);
+    void checkExisting();
+  }, [router]);
 
-  /** TODO(plan dédié) : modale login Google / Apple / email pour compte Petitmo+. */
   const handleExistingAccount = () => {
-    Alert.alert(
-      'J’ai déjà un compte',
-      "La connexion à un compte Petitmo+ arrive bientôt. Si tu n'es pas encore abonnée, utilise « Commencer gratuitement » : tes souvenirs restent sur ton téléphone, sans création de compte.",
-      [{ text: 'OK', style: 'default' }]
-    );
+    router.push({ pathname: '/auth', params: { mode: 'login' } });
   };
 
   return (
@@ -106,12 +105,12 @@ export default function OnboardingScreen() {
 
           <TouchableOpacity
             style={styles.ctaButton}
-            onPress={() => router.push('/create-child')}
+            onPress={() => router.push({ pathname: '/auth', params: { mode: 'signup' } })}
             activeOpacity={0.9}
             accessibilityRole="button"
-            accessibilityLabel="Commencer gratuitement sans compte"
+            accessibilityLabel="Commencer — créer un compte Petitmo"
           >
-            <Text style={styles.ctaButtonText}>Commencer gratuitement</Text>
+            <Text style={styles.ctaButtonText}>Commencer</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -131,7 +130,7 @@ export default function OnboardingScreen() {
             onPress={handleExistingAccount}
             activeOpacity={0.7}
             accessibilityRole="button"
-            accessibilityLabel="J’ai déjà un compte Petitmo Plus"
+            accessibilityLabel="J’ai déjà un compte Petitmo"
           >
             <Text style={styles.linkTertiary}>J&apos;ai déjà un compte</Text>
           </TouchableOpacity>
@@ -139,7 +138,7 @@ export default function OnboardingScreen() {
           <View style={styles.privacyBadge}>
             <Lock size={scale(19)} color="rgba(255, 255, 255, 0.6)" strokeWidth={2} />
             <Text style={styles.privacyText}>
-              Confidentialité 100% préservée.
+              Souvenirs privés et sauvegardés.
             </Text>
           </View>
         </View>

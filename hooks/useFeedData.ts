@@ -330,9 +330,12 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
         const ordered = preserveInsertionOrder
           ? [...rows]
           : [...rows].sort((a, b) => {
-              const ta = new Date(a.inserted_at ?? a.created_at).getTime();
-              const tb = new Date(b.inserted_at ?? b.created_at).getTime();
-              return tb - ta;
+              const ta = new Date(a.created_at).getTime();
+              const tb = new Date(b.created_at).getTime();
+              if (tb !== ta) return tb - ta;
+              const ia = new Date(a.inserted_at ?? a.created_at).getTime();
+              const ib = new Date(b.inserted_at ?? b.created_at).getTime();
+              return ib - ia;
             });
         if (pendingTempId && ordered.length === 1) {
           memoryFlatListKeyByIdRef.current.set(ordered[0].id, pendingTempId);

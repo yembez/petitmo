@@ -8,9 +8,8 @@ import {
   getInfoAsync,
   makeDirectoryAsync,
 } from 'expo-file-system/legacy';
-import { DeviceEventEmitter, Platform } from 'react-native';
+import { DeviceEventEmitter, InteractionManager, Platform } from 'react-native';
 import * as ImageManipulator from 'expo-image-manipulator';
-import * as VideoThumbnails from 'expo-video-thumbnails';
 import type { Database } from '@/types/database';
 import type { Memory } from '@/types/local';
 import type { UploadStatus } from '@/types/local';
@@ -42,7 +41,10 @@ import {
   invalidateMemoryLimitCache,
   MEDIA_BOOK_PRINT_MAX_WIDTH,
   MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH,
+  VIDEO_POSTER_FEED_JPEG_QUALITY,
+  VIDEO_POSTER_PRINT_JPEG_QUALITY,
 } from '@/lib/limits';
+import { persistDefaultVideoPostersAtImport, extractVideoFrameJpeg } from '@/services/videoPosterLocal';
 import { getUserTier } from '@/lib/userTier';
 import { deleteLocalMediaFiles } from '@/lib/localCleanup';
 import {
@@ -149,15 +151,10 @@ async function readBytes(uri: string): Promise<{ bytes: Blob | Uint8Array; size:
 }
 
 async function createVideoThumbnailJpeg(uri: string): Promise<string | null> {
-  try {
-    const { uri: thumbUri } = await VideoThumbnails.getThumbnailAsync(uri, {
-      time: 0,
-      quality: 0.7,
-    });
-    return thumbUri;
-  } catch {
-    return null;
-  }
+  return extractVideoFrameJpeg(uri, {
+    timeMs: 0,
+    quality: VIDEO_POSTER_FEED_JPEG_QUALITY,
+  });
 }
 
 async function generateAndUploadVideoThumb(params: {
@@ -171,10 +168,11 @@ async function generateAndUploadVideoThumb(params: {
       typeof params.durationSec === 'number' && Number.isFinite(params.durationSec) && params.durationSec > 1
         ? Math.floor(params.durationSec * 0.2 * 1000)
         : 0;
-    const { uri: thumbUri } = await VideoThumbnails.getThumbnailAsync(params.localPath, {
-      time: timeMs,
-      quality: 0.7,
+    const thumbUri = await extractVideoFrameJpeg(params.localPath, {
+      timeMs,
+      quality: VIDEO_POSTER_PRINT_JPEG_QUALITY,
     });
+    if (!thumbUri) return null;
     const ts = Date.now();
     const filePath = `${params.userId}/${params.childId}/derived/video_thumb_${ts}.jpg`;
     const { bytes, size } = await readBytes(thumbUri);
@@ -1733,23 +1731,6 @@ export async function uploadMedia({
       const mediaPathLocal = feedPath ?? src;
 
       let thumbDest: string | null = null;
-      try {
-        const { uri: thumbTmp } = await VideoThumbnails.getThumbnailAsync(mediaPathLocal, {
-          time: 0,
-          quality: 0.7,
-        });
-        if (thumbTmp?.trim() && documentDirectory) {
-          const dir = `${documentDirectory}petitmo_memories/${memoryId}/`;
-          await makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
-          thumbDest = `${dir}poster.jpg`;
-          await copyAsync({ from: thumbTmp.trim(), to: thumbDest }).catch(() => {
-            thumbDest = null;
-          });
-        }
-      } catch {
-        thumbDest = null;
-      }
-
       setFeedBootstrapVideoUri(memoryId, mediaPathLocal);
 
       const mem: Memory = {
@@ -1803,6 +1784,44 @@ export async function uploadMedia({
       if (!suppressFeedEmit) {
         DeviceEventEmitter.emit('petitmo:memories-inserted', { memories: [mem] });
       }
+
+      /** Poster après interactions : le décodage vidéo ne doit pas figer le fil à l’insert. */
+      InteractionManager.runAfterInteractions(() => {
+        setTimeout(() => {
+          void (async () => {
+            try {
+              const { feedPath, printPath } = await persistDefaultVideoPostersAtImport({
+                memoryId,
+                videoUri: mediaPathLocal,
+              });
+              if (!feedPath && !printPath) return;
+              const cur = getLocalMemoryById(memoryId);
+              if (!cur) return;
+              upsertLocalMemory({
+                ...cur,
+                ...(feedPath
+                  ? {
+                      thumbnail_url: feedPath,
+                      poster_url: feedPath,
+                      local_thumb_path: feedPath,
+                    }
+                  : {}),
+                ...(printPath
+                  ? {
+                      local_poster_print_path: printPath,
+                      poster_print_url: printPath,
+                    }
+                  : {}),
+                updated_at: new Date().toISOString(),
+              });
+              DeviceEventEmitter.emit('petitmo:memories-invalidate');
+            } catch {
+              /* ignore */
+            }
+          })();
+        }, 320);
+      });
+
       void syncCloudVideoMemoryInBackground({
         memoryId,
         childId,

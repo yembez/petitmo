@@ -3,11 +3,11 @@ import { CAPTURE_SCREEN_ACCENT, CAPTURE_SCREEN_BG } from '@/constants/captureScr
 /** Rosé charte — couleur d’accent / CTA / marque (remplace ardoise + terracotta). */
 const BRAND_PRIMARY = '#FC5757';
 const BRAND_PRIMARY_RGB = '252, 87, 87';
-/** Corail brique — fond splash natif (`app.json` `splash.backgroundColor`), adaptive icon. */
-const BRAND_SPLASH_BRICK = '#D9683A';
-/** Orange CTA — disques Capturer, onglet actif tab bar, accents chaleureux. */
+/** Orange CTA charte — splash natif, adaptive icon, disques Capturer, tab bar. */
 const BRAND_CTA_ORANGE = '#FF7F4F';
 const BRAND_CTA_ORANGE_RGB = '255, 127, 79';
+/** @deprecated — utiliser `BRAND_CTA_ORANGE` (splash + icône alignés sur la charte). */
+const BRAND_SPLASH_BRICK = BRAND_CTA_ORANGE;
 /** Gris — CTA secondaires (paywall, livres, modales, favoris, memory-view…). */
 const BRAND_CTA_GRAY = '#51545E';
 const BRAND_CTA_GRAY_RGB = '81, 84, 94';
@@ -35,7 +35,7 @@ export const THEME = {
 
   /** Couleur de marque — CTA, cœurs favoris, paywall, spinners d’accent… */
   brandPrimary: BRAND_PRIMARY,
-  /** Fond splash (Expo / Android / iOS) — corail brique, distinct du rosé `brandPrimary`. */
+  /** Fond splash (Expo / Android / iOS) — orange charte (`brandCtaOrange`). */
   splashScreenBackground: BRAND_SPLASH_BRICK,
   /** Orange CTA charte — disques Capturer, tab bar active, point âge / cœur titre… */
   brandCtaOrange: BRAND_CTA_ORANGE,

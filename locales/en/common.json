@@ -2,5 +2,36 @@
   "back": "Back",
   "cancel": "Cancel",
   "ok": "OK",
-  "error": "Error"
+  "error": "Error",
+  "auth": {
+    "signupTitle": "Create your Petitmo space",
+    "signupSubtitle": "A free account to save your memories and find them on another device. Next, you’ll add your child’s profile.",
+    "loginTitle": "Welcome back",
+    "loginSubtitle": "Sign in to restore your saved memories.",
+    "signupCta": "Create my account",
+    "loginCta": "Sign in",
+    "continueGoogle": "Continue with Google",
+    "continueApple": "Continue with Apple",
+    "orEmail": "or with email",
+    "email": "Email",
+    "password": "Password",
+    "forgotPassword": "Forgot password?",
+    "forgotNeedEmail": "Enter your email address first.",
+    "forgotSentTitle": "Email sent",
+    "forgotSentBody": "If an account exists for this address, you will receive a reset link.",
+    "confirmEmailTitle": "Check your inbox",
+    "confirmEmailBody": "Email confirmation may be required depending on configuration. You can sign in afterwards.",
+    "switchToLogin": "Already have an account — sign in",
+    "switchToSignup": "No account yet — create one"
+  },
+  "parent": {
+    "report": {
+      "cta": "Report a problem",
+      "openedTitle": "Thank you",
+      "openedBody": "An email draft includes technical details. Describe what happened, then send.",
+      "fallbackTitle": "Technical details ready",
+      "fallbackBody": "Could not open Mail. Email contact@petitmo.app with the shared technical block.",
+      "failed": "Could not prepare the report. Try again or email contact@petitmo.app."
+    }
+  }
 }

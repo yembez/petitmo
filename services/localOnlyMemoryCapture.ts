@@ -14,7 +14,7 @@ import {
   setFeedBootstrapDisplayUrls,
   setFeedBootstrapVideoUri,
 } from '@/services/feedLocalPhotoCache';
-import * as VideoThumbnails from 'expo-video-thumbnails';
+import { persistDefaultVideoPostersAtImport } from '@/services/videoPosterLocal';
 
 export type LocalCaptureMediaType = 'photo' | 'video' | 'voice';
 
@@ -33,18 +33,6 @@ async function readBytesSize(uri: string): Promise<number> {
   const file = new FileSystem.File(uri);
   const b = await file.bytes();
   return b.length;
-}
-
-async function createVideoThumbnailJpeg(uri: string): Promise<string | null> {
-  try {
-    const { uri: thumbUri } = await VideoThumbnails.getThumbnailAsync(uri, {
-      time: 0,
-      quality: 0.7,
-    });
-    return thumbUri;
-  } catch {
-    return null;
-  }
 }
 
 function emptyMemoryShell(params: {
@@ -245,16 +233,11 @@ export async function captureMemoryLocalOnly(params: {
     const src = (localOriginalUri ?? uri).trim();
     const size = await readBytesSize(src).catch(() => 0);
     const feedPath = await persistFeedLocalVideo(id, uri);
-    const thumbTmp = await createVideoThumbnailJpeg(feedPath ?? src);
-    let thumbDest: string | null = null;
-    if (thumbTmp?.trim() && documentDirectory) {
-      const dir = `${documentDirectory}petitmo_memories/${id}/`;
-      await makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
-      thumbDest = `${dir}poster.jpg`;
-      await copyAsync({ from: thumbTmp, to: thumbDest }).catch(() => {
-        thumbDest = null;
-      });
-    }
+    const mediaPathLocal = feedPath ?? src;
+    const { feedPath: thumbDest, printPath } = await persistDefaultVideoPostersAtImport({
+      memoryId: id,
+      videoUri: mediaPathLocal,
+    });
     const mem = emptyMemoryShell({
       id,
       childId,
@@ -264,7 +247,6 @@ export async function captureMemoryLocalOnly(params: {
       insertedAt,
       location: locationLabel,
     });
-    const mediaPathLocal = feedPath ?? src;
     setFeedBootstrapVideoUri(id, mediaPathLocal);
     mem.local_media_path = mediaPathLocal;
     mem.local_original_path = localOriginalUri;
@@ -273,6 +255,9 @@ export async function captureMemoryLocalOnly(params: {
     mem.file_size = size;
     mem.thumbnail_url = thumbDest;
     mem.poster_url = thumbDest;
+    mem.local_thumb_path = thumbDest;
+    mem.local_poster_print_path = printPath;
+    mem.poster_print_url = printPath;
     return stampLibraryAsset(mem);
   }
 

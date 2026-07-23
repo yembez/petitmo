@@ -13,6 +13,8 @@ import {
   ScrollView,
   useWindowDimensions,
   DeviceEventEmitter,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from 'react-native';
 import { useSafeAreaInsets, useSafeAreaFrame } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -302,6 +304,9 @@ function CapturerScreen() {
   const [isLoading, setIsLoading] = useState(() => child === null);
   const childRef = useRef<Child | null>(null);
   childRef.current = child;
+  const captureScrollRef = useRef<ScrollView>(null);
+  const captureScrollYRef = useRef(0);
+  const captureScrollMaxYRef = useRef(0);
 
   const heroDisplayUri = child
     ? resolveChildProfileImageDisplayUri(
@@ -362,6 +367,8 @@ function CapturerScreen() {
 
   const activeOpacity = useRef(new Animated.Value(1)).current;
   const activeTranslateY = useRef(new Animated.Value(0)).current;
+  /** Skip fade/slide on cold start — only animate when switching child afterwards. */
+  const skipCaptureEnterAnimOnceRef = useRef(true);
 
   const handleCaptureCtaPress = useCallback(
     (route: CaptureRoute) => {
@@ -400,7 +407,46 @@ function CapturerScreen() {
     [router],
   );
 
+  /** Soft snap : 2 positions (haut hero / bas CTA), retour amorti. */
+  const captureSettlingRef = useRef(false);
+  const settleCaptureScroll = useCallback(() => {
+    if (captureSettlingRef.current) return;
+    const y = captureScrollYRef.current;
+    const maxY = captureScrollMaxYRef.current;
+    if (maxY <= 8) {
+      if (y > 1) {
+        captureSettlingRef.current = true;
+        captureScrollRef.current?.scrollTo({ y: 0, animated: true });
+        setTimeout(() => {
+          captureSettlingRef.current = false;
+        }, 420);
+      }
+      return;
+    }
+    const mid = maxY * 0.45;
+    const target = y < mid ? 0 : maxY;
+    if (Math.abs(y - target) < 3) return;
+    captureSettlingRef.current = true;
+    captureScrollRef.current?.scrollTo({ y: target, animated: true });
+    setTimeout(() => {
+      captureSettlingRef.current = false;
+    }, 420);
+  }, []);
+
+  const onCaptureScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    captureScrollYRef.current = e.nativeEvent.contentOffset.y;
+  }, []);
+
+  const captureViewportHRef = useRef(0);
+
   useEffect(() => {
+    if (!child?.id) return;
+    if (skipCaptureEnterAnimOnceRef.current) {
+      skipCaptureEnterAnimOnceRef.current = false;
+      activeOpacity.setValue(1);
+      activeTranslateY.setValue(0);
+      return;
+    }
     activeOpacity.setValue(0.92);
     activeTranslateY.setValue(4);
     Animated.parallel([
@@ -508,13 +554,26 @@ function CapturerScreen() {
         ]}
       >
         <ScrollView
+          ref={captureScrollRef}
           style={styles.captureScroll}
           contentContainerStyle={[
             styles.captureScrollContent,
             { paddingBottom: captureBottomReserve + verticalScale(20) },
           ]}
           showsVerticalScrollIndicator={false}
-          bounces={false}
+          bounces
+          alwaysBounceVertical
+          decelerationRate="normal"
+          scrollEventThrottle={16}
+          onScroll={onCaptureScroll}
+          onLayout={e => {
+            captureViewportHRef.current = e.nativeEvent.layout.height;
+          }}
+          onContentSizeChange={(_w, h) => {
+            captureScrollMaxYRef.current = Math.max(0, h - captureViewportHRef.current);
+          }}
+          onScrollEndDrag={settleCaptureScroll}
+          onMomentumScrollEnd={settleCaptureScroll}
         >
           <View style={{ paddingTop: insets.top + verticalScale(8) }}>
             <View style={styles.capturePageHeader}>
@@ -1032,6 +1091,11 @@ function CaptureHeroImageStack({
   isTabFocused,
 }: CaptureHeroImageStackProps & { isTabFocused: boolean }) {
   const breatheScale = useRef(new Animated.Value(CAPTURE_HERO_BREATHE_MIN)).current;
+  const [imageReady, setImageReady] = useState(false);
+
+  useEffect(() => {
+    setImageReady(false);
+  }, [photoUri, imageRevision, reactKey]);
 
   useEffect(() => {
     breatheScale.setValue(CAPTURE_HERO_BREATHE_MIN);
@@ -1060,13 +1124,12 @@ function CaptureHeroImageStack({
   }, [reactKey, breatheScale, isTabFocused]);
 
   /**
-   * Pas de ColorMatrix ici : avec ExpoImage il flashait une miniature en bas à gauche
-   * à chaque focus de l’onglet (taille intrinsèque hors layout).
+   * ExpoImage peut peindre 1 frame à taille intrinsèque (miniature bas-gauche)
+   * avant le layout cover — on masque jusqu’à `onLoad`.
    */
   return (
     <View style={[StyleSheet.absoluteFillObject, styles.heroImageClip]} pointerEvents="box-none" collapsable={false}>
       <Animated.View
-        key={reactKey}
         style={[StyleSheet.absoluteFillObject, { transform: [{ scale: breatheScale }] }]}
         collapsable={false}
       >
@@ -1080,13 +1143,18 @@ function CaptureHeroImageStack({
         ) : (
           <ExpoImage
             source={{ uri: photoUri }}
-            style={[StyleSheet.absoluteFillObject, styles.heroImageCover]}
+            style={[
+              StyleSheet.absoluteFillObject,
+              styles.heroImageCover,
+              { opacity: imageReady ? 1 : 0 },
+            ]}
             contentFit="cover"
             contentPosition={CAPTURE_HERO_IMAGE_CONTENT_POSITION}
             cachePolicy="memory-disk"
             recyclingKey={`${reactKey}-${imageRevision}`}
             priority="high"
             transition={0}
+            onLoad={() => setImageReady(true)}
             accessibilityIgnoresInvertColors
           />
         )}

@@ -148,7 +148,7 @@ import {
 import { buildFavorisGridItems } from '@/utils/favorisGridItems';
 import { FavoriteCoverPickerTile } from '@/components/FavoriteCoverPickerTile';
 import { getAllLocalMemories } from '@/lib/localDb';
-import { hasReadableBookVideoPoster, peekSyncBookVideoPosterDisplayUri } from '@/utils/bookVideoPosterUri';
+import { peekSyncBookVideoPosterDisplayUri } from '@/utils/bookVideoPosterUri';
 import { runBookExportPrepInBackground } from '@/services/bookExportPrep';
 import { getBookExportPrepIssues } from '@/services/bookExportPrep';
 import {
@@ -1035,27 +1035,30 @@ export default function BookPreviewScreen() {
   }, [bookMemories]);
 
   const videoPosterBackfillRef = useRef(new Set<string>());
-  /** Souvenirs vidéo : génère `poster.jpg` si aucune vignette lisible (pas seulement colonne SQLite remplie). */
+  /**
+   * Souvenirs vidéo du livre : `poster_print.jpg` à 3200 px (sinon badge ~147 DPI sur frame 1080p).
+   * Clé = id + updated_at pour re-tenter après choix de frame / upscale.
+   */
   useEffect(() => {
     for (const m of bookMemories) {
       if (m.type !== 'video') continue;
-      if (videoPosterBackfillRef.current.has(m.id)) continue;
-      void hasReadableBookVideoPoster(m).then(readable => {
-        if (readable) return;
-        if (videoPosterBackfillRef.current.has(m.id)) return;
-        videoPosterBackfillRef.current.add(m.id);
-        void awaitVideoPosterForBookMemory(m.id).then(updated => {
-          if (!updated) {
-            videoPosterBackfillRef.current.delete(m.id);
-            return;
-          }
-          void hasReadableBookVideoPoster(updated).then(ok => {
-            if (!ok) {
-              videoPosterBackfillRef.current.delete(m.id);
-              return;
-            }
-            setBookMemories(prev => prev.map(x => (x.id === updated.id ? updated : x)));
-          });
+      const verifyKey = `${m.id}:${m.updated_at ?? ''}:${m.local_poster_print_path ?? ''}`;
+      if (videoPosterBackfillRef.current.has(verifyKey)) continue;
+      videoPosterBackfillRef.current.add(verifyKey);
+      void awaitVideoPosterForBookMemory(m.id).then(updated => {
+        if (!updated) {
+          videoPosterBackfillRef.current.delete(verifyKey);
+          return;
+        }
+        const printChanged =
+          (updated.local_poster_print_path ?? '') !== (m.local_poster_print_path ?? '') ||
+          (updated.poster_print_url ?? '') !== (m.poster_print_url ?? '') ||
+          (updated.updated_at ?? '') !== (m.updated_at ?? '');
+        if (!printChanged) return;
+        setBookMemories(prev => prev.map(x => (x.id === updated.id ? updated : x)));
+        setCropDpiMetaByKey(prev => {
+          const { [updated.id]: _drop, ...rest } = prev;
+          return rest;
         });
       });
     }
@@ -1097,7 +1100,7 @@ export default function BookPreviewScreen() {
           next[idx] = local;
           return next;
         });
-        if (local.type === 'voice') {
+        if (local.type === 'voice' || local.type === 'video') {
           setCropDpiMetaByKey(prev => {
             if (!prev[memoryId]) return prev;
             const { [memoryId]: _drop, ...rest } = prev;
@@ -1252,10 +1255,13 @@ export default function BookPreviewScreen() {
           : mem &&
               (payload.pageType === 'photo-full' ||
                 payload.pageType === 'photo-note' ||
-                payload.pageType === 'audio')
+                payload.pageType === 'audio' ||
+                payload.pageType === 'video')
             ? mem.type === 'voice'
               ? (mem.local_print_path ?? '').trim() || null
-              : getBookPhotoPrintUri(mem, pagePhotoRef).trim() || null
+              : mem.type === 'video'
+                ? peekSyncBookVideoPosterDisplayUri(mem).trim() || null
+                : getBookPhotoPrintUri(mem, pagePhotoRef).trim() || null
             : null;
 
       // DPI = pixels du fichier **print** envoyé à l’impression — jamais le display éditeur.
@@ -1280,16 +1286,33 @@ export default function BookPreviewScreen() {
       };
 
       if (mem) {
-        const printPx = getBookPhotoPrintPixelSize(mem, photoRefForDpi);
-        if (printPx) considerDpiPx(printPx.w, printPx.h);
+        // Vidéo : jamais `print_px` / candidats photo — uniquement le poster affiché.
+        if (payload.pageType !== 'video') {
+          const printPx = getBookPhotoPrintPixelSize(mem, photoRefForDpi);
+          if (printPx) considerDpiPx(printPx.w, printPx.h);
+        }
       }
 
-      for (const printUri of dpiUriCandidates) {
-        try {
-          const px = await getImagePx(printUri);
-          considerDpiPx(px.w, px.h);
-        } catch {
-          /* essai suivant */
+      if (payload.pageType === 'video') {
+        const posterCandidates = [payload.uri, bookPrintUri].filter(
+          (u): u is string => typeof u === 'string' && u.trim().length > 0,
+        );
+        for (const printUri of posterCandidates) {
+          try {
+            const px = await getImagePx(printUri);
+            considerDpiPx(px.w, px.h);
+          } catch {
+            /* essai suivant */
+          }
+        }
+      } else {
+        for (const printUri of dpiUriCandidates) {
+          try {
+            const px = await getImagePx(printUri);
+            considerDpiPx(px.w, px.h);
+          } catch {
+            /* essai suivant */
+          }
         }
       }
 
@@ -1595,9 +1618,23 @@ export default function BookPreviewScreen() {
     return () => sub.remove();
   }, [unlockAndBack]);
 
-  const merge = useCallback((m: Memory) => m, []);
   const bookMemoriesRef = useRef(bookMemories);
   bookMemoriesRef.current = bookMemories;
+
+  const merge = useCallback((m: Memory) => {
+    return bookMemoriesRef.current.find(x => x.id === m.id) ?? m;
+  }, []);
+
+  const bookMediaRevision = useMemo(
+    () =>
+      bookMemories
+        .map(
+          m =>
+            `${m.id}:${m.updated_at ?? ''}:${m.local_poster_print_path ?? ''}:${m.poster_print_url ?? ''}:${m.voice_cover_path ?? ''}`,
+        )
+        .join('|'),
+    [bookMemories],
+  );
   const bulkPortraitPrefetchKeyRef = useRef<string | null>(null);
 
   /** Prefetch images browse — une fois par livre, étalé pour ne pas bloquer le scroll. */
@@ -1712,6 +1749,11 @@ export default function BookPreviewScreen() {
         if (!uri) return null;
         return { storageKey: m.id, uri, pageType: 'audio' as const };
       }
+      if (page.type === 'video') {
+        const uri = peekSyncBookVideoPosterDisplayUri(m).trim();
+        if (!uri) return null;
+        return { storageKey: m.id, uri, pageType: 'video' as const };
+      }
       return null;
     },
     [bookSnapshot?.memoryPhotoRefs, coverPhotoDisplayUri, merge, bookMemories]
@@ -1724,6 +1766,16 @@ export default function BookPreviewScreen() {
     const payload = cropDpiPayloadForPageRow(row);
     if (payload) prefetchCropDpiMeta(payload);
   }, [cropDpiPayloadForPageRow, editorOpen, editorPageIndex, pageRows, prefetchCropDpiMeta]);
+
+  /** Spread browse : mesurer les posters A/V pour appliquer crop sans bandeau gris. */
+  useEffect(() => {
+    if (editorOpen || pageRows.length === 0) return;
+    for (const row of pageRows) {
+      if (row.page.type !== 'audio' && row.page.type !== 'video') continue;
+      const payload = cropDpiPayloadForPageRow(row);
+      if (payload) prefetchCropDpiMeta(payload);
+    }
+  }, [cropDpiPayloadForPageRow, editorOpen, pageRows, prefetchCropDpiMeta, bookMediaRevision]);
 
   const renderMaquettePage = useCallback(
     (row: PageRow): ReactElement => {
@@ -1746,10 +1798,15 @@ export default function BookPreviewScreen() {
           memoryPhotoRef={photoRefFromBookPage(page, m?.id, bookSnapshot?.memoryPhotoRefs)}
           rotation={rot}
           photoCrop={
-            page.type === 'photo-full' || page.type === 'photo-note' || page.type === 'audio'
+            page.type === 'photo-full' ||
+            page.type === 'photo-note' ||
+            page.type === 'audio' ||
+            page.type === 'video'
               ? photoCrops[m?.id ?? '']
               : undefined
           }
+          photoImgPxW={m ? cropDpiMetaByKey[m.id]?.imgPxW : undefined}
+          photoImgPxH={m ? cropDpiMetaByKey[m.id]?.imgPxH : undefined}
           truncated={false}
           coverYearLabel={coverYearLabel}
           coverDisplayTitle={page.type === 'cover' ? coverDisplayTitle : undefined}
@@ -1966,6 +2023,7 @@ export default function BookPreviewScreen() {
           chapterTitleLine={chapterTitleLine}
           coverPhotoBrowseUri={coverPhotoBrowseUri}
           cropDpiMetaCover={coverCropDpiMetaForBrowse}
+          cropDpiMetaByKey={cropDpiMetaByKey}
           photoCrops={photoCrops}
           rotations={rotations}
           typography={maquetteTypography}
@@ -1983,6 +2041,7 @@ export default function BookPreviewScreen() {
       coverPhotoBrowseUri,
       coverTitleLine,
       coverYearLabel,
+      cropDpiMetaByKey,
       familyChildren,
       getMemoryForPage,
       maquetteTypography,
@@ -2076,6 +2135,7 @@ export default function BookPreviewScreen() {
           chapterTitleLine={chapterTitleLine}
           coverPhotoBrowseUri={coverPhotoBrowseUri}
           cropDpiMetaCover={coverCropDpiMetaForBrowse}
+          cropDpiMetaByKey={cropDpiMetaByKey}
           photoCrops={photoCrops}
           rotations={rotations}
           typography={maquetteTypography}
@@ -2098,6 +2158,7 @@ export default function BookPreviewScreen() {
       coverTitleLine,
       coverYearLabel,
       dm400,
+      cropDpiMetaByKey,
       bookSnapshot?.memoryPhotoRefs,
       familyChildren,
       getMemoryForPage,
@@ -2380,6 +2441,31 @@ export default function BookPreviewScreen() {
               scale: cropScale,
             });
             const label = `Audio — illustration (${dpi} DPI)`;
+            if (dpi > 0 && dpi < 200) blocks.push(label);
+            else if (dpi > 0 && dpi < 240) warns.push(label);
+          } catch {
+            // ignore
+          }
+        }
+
+        for (const p of pages) {
+          if (p.type !== 'video') continue;
+          const m = p.memory;
+          if (m.type !== 'video') continue;
+          const posterUri = peekSyncBookVideoPosterDisplayUri(m).trim();
+          if (!posterUri) continue;
+          try {
+            const { w, h } = await getImagePx(posterUri);
+            const cropScale = Math.max(1, photoCrops[m.id]?.scale ?? 1);
+            const { w: mmW, h: mmH } = bookPrintFrameMmFor('video');
+            const dpi = effectiveBookPhotoPrintDpi({
+              imgPxW: w,
+              imgPxH: h,
+              printMmW: mmW,
+              printMmH: mmH,
+              scale: cropScale,
+            });
+            const label = `Vidéo — image (${dpi} DPI)`;
             if (dpi > 0 && dpi < 200) blocks.push(label);
             else if (dpi > 0 && dpi < 240) warns.push(label);
           } catch {
@@ -2841,6 +2927,7 @@ export default function BookPreviewScreen() {
           data={spreadRows}
           keyExtractor={(_, i) => i.toString()}
           renderItem={renderSpreadItem as any}
+          extraData={bookMediaRevision}
           horizontal
           pagingEnabled
           decelerationRate="fast"
@@ -2865,6 +2952,7 @@ export default function BookPreviewScreen() {
           data={spreadRows}
           keyExtractor={(_, i) => i.toString()}
           renderItem={renderPortraitSpreadItem as any}
+          extraData={bookMediaRevision}
           showsVerticalScrollIndicator={false}
           style={[styles.list, styles.browseList]}
           contentContainerStyle={[
@@ -3112,6 +3200,7 @@ export default function BookPreviewScreen() {
               const fresh = getLocalMemoryById(updated.id) ?? updated;
               setBookMemories(prev => prev.map(x => (x.id === fresh.id ? fresh : x)));
               setVideoPosterPickerMemory(null);
+              DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId: fresh.id });
             }}
           />
 

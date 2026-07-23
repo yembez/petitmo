@@ -471,9 +471,7 @@ function pageMediaQr(
   const audioImgStyle = photoCropImgStyle(crop, cropImgPxW, cropImgPxH, frameWmm, frameHmm, rotCss);
 
   const visualInner = visualUrl
-    ? kind === 'audio'
-      ? `<div class="crop-frame" style="width:100%;height:100%;"><img class="crop-img" src="${visualUrl}" alt="" style="${audioImgStyle}" /></div>`
-      : `<img src="${visualUrl}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;" />`
+    ? `<div class="crop-frame" style="width:100%;height:100%;"><img class="crop-img" src="${visualUrl}" alt="" style="${audioImgStyle}" /></div>`
     : mediaQrVisualFallbackHtml(kind, m.id);
 
   return `<div class="page media-qr media-qr-${kind} audio-note-layout">
@@ -521,9 +519,13 @@ function pageVideo(
   m: MemoryRow,
   qrUrl: string,
   pageNum: number,
-  birthdate: string | null | undefined
+  rot: number,
+  crop: PhotoCrop | undefined,
+  birthdate: string | null | undefined,
+  cropImgPxW?: number,
+  cropImgPxH?: number,
 ): string {
-  return pageMediaQr('video', m, qrUrl, pageNum, 0, undefined, birthdate);
+  return pageMediaQr('video', m, qrUrl, pageNum, rot, crop, birthdate, cropImgPxW, cropImgPxH);
 }
 
 function pageBackCover(pageNum: number): string {
@@ -667,7 +669,7 @@ function renderPage(page: BookPageServer, input: BuildBookHtmlInput, pageNum: nu
         case 'video': {
           const tok = qrTokensByMemoryId.get(id) ?? '';
           const qrTarget = tok ? `${qrBaseUrl}/${tok}` : '';
-          return pageVideo(m, qrTarget, pageNum, birthdate);
+          return pageVideo(m, qrTarget, pageNum, rot, crop, birthdate, page.cropImgPxW, page.cropImgPxH);
         }
         default:
           return '';

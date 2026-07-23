@@ -39,6 +39,7 @@ type BookSpreadSlideProps = {
   chapterTitleLine: string | null;
   coverPhotoBrowseUri: string | null;
   cropDpiMetaCover?: { imgPxW: number; imgPxH: number };
+  cropDpiMetaByKey?: Record<string, { imgPxW: number; imgPxH: number }>;
   photoCrops: Record<string, PhotoCrop>;
   rotations: Record<string, number>;
   typography: BookMaquetteTypography;
@@ -57,6 +58,7 @@ function SpreadMaquettePage({
   chapterTitleLine,
   coverPhotoBrowseUri,
   cropDpiMetaCover,
+  cropDpiMetaByKey,
   photoCrops,
   rotations,
   typography,
@@ -73,6 +75,7 @@ function SpreadMaquettePage({
   chapterTitleLine: string | null;
   coverPhotoBrowseUri: string | null;
   cropDpiMetaCover?: { imgPxW: number; imgPxH: number };
+  cropDpiMetaByKey?: Record<string, { imgPxW: number; imgPxH: number }>;
   photoCrops: Record<string, PhotoCrop>;
   rotations: Record<string, number>;
   typography: BookMaquetteTypography;
@@ -83,6 +86,7 @@ function SpreadMaquettePage({
   const mem = memoryForMaquette(row.page, getMemoryForPage(row.page));
   const needsQr = row.page.type === 'audio' || row.page.type === 'video';
   const qrUrl = useBookQrUrl(needsQr ? mem?.id : undefined);
+  const dpi = mem ? cropDpiMetaByKey?.[mem.id] : undefined;
 
   return (
     <View style={[styles.spreadPageCenter, { width: dims.width, height: dims.height }]}>
@@ -107,10 +111,13 @@ function SpreadMaquettePage({
           mem &&
           (row.page.type === 'photo-full' ||
             row.page.type === 'photo-note' ||
-            row.page.type === 'audio')
+            row.page.type === 'audio' ||
+            row.page.type === 'video')
             ? photoCrops[mem.id]
             : undefined
         }
+        photoImgPxW={dpi?.imgPxW}
+        photoImgPxH={dpi?.imgPxH}
         truncated={false}
         coverYearLabel={coverYearLabel}
         coverDisplayTitle={
@@ -141,6 +148,7 @@ function BookSpreadSlideInner({
   chapterTitleLine,
   coverPhotoBrowseUri,
   cropDpiMetaCover,
+  cropDpiMetaByKey,
   photoCrops,
   rotations,
   typography,
@@ -161,6 +169,7 @@ function BookSpreadSlideInner({
     chapterTitleLine,
     coverPhotoBrowseUri,
     cropDpiMetaCover,
+    cropDpiMetaByKey,
     photoCrops,
     rotations,
     typography,
@@ -218,6 +227,7 @@ function spreadSlidePropsEqual(a: BookSpreadSlideProps, b: BookSpreadSlideProps)
   ) {
     return false;
   }
+  if (a.cropDpiMetaByKey !== b.cropDpiMetaByKey) return false;
   if (a.photoCrops !== b.photoCrops || a.rotations !== b.rotations) return false;
   if (a.typography !== b.typography) return false;
   if (a.memoryPhotoRefs !== b.memoryPhotoRefs) return false;

@@ -621,7 +621,6 @@ const styles = StyleSheet.create({
   textTitle: {
     width: '100%',
     fontSize: scale(18),
-    fontWeight: '700',
     color: '#1C1C1E',
     lineHeight: scale(25),
     marginBottom: verticalScale(12),
@@ -632,7 +631,6 @@ const styles = StyleSheet.create({
     width: '100%',
     alignSelf: 'stretch',
     fontSize: scale(16),
-    fontWeight: '400',
     color: '#1C1C1E',
     lineHeight: FEED_TEXT_BODY_LINE_HEIGHT,
     textAlign: 'justify',

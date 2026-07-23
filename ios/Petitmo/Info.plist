@@ -39,6 +39,14 @@
           <string>exp+petitmo</string>
         </array>
       </dict>
+      <dict>
+        <key>CFBundleURLName</key>
+        <string>GoogleSignIn</string>
+        <key>CFBundleURLSchemes</key>
+        <array>
+          <string>com.googleusercontent.apps.267645460430-h8or3fe0qnm6f4gd72g3nije4qg196se</string>
+        </array>
+      </dict>
     </array>
     <key>CFBundleVersion</key>
     <string>1</string>

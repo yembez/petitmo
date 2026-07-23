@@ -1,8 +1,10 @@
-# Architecture Petitmo — Local-first (gratuit) vs Cloud (Petitmo+)
+# Architecture Petitmo — Local-first vs Cloud
 
-> Référence canonique. À citer dans les commits / PR / décisions produit
-> sous la forme : `voir docs/specs/architecture-locale-cloud.md`.
-> La forme courte pour les agents IA est dans [`AGENTS.md`](../../AGENTS.md).
+> **⚠️ Superseeded en partie (2026-07-22)** : la **règle d’or V2** (compte gratuit + sync cloud limitée) est dans [`AGENTS.md`](../../AGENTS.md) et [`.cursor/rules/architecture.mdc`](../../.cursor/rules/architecture.mdc).  
+> **En cas de conflit, `AGENTS.md` prime.** Ce document conserve encore des sections « gratuit sans compte / local-only » — à réécrire (chantier doc).  
+> Remise print Petitmo+ = **−10 %** (pas 15 %).
+
+> Ancienne intro : référence canonique locale vs cloud. La forme courte agents = `AGENTS.md`.
 
 ---
 

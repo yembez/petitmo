@@ -5,29 +5,31 @@ import { THEME } from '@/constants/theme';
 import { listLocalChildren } from '@/lib/localDb';
 import { getChildren } from '@/services/children';
 import { hydrateTabScreensFromSqliteSync } from '@/services/tabScreensHydrate';
+import { hasRealAuthAccount } from '@/lib/authAccount';
 
 /**
- * Règle d'or (cf. AGENTS.md / docs/specs/architecture-locale-cloud.md) :
- * la décision de redirection initiale ne doit dépendre QUE du local
- * (SQLite) — jamais d'un check Supabase. Les deux modes (gratuit / Petitmo+)
- * passent par `/onboarding` s'il n'y a pas encore d'enfant local ; l'écran
- * d'accueil propose ensuite "Commencer" (gratuit) ou "J'ai un compte
- * Petitmo+" (restauration cloud).
+ * Règle d'or V2 : compte d’abord, puis enfant.
+ * Pas de compte → onboarding. Compte sans enfant → create-child. Sinon tabs.
  */
 export default function Index() {
   const [hasChild, setHasChild] = useState(() => {
     hydrateTabScreensFromSqliteSync();
     return listLocalChildren().length > 0;
   });
-  const [isChecking, setIsChecking] = useState(() => listLocalChildren().length === 0);
+  const [hasAccount, setHasAccount] = useState(false);
+  const [isChecking, setIsChecking] = useState(true);
 
   useEffect(() => {
-    if (!isChecking) return;
-    void getChildren().then(children => {
+    void (async () => {
+      const [accountOk, children] = await Promise.all([
+        hasRealAuthAccount(),
+        getChildren(),
+      ]);
+      setHasAccount(accountOk);
       setHasChild(children.length > 0);
       setIsChecking(false);
-    });
-  }, [isChecking]);
+    })();
+  }, []);
 
   if (isChecking) {
     return (
@@ -37,7 +39,13 @@ export default function Index() {
     );
   }
 
-  return <Redirect href={hasChild ? '/(tabs)' : '/onboarding'} />;
+  if (!hasAccount) {
+    return <Redirect href="/onboarding" />;
+  }
+  if (!hasChild) {
+    return <Redirect href="/create-child" />;
+  }
+  return <Redirect href="/(tabs)" />;
 }
 
 const styles = StyleSheet.create({

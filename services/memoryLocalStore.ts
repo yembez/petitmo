@@ -1,13 +1,10 @@
 import { DeviceEventEmitter, InteractionManager, Platform, Image } from 'react-native';
 import { copyAsync, documentDirectory, makeDirectoryAsync } from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
-import * as VideoThumbnails from 'expo-video-thumbnails';
 import { getLocalMemoryById, upsertLocalMemory } from '@/lib/localDb';
 import { MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH } from '@/lib/limits';
 import type { Memory } from '@/types/local';
 import {
-  collectVideoCloudSyncUriCandidates,
-  collectVideoFeedPosterLocalUriCandidates,
   collectVoiceCoverReadableSourceCandidates,
 } from '@/utils/memoryPhotos';
 import { pickFirstReadableLocalMediaUri } from '@/utils/localMediaReadable';
@@ -17,7 +14,7 @@ import {
   feedMemoriesHydrationSnapshot,
   setFeedHydrationSnapshots,
 } from '@/services/tabScreensCache';
-import { peekFeedBootstrapVideoUri } from '@/services/feedLocalPhotoCache';
+import { ensureVideoPosterPrintForBookMemory } from '@/services/videoPosterLocal';
 
 function safeExtFromUri(uri: string, fallback: string): string {
   const clean = uri.split('?')[0];
@@ -419,82 +416,23 @@ export async function awaitVoiceCoverPrintDerivativeForMemory(memoryId: string):
   }
 }
 
-/** Génère `poster.jpg` si absent — vignette vidéo livre / export PDF. */
+/** Génère `poster.jpg` + `poster_print.jpg` HQ si absents — livre / export PDF. */
 export async function awaitVideoPosterForBookMemory(memoryId: string): Promise<Memory | null> {
+  const next = await ensureVideoPosterPrintForBookMemory(memoryId);
+  if (!next) return null;
+
   const id = memoryId.trim();
-  const cur = getLocalMemoryById(id);
-  if (!cur || cur.type !== 'video') return cur;
-
-  const readablePoster = await pickFirstReadableLocalMediaUri(
-    collectVideoFeedPosterLocalUriCandidates(cur),
-  );
-  if (readablePoster) {
-    const posterNorm = readablePoster.trim();
-    const dbHasSameLocal = [cur.local_thumb_path, cur.poster_url, cur.thumbnail_url]
-      .map(u => (u ?? '').trim())
-      .includes(posterNorm);
-    if (!dbHasSameLocal) {
-      const next: Memory = {
-        ...cur,
-        local_thumb_path: readablePoster,
-        poster_url: readablePoster,
-        thumbnail_url: readablePoster,
-        updated_at: new Date().toISOString(),
-      };
-      upsertLocalMemory(next);
-      DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId: id });
-      return next;
-    }
-    return cur;
+  const snapIdx = feedMemoriesHydrationSnapshot.findIndex(m => m.id === id);
+  if (snapIdx >= 0) {
+    const snapMemories = [...feedMemoriesHydrationSnapshot];
+    snapMemories[snapIdx] = next;
+    setFeedHydrationSnapshots(
+      feedChildHydrationSnapshot,
+      snapMemories,
+      feedBooksHydrationSnapshot,
+    );
   }
-
-  if (Platform.OS === 'web') return cur;
-
-  const videoCandidates = [
-    ...collectVideoCloudSyncUriCandidates(cur).filter(u => !u.endsWith('poster.jpg')),
-    peekFeedBootstrapVideoUri(id) ?? '',
-  ].filter(Boolean);
-  const videoUri = await pickFirstReadableLocalMediaUri(videoCandidates);
-  if (!videoUri) return cur;
-
-  try {
-    const { uri: thumbTmp } = await VideoThumbnails.getThumbnailAsync(videoUri, {
-      time: 0,
-      quality: 0.7,
-    });
-    if (!thumbTmp?.trim() || !documentDirectory) return cur;
-
-    const dir = `${documentDirectory}petitmo_memories/${id}/`;
-    await ensureDir(dir);
-    const thumbDest = `${dir}poster.jpg`;
-    await copyAsync({ from: thumbTmp, to: thumbDest });
-
-    const next: Memory = {
-      ...cur,
-      local_thumb_path: thumbDest,
-      poster_url: thumbDest,
-      thumbnail_url: thumbDest,
-      updated_at: new Date().toISOString(),
-    };
-    upsertLocalMemory(next);
-
-    const snapIdx = feedMemoriesHydrationSnapshot.findIndex(m => m.id === id);
-    if (snapIdx >= 0) {
-      const snapMemories = [...feedMemoriesHydrationSnapshot];
-      snapMemories[snapIdx] = next;
-      setFeedHydrationSnapshots(
-        feedChildHydrationSnapshot,
-        snapMemories,
-        feedBooksHydrationSnapshot,
-      );
-    }
-
-    DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId: id });
-    return next;
-  } catch (e) {
-    console.warn('[memoryLocalStore] awaitVideoPosterForBookMemory', id, e);
-    return cur;
-  }
+  return next;
 }
 
 /** Les 3 dérivés d’un coup — édition photo, export livre, chemins qui exigent print tout de suite. */

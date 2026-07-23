@@ -3,6 +3,11 @@
 > Ce fichier doit être lu en début de session par tout agent IA travaillant sur ce dépôt.
 > Avant tout correctif touchant **import / souvenirs / livres / paywall / auth / sync**,
 > citer la règle d'or ci-dessous et vérifier que la solution la respecte.
+>
+> **Orientation produit V2 (2026-07-22)** : fin du « gratuit sans compte ». Compte gratuit
+> obligatoire + sync cloud limitée. Remise impression Petitmo+ = **10 %** (`PRINT_V1_PAID_DISCOUNT_PERCENT`).
+> Spec longue historique à réaligner : [`docs/specs/architecture-locale-cloud.md`](docs/specs/architecture-locale-cloud.md)
+> (peut encore décrire l’ancien modèle local-only — **ce fichier prime**).
 
 ---
 
@@ -20,39 +25,27 @@ La seule exception possible à terme : un achat web (livre, PDF) hors store — 
 
 ### Initialisation RevenueCat
 
-RevenueCat s'initialise **dès le premier lancement de l'app**, pour toutes les utilisatrices y compris gratuites, en silence total. Il crée un ID anonyme lié à l'appareil sur ses propres serveurs — **aucune écriture Supabase**, aucune donnée personnelle collectée. C'est obligatoire et intentionnel : ne jamais supprimer cette initialisation au prétexte du mode local.
+RevenueCat s'initialise **dès le premier lancement de l'app**, pour toutes les utilisatrices y compris gratuites, en silence total. Il crée un ID anonyme lié à l'appareil sur ses propres serveurs — **aucune écriture Supabase Auth**, aucune donnée personnelle collectée. Dès qu’un compte Supabase existe, appeler **`Purchases.logIn(supabaseUser.id)`**. Ne jamais supprimer cette initialisation.
 
 ---
 
-### Séquence de paiement — ordre non négociable
+### Séquence abonnement — ordre non négociable (compte déjà créé)
+
+Le compte gratuit est créé **pendant l’onboarding** (voir règle d’or). L’abonnement ne crée **pas** le compte :
 
 ```
-1. Paywall s'ouvre
-2. Utilisatrice choisit mensuel / annuel
-3. Apple IAP (StoreKit) gère le paiement
-4. ── PAIEMENT CONFIRMÉ ── ← seul déclencheur de la suite
-5. Écran "Crée ton compte" → Google / Apple / email + mot de passe
-6. Compte Supabase créé
-7. Purchases.logIn(supabaseUser.id) → lie l'achat RevenueCat au compte
-8. Webhook RevenueCat → Edge Function → app_metadata { subscriptionTier: "paid" }
-9. AsyncStorage mis à jour → userTier = 'paid'
-10. Upload silencieux des souvenirs locaux vers Supabase
+1. Utilisatrice déjà authentifiée (compte gratuit)
+2. Paywall s'ouvre
+3. Choix mensuel / annuel
+4. Apple IAP (StoreKit) gère le paiement
+5. ── PAIEMENT CONFIRMÉ ── ← seul déclencheur de la suite
+6. Purchases.logIn(supabaseUser.id) si pas déjà lié
+7. Webhook RevenueCat → Edge Function → app_metadata { subscriptionTier: "paid" }
+8. AsyncStorage mis à jour → userTier = 'paid'
+9. Quotas / features Petitmo+ débloqués (HD cloud, etc.) ; sync déjà active en gratuit
 ```
 
-**Si le paiement échoue :** rien n'est créé côté Supabase, utilisatrice reste sur le paywall.
-**Si elle abandonne :** idem, retour en mode gratuit sans trace.
-
-Le compte Supabase ne se crée **jamais** avant l'étape 4. Tout compte créé avant paiement confirmé est une erreur.
-
----
-
-### Migration des souvenirs locaux au passage payant (étape 10)
-
-- Upload en arrière-plan, sans bloquer la navigation.
-- Afficher pendant l'upload : **"Merci de t'être abonnée 🤍 Nous sécurisons tous tes souvenirs sur petitmo cloud. Merci de ne pas fermer l'app pendant quelques instants."**
-- Ordre d'upload : textes → photos → audios → vidéos (du plus léger au plus lourd).
-- Si coupure réseau : reprendre silencieusement à la reconnexion, sans re-solliciter l'utilisatrice.
-- Volume garanti raisonnable en gratuit : max **50** souvenirs, 5 vidéos de 30s max, 5 audios de 60s max (quotas **fil**). Livre : composition A/V **libre** ; QR facturés au checkout (2 inclus + 0,70 €).
+**Si le paiement échoue ou est abandonné :** l’utilisatrice reste sur le plan gratuit (compte + sync limitée), sans `subscriptionTier=paid`.
 
 ---
 
@@ -60,73 +53,60 @@ Le compte Supabase ne se crée **jamais** avant l'étape 4. Tout compte créé a
 
 **Réponse : option A — `app_metadata` sur `auth.users` dans Supabase.**
 
-C'est la solution standard de l'intégration officielle RevenueCat + Supabase :
 1. RevenueCat envoie un webhook à une Edge Function Supabase à chaque événement (achat, renouvellement, expiration, remboursement).
 2. L'Edge Function met à jour `auth.users.app_metadata` avec `{ "subscriptionTier": "paid" }` (ou `"free"` à l'expiration).
 3. `app_metadata` est accessible dans les RLS policies et côté serveur — jamais modifiable par le client.
 4. L'app lit ce statut via l'API Supabase et le cache en local dans AsyncStorage (`petitmo:userTier`) comme cache UX uniquement.
 
----
-
-## Règle d'or (non négociable)
-
-Petitmo a **deux modes** et **deux modes seulement** :
-
-### 1. MODE LOCAL — plan gratuit, sans compte
-
-- **Ultra simple, zéro friction, instantané, sans inscription obligatoire.**
-- Dès l'install, la maman peut **immédiatement** :
-  - écrire un souvenir texte ;
-  - ajouter une / plusieurs photos ;
-  - enregistrer un audio ;
-  - créer un livre **avec photos, audio et vidéo** (QR cloud **uniquement après commande** livre/PDF en gratuit).
-- **Tout** est stocké :
-  - en **SQLite local** ;
-  - dans le **sandbox / app storage** du téléphone.
-- Conséquences explicites et acceptées :
-  - **aucun cloud**, **aucun backup**, **aucune sync multi-appareil** ;
-  - **si perte du téléphone, les données sont perdues** (assumé produit).
-
-#### Exceptions Supabase autorisées en mode local
-
-Ce sont les **seuls** moments où le mode gratuit écrit en base distante :
-
-1. **Achat PDF / commande livre** (commande / paiement à l'acte).
-2. **Stockage cloud d'un souvenir audio ou vidéo** uniquement pour un **QR code pérenne** dans un livre **commandé ou exporté payé** — pas une sync du fil. Voir [`docs/specs/free-tier-book-qr-av.md`](docs/specs/free-tier-book-qr-av.md).
-
-Aucune autre écriture cloud n'est permise en gratuit. Pas de "petite sync gentille en arrière-plan", pas de backup auto, pas de "au cas où".
-
-### 2. MODE CLOUD — Petitmo+ (abonnement payant)
-
-- **Abonnement = compte** : le paywall vient d'abord, puis la création/lien du compte après paiement réussi — via **Google**, **Apple** ou **email + mot de passe** (dans cet ordre de présentation).
-- À partir de là deviennent possibles :
-  - sync cloud des souvenirs / enfants ;
-  - restauration / changement d'iPhone ;
-  - multi-device ;
-  - QR pérennes (audio **et** vidéo) ;
-  - exports serveur (PDF haute qualité).
+Un compte authentifié **sans** `subscriptionTier=paid` = **plan gratuit** (sync cloud limitée), **pas** « pas de compte ».
 
 ---
 
-## Conséquences UX directes (à respecter sans exception)
+## Règle d'or V2 (non négociable)
 
-- Sur l'écran d'accueil, on peut afficher **"J'ai déjà un compte"** (login classique).
-  Si l'email n'a **pas** de compte cloud Petitmo+ (même si l'email existe en base à cause d'une commande),
-  afficher un message clair : **"Cette adresse e-mail n'a pas de compte cloud payant associé"**
-  + CTA **"Créer un compte"** (upgrade Petitmo+).
-- **Aucune création de compte email/mot de passe** déclenchée par un parcours gratuit.
-- Le "device-user" Supabase auto-créé dans `app/_layout.tsx` est une **mécanique technique**
-  pour les exceptions ci-dessus ; il n'est **jamais** présenté à l'utilisatrice comme un compte.
-- Tout texte qui suggère "tes souvenirs sont sauvegardés" en gratuit est **interdit**.
-  Le badge actuel "Confidentialité 100% préservée" est OK.
-- En gratuit : **vidéo dans un livre autorisée** (composition libre) ; QR audio/vidéo cloud **uniquement après paiement** commande livre — spec [`docs/specs/free-tier-book-qr-av.md`](docs/specs/free-tier-book-qr-av.md), durées [`validateFreeTierBookMemoryLimits`](services/books.ts), tarif [`docs/specs/pricing-v1-migration.md`](docs/specs/pricing-v1-migration.md).
+Petitmo a **deux plans** sur une **même identité** (compte obligatoire) :
 
-### Paywall — hero selon le contexte (`app/paywall.tsx`)
+### 1. PLAN GRATUIT — compte + cloud limité (local-first)
 
-- **Quota souvenirs gratuit atteint** (`context=LIMIT_REACHED` uniquement) : hero chiffré du type « Vous avez capturé vos N premiers souvenirs » + sous-texte du type « Continuez à préserver… » — pour que le message soit **factuel** et lié au plafond gratuit.
-- **Toute autre entrée** (onboarding « S’abonner », vidéo dans un livre, export, audio/vidéo hors quota souvenirs, nudges J+30…, ou absence de `context`) : hero **neutre**, sans évoquer un nombre de souvenirs capturés : ligne 1 **« Préservez chaque moment »** (saut après *moment*), ligne 2 **« avec votre enfant, sans limite »** + pictogramme **cœur Lucide** plein **rosé charte** (`THEME.brandPrimary`). CTA principal paywall en **rosé charte**.
-- Exception UI : flux **export PDF numérique à l’acte** (`EXPORT_DIGITAL_PDF`) conserve son propre titre / sous-titre (achat hors abonnement).
-- Passer explicitement `params.context` depuis chaque écran ; défaut = **`GENERAL`** (plus **`LIMIT_REACHED`** si param absent).
+- **Compte obligatoire** avant d’accumuler des souvenirs pour de vrai.
+- **Onboarding (ordre)** :
+  1. présentation rapide ;
+  2. écran création / connexion de compte ;
+  3. profil de l’enfant ;
+  4. entrée dans l’app (fil).
+- **Auth** (ordre de présentation) : **Google** → **Apple** → **email + mot de passe**, avec **mot de passe oublié** prévu dès le départ. Lien **« J’ai déjà un compte »** = login.
+- **Local-first** : l’UI lit **SQLite + sandbox** en premier ; sync cloud **en arrière-plan** dès le gratuit.
+- **Promesse** : *« tes souvenirs restent privés et sauvegardés »*.  
+  **Pas** de partage familial / diffusion (Petitmo = relation intime parent–enfant, pas TinyBeans).  
+  **Zéro pub**, même en gratuit.
+- **Quotas fil gratuit** (cible produit — aligner `lib/limits.ts`) :
+  - **50** souvenirs au total ;
+  - **vidéo** : max **5** souvenirs, **20 s** chacun ;
+  - **audio** : **60 s** par souvenir, **pas** de cap de nombre séparé (borné par les 50) ;
+  - *(code actuel : encore `FREE_TIER_VOICE_LIMIT = 5` — à retirer pour aligner).*
+- **Photos** : **thumb + print A5** en cloud dès le gratuit ; **original HD** reste local. Petitmo+ débloque le **HD cloud**.
+- **Livre imprimé** : accessible à toutes (gratuites et payantes). Remise Petitmo+ = **−10 %** sur la partie livre (`lib/pricingV1.ts`). QR A/V : composition libre ; facturation au checkout (2 inclus + 0,70 €) — specs pricing / QR.
+- Le **`user_id` anonyme (device-user)** n’est **plus** le socle produit. Cas limite technique éventuel seulement ; **cible bêta** : pas de commande livre sans compte authentifié.
+
+### 2. PLAN PETITMO+ — abonnement payant
+
+- Même compte ; `subscriptionTier=paid` côté serveur.
+- Débloque notamment : quotas étendus / sans les plafonds gratuits, **HD photo cloud**, avantages print (**−10 %**), et le reste des features payantes définies au paywall.
+- Local-first **conservé** : sync / pull / materialisation comme aujourd’hui pour le cloud.
+
+---
+
+## Conséquences UX directes
+
+- **« J’ai déjà un compte »** : login Google / Apple / email+mdp (pas un placeholder « bientôt » une fois le chantier auth livré).
+- Textes du type **« tes souvenirs sont sauvegardés »** : **autorisés** dès le gratuit (c’est la promesse).
+- **Interdit** : promettre du partage familial / multi-membres comme bénéfice cœur (hors scope V1).
+- **Suppression de compte in-app** : **P0** avant TestFlight public / App Store (exigence Apple) dès qu’on crée des comptes.
+- Paywall — hero selon le contexte (`app/paywall.tsx`) :
+  - **Quota souvenirs gratuit atteint** (`context=LIMIT_REACHED` uniquement) : hero chiffré du type « Vous avez capturé vos N premiers souvenirs » + sous-texte « Continuez à préserver… ».
+  - **Toute autre entrée** : hero **neutre** — ligne 1 « Préservez chaque moment », ligne 2 « avec votre enfant, sans limite » + cœur Lucide rosé (`THEME.brandPrimary`). CTA principal **rosé charte**.
+  - Exception : flux **export PDF numérique à l’acte** (`EXPORT_DIGITAL_PDF`) — titre / sous-titre propres.
+  - Passer explicitement `params.context` ; défaut = **`GENERAL`**.
 
 ---
 
@@ -134,66 +114,61 @@ Aucune autre écriture cloud n'est permise en gratuit. Pas de "petite sync genti
 
 | Concept | Fichier |
 |---|---|
-| Mode `local` vs `cloud` (dérivé du tier) | [`lib/userMode.ts`](lib/userMode.ts) |
-| i18n FR/EN (init, clés) — migration EN **gelée** pendant bêta FR | [`lib/i18n.ts`](lib/i18n.ts) · [`docs/specs/i18n-en-roadmap.md`](docs/specs/i18n-en-roadmap.md) |
-| Go / no-go bêta FR (prod réelle) | [`docs/qa/BETA_FR_GO_NOGO.md`](docs/qa/BETA_FR_GO_NOGO.md) |
-| Tier `free` vs `paid` (source de vérité) | [`lib/userTier.ts`](lib/userTier.ts) |
-| Limites plan gratuit (souvenirs, audio, vidéo) | [`lib/limits.ts`](lib/limits.ts) |
-| Capture 100% locale (gratuit) | [`services/localOnlyMemoryCapture.ts`](services/localOnlyMemoryCapture.ts) |
-| Garde-fou livre gratuit (durées A/V) | [`services/books.ts`](services/books.ts) `validateFreeTierBookMemoryLimits` |
-| Tarif impression V1 | [`lib/pricingV1.ts`](lib/pricingV1.ts) · [`docs/specs/pricing-v1-migration.md`](docs/specs/pricing-v1-migration.md) |
-| QR audio/vidéo gratuit (exception cloud) | [`docs/specs/free-tier-book-qr-av.md`](docs/specs/free-tier-book-qr-av.md) |
-| Materialisation cloud → sandbox (Petitmo+) | [`services/memoryCloudMaterialize.ts`](services/memoryCloudMaterialize.ts) |
-| Création device-user Supabase (mécanique technique) | [`app/_layout.tsx`](app/_layout.tsx) |
-| Écran d'accueil | [`app/onboarding.tsx`](app/onboarding.tsx) |
-| Paywall (contexte hero, `GENERAL` / `LIMIT_REACHED`…) | [`app/paywall.tsx`](app/paywall.tsx) |
-| Parité aperçu livre ↔ export PDF (checklist miroirs) | [`.cursor/rules/book-maquette-pdf-parity.mdc`](.cursor/rules/book-maquette-pdf-parity.mdc) |
-| Référence canonique complète | [`docs/specs/architecture-locale-cloud.md`](docs/specs/architecture-locale-cloud.md) |
+| Mode / tier (à réaligner free=compte+sync) | [`lib/userMode.ts`](lib/userMode.ts) · [`lib/userTier.ts`](lib/userTier.ts) |
+| i18n FR/EN — migration EN **gelée** pendant bêta FR | [`lib/i18n.ts`](lib/i18n.ts) · [`docs/specs/i18n-en-roadmap.md`](docs/specs/i18n-en-roadmap.md) |
+| Go / no-go bêta FR | [`docs/qa/BETA_FR_GO_NOGO.md`](docs/qa/BETA_FR_GO_NOGO.md) |
+| Limites plan gratuit | [`lib/limits.ts`](lib/limits.ts) |
+| Capture (à faire évoluer : local + enqueue sync) | [`services/localOnlyMemoryCapture.ts`](services/localOnlyMemoryCapture.ts) |
+| Garde-fou livre (durées A/V) | [`services/books.ts`](services/books.ts) `validateFreeTierBookMemoryLimits` |
+| Tarif impression V1 (−10 % paid) | [`lib/pricingV1.ts`](lib/pricingV1.ts) · [`docs/specs/pricing-v1-migration.md`](docs/specs/pricing-v1-migration.md) |
+| QR audio/vidéo livre | [`docs/specs/free-tier-book-qr-av.md`](docs/specs/free-tier-book-qr-av.md) |
+| Materialisation cloud → sandbox | [`services/memoryCloudMaterialize.ts`](services/memoryCloudMaterialize.ts) |
+| Device-user (legacy / cas limite — ne plus étendre) | [`lib/ensureSupabaseSession.ts`](lib/ensureSupabaseSession.ts) · [`app/_layout.tsx`](app/_layout.tsx) |
+| Onboarding | [`app/onboarding.tsx`](app/onboarding.tsx) |
+| Paywall | [`app/paywall.tsx`](app/paywall.tsx) |
+| Parité aperçu livre ↔ export PDF | [`.cursor/rules/book-maquette-pdf-parity.mdc`](.cursor/rules/book-maquette-pdf-parity.mdc) |
+| Spec architecture (à mettre à jour vers V2) | [`docs/specs/architecture-locale-cloud.md`](docs/specs/architecture-locale-cloud.md) |
 
 ### Livre et PDF — date affichée (photo, vidéo, audio, légendes)
 
 - Sous les **médias** et partout où le livre affiche une **date de souvenir**, la source est **`memories.created_at`** : date de **prise / de l’événement** (EXIF, fichier, enregistrement…).
-- **`inserted_at`** sert uniquement à l’**ordre du fil** (date d’ajout dans l’app) — **ne jamais** l’utiliser pour ce libellé dans la maquette, le serveur PDF (`server/src/pdf/htmlBook.ts`), ni le payload **`guestMemories`** (`created_at` obligatoire côté client pour aligner PDF exporté et aperçu ; voir `mapGuestMemories` dans `server/src/routes/generatePdf.ts`).
-- Helper unique côté app : [`utils/memoryBookDisplayDate.ts`](utils/memoryBookDisplayDate.ts) (`memoryBookDisplayDateIso`). Côté serveur : `server/src/pdf/memoryBookDisplayDate.ts`.
+- **`inserted_at`** = date d’ajout dans l’app (audit / pastille « import différé ») — **pas** l’ordre du fil ni le libellé date. L’**ordre du fil** et la date affichée dans le fil / viewer = **`created_at`**.
+- Helpers : [`utils/memoryBookDisplayDate.ts`](utils/memoryBookDisplayDate.ts) · `server/src/pdf/memoryBookDisplayDate.ts`.
 
-### Export livre PDF — **uniquement** le service distant (aucune génération sur l’appareil)
+### Export livre PDF — **uniquement** le service distant
 
-- La **génération** d’un PDF livre depuis l’app se fait **exclusivement** via [`services/bookPdfServer.ts`](services/bookPdfServer.ts) (Playwright / Chromium sur Railway ou équivalent). **`expo-print` et tout rendu HTML→PDF sur le téléphone sont interdits** — pas d’exception « dev », pas de repli si l’URL serveur est absente.
-- Si `EXPO_PUBLIC_PDF_SERVER_URL` est absent ou injoignable : message utilisateur (`PDF_EXPORT_REQUIRES_SERVER_MESSAGE` ou `EXPORT_SERVER_FAILED_CONTACT_MESSAGE`) ; **pas** de PDF produit localement.
-- [`services/bookPdf.ts`](services/bookPdf.ts) ne contient plus que **`shareBookPdf`** (partage d’un fichier déjà obtenu du serveur).
+- Génération **exclusivement** via [`services/bookPdfServer.ts`](services/bookPdfServer.ts). **`expo-print` / PDF local interdits**.
+- URL absente ou erreur → messages dédiés ; pas de repli local.
+- [`services/bookPdf.ts`](services/bookPdf.ts) = **`shareBookPdf`** seulement.
 
-**Parité déploiement Supabase — service PDF Railway** : le Node `server/` utilise la **service role** sur les tables du flux export (ex. `public_media_tokens`). Dès qu’une PR ajoute ou utilise une **colonne ou table** côté serveur, il doit exister une migration sous [`supabase/migrations/`](supabase/migrations/) et elle doit être **appliquée en prod** avant ou avec le push Railway. Sinon les inserts échouent ; symptôme historique : **502** sur `generate-pdf` alors que `/health` répond 200 (ex. colonne manquante `expires_at` → migration `20260505120000_public_media_tokens_expires_at.sql`).
+**Parité déploiement Supabase ↔ Railway** : toute colonne/table utilisée par `server/` doit exister en prod (`supabase/migrations/`) avant ou avec le push Railway.
 
-**QR médias livre** : un token `ready` est **figé dans le marbre** (PDF imprimé / exporté). Garde-fous : trigger SQL, copie `qr-media/archive/`, auto-heal au scan. Specs : [`docs/specs/qr-media-permanence.md`](docs/specs/qr-media-permanence.md), exception gratuit A/V [`docs/specs/free-tier-book-qr-av.md`](docs/specs/free-tier-book-qr-av.md).
+**QR médias livre** : token `ready` figé ; specs [`docs/specs/qr-media-permanence.md`](docs/specs/qr-media-permanence.md), [`docs/specs/free-tier-book-qr-av.md`](docs/specs/free-tier-book-qr-av.md).
 
 ### Parité maquette livre ↔ export PDF
 
-L’aperçu in-app (`MaquetteBookPages.tsx`) et le PDF serveur (`htmlBook.ts`) partagent le **même contenu de pages** ; digital et impression ne diffèrent que par le format `@page` et le fond perdu.
-
-- Toute modification de **mise en page, typo, couleurs, recadrage ou texte affiché** dans l’aperçu livre doit être reportée **dans le même PR** sur `server/src/pdf/` (et helpers miroirs).
-- Checklist complète, fichiers couplés et règles typo (Roboto Flex souvenirs vs Garamond éditorial) : [`.cursor/rules/book-maquette-pdf-parity.mdc`](.cursor/rules/book-maquette-pdf-parity.mdc).
-- Après changement côté serveur : **redéployer** `server/` (Railway/VPS) — un reload Metro ne met pas à jour l’export PDF.
+Aperçu (`MaquetteBookPages.tsx`) et PDF (`htmlBook.ts`) = même contenu de pages. Toute modif layout/typo/couleurs/recadrage/texte → **même PR** sur `server/src/pdf/`. Voir [`.cursor/rules/book-maquette-pdf-parity.mdc`](.cursor/rules/book-maquette-pdf-parity.mdc).
 
 ### Local-first universel (gratuit et Petitmo+)
 
-- **Affichage** : SQLite + sandbox — jamais un `supabase.from(...).select` direct dans un composant UI — **y compris aperçu livre / maquette in-app** (`app/book-preview.tsx`, `MaquetteBookPages.tsx`).
-- **Cycle Petitmo+** : hydratation cloud → merge SQLite → **materialisation sandbox** (`services/memoryCloudMaterialize.ts`) → affichage 100 % local ; repli URL signée **uniquement pendant** la materialisation ou hors ligne.
-- **Cloud** : sync / pull / upload **en arrière-plan** ; merge via `mergeServerMemoryRowWithExistingLocal`.
-- **Bascule gratuit → payant** : données locales visibles tout de suite ; `upgradeToFullCloud` + `flushPendingCloudUploadsOnce` sans bloquer la navigation.
-- **Repli cloud** : transitoire (materialisation en cours) ou si cloud injoignable — **pas** comme état stable d’un souvenir hydraté.
-- **Aperçu livre ≠ export PDF** : la maquette in-app reste local-first ; l’export serveur (`bookPdfServer.ts`) envoie un payload séparé — voir §1.3.1 dans la spec architecture.
-- Référence : [`docs/specs/architecture-locale-cloud.md`](docs/specs/architecture-locale-cloud.md) §1.3–1.3.3, [`.cursor/rules/local-first-media.mdc`](.cursor/rules/local-first-media.mdc).
+- **Affichage** : SQLite + sandbox — jamais un `supabase.from(...).select` direct dans un composant UI (y compris aperçu livre).
+- **Cycle** : hydratation cloud → merge SQLite → **materialisation sandbox** → affichage local ; repli URL signée **transitoire** seulement.
+- **Cloud** : sync / pull / upload **en arrière-plan** dès le **gratuit** (dans les quotas) ; merge via `mergeServerMemoryRowWithExistingLocal`.
+- **Aperçu livre ≠ export PDF** : maquette local-first ; export via payload serveur.
 
 ---
 
-## Distinction critique : email de commande vs compte cloud Petitmo+
+## Compte gratuit vs Petitmo+
 
-- Un **email peut exister en base** pour des raisons **commande/CRM** (gratuit) sans être un **compte cloud**.
-- **Compte cloud Petitmo+** = email (ou Apple/Google) **associé à un abonnement payant** et donnant droit à la sync/restauration.
-- La **source de vérité** de ce statut est **serveur** : `subscriptionTier=paid` dans **`auth.users.app_metadata`** (Supabase),
-  alimenté par webhook **RevenueCat** → Edge Function Supabase (Apple IAP / StoreKit sur iOS, Google Play Billing sur Android à venir). Stripe n'intervient pas dans les abonnements in-app. L'AsyncStorage local n'est qu'un cache UX.
-- En gratuit : l'email sert au **suivi de commande**, aux **QR audio** du livre commandé, et au **CRM** (marketing futur),
-  mais **ne doit jamais** être traité comme un identifiant de restauration.
+| | Compte gratuit | Petitmo+ (`subscriptionTier=paid`) |
+|---|---|---|
+| Identité Auth | Oui | Oui (même compte) |
+| Sync / restore / multi-device | Oui (quotas) | Oui (étendus) |
+| Photos cloud | Thumb + print A5 | + original HD |
+| Remise livre imprimé | 0 % | **−10 %** |
+| Pub | Non | Non |
+
+Ne plus raisonner en « email commande ≠ compte » comme modèle principal : **le compte est l’identité**. Un email CRM sans Auth reste possible pour d’anciens flux, mais la cible produit est **compte d’abord**.
 
 ---
 
@@ -201,21 +176,36 @@ L’aperçu in-app (`MaquetteBookPages.tsx`) et le PDF serveur (`htmlBook.ts`) p
 
 ```mermaid
 flowchart LR
-    install[Installation app] --> mode{Plan ?}
-    mode -- "gratuit (defaut)" --> local[SQLite + sandbox UNIQUEMENT]
-    mode -- "passe a Petitmo+" --> account[Creation compte cloud]
-    account --> cloud[Sync Supabase + restauration + multi-device]
-    local -. "exceptions ciblees" .-> supaFree["Achat PDF / livre + audio QR"]
-    local -. "perte telephone" .-> lost[Donnees perdues, accepte]
+  install[Installation] --> onboard[Presentation]
+  onboard --> auth[Compte gratuit: Google / Apple / email+mdp]
+  auth --> child[Profil enfant]
+  child --> free[Local-first + sync cloud limitee]
+  free --> paywall[Paywall Petitmo+]
+  paywall -->|IAP confirme| paid[subscriptionTier paid]
+  free --> book[Livre imprime -10pct si paid]
 ```
+
+---
+
+## Chantiers produit (pas encore tous livrés dans le code)
+
+1. Auth onboarding + login + mot de passe oublié  
+2. Sync cloud dès le gratuit (limites ci-dessus)  
+3. RevenueCat + webhook `subscriptionTier`  
+4. Suppression de compte in-app (Apple)  
+5. Dimensionnement coût Storage gratuit à l’échelle  
+6. Réalignement `lib/limits.ts` (retirer le cap 5 audios ; durée déjà 60 s)  
+7. Mise à jour `docs/specs/architecture-locale-cloud.md` + `supabase-write-policy.mdc`
 
 ---
 
 ## Comportement attendu de l'agent
 
 1. **Toujours** lire ce fichier en début de session avant tout correctif sensible.
-2. **Citer la règle d'or en une ligne** au début de tout plan ou patch touchant : import, souvenirs, livres, paywall, auth, sync, écran d'accueil, paramètres.
-3. Si une demande utilisateur entre en conflit avec la règle d'or, **lever le drapeau immédiatement** plutôt que de l'exécuter en silence.
-4. Pour toute exception Supabase en gratuit, vérifier qu'elle correspond bien à un des **deux cas autorisés** (achat PDF/livre, audio QR pérenne).
-5. Export PDF livre : **uniquement** serveur — voir **« Export livre PDF — uniquement le service distant »** ci-dessus ; jamais `expo-print` / génération locale.
-6. Changement livre / maquette : lire et appliquer [`.cursor/rules/book-maquette-pdf-parity.mdc`](.cursor/rules/book-maquette-pdf-parity.mdc) — maintenir la parité aperçu ↔ `htmlBook.ts` dans le même PR.
+2. **Citer la règle d'or en une ligne** au début de tout plan ou patch touchant : import, souvenirs, livres, paywall, auth, sync, écran d'accueil, paramètres.  
+   Exemple : *« Règle d’or V2 : compte gratuit + sync cloud limitée ; Petitmo+ = quotas/HD/−10 % print. »*
+3. Si une demande entre en conflit avec la règle d'or, **lever le drapeau immédiatement**.
+4. Ne **pas** réintroduire « gratuit sans compte » / « perte téléphone = perte données assumée » / interdiction de dire « sauvegardés » en gratuit.
+5. Export PDF livre : **uniquement** serveur.
+6. Changement livre / maquette : [`.cursor/rules/book-maquette-pdf-parity.mdc`](.cursor/rules/book-maquette-pdf-parity.mdc).
+7. Remise print Petitmo+ = **10 %** — ne pas inventer 15 %.

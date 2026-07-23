@@ -2,7 +2,11 @@ import type { BookPage } from '@/src/book/BookEngine';
 import type { BookPageServer } from '@/types/shared';
 import type { GenerateBookPdfResponse } from '@/types/shared';
 import { getLocalMemoryById, upsertLocalMemory } from '@/lib/localDb';
-import { primeBookQrTokens, readBookQrTokenFromLocal } from '@/lib/bookQrTokenStore';
+import {
+  bookQrPreviewUrl,
+  primeBookQrTokens,
+  readBookQrTokenFromLocal,
+} from '@/lib/bookQrTokenStore';
 import { supabase } from '@/lib/supabase';
 import { publicMediaBaseUrl, bookQrUrlForToken } from '@/lib/publicMediaBaseUrl';
 import {
@@ -226,8 +230,10 @@ export function qrPreviewUrlForMemory(
   tokensByMemoryId: Record<string, string>,
 ): string {
   if (!memoryId) return '';
-  const token = tokensByMemoryId[memoryId]?.trim() || readBookQrTokenFromLocal(memoryId);
-  return token ? bookQrUrlForToken(token) : '';
+  const fromMap = tokensByMemoryId[memoryId]?.trim();
+  if (fromMap) return bookQrUrlForToken(fromMap);
+  /** Spread + éditeur : même repli `preview-…` (voir `bookQrPreviewUrl`). */
+  return bookQrPreviewUrl(memoryId);
 }
 
 export { publicMediaBaseUrl, bookQrUrlForToken };

@@ -14,10 +14,22 @@ export function readBookQrTokenFromLocal(memoryId: string): string {
   return (getLocalMemoryById(memoryId)?.public_media_token ?? '').trim();
 }
 
+/**
+ * Token QR **visuel** pour l’aperçu maquette (spread + éditeur) avant commande/export.
+ * Le token cloud pérenne n’existe qu’après paiement — sans ceci la carte QR reste vide.
+ */
+export function bookPreviewQrTokenForMemory(memoryId: string): string {
+  const id = memoryId.trim();
+  if (!id) return '';
+  return `preview-${id.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 48)}`;
+}
+
 export function bookQrPreviewUrl(memoryId: string | undefined): string {
   if (!memoryId) return '';
   const token = readBookQrTokenFromLocal(memoryId);
-  return token ? bookQrUrlForToken(token) : '';
+  if (token) return bookQrUrlForToken(token);
+  const previewTok = bookPreviewQrTokenForMemory(memoryId);
+  return previewTok ? bookQrUrlForToken(previewTok) : '';
 }
 
 /** Met à jour le store et notifie uniquement les souvenirs concernés. */

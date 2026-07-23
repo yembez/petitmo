@@ -5,6 +5,7 @@
   },
   "build": {
     "preview": {
+      "channel": "preview",
       "distribution": "internal",
       "android": {
         "buildType": "apk"
@@ -14,10 +15,13 @@
       },
       "env": {
         "EXPO_PUBLIC_PDF_SERVER_URL": "https://petitmo-production.up.railway.app",
-        "EXPO_PUBLIC_PUBLIC_MEDIA_BASE_URL": "https://petitmo-production.up.railway.app/m"
+        "EXPO_PUBLIC_PUBLIC_MEDIA_BASE_URL": "https://petitmo-production.up.railway.app/m",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "267645460430-fe5f6kiae4r9ulf4s5b9t4eq4cgatj1j.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "267645460430-h8or3fe0qnm6f4gd72g3nije4qg196se.apps.googleusercontent.com"
       }
     },
     "dev-ios-device": {
+      "channel": "development",
       "distribution": "internal",
       "developmentClient": true,
       "ios": {
@@ -25,10 +29,13 @@
       },
       "env": {
         "EXPO_PUBLIC_PDF_SERVER_URL": "https://petitmo-production.up.railway.app",
-        "EXPO_PUBLIC_PUBLIC_MEDIA_BASE_URL": "https://petitmo-production.up.railway.app/m"
+        "EXPO_PUBLIC_PUBLIC_MEDIA_BASE_URL": "https://petitmo-production.up.railway.app/m",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "267645460430-fe5f6kiae4r9ulf4s5b9t4eq4cgatj1j.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "267645460430-h8or3fe0qnm6f4gd72g3nije4qg196se.apps.googleusercontent.com"
       }
     },
     "production": {
+      "channel": "production",
       "distribution": "store",
       "autoIncrement": true,
       "environment": "production",
@@ -37,7 +44,9 @@
       },
       "env": {
         "EXPO_PUBLIC_PDF_SERVER_URL": "https://petitmo-production.up.railway.app",
-        "EXPO_PUBLIC_PUBLIC_MEDIA_BASE_URL": "https://petitmo-production.up.railway.app/m"
+        "EXPO_PUBLIC_PUBLIC_MEDIA_BASE_URL": "https://petitmo-production.up.railway.app/m",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "267645460430-fe5f6kiae4r9ulf4s5b9t4eq4cgatj1j.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "267645460430-h8or3fe0qnm6f4gd72g3nije4qg196se.apps.googleusercontent.com"
       }
     }
   },

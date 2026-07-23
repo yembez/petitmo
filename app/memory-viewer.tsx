@@ -63,7 +63,12 @@ import {
   shouldShowCapturedMediaDateOverlay,
 } from '@/utils/feedCaptureOverlay';
 import { THEME } from '@/constants/theme';
-import { useMemoryTextFontScreen } from '@/hooks/useMemoryTextFontScreen';
+import {
+  MemoryTextFontProvider,
+  useMemoryEditorialBoldFont,
+  useMemoryEditorialFont,
+} from '@/contexts/MemoryTextFontContext';
+import { styles as feedStyles } from '@/components/feed/feedStyles';
 import {
   buildImmersiveViewerItems,
   immersiveViewerItemKey,
@@ -215,6 +220,14 @@ function isImmersiveMediaType(type: Memory['type']): boolean {
 }
 
 export default function MemoryViewerScreen() {
+  return (
+    <MemoryTextFontProvider>
+      <MemoryViewerScreenInner />
+    </MemoryTextFontProvider>
+  );
+}
+
+function MemoryViewerScreenInner() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const isFocused = useIsFocused();
@@ -554,7 +567,7 @@ function ImmersivePage({
 }) {
   const insets = useSafeAreaInsets();
   const { feedDateFontFamily, feedAgeFontFamily } = useFeedMetaFonts();
-  const postDateLabel = formatDateLong(memory.inserted_at || memory.created_at);
+  const postDateLabel = formatDateLong(memory.created_at);
   const ageAt = formatFamilyAgesLine(familyChildren, memory.created_at);
   const loc = memory.location?.trim()
     ? memory.location.replace(/\s*\([^)]*\)\s*$/, '').trim()
@@ -579,7 +592,7 @@ function ImmersivePage({
   );
   const overlayBottomInset = immersiveOverlayBottomInset(insets.bottom);
   const [videoSoundOn, setVideoSoundOn] = useState(true);
-  const memoryTextFont = useMemoryTextFontScreen();
+  const memoryEditorialFont = useMemoryEditorialFont();
 
   useEffect(() => {
     setVideoSoundOn(true);
@@ -716,7 +729,7 @@ function ImmersivePage({
             onInnerScrollUnlock={onInnerScrollUnlock}
           >
             <Text
-              style={[styles.caption, { fontFamily: memoryTextFont }]}
+              style={[feedStyles.captionAnnotation, { fontFamily: memoryEditorialFont }]}
               {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
             >
               {memory.content.trim()}
@@ -1233,7 +1246,10 @@ function ImmersiveText({
   onGoNext: () => void;
   overlayBottomInset: number;
 }) {
-  const memoryTextFont = useMemoryTextFontScreen();
+  /** Exactement le même hook / styles que `FilMemoryRow` (souvenirs texte du fil). */
+  const memoryEditorialFont = useMemoryEditorialFont();
+  const memoryEditorialBoldFont = useMemoryEditorialBoldFont();
+  const title = memory.text_title?.trim() ?? '';
   const raw = memory.content?.trim() || '';
   const paragraphs = useMemo(() => {
     const t = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
@@ -1256,18 +1272,40 @@ function ImmersiveText({
           <View style={styles.textMarginSpacer} />
         )}
         <View style={styles.textImmersiveCenter}>
-          <ScrollableTextBlock maxHeight={viewportHeight} contentContainerStyle={styles.textWrap}>
-            {paragraphs.map((para, idx) => (
+          <ScrollableTextBlock
+            maxHeight={viewportHeight}
+            contentContainerStyle={styles.textWrapCentered}
+          >
+            {title ? (
               <Text
-                key={idx}
-                style={[styles.textBody, { fontFamily: memoryTextFont }, idx > 0 && styles.textParaGap]}
+                style={[
+                  feedStyles.textTitle,
+                  styles.immersiveTextCentered,
+                  { fontFamily: memoryEditorialBoldFont },
+                ]}
                 onPress={onTapEdit}
                 accessibilityRole="button"
                 accessibilityLabel="Modifier le texte"
                 {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
               >
-                {EM_QUAD}
-                {para.replace(/\n/g, `\n${EM_QUAD}`)}
+                {title}
+              </Text>
+            ) : null}
+            {paragraphs.map((para, idx) => (
+              <Text
+                key={idx}
+                style={[
+                  feedStyles.textContent,
+                  styles.immersiveTextCentered,
+                  { fontFamily: memoryEditorialFont },
+                  idx > 0 && feedStyles.textBookParagraphSpacing,
+                ]}
+                onPress={onTapEdit}
+                accessibilityRole="button"
+                accessibilityLabel="Modifier le texte"
+                {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
+              >
+                {para}
               </Text>
             ))}
           </ScrollableTextBlock>
@@ -1336,6 +1374,7 @@ const styles = StyleSheet.create({
   textImmersiveCenter: {
     flex: 1,
     minWidth: 0,
+    justifyContent: 'center',
   },
   textMarginHint: {
     alignItems: 'center',
@@ -1553,11 +1592,16 @@ const styles = StyleSheet.create({
     paddingTop: verticalScale(12),
     backgroundColor: BG,
   },
-  caption: {
-    color: THEME.textPrimary,
-    fontSize: scale(15),
-    fontWeight: '400',
-    lineHeight: scale(22),
+  /** Souvenir texte immersif : centré comme les pages quote du livre. */
+  textWrapCentered: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    paddingTop: verticalScale(12),
+    paddingBottom: verticalScale(56),
+    paddingHorizontal: scale(4),
+  },
+  immersiveTextCentered: {
+    textAlign: 'center',
   },
   /** Vocal immersif : même zone que la photo (flex dans mediaBlock), cover en plein écran. */
   voiceWrapImmersive: {
@@ -1576,21 +1620,5 @@ const styles = StyleSheet.create({
   },
   voicePlayerImmersiveCoverScrim: {
     backgroundColor: 'rgba(0,0,0,0.42)',
-  },
-  /** Colonne centrale : scroll vertical du corps de texte uniquement. */
-  textWrap: {
-    paddingTop: verticalScale(12),
-    paddingBottom: verticalScale(56),
-  },
-  textBody: {
-    color: THEME.textPrimary,
-    fontSize: scale(16),
-    lineHeight: scale(25),
-    width: '100%',
-    textAlign: 'justify',
-    textAlignVertical: 'top',
-  },
-  textParaGap: {
-    marginTop: verticalScale(16),
   },
 });

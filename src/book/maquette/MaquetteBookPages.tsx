@@ -637,7 +637,7 @@ function VisualBand({
           width: frameW,
           height: frameH,
           overflow: 'hidden',
-          backgroundColor: '#F2F2F7',
+          backgroundColor: '#FFFFFF',
         }}
       >
         {children(frameW, frameH)}
@@ -711,6 +711,9 @@ type Props = {
   rotation: number;
   /** Recadrage photo (pan + zoom). */
   photoCrop?: PhotoCrop;
+  /** Dims fichier pour appliquer le crop en lecture (spread) sans éditeur inline. */
+  photoImgPxW?: number;
+  photoImgPxH?: number;
   truncated: boolean;
   coverYearLabel: string;
   /** Ligne de titre affichée sur la couverture (aperçu éditable). */
@@ -751,6 +754,8 @@ function MaquetteBookPages(props: Props) {
     memoryPhotoRef,
     rotation,
     photoCrop,
+    photoImgPxW,
+    photoImgPxH,
     truncated,
     onRotate,
     coverDisplayTitle,
@@ -941,6 +946,8 @@ function MaquetteBookPages(props: Props) {
           qrUrl={qrUrl}
           rotation={rotation}
           photoCrop={photoCrop}
+          photoImgPxW={photoImgPxW}
+          photoImgPxH={photoImgPxH}
           onRotate={onRotate}
           inlineCropConfig={inlineCropConfig}
           onRequestTextEdit={onRequestTextEdit}
@@ -1638,51 +1645,86 @@ function MaquetteVideoPosterVisual({
   frameW,
   frameH,
   fallback,
+  photoCrop,
+  rotation,
+  photoInline,
+  onRotate,
+  typoScale,
+  imgPxW,
+  imgPxH,
 }: {
   memory: Memory;
   frameW: number;
   frameH: number;
   fallback: ReactNode;
+  photoCrop?: PhotoCrop;
+  rotation?: number;
+  photoInline?: ReturnType<typeof buildInlineCropProps>;
+  onRotate?: () => void;
+  typoScale?: number;
+  imgPxW?: number;
+  imgPxH?: number;
 }) {
   const raw = useBookVideoPosterDisplayUrl(memory).trim();
   if (!raw) return <>{fallback}</>;
   const baseUri = (raw.split('?')[0] ?? raw).trim();
+  const frameProps = {
+    frameW,
+    frameH,
+    crop: photoCrop,
+    rotation,
+    inlineCrop: photoInline,
+    showRotateButton: !!photoInline,
+    onRotate,
+    typoScale,
+    imgPxW,
+    imgPxH,
+  } as const;
+  /** `key` force le remontage ExpoImage quand le poster print change (même path fichier). */
+  const visualKey = `vp-${memory.id}-${memory.updated_at ?? ''}-${baseUri.slice(-48)}`;
   if (isDeviceLocalMediaUri(baseUri)) {
     return (
       <BookPagePhotoFrame
+        key={visualKey}
         uri={raw}
-        frameW={frameW}
-        frameH={frameH}
-        recyclingKey={`book-video-poster-${memory.id}-${memory.updated_at ?? ''}`}
+        {...frameProps}
       />
     );
   }
   return (
     <MaquetteVideoPosterCloudFrame
-      memoryId={memory.id}
-      cacheKey={memory.updated_at ?? memory.poster_print_url ?? ''}
+      key={visualKey}
       raw={raw}
-      frameW={frameW}
-      frameH={frameH}
       fallback={fallback}
+      {...frameProps}
     />
   );
 }
 
 function MaquetteVideoPosterCloudFrame({
-  memoryId,
-  cacheKey,
   raw,
   frameW,
   frameH,
   fallback,
+  photoCrop,
+  rotation,
+  photoInline,
+  onRotate,
+  typoScale,
+  imgPxW,
+  imgPxH,
 }: {
-  memoryId: string;
-  cacheKey?: string;
   raw: string;
   frameW: number;
   frameH: number;
   fallback: ReactNode;
+  photoCrop?: PhotoCrop;
+  rotation?: number;
+  photoInline?: ReturnType<typeof buildInlineCropProps>;
+  onRotate?: () => void;
+  typoScale?: number;
+  imgPxW?: number;
+  imgPxH?: number;
 }) {
   const signed = useSignedMediaUrl(raw);
   const uri = (signed ?? raw).trim();
@@ -1692,7 +1734,14 @@ function MaquetteVideoPosterCloudFrame({
       uri={uri}
       frameW={frameW}
       frameH={frameH}
-      recyclingKey={`book-video-poster-${memoryId}-${cacheKey ?? ''}`}
+      crop={photoCrop}
+      rotation={rotation}
+      inlineCrop={photoInline}
+      showRotateButton={!!photoInline}
+      onRotate={onRotate}
+      typoScale={typoScale}
+      imgPxW={imgPxW}
+      imgPxH={imgPxH}
     />
   );
 }
@@ -1710,6 +1759,8 @@ function MaquetteMediaQr({
   qrUrl,
   rotation,
   photoCrop,
+  photoImgPxW,
+  photoImgPxH,
   onRotate,
   inlineCropConfig,
   onRequestTextEdit,
@@ -1728,6 +1779,8 @@ function MaquetteMediaQr({
   qrUrl: string;
   rotation: number;
   photoCrop?: PhotoCrop;
+  photoImgPxW?: number;
+  photoImgPxH?: number;
   onRotate: () => void;
   inlineCropConfig?: InlineCropConfig;
   onRequestTextEdit: () => void;
@@ -1738,10 +1791,16 @@ function MaquetteMediaQr({
   const captionRaw = clampMediaBookCaption((memory.content ?? '').trim());
   const mediaPad = Math.round(pdfMmToPreviewPxUniform(PDF_MEDIA_TEXT_PAD_X_MM, width, height));
   const qrCard = pdfMediaQrCardLayoutPx(width, height);
-  const photoInline = kind === 'audio' ? buildInlineCropProps(inlineCropConfig, memory.id) : undefined;
+  const photoInline =
+    kind === 'audio' || kind === 'video'
+      ? buildInlineCropProps(inlineCropConfig, memory.id)
+      : undefined;
   const voicePrintPx = kind === 'audio' ? getBookPhotoPrintPixelSize(memory) : null;
-  const voiceImgPxW = photoInline?.dpiMeta?.imgPxW ?? voicePrintPx?.w;
-  const voiceImgPxH = photoInline?.dpiMeta?.imgPxH ?? voicePrintPx?.h;
+  /** Vidéo : dims poster uniquement (dpiMeta / mesure), jamais `print_px` vidéo. */
+  const voiceImgPxW =
+    photoInline?.dpiMeta?.imgPxW ?? photoImgPxW ?? voicePrintPx?.w;
+  const voiceImgPxH =
+    photoInline?.dpiMeta?.imgPxH ?? photoImgPxH ?? voicePrintPx?.h;
   const voiceVisualUri =
     kind === 'audio'
       ? getVoiceCoverUriForBookEditorDisplay(memory) || getVoiceCoverUriForBookPreview(memory)
@@ -1773,6 +1832,13 @@ function MaquetteMediaQr({
                 frameW={fw}
                 frameH={fh}
                 fallback={fallback}
+                photoCrop={photoCrop}
+                rotation={rotation}
+                photoInline={photoInline}
+                onRotate={onRotate}
+                typoScale={typoScale}
+                imgPxW={voiceImgPxW}
+                imgPxH={voiceImgPxH}
               />
             );
           }

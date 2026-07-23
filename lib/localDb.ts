@@ -166,17 +166,17 @@ export function getLocalMemories(childId: string): Memory[] {
   const rows = db.getAllSync(
     `SELECT * FROM memories 
      WHERE child_id = ? 
-     ORDER BY created_at DESC`,
+     ORDER BY created_at DESC, COALESCE(inserted_at, created_at) DESC`,
     [childId]
   ) as Record<string, unknown>[]
   return rows.map(deserializeMemory)
 }
 
-/** Tous les souvenirs famille — ordre fil (`inserted_at` prioritaire). */
+/** Tous les souvenirs famille — ordre fil = date d’événement / prise (`created_at`). */
 export function getAllLocalMemories(): Memory[] {
   const rows = db.getAllSync(
     `SELECT * FROM memories
-     ORDER BY COALESCE(inserted_at, created_at) DESC`,
+     ORDER BY created_at DESC, COALESCE(inserted_at, created_at) DESC`,
     [],
   ) as Record<string, unknown>[]
   return rows.map(deserializeMemory)
