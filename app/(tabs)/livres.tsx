@@ -416,7 +416,7 @@ function LivresScreen() {
               <BookOpen size={scale(36)} color={THEME.textMuted} strokeWidth={2} />
             </View>
             <Text style={styles.emptyTitle}>Aucun livre pour l’instant</Text>
-            <Text style={styles.emptySub}>Crée un livre pour rassembler tes souvenirs.</Text>
+            <Text style={styles.emptySub}>Crée un livre pour rassembler vos souvenirs.</Text>
             <TouchableOpacity
               style={styles.emptyCta}
               onPress={openCreateFlow}

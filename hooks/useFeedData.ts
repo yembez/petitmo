@@ -9,7 +9,12 @@ import {
   type SetStateAction,
 } from 'react';
 import { DeviceEventEmitter, InteractionManager } from 'react-native';
-import { getLocalMemoryById, listLocalChildren } from '@/lib/localDb';
+import {
+  getLocalMemoryById,
+  getLocalChild,
+  listLocalChildren,
+  getAllLocalMemories,
+} from '@/lib/localDb';
 import { useFocusEffect } from '@react-navigation/native';
 import { setStatusBarStyle } from 'expo-status-bar';
 import {
@@ -17,6 +22,7 @@ import {
   fetchMemoriesByIds,
   requestMissingMediaDerivatives,
 } from '@/services/media';
+import { pullFamilyMemoriesFromRemoteToLocal } from '@/services/memoriesLocalSync';
 import { materializeCloudMediaForMemories } from '@/services/memoryCloudMaterialize';
 import { primeFeedVideoPosterStableCache } from '@/services/feedVideoPosterPrime';
 import {
@@ -25,6 +31,7 @@ import {
   setSelectedChild,
   ensureChildFaceBounds,
   refreshChildProfileFromLocal,
+  refreshChildrenFromCloudInBackground,
   childNeedsFaceBoundsBackfill,
   PETITMO_CHILD_PROFILE_UPDATED_EVENT,
   type ChildProfileUpdatedPayload,
@@ -42,6 +49,7 @@ import {
   setFeedHydrationSnapshots,
 } from '@/services/tabScreensCache';
 import {
+  filMemoryVisualEqual,
   mergeMemoriesListPreservingVisualRowRefs,
   memoryWaitingForFeedDerivatives,
   type Memory,
@@ -87,6 +95,9 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
     if (pendingUploads.length > 0) return false;
     if (feedChildHydrationSnapshot != null) return false;
     if (peekSilentInitialFilLoadArmed()) return false;
+    // SQLite déjà rempli → pas de spinner plein écran en attendant le 1er load async.
+    if (getAllLocalMemories().length > 0) return false;
+    if (listLocalChildren().length > 0) return false;
     return true;
   });
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -102,11 +113,22 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
     const silent = opts?.silent === true;
     const seq = ++loadDataSeqRef.current;
     try {
-      if (!silent) {
+      /**
+       * Local-first : peindre SQLite **avant** tout réseau.
+       * Sinon le 1er ouverture du fil après reconnexion attend le pull cloud → roue longue.
+       */
+      setFamilyChildren(readFamilyChildrenFromLocal());
+      const localMemoriesNow = getAllLocalMemories();
+      if (localMemoriesNow.length > 0) {
+        setMemories(prev =>
+          mergeMemoriesListPreservingVisualRowRefs(prev, localMemoriesNow as Memory[]),
+        );
+        if (!silent) {
+          setIsLoading(false);
+        }
+      } else if (!silent) {
         setIsLoading(true);
       }
-
-      setFamilyChildren(readFamilyChildrenFromLocal());
 
       const selectedChildId = await getOrSelectFirstChild();
       if (seq !== loadDataSeqRef.current) return;
@@ -133,27 +155,46 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
       if (skipChildRefetch) {
         activeChild = childRef.current;
       } else {
-        const children = await getChildren();
-        if (seq !== loadDataSeqRef.current) return;
+        /**
+         * Local-first : peindre l’enfant depuis SQLite.
+         * `await getChildren()` seulement si le local est vide (cold / autre appareil).
+         */
+        const localChildren = readFamilyChildrenFromLocal();
+        activeChild =
+          localChildren.find(c => c.id === selectedChildId) ?? localChildren[0] ?? null;
 
-        activeChild = children.find(c => c.id === selectedChildId) ?? null;
-        if (!activeChild && children.length > 0) {
-          const first = children[0];
-          activeChild = first;
-          await setSelectedChild(first.id);
+        if (activeChild) {
+          if (activeChild.id !== selectedChildId) {
+            await setSelectedChild(activeChild.id);
+          }
+          const cleaned = await ensureChildFaceBounds(activeChild);
+          if (seq !== loadDataSeqRef.current) return;
+          setChild(cleaned);
+          activeChild = cleaned;
+          refreshChildrenFromCloudInBackground();
+        } else {
+          const children = await getChildren();
+          if (seq !== loadDataSeqRef.current) return;
+
+          activeChild = children.find(c => c.id === selectedChildId) ?? null;
+          if (!activeChild && children.length > 0) {
+            const first = children[0];
+            activeChild = first;
+            await setSelectedChild(first.id);
+          }
+
+          if (!activeChild) {
+            setChild(null);
+            setMemories([]);
+            setBooks([]);
+            return;
+          }
+
+          const cleaned = await ensureChildFaceBounds(activeChild);
+          if (seq !== loadDataSeqRef.current) return;
+          setChild(cleaned);
+          activeChild = cleaned;
         }
-
-        if (!activeChild) {
-          setChild(null);
-          setMemories([]);
-          setBooks([]);
-          return;
-        }
-
-        const cleaned = await ensureChildFaceBounds(activeChild);
-        if (seq !== loadDataSeqRef.current) return;
-        setChild(cleaned);
-        activeChild = cleaned;
       }
 
       if (activeChild && childNeedsFaceBoundsBackfill(activeChild)) {
@@ -170,20 +211,42 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
         return;
       }
 
+      const hadLocalPaint = localMemoriesNow.length > 0;
       const [memoriesData, loadedBooks] = await Promise.all([
-        getFamilyMemories(),
+        getFamilyMemories({ waitForRemote: !hadLocalPaint }),
         listBooks(),
       ]);
       if (seq !== loadDataSeqRef.current) return;
       setMemories(prev => mergeMemoriesListPreservingVisualRowRefs(prev, memoriesData));
       setBooks(loadedBooks);
       void primeFeedVideoPosterStableCache(memoriesData);
-      // Materialisation cloud→sandbox différée après les interactions (scroll/anim) et concurrence
-      // réduite : sur un fil riche en anciennes vidéos, la rafale de téléchargements saccadait le scroll.
-      InteractionManager.runAfterInteractions(() => {
-        void materializeCloudMediaForMemories(memoriesData, { max: 16, batchSize: 2 });
-        void requestMissingMediaDerivatives(memoriesData);
-      });
+      if (!silent) {
+        setIsLoading(false);
+      }
+
+      // Sync cloud en fond si on a déjà peint le local (évite de bloquer la roue).
+      if (hadLocalPaint) {
+        void (async () => {
+          try {
+            await pullFamilyMemoriesFromRemoteToLocal();
+          } catch {
+            /* hors ligne */
+          }
+          if (seq !== loadDataSeqRef.current) return;
+          const fresh = getAllLocalMemories() as Memory[];
+          setMemories(prev => mergeMemoriesListPreservingVisualRowRefs(prev, fresh));
+          void primeFeedVideoPosterStableCache(fresh);
+          InteractionManager.runAfterInteractions(() => {
+            void materializeCloudMediaForMemories(fresh, { max: 16, batchSize: 2 });
+            void requestMissingMediaDerivatives(fresh);
+          });
+        })();
+      } else {
+        InteractionManager.runAfterInteractions(() => {
+          void materializeCloudMediaForMemories(memoriesData, { max: 16, batchSize: 2 });
+          void requestMissingMediaDerivatives(memoriesData);
+        });
+      }
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
@@ -250,11 +313,11 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
               let changed = false;
               const next = prev.map(m => {
                 const patched = batch.get(m.id);
-                if (patched && patched !== m) {
-                  changed = true;
-                  return patched;
-                }
-                return m;
+                if (!patched || patched === m) return m;
+                // Sync cloud : upsert SQLite OK, mais pas de re-render si l’affichage local est identique.
+                if (filMemoryVisualEqual(m, patched)) return m;
+                changed = true;
+                return patched;
               });
               return changed ? next : prev;
             });
@@ -275,24 +338,25 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
             return;
           }
           try {
-            const all = await getChildren();
             const selectedId = childRef.current?.id;
-            const activeRow =
-              selectedId != null
-                ? all.find(c => c.id === selectedId) ?? all[0] ?? null
-                : all[0] ?? null;
-            if (activeRow) {
+            const fromLocal =
+              (selectedId ? getLocalChild(selectedId) : null) ??
+              getLocalChild(id) ??
+              readFamilyChildrenFromLocal()[0] ??
+              null;
+            if (fromLocal) {
               const cleaned =
-                activeRow.id === id
+                fromLocal.id === id
                   ? (await refreshChildProfileFromLocal(id)) ??
                     (await ensureChildFaceBounds(
-                      payload.child?.id === id ? payload.child : activeRow,
+                      payload.child?.id === id ? payload.child : fromLocal,
                     ))
-                  : await ensureChildFaceBounds(activeRow);
+                  : await ensureChildFaceBounds(fromLocal);
               setChild(cleaned);
             } else {
               setChild(null);
             }
+            refreshChildrenFromCloudInBackground();
             if (id !== selectedId) {
               scheduleSilentReload();
             }
@@ -307,7 +371,6 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
       (payload: unknown) => {
         let rows: Memory[];
         let pendingTempId: string | undefined;
-        let preserveInsertionOrder = false;
         if (Array.isArray(payload)) {
           rows = payload as Memory[];
         } else if (
@@ -318,32 +381,28 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
           const p = payload as {
             memories: Memory[];
             pendingTempId?: string;
-            preserveInsertionOrder?: boolean;
           };
           rows = p.memories;
           pendingTempId = p.pendingTempId;
-          preserveInsertionOrder = p.preserveInsertionOrder === true;
         } else {
           return;
         }
         if (rows.length === 0) return;
-        const ordered = preserveInsertionOrder
-          ? [...rows]
-          : [...rows].sort((a, b) => {
-              const ta = new Date(a.created_at).getTime();
-              const tb = new Date(b.created_at).getTime();
-              if (tb !== ta) return tb - ta;
-              const ia = new Date(a.inserted_at ?? a.created_at).getTime();
-              const ib = new Date(b.inserted_at ?? b.created_at).getTime();
-              return ib - ia;
-            });
+        // Toujours trier la vague par date d’événement — jamais l’ordre d’import.
+        const ordered = [...rows].sort((a, b) => {
+          const ta = new Date(a.created_at).getTime();
+          const tb = new Date(b.created_at).getTime();
+          if (tb !== ta) return tb - ta;
+          const ia = new Date(a.inserted_at ?? a.created_at).getTime();
+          const ib = new Date(b.inserted_at ?? b.created_at).getTime();
+          return ib - ia;
+        });
         if (pendingTempId && ordered.length === 1) {
           memoryFlatListKeyByIdRef.current.set(ordered[0].id, pendingTempId);
         }
-        setMemories(prev => {
-          const idSet = new Set(ordered.map(r => r.id));
-          return [...ordered, ...prev.filter(m => !idSet.has(m.id))];
-        });
+        // Fusion + tri chronologique du fil entier (created_at) — ne pas prepend-only
+        // sinon une photo ancienne importée après remonte au-dessus d’une plus récente.
+        setMemories(prev => mergeMemoriesListPreservingVisualRowRefs(prev, ordered));
         void materializeCloudMediaForMemories(ordered, { max: 16, batchSize: 4 });
         void requestMissingMediaDerivatives(ordered);
       }
@@ -388,6 +447,12 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
         }
         setBooks([...feedBooksHydrationSnapshot]);
         setIsLoading(false);
+      } else if (memoriesRef.current.length > 0) {
+        // Réaligner l’ordre sur created_at (guérit un fil faussé par d’anciens prepends).
+        const local = getAllLocalMemories() as Memory[];
+        if (local.length > 0) {
+          setMemories(prev => mergeMemoriesListPreservingVisualRowRefs(prev, local));
+        }
       }
     }, [])
   );

@@ -15,13 +15,18 @@ import {
 
 type Props = {
   children: ReactNode;
+  /** Fond sous l’animation — matcher l’écran (évite flash de couleur). */
+  backgroundColor?: string;
 };
 
 /**
  * Montée verticale légère à l’entrée sur un onglet — une seule piste d’animation
  * (pas de voile blanc par-dessus) pour garder le slide et le fondu synchrones.
  */
-export default function TabSceneTransition({ children }: Props) {
+export default function TabSceneTransition({
+  children,
+  backgroundColor = TAB_TRANSITION_FADE_BG,
+}: Props) {
   const isFocused = useIsFocused();
   const translateY = useSharedValue(0);
   const hasEnteredOnceRef = useRef(false);
@@ -47,7 +52,7 @@ export default function TabSceneTransition({ children }: Props) {
   }));
 
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, { backgroundColor }]}>
       <Reanimated.View style={[styles.scene, sceneStyle]}>{children}</Reanimated.View>
     </View>
   );
@@ -56,7 +61,6 @@ export default function TabSceneTransition({ children }: Props) {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: TAB_TRANSITION_FADE_BG,
   },
   scene: {
     flex: 1,

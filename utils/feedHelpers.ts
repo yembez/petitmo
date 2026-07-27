@@ -7,7 +7,8 @@ export type { Memory, Child } from '@/types/local';
 export function filChildLiteKey(c: Child | null): string {
   if (!c) return '';
   const localPh = (c.local_photo_path ?? '').trim();
-  const remotePh = (c.photo_url ?? '').trim();
+  // Sync cloud peut remplir `photo_url` sans changer l’affichage local — ne pas invalider le memo.
+  const remotePh = localPh ? '' : (c.photo_url ?? '').trim();
   return `${c.id}|${c.birthdate ?? ''}|${localPh}|${remotePh}|${c.name.trim()}`;
 }
 
@@ -54,6 +55,32 @@ export function filMemoryLiteKey(m: Memory): string {
   });
 }
 
+/**
+ * Égalité **affichage** fil/capture — ignore sync cloud (`thumb_url`, `sync_status`, etc.).
+ * Si true, un upsert SQLite post-sync ne doit **pas** remonter React / FlatList.
+ */
+export function filMemoryVisualEqual(a: Memory, b: Memory): boolean {
+  if (a === b) return true;
+  if (a.id !== b.id || a.type !== b.type) return false;
+  return (
+    (a.content ?? '') === (b.content ?? '') &&
+    (a.text_title ?? '') === (b.text_title ?? '') &&
+    !!a.is_favorite === !!b.is_favorite &&
+    (a.location ?? '') === (b.location ?? '') &&
+    a.created_at === b.created_at &&
+    (a.local_thumb_path ?? '') === (b.local_thumb_path ?? '') &&
+    (a.local_display_path ?? '') === (b.local_display_path ?? '') &&
+    (a.local_original_path ?? '') === (b.local_original_path ?? '') &&
+    (a.local_media_path ?? '') === (b.local_media_path ?? '') &&
+    (a.local_print_path ?? '') === (b.local_print_path ?? '') &&
+    (a.voice_cover_path ?? '') === (b.voice_cover_path ?? '') &&
+    JSON.stringify(a.extra_photo_paths ?? []) === JSON.stringify(b.extra_photo_paths ?? []) &&
+    JSON.stringify(a.favorite_photo_urls ?? []) === JSON.stringify(b.favorite_photo_urls ?? []) &&
+    (a.duration ?? null) === (b.duration ?? null) &&
+    (a.captured_overlay_ink ?? null) === (b.captured_overlay_ink ?? null)
+  );
+}
+
 function compareMemoriesByEventDateDesc(a: Memory, b: Memory): number {
   const ta = new Date(a.created_at).getTime();
   const tb = new Date(b.created_at).getTime();
@@ -66,7 +93,8 @@ function compareMemoriesByEventDateDesc(a: Memory, b: Memory): number {
 /**
  * Quand `getMemories` revient juste après un import, on recevait une **nouvelle** liste d’objets :
  * même contenu visible, références différentes → React / FlatList recyclaient les cellules → flash.
- * On garde l’ancienne référence `Memory` si le rendu fil serait strictement le même (`filMemoryLiteKey`).
+ * On garde l’ancienne référence `Memory` si l’affichage local est identique (`filMemoryVisualEqual`) —
+ * **pas** `filMemoryLiteKey` (qui inclut les URLs cloud et ferait remonter la sync).
  *
  * **Union prev + server** : le SQLite local peut être un cran derrière Supabase (pull async) ;
  * si on ne faisait que `server.map`, une liste serveur incomplète **écrasait** les souvenirs déjà
@@ -83,7 +111,7 @@ export function mergeMemoriesListPreservingVisualRowRefs(prev: Memory[], server:
 
   for (const s of server) {
     const p = prevById.get(s.id);
-    if (p && filMemoryLiteKey(p) === filMemoryLiteKey(s)) {
+    if (p && filMemoryVisualEqual(p, s)) {
       mergedById.set(s.id, p);
     } else {
       mergedById.set(s.id, s);
@@ -139,15 +167,17 @@ export function buildOptimisticMemoryForPending(p: PendingUpload, child: Child |
   };
 
   if (p.kind === 'video') {
+    const poster = p.previewPosterUri?.trim() || null;
     return {
       ...shared,
       type: 'video',
       media_url: uris[0] ?? null,
       duration: null,
-      thumbnail_url: null,
-      thumb_url: null,
+      thumbnail_url: poster,
+      thumb_url: poster,
       display_url: null,
-      poster_url: null,
+      poster_url: poster,
+      local_thumb_path: poster,
       extra_photo_urls: emptyExtras,
       extra_thumb_urls: emptyExtras,
       extra_display_urls: emptyExtras,

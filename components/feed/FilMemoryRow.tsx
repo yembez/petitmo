@@ -42,7 +42,6 @@ import PhotoMosaic from "@/components/PhotoMosaic";
 import {
   appendLocalMediaCacheBuster,
   getVoiceCoverUriForFeedAndViewer,
-  getVideoPosterUriForFeedAndViewer,
   isAlbumFullyFavorited,
   isFeedMultiPhotoAlbum,
   memoryHasExplicitVoiceCover,
@@ -51,10 +50,13 @@ import {
 } from '@/utils/memoryPhotos';
 import { useFeedPhotoDisplayUrls } from '@/hooks/useFeedPhotoDisplayUrls';
 import { useFeedVideoPlaybackUri } from '@/hooks/useFeedVideoPlaybackUri';
+import { useFeedVideoPosterDisplayUrl } from '@/hooks/useFeedVideoPosterDisplayUrl';
 import { useExpoAvShouldPlay } from '@/hooks/useExpoAvShouldPlay';
 import { normalizeVideoPlaybackUri } from '@/utils/videoMediaUri';
 import { clampAudioBookAnnotation } from '@/lib/audioBookAnnotation';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
+import { FeedMediaPrepOverlay } from '@/components/FeedMediaPrepOverlay';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { Video, ResizeMode, type AVPlaybackStatus } from 'expo-av';
 import { Swipeable, RectButton } from "react-native-gesture-handler";
 import {
@@ -130,11 +132,14 @@ type FilMemoryRowProps = {
   immersiveLaunchRef: RefObject<(memoryId: string, albumPhotoIndex?: number) => void>;
   /** Import non finalisé : pas de favori / swipe / actions. */
   isOptimisticFeedPending?: boolean;
+  /** Libellé sous la roue (lot multi-photos, etc.). */
+  pendingPrepLabel?: string;
 };
 function filMemoryRowDataPropsEqual(prev: FilMemoryRowProps, next: FilMemoryRowProps): boolean {
   if (prev.memoryIndex !== next.memoryIndex) return false;
   if (prev.uploadingVoiceCoverId !== next.uploadingVoiceCoverId) return false;
   if (!!prev.isOptimisticFeedPending !== !!next.isOptimisticFeedPending) return false;
+  if ((prev.pendingPrepLabel ?? '') !== (next.pendingPrepLabel ?? '')) return false;
   if (filChildLiteKey(prev.child) !== filChildLiteKey(next.child)) return false;
   if (filFamilyChildrenLiteKey(prev.familyChildren) !== filFamilyChildrenLiteKey(next.familyChildren)) {
     return false;
@@ -234,7 +239,9 @@ function FilMemoryRow({
   swipeRefs,
   immersiveLaunchRef,
   isOptimisticFeedPending = false,
+  pendingPrepLabel,
 }: FilMemoryRowProps) {
+  const { t } = useAppTranslation('common');
   const isFeedVideoAutoplay = useIsFeedVideoAutoplay(memory.id);
   const memoryEditorialFont = useMemoryEditorialFont();
   const memoryEditorialBoldFont = useMemoryEditorialBoldFont();
@@ -257,9 +264,7 @@ function FilMemoryRow({
     const parts = raw.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
     return parts.length > 0 ? parts : [raw];
   })();
-  const videoPosterRaw = getVideoPosterUriForFeedAndViewer(memory);
-  const videoPosterSigned = useSignedMediaUrl(videoPosterRaw || null) ?? '';
-  const videoPosterUri = normalizeVideoPlaybackUri((videoPosterSigned || videoPosterRaw).trim());
+  const videoPosterUri = useFeedVideoPosterDisplayUrl(memory);
   const voiceCoverRaw = getVoiceCoverUriForFeedAndViewer(memory);
   const voiceCoverSigned = useSignedMediaUrl(voiceCoverRaw || null) ?? '';
   const voiceCoverDisplayUri = appendLocalMediaCacheBuster(
@@ -290,6 +295,8 @@ function FilMemoryRow({
   const feedInlinePosterFade = useRef(new Animated.Value(1)).current;
   const feedInlineVideoReveal = useRef(new Animated.Value(0)).current;
   const feedInlineVideoRef = useRef<Video | null>(null);
+  /** Swipe « supprimer » : ne pas ouvrir l’immersif au relâchement du doigt. */
+  const suppressImmersivePressRef = useRef(false);
   useExpoAvShouldPlay(feedInlineVideoRef, canAutoplayVideoInline, videoPlaybackUri, {
     restartFromBeginningOnPlay: true,
   });
@@ -330,7 +337,8 @@ function FilMemoryRow({
     setFeedInlineVideoDisplayReady(false);
     feedInlinePosterFade.setValue(1);
     feedInlineVideoReveal.setValue(0);
-  }, [memory.id, canAutoplayVideoInline, videoPlaybackUri, feedInlinePosterFade, feedInlineVideoReveal]);
+    // Reset seulement si la source visuelle change — pas au swap pending→id (même URI).
+  }, [canAutoplayVideoInline, videoPlaybackUri, feedInlinePosterFade, feedInlineVideoReveal]);
 
   useEffect(() => {
     if (!feedInlineVideoDisplayReady || !canAutoplayVideoInline) return;
@@ -364,8 +372,22 @@ function FilMemoryRow({
     setFeedInlineVideoSoundOn(next);
   }, [feedInlineVideoSoundOn]);
 
+  const markSwipeSuppressImmersive = useCallback(() => {
+    suppressImmersivePressRef.current = true;
+  }, []);
+
+  const clearSwipeSuppressImmersive = useCallback(() => {
+    setTimeout(() => {
+      suppressImmersivePressRef.current = false;
+    }, 200);
+  }, []);
+
   const launchImmersive = (albumPhotoIndex = 0) => {
     if (isOptimisticFeedPending) return;
+    if (suppressImmersivePressRef.current) {
+      suppressImmersivePressRef.current = false;
+      return;
+    }
     immersiveLaunchRef.current(memory.id, albumPhotoIndex);
   };
 
@@ -469,28 +491,6 @@ function FilMemoryRow({
       </View>
       ) : null}
       <View style={styles.postMain}>
-        <Swipeable
-          ref={(r) => {
-            if (r) swipeRefs.current.set(memory.id, r);
-            else swipeRefs.current.delete(memory.id);
-          }}
-          enabled={!isOptimisticFeedPending}
-          friction={2}
-          overshootRight={false}
-          {...FEED_SWIPEABLE_AXIS_LOCK}
-          renderRightActions={
-            isOptimisticFeedPending
-              ? undefined
-              : () => (
-                  <View style={styles.swipeDeleteContainer}>
-                    <RectButton style={styles.swipeDeleteBtn} onPress={() => handleDeleteMemory(memory)}>
-                      <Trash2 size={scale(22)} color="#FFFFFF" strokeWidth={2.2} />
-                      <Text style={styles.swipeDeleteLabel}>Supprimer</Text>
-                    </RectButton>
-                  </View>
-                )
-          }
-        >
           <View style={styles.postBody}>
           {memory.type === 'photo' && photoUrls.length > 0 && (
             <View style={{ position: 'relative' }}>
@@ -511,6 +511,14 @@ function FilMemoryRow({
                 }
                 memoryForFavoriteVariants={memory}
               />
+              {isOptimisticFeedPending ? (
+                <FeedMediaPrepOverlay
+                  compact
+                  prominent
+                  blockTouches
+                  label={pendingPrepLabel?.trim() || t('mediaPrep.addingPhoto')}
+                />
+              ) : null}
               {showCapturedOverlay ? (
                 <CapturedAtOverlay
                   uriForAnalysis={photoUrls[0]}
@@ -524,6 +532,14 @@ function FilMemoryRow({
             <View style={{ position: 'relative' }}>
               {mediaMetaOverlay}
               <View style={[styles.mediaCard, styles.photoPlaceholder]} />
+              {isOptimisticFeedPending ? (
+                <FeedMediaPrepOverlay
+                  compact
+                  prominent
+                  blockTouches
+                  label={pendingPrepLabel?.trim() || t('mediaPrep.addingPhoto')}
+                />
+              ) : null}
             </View>
           )}
 
@@ -550,7 +566,9 @@ function FilMemoryRow({
                         style={[
                           StyleSheet.absoluteFillObject,
                           {
-                            opacity: 1,
+                            opacity: videoPosterUri.trim()
+                              ? 1
+                              : feedInlineVideoReveal,
                             zIndex: 1,
                             backgroundColor: '#000000',
                           },
@@ -596,7 +614,7 @@ function FilMemoryRow({
                               style={StyleSheet.absoluteFillObject}
                               contentFit="cover"
                               cachePolicy="memory-disk"
-                              recyclingKey={memory.id}
+                              recyclingKey={`poster-${memory.id}`}
                             />
                           </Animated.View>
                         ) : (
@@ -605,21 +623,44 @@ function FilMemoryRow({
                             style={[StyleSheet.absoluteFillObject, { zIndex: 2 }]}
                             contentFit="cover"
                             cachePolicy="memory-disk"
-                            recyclingKey={memory.id}
+                            recyclingKey={`poster-${memory.id}`}
                           />
                         )
                       ) : null}
+                      {/** Roue uniquement sur carte d’upload vidéo (pending) — jamais au scroll autoplay. */}
+                      {isOptimisticFeedPending ? (
+                        <FeedMediaPrepOverlay
+                          compact
+                          prominent
+                          blockTouches
+                          label={videoPosterUri.trim() ? '' : t('mediaPrep.preparing')}
+                        />
+                      ) : null}
                     </View>
                   ) : videoPosterUri ? (
-                    <Image
-                      source={{ uri: videoPosterUri }}
-                      style={styles.photoImage}
-                      contentFit="cover"
-                      cachePolicy="memory-disk"
-                      recyclingKey={memory.id}
-                    />
+                    <View style={styles.photoImage}>
+                      <Image
+                        source={{ uri: videoPosterUri }}
+                        style={StyleSheet.absoluteFillObject}
+                        contentFit="cover"
+                        cachePolicy="memory-disk"
+                        recyclingKey={`poster-${memory.id}`}
+                      />
+                      {isOptimisticFeedPending ? (
+                        <FeedMediaPrepOverlay compact prominent blockTouches label="" />
+                      ) : null}
+                    </View>
                   ) : (
-                    <View style={[styles.photoImage, { backgroundColor: '#000000' }]} />
+                    <View style={[styles.photoImage, { backgroundColor: '#000000' }]}>
+                      {isOptimisticFeedPending ? (
+                        <FeedMediaPrepOverlay
+                          compact
+                          prominent
+                          blockTouches
+                          label={t('mediaPrep.preparing')}
+                        />
+                      ) : null}
+                    </View>
                   )}
                   {!skipImmersive && !canAutoplayVideoInline ? (
                     <View style={[styles.playOverlay, styles.videoPlayIconAboveTap]} pointerEvents="none">
@@ -746,7 +787,6 @@ function FilMemoryRow({
             </Pressable>
           )}
           </View>
-        </Swipeable>
 
         {memory.type !== 'text' && !!contentText && (
           <View style={styles.postCaption}>
@@ -885,6 +925,9 @@ function FilMemoryRow({
         friction={2}
         overshootRight={false}
         {...FEED_SWIPEABLE_AXIS_LOCK}
+        onSwipeableOpenStartDrag={markSwipeSuppressImmersive}
+        onSwipeableWillOpen={markSwipeSuppressImmersive}
+        onSwipeableClose={clearSwipeSuppressImmersive}
         /** Par défaut RNGH met `overflow: 'hidden'` — coupe l’ombre du `postShell`. */
         containerStyle={{ overflow: 'visible' }}
         renderRightActions={

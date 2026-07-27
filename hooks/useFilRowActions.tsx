@@ -80,7 +80,7 @@ export function useFilRowActions(setMemories: Dispatch<SetStateAction<Memory[]>>
       try {
         const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (!perm.granted) {
-          Alert.alert('Accès refusé', 'Autorisez l’accès aux photos pour ajouter une illustration.');
+          Alert.alert('Accès refusé', 'Autorise l’accès aux photos pour ajouter une illustration.');
           return;
         }
         const result = await ImagePicker.launchImageLibraryAsync({
@@ -121,7 +121,7 @@ export function useFilRowActions(setMemories: Dispatch<SetStateAction<Memory[]>>
 
   const handleDeleteMemory = useCallback(
     (memory: Memory) => {
-      Alert.alert('Supprimer ce moment', 'Êtes-vous sûr de vouloir supprimer ce moment ?', [
+      Alert.alert('Supprimer ce moment', 'Es-tu sûr de vouloir supprimer ce moment ?', [
         { text: 'Annuler', style: 'cancel', onPress: () => swipeRefs.current.get(memory.id)?.close() },
         {
           text: 'Supprimer',

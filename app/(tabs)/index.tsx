@@ -61,9 +61,11 @@ import {
 import { hydrateTabScreensFromSqliteSync } from '@/services/tabScreensHydrate';
 import type { Child } from '@/types/local';
 import { checkMemoryLimit } from '@/lib/limits';
-import { getLocalChild, listLocalChildren } from '@/lib/localDb';
+import { promptFreeTierLimitThenPaywall } from '@/utils/freeTierLimitGate';
+import { getLocalChild, listLocalChildren, listLocalChildrenForUser } from '@/lib/localDb';
+import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
-import { resolveChildProfileImageDisplayUri } from '@/utils/childPhotoUri';
+import { resolveChildProfileImageUri } from '@/utils/childPhotoUri';
 import { childDisplayGivenName, childDisplayInitial } from '@/utils/childDisplayName';
 import { formatCaptureChildAge, formatCaptureHeaderDate } from '@/utils/date';
 import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
@@ -72,6 +74,13 @@ import {
   CAPTURE_HERO_IMAGE_CONTENT_POSITION,
   CAPTURE_HERO_IMAGE_OBJECT_POSITION,
 } from '@/utils/captureHeroMetrics';
+
+/** Enfants visibles pour le compte courant — jamais ceux d’un autre e-mail. */
+function listCaptureScopedChildren(): Child[] {
+  const uid = peekLastRealAuthUserId();
+  if (uid) return listLocalChildrenForUser(uid);
+  return listLocalChildren().filter(c => !(c.user_id ?? '').trim());
+}
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
@@ -115,9 +124,11 @@ function captureCtaHaloStyle(color: string) {
   });
 }
 
-/** Révision photo (chemins + date) — `updated_at` change à chaque upload même si le chemin fichier est identique. */
+/** Révision photo — chemin local prioritaire ; ignore `photo_url` cloud (sync silencieuse). */
 function captureHeroPhotoRevision(child: Child): string {
-  return `${(child.local_photo_path ?? '').trim()}|${(child.photo_url ?? '').trim()}|${(child.updated_at ?? '').trim()}`;
+  const local = (child.local_photo_path ?? '').trim();
+  if (local) return `local:${local}`;
+  return `remote:${(child.photo_url ?? '').trim()}`;
 }
 
 function captureChildDisplayEqual(a: Child | null, b: Child | null): boolean {
@@ -299,7 +310,7 @@ function CapturerScreen() {
     return getCaptureTabChildSnapshot();
   });
   const [familyChildren, setFamilyChildren] = useState<Child[]>(() =>
-    sortChildrenByBirthdateAsc(listLocalChildren()),
+    sortChildrenByBirthdateAsc(listCaptureScopedChildren()),
   );
   const [isLoading, setIsLoading] = useState(() => child === null);
   const childRef = useRef<Child | null>(null);
@@ -309,11 +320,9 @@ function CapturerScreen() {
   const captureScrollMaxYRef = useRef(0);
 
   const heroDisplayUri = child
-    ? resolveChildProfileImageDisplayUri(
-        child.local_photo_path,
-        child.photo_url,
-        child.updated_at,
-      )
+    ? // Pas de `?petitmo_v=updated_at` : un pull cloud qui touche `updated_at` ne doit
+      // **jamais** changer l’URI hero (sinon ExpoImage opacity 0 = flash plein écran).
+      resolveChildProfileImageUri(child.local_photo_path, child.photo_url)
     : null;
   const heroIsLocalAsset =
     !!heroDisplayUri &&
@@ -323,7 +332,7 @@ function CapturerScreen() {
       (!heroDisplayUri.startsWith('http://') && !heroDisplayUri.startsWith('https://')));
   const heroRemoteBase =
     child && !heroIsLocalAsset
-      ? resolveChildProfileImageDisplayUri(null, child.photo_url, child.updated_at)
+      ? resolveChildProfileImageUri(null, child.photo_url)
       : null;
   const heroSignedRemote = useSignedMediaUrl(heroRemoteBase);
   const photoUri = heroDisplayUri
@@ -346,7 +355,7 @@ function CapturerScreen() {
     const sub = DeviceEventEmitter.addListener(
       PETITMO_CHILD_PROFILE_UPDATED_EVENT,
       (payload: ChildProfileUpdatedPayload) => {
-        const sorted = sortChildrenByBirthdateAsc(listLocalChildren());
+        const sorted = sortChildrenByBirthdateAsc(listCaptureScopedChildren());
         setFamilyChildren(sorted);
         const id = payload?.childId?.trim();
         const active =
@@ -358,8 +367,11 @@ function CapturerScreen() {
           setChild(null);
           return;
         }
-        setCaptureTabChildSnapshot(active);
-        setChild(prev => (captureChildDisplayEqual(prev, active) ? prev : active));
+        setChild(prev => {
+          if (captureChildDisplayEqual(prev, active)) return prev;
+          setCaptureTabChildSnapshot(active);
+          return active;
+        });
       }
     );
     return () => sub.remove();
@@ -384,9 +396,9 @@ function CapturerScreen() {
           return;
         }
 
-        const limitCheck = await checkMemoryLimit(childId);
+        const limitCheck = await checkMemoryLimit(childId, { skipRemotePull: true });
         if (!limitCheck.canCreate) {
-          router.push({ pathname: '/paywall', params: { context: 'LIMIT_REACHED' } });
+          promptFreeTierLimitThenPaywall({ kind: 'memories', router });
           return;
         }
 
@@ -465,23 +477,28 @@ function CapturerScreen() {
         const silent = childRef.current != null;
         try {
           if (!silent) setIsLoading(true);
+          // Local-first : ID sélectionné + SQLite (getOrSelectFirstChild ne bloque plus sur le cloud).
           const storedSelectedId = await getOrSelectFirstChild();
           if (cancelled) return;
 
           /** Retour onglet : lecture SQLite légère (pas de ML / sanitize en boucle). */
           if (silent && storedSelectedId) {
-            const sorted = sortChildrenByBirthdateAsc(listLocalChildren());
+            const sorted = sortChildrenByBirthdateAsc(listCaptureScopedChildren());
             if (!cancelled) setFamilyChildren(sorted);
             const row = getLocalChild(storedSelectedId);
             if (row && !cancelled) {
-              setCaptureTabChildSnapshot(row);
-              setChild(prev => (captureChildDisplayEqual(prev, row) ? prev : row));
+              // Ne pas écraser le snapshot / state si le hero est déjà le même fichier.
+              setChild(prev => {
+                if (captureChildDisplayEqual(prev, row)) return prev;
+                setCaptureTabChildSnapshot(row);
+                return row;
+              });
             }
             return;
           }
 
-          /** SQLite uniquement — pas `getChildren()` (évite ML face bounds + sanitize async). */
-          const allChildren = sortChildrenByBirthdateAsc(listLocalChildren());
+          /** SQLite uniquement — pas `await getChildren()` sur le chemin critique. */
+          const allChildren = sortChildrenByBirthdateAsc(listCaptureScopedChildren());
           if (cancelled) return;
           setFamilyChildren(allChildren);
 
@@ -493,7 +510,8 @@ function CapturerScreen() {
             }
           } else if (allChildren.length === 0) {
             setChild(null);
-            router.push('/create-child');
+            // replace : évite une pile sans historique + GO_BACK si create-child est déjà la cible.
+            router.replace('/create-child');
           } else if (!cancelled) {
             setCaptureTabChildSnapshot(allChildren[0]);
             setChild(prev => (captureChildDisplayEqual(prev, allChildren[0]) ? prev : allChildren[0]));
@@ -1092,10 +1110,40 @@ function CaptureHeroImageStack({
 }: CaptureHeroImageStackProps & { isTabFocused: boolean }) {
   const breatheScale = useRef(new Animated.Value(CAPTURE_HERO_BREATHE_MIN)).current;
   const [imageReady, setImageReady] = useState(false);
+  const lastReadyUriRef = useRef('');
 
   useEffect(() => {
-    setImageReady(false);
-  }, [photoUri, imageRevision, reactKey]);
+    // Ne masquer que si l’URI visuelle change vraiment — ignorer `?petitmo_v=` / signatures.
+    const strip = (u: string) =>
+      u
+        .replace(/[?&]petitmo_v=[^&]*/gi, '')
+        .replace(/[?&]token=[^&]*/gi, '')
+        .replace(/[?&]X-Amz-[^=]+=[^&]*/gi, '')
+        .replace(/\?&+/, '?')
+        .replace(/[?&]$/, '');
+    if (strip(lastReadyUriRef.current) === strip(photoUri) && photoUri.trim()) {
+      setImageReady(true);
+      return;
+    }
+    const prev = lastReadyUriRef.current;
+    const next = photoUri.trim();
+    const upgradingRemoteToLocal =
+      !!prev &&
+      /^https?:\/\//i.test(prev) &&
+      !!next &&
+      (next.startsWith('file:') ||
+        next.startsWith('content:') ||
+        next.startsWith('ph://'));
+    const sameRemoteHost =
+      !!prev &&
+      /^https?:\/\//i.test(prev) &&
+      !!next &&
+      /^https?:\/\//i.test(next);
+    // Cache sandbox après sync / URL signée : garder l’image affichée.
+    if (!upgradingRemoteToLocal && !sameRemoteHost) {
+      setImageReady(false);
+    }
+  }, [photoUri]);
 
   useEffect(() => {
     breatheScale.setValue(CAPTURE_HERO_BREATHE_MIN);
@@ -1125,7 +1173,7 @@ function CaptureHeroImageStack({
 
   /**
    * ExpoImage peut peindre 1 frame à taille intrinsèque (miniature bas-gauche)
-   * avant le layout cover — on masque jusqu’à `onLoad`.
+   * avant le layout cover — on masque jusqu’à `onLoad` **uniquement** au 1er paint d’une URI.
    */
   return (
     <View style={[StyleSheet.absoluteFillObject, styles.heroImageClip]} pointerEvents="box-none" collapsable={false}>
@@ -1154,7 +1202,10 @@ function CaptureHeroImageStack({
             recyclingKey={`${reactKey}-${imageRevision}`}
             priority="high"
             transition={0}
-            onLoad={() => setImageReady(true)}
+            onLoad={() => {
+              lastReadyUriRef.current = photoUri;
+              setImageReady(true);
+            }}
             accessibilityIgnoresInvertColors
           />
         )}
@@ -1165,7 +1216,7 @@ function CaptureHeroImageStack({
 
 export default function CapturerScreenTab() {
   return (
-    <TabSceneTransition>
+    <TabSceneTransition backgroundColor={CAPTURE_SCREEN_BG}>
       <CapturerScreen />
     </TabSceneTransition>
   );

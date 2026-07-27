@@ -23,6 +23,7 @@ import {
   getLocalChild,
   listLocalBooks,
   listLocalChildren,
+  listLocalChildrenForUser,
   reassignLocalMemoriesChildId,
   upsertLocalChild,
 } from '@/lib/localDb';
@@ -35,6 +36,10 @@ import { ensureLocalImageForPalette } from '@/hooks/ensureLocalImageForPalette';
 import { normalizeChildGivenName } from '@/utils/childDisplayName'
 import { isLegacyHeroHeuristicOnProfileCrop, isValidFaceBounds } from '@/utils/avatarFaceBounds';
 import { detectFaceBounds, estimatePortraitFaceBounds } from '@/utils/detectFace';
+
+function isDeviceUserEmail(email: string | null | undefined): boolean {
+  return !!email && email.toLowerCase().endsWith('@petitmo.local');
+}
 
 type ChildRow = Database['public']['Tables']['children']['Row'];
 
@@ -441,12 +446,22 @@ function mergeRemoteChildRowWithLocal(row: ChildRow): LocalChild {
 }
 
 export async function getChildren() {
-  const localChildren = listLocalChildren();
+  const { data: auth } = await supabase.auth.getUser();
+  const sessionUser = auth.user;
+  const sessionUid = sessionUser && !isDeviceUserEmail(sessionUser.email) ? sessionUser.id : '';
+
+  const localChildren = sessionUid
+    ? listLocalChildrenForUser(sessionUid)
+    : listLocalChildren();
 
   try {
     if ((await getCachedUserMode()) === 'local') {
-      scheduleChildFaceBoundsBackfill(localChildren);
-      return localChildren;
+      // Sans compte produit : ne pas exposer des profils déjà liés à un e-mail.
+      const safeLocal = sessionUid
+        ? localChildren
+        : localChildren.filter(c => !(c.user_id ?? '').trim());
+      scheduleChildFaceBoundsBackfill(safeLocal);
+      return safeLocal;
     }
 
     const { data, error } = await supabase
@@ -458,10 +473,12 @@ export async function getChildren() {
 
     const remoteRows = data ?? [];
 
-    /** Passage gratuit → payant : profils encore uniquement en SQLite tant que la sync n’a pas abouti. */
-    if (remoteRows.length === 0 && localChildren.length > 0) {
-      void ensureLocalChildrenSyncedToSupabase();
-      scheduleChildFaceBoundsBackfill(localChildren);
+    /** Remote vide : uniquement les locaux **du compte courant** (jamais un autre e-mail). */
+    if (remoteRows.length === 0) {
+      if (localChildren.length > 0) {
+        void ensureLocalChildrenSyncedToSupabase();
+        scheduleChildFaceBoundsBackfill(localChildren);
+      }
       return localChildren;
     }
 
@@ -666,7 +683,7 @@ export async function ensureLocalChildrenSyncedToSupabase(): Promise<ChildrenSyn
   };
 
   if (mode !== 'cloud') {
-    report.errors.push('Mode non cloud (tier pas "paid").');
+    report.errors.push('Mode non cloud (aucun vrai compte authentifié).');
     return report;
   }
 
@@ -685,7 +702,10 @@ export async function ensureLocalChildrenSyncedToSupabase(): Promise<ChildrenSyn
     return report;
   }
 
-  const locals = listLocalChildren();
+  const locals = listLocalChildren().filter(c => {
+    const o = (c.user_id ?? '').trim();
+    return !o || o === user.id;
+  });
   report.total = locals.length;
   if (locals.length === 0) {
     report.errors.push('Aucun enfant en local à synchroniser.');
@@ -707,6 +727,11 @@ export async function ensureLocalChildrenSyncedToSupabase(): Promise<ChildrenSyn
       created_at: child.created_at,
       updated_at: child.updated_at ?? child.created_at,
     };
+
+    // Rattache l’orphelin au compte avant insert cloud.
+    if (!(child.user_id ?? '').trim()) {
+      upsertLocalChild({ ...child, user_id: user.id });
+    }
 
     const { error } = await supabase.from('children').insert(insert);
     if (error) {
@@ -860,6 +885,17 @@ export async function setSelectedChild(childId: string) {
   }
 }
 
+/** Déconnexion / switch de compte : plus de profil « collé » à l’appareil. */
+export async function clearSelectedChildAndCaptureSnapshot(): Promise<void> {
+  selectedChildIdLastKnown = null;
+  setCaptureTabChildSnapshot(null);
+  try {
+    await AsyncStorage.removeItem(SELECTED_CHILD_KEY);
+  } catch {
+    /* */
+  }
+}
+
 export async function getSelectedChild(): Promise<string | null> {
   try {
     const v = await AsyncStorage.getItem(SELECTED_CHILD_KEY);
@@ -872,20 +908,72 @@ export async function getSelectedChild(): Promise<string | null> {
   }
 }
 
+/**
+ * Pull cloud enfants en fond — **ne doit jamais** bloquer peindre Capturer / fil / hydrate UI.
+ * Debounce : un focus Capturer / hydrate AppState ne doit pas marteler getChildren.
+ */
+let refreshChildrenBgTimer: ReturnType<typeof setTimeout> | null = null;
+let refreshChildrenBgInFlight = false;
+
+export function refreshChildrenFromCloudInBackground(): void {
+  if (refreshChildrenBgTimer) clearTimeout(refreshChildrenBgTimer);
+  refreshChildrenBgTimer = setTimeout(() => {
+    refreshChildrenBgTimer = null;
+    if (refreshChildrenBgInFlight) return;
+    refreshChildrenBgInFlight = true;
+    void getChildren()
+      .catch(e => {
+        console.warn('[children] refreshChildrenFromCloudInBackground', e);
+      })
+      .finally(() => {
+        refreshChildrenBgInFlight = false;
+      });
+  }, 800);
+}
+
+/**
+ * Local-first : ID sélectionné depuis AsyncStorage / SQLite **sans attendre** le réseau.
+ * Pull cloud uniquement en fond (ou en dernier recours si SQLite vide).
+ */
 export async function getOrSelectFirstChild(): Promise<string | null> {
   try {
-    /** Toujours partir de la liste serveur : évite « aucun enfant » si AsyncStorage vide / ID obsolète alors qu’il existe des profils. */
+    /** `getSession` = cache local ; éviter `getUser()` (réseau) sur le chemin Capturer. */
+    const { data: sess } = await supabase.auth.getSession();
+    const sessionUser = sess.session?.user;
+    const sessionUid =
+      sessionUser && !isDeviceUserEmail(sessionUser.email) ? sessionUser.id : '';
+
+    const localChildren = sessionUid
+      ? listLocalChildrenForUser(sessionUid)
+      : listLocalChildren().filter(c => !(c.user_id ?? '').trim());
+
+    const stored = await getSelectedChild();
+
+    if (stored && localChildren.some(c => c.id === stored)) {
+      refreshChildrenFromCloudInBackground();
+      return stored;
+    }
+
+    if (localChildren.length > 0) {
+      const sorted = sortChildrenByBirthdateAsc(localChildren);
+      const firstId = sorted[0]!.id;
+      await setSelectedChild(firstId);
+      refreshChildrenFromCloudInBackground();
+      return firstId;
+    }
+
+    /** Cold start / nouvel appareil : pas de local → réseau nécessaire. */
     const children = await getChildren();
     if (!children.length) {
       return null;
     }
 
-    const stored = await getSelectedChild();
-    if (stored && children.some(c => c.id === stored)) {
-      return stored;
+    const storedAfter = await getSelectedChild();
+    if (storedAfter && children.some(c => c.id === storedAfter)) {
+      return storedAfter;
     }
 
-    const firstId = children[0].id;
+    const firstId = children[0]!.id;
     await setSelectedChild(firstId);
     return firstId;
   } catch (error) {

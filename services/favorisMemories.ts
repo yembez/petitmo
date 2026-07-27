@@ -15,15 +15,38 @@ export function memoryShouldAppearInFavoris(m: Memory): boolean {
 }
 
 /**
- * Charge les souvenirs pour Favoris : sync cloud + réaligne les cœurs du fil (cache onglet Fil)
- * vers SQLite avant affichage.
+ * Charge les souvenirs pour Favoris.
+ * Défaut = **local-first** (SQLite immédiat). Passer `{ waitForRemote: true }` seulement
+ * pour un pull bloquant explicite (rare).
  */
-export async function loadMemoriesForFavorisTab(): Promise<Memory[]> {
-  await getFamilyMemories();
+export async function loadMemoriesForFavorisTab(opts?: {
+  waitForRemote?: boolean;
+}): Promise<Memory[]> {
   const { applyFeedHydrationFavoriteFlagsToLocal } = await import('@/services/memoryDisplayHeal');
   applyFeedHydrationFavoriteFlagsToLocal();
-  await reconcileFavoritesAfterCloudSync();
+
+  if (opts?.waitForRemote === true) {
+    await getFamilyMemories();
+    applyFeedHydrationFavoriteFlagsToLocal();
+    await reconcileFavoritesAfterCloudSync();
+    return getAllLocalMemories();
+  }
+
   return getAllLocalMemories();
+}
+
+/** Pull cloud + reconcile favoris en fond (ne doit jamais bloquer l’UI). */
+export function syncFavorisMemoriesFromCloudInBackground(
+  onDone?: (list: Memory[]) => void,
+): void {
+  void (async () => {
+    try {
+      const list = await loadMemoriesForFavorisTab({ waitForRemote: true });
+      onDone?.(list);
+    } catch (e) {
+      console.warn('[syncFavorisMemoriesFromCloudInBackground]', e);
+    }
+  })();
 }
 
 export function listLocalMemoriesMarkedForFavoris(): Memory[] {

@@ -569,6 +569,19 @@ export function listLocalChildren(): Child[] {
   return rows.map(deserializeChild)
 }
 
+/**
+ * Enfants du compte courant : `user_id` = uid, ou orphelins (`user_id` vide).
+ * Exclut toujours les profils déjà rattachés à un autre compte.
+ */
+export function listLocalChildrenForUser(userId: string | null | undefined): Child[] {
+  const uid = (userId ?? '').trim()
+  if (!uid) return []
+  return listLocalChildren().filter(c => {
+    const o = (c.user_id ?? '').trim()
+    return !o || o === uid
+  })
+}
+
 export function upsertLocalChild(child: Child): void {
   db.runSync(
     `INSERT OR REPLACE INTO children

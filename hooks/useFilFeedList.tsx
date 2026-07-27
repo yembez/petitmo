@@ -20,6 +20,19 @@ import {
   PendingFeedUploadCard,
   type FeedListItem,
 } from '@/components/feed/FilMemoryRow';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
+
+function pendingPrepLabelFor(
+  p: PendingUpload,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+): string {
+  const total = p.batchTotal ?? 0;
+  if (total > 1) {
+    const done = Math.min(Math.max(0, p.batchDone ?? 0), total);
+    return t('mediaPrep.addingPhotos', { done, total });
+  }
+  return t('mediaPrep.addingPhoto');
+}
 
 export function useFilFeedList(
   memories: Memory[],
@@ -43,6 +56,8 @@ export function useFilFeedList(
   feedData: FeedListItem[];
   renderItem: (info: { item: FeedListItem }) => ReactElement;
 } {
+  const { t } = useAppTranslation('common');
+
   const memoryIndexById = useMemo(() => {
     const m = new Map<string, number>();
     memories.forEach((mem, idx) => m.set(mem.id, idx));
@@ -53,18 +68,47 @@ export function useFilFeedList(
     const bridgedMemoryIds = new Set(
       pendingUploads.map(p => p.committedMemory?.id).filter((id): id is string => !!id?.trim())
     );
-    const pend: FeedListItem[] = pendingUploads.map(row => ({ rowKind: 'pending', row }));
-    const mem: FeedListItem[] = memories
-      .filter(m => !bridgedMemoryIds.has(m.id))
-      .map(memory => ({ rowKind: 'memory', memory }));
-    return [...pend, ...mem];
+
+    type Ranked = { t: number; ins: number; item: FeedListItem };
+    const ranked: Ranked[] = [];
+
+    for (const row of pendingUploads) {
+      const iso =
+        row.committedMemory?.created_at?.trim() ||
+        row.capturedAtPreviewIso?.trim() ||
+        new Date().toISOString();
+      const insIso =
+        row.committedMemory?.inserted_at?.trim() ||
+        // Pending en cours : tie-break récent pour ne pas remonter au-dessus d’un jumeau date.
+        new Date().toISOString();
+      ranked.push({
+        t: new Date(iso).getTime(),
+        ins: new Date(insIso).getTime(),
+        item: { rowKind: 'pending', row },
+      });
+    }
+
+    for (const memory of memories) {
+      if (bridgedMemoryIds.has(memory.id)) continue;
+      ranked.push({
+        t: new Date(memory.created_at).getTime(),
+        ins: new Date(memory.inserted_at ?? memory.created_at).getTime(),
+        item: { rowKind: 'memory', memory },
+      });
+    }
+
+    ranked.sort((a, b) => {
+      if (b.t !== a.t) return b.t - a.t;
+      return b.ins - a.ins;
+    });
+    return ranked.map(r => r.item);
   }, [pendingUploads, memories]);
 
   const renderMemory = useCallback(
     (
       memory: Memory,
       memoryIndex: number,
-      opts?: { isOptimisticFeedPending?: boolean }
+      opts?: { isOptimisticFeedPending?: boolean; pendingPrepLabel?: string }
     ) => (
       <FilMemoryRowMemo
         memory={memory}
@@ -85,6 +129,7 @@ export function useFilFeedList(
         swipeRefs={swipeRefs}
         immersiveLaunchRef={immersiveLaunchRef}
         isOptimisticFeedPending={opts?.isOptimisticFeedPending === true}
+        pendingPrepLabel={opts?.pendingPrepLabel}
       />
     ),
     [
@@ -110,9 +155,14 @@ export function useFilFeedList(
     ({ item }: { item: FeedListItem }) => {
       if (item.rowKind === 'pending') {
         const committed = item.row.committedMemory;
+        const prepLabel = pendingPrepLabelFor(item.row, t);
         if (committed) {
           const memoryIndex = memoryIndexById.get(committed.id) ?? 0;
-          return renderMemory(committed, memoryIndex);
+          /** Toujours « prep upload » : la roue reste jusqu’au retrait du pending. */
+          return renderMemory(committed, memoryIndex, {
+            isOptimisticFeedPending: true,
+            pendingPrepLabel: prepLabel,
+          });
         }
         if (item.row.status === 'error') {
           return (
@@ -126,6 +176,7 @@ export function useFilFeedList(
           const optimistic = buildOptimisticMemoryForPending(item.row, child);
           return renderMemory(optimistic, 0, {
             isOptimisticFeedPending: true,
+            pendingPrepLabel: prepLabel,
           });
         }
         return (
@@ -138,7 +189,7 @@ export function useFilFeedList(
       const memoryIndex = memoryIndexById.get(item.memory.id) ?? 0;
       return renderMemory(item.memory, memoryIndex);
     },
-    [memoryIndexById, child, renderMemory, feedLocationFilledFontFamily]
+    [memoryIndexById, child, renderMemory, feedLocationFilledFontFamily, t]
   );
 
   return { feedData, renderItem };

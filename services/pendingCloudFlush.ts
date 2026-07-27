@@ -1,4 +1,3 @@
-import { DeviceEventEmitter } from 'react-native';
 import { getLocalMemoriesPendingCloudSync } from '@/lib/localDb';
 import { ensureSupabaseSession } from '@/lib/ensureSupabaseSession';
 import { supabase } from '@/lib/supabase';
@@ -13,7 +12,9 @@ let flushInFlight: Promise<void> | null = null;
 
 /**
  * Reprend les souvenirs encore « pending » côté cloud (upload interrompu, app fermée).
- * Mode local gratuit : no-op. Appels concurrents partagent la même promesse.
+ * Ne tourne que pour un vrai compte authentifié (gratuit ou paid), jamais pour le device-user.
+ * Appels concurrents partagent la même promesse.
+ * **Silencieux UI** : upsert SQLite seulement — jamais `memories-invalidate` / flash fil.
  */
 export function flushPendingCloudUploadsOnce(): Promise<void> {
   if (flushInFlight) return flushInFlight;
@@ -24,11 +25,13 @@ export function flushPendingCloudUploadsOnce(): Promise<void> {
     const session = await ensureSupabaseSession();
     if (!session.ok) return;
 
-    await remapLegacyEntityIdsForCloudSync();
-    await ensureLocalChildrenSyncedToSupabase();
-
     const { data: { user } } = await supabase.auth.getUser();
     if (!user?.id) return;
+    // Garde-fou : jamais flush sous device-user même si le cache mode serait incohérent.
+    if ((user.email ?? '').toLowerCase().endsWith('@petitmo.local')) return;
+
+    await remapLegacyEntityIdsForCloudSync();
+    await ensureLocalChildrenSyncedToSupabase();
 
     const pending = getLocalMemoriesPendingCloudSync();
     const paid = (await getUserTier()) === 'paid';
@@ -45,8 +48,6 @@ export function flushPendingCloudUploadsOnce(): Promise<void> {
       }
       await new Promise<void>(r => setTimeout(r, 120));
     }
-
-    DeviceEventEmitter.emit('petitmo:memories-invalidate');
   })();
 
   flushInFlight = p;

@@ -184,13 +184,35 @@ function FilScreen() {
     const intent = pendingScrollIntentRef.current;
     if (!intent || !listRef.current || feedData.length === 0) return false;
 
+    if (intent.type === 'snapToKey') {
+      const key = intent.key;
+      const index = feedData.findIndex(item =>
+        item.rowKind === 'pending'
+          ? item.row.tempId === key || item.row.committedMemory?.id === key
+          : item.memory.id === key ||
+            memoryFlatListKeyByIdRef.current.get(item.memory.id) === key,
+      );
+      if (index >= 0) {
+        try {
+          listRef.current.scrollToIndex({ index, animated: false, viewPosition: 0 });
+        } catch {
+          listRef.current.scrollToOffset({ offset: 0, animated: false });
+        }
+      } else {
+        listRef.current.scrollToOffset({ offset: 0, animated: false });
+      }
+      pendingScrollIntentRef.current = null;
+      setFeedListOpacity(1);
+      return true;
+    }
+
     const offsetY = intent.type === 'restore' ? intent.offsetY : 0;
     listRef.current.scrollToOffset({ offset: offsetY, animated: false });
     feedScrollOffsetRef.current = offsetY;
     pendingScrollIntentRef.current = null;
     setFeedListOpacity(1);
     return true;
-  }, [feedData.length]);
+  }, [feedData, memoryFlatListKeyByIdRef]);
 
   const onFeedContentSizeChange = useCallback(() => {
     if (pendingScrollIntentRef.current) {
@@ -308,6 +330,12 @@ function FilScreen() {
           onMomentumScrollEnd={onFeedScrollStopped}
           scrollEventThrottle={16}
           onContentSizeChange={onFeedContentSizeChange}
+          onScrollToIndexFailed={info => {
+            listRef.current?.scrollToOffset({
+              offset: Math.max(0, info.averageItemLength * info.index),
+              animated: false,
+            });
+          }}
           bounces={false}
           overScrollMode="never"
           alwaysBounceVertical={false}
