@@ -21,7 +21,7 @@ import { scale, verticalScale } from '@/utils/responsive';
 import { SPACING, FONT_SIZES, PROFILE_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
 import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
-import { getLocalChild } from '@/lib/localDb';
+import { getLocalChild, listLocalChildren } from '@/lib/localDb';
 import {
   deleteChild,
   getChildren,
@@ -30,6 +30,7 @@ import {
   uploadChildPhoto,
   sanitizeChildLocalAvatarIfMissing,
   refreshChildProfileFromLocal,
+  refreshChildrenFromCloudInBackground,
   notifyChildProfileUpdated,
   resolveChildAvatarCropSourceUri,
 } from '@/services/children';
@@ -99,37 +100,58 @@ export default function EditChildScreen() {
   }, []);
 
   const loadChild = async () => {
+    const childId = typeof params.childId === 'string' ? params.childId.trim() : '';
+    const applyRow = async (currentChild: Child, count: number) => {
+      setChildrenCount(count);
+      await setSelectedChild(currentChild.id);
+      const cleaned =
+        Platform.OS === 'web'
+          ? currentChild
+          : await sanitizeChildLocalAvatarIfMissing(currentChild);
+      setChild(cleaned);
+      setName(cleaned.name);
+      setBirthdate(cleaned.birthdate || '');
+      const resolved =
+        resolveChildProfileImageDisplayUri(
+          cleaned.local_photo_path,
+          cleaned.photo_url,
+          cleaned.updated_at,
+        ) ??
+        resolveChildProfileImageUri(cleaned.local_photo_path, cleaned.photo_url) ??
+        '';
+      setPhotoUrl(resolved);
+      try {
+        const stored = await AsyncStorage.getItem(originalPhotoKey(cleaned.id));
+        setOriginalPhotoUri((stored ?? resolved).trim());
+      } catch {
+        setOriginalPhotoUri(resolved.trim());
+      }
+    };
+
     try {
+      const localRow = childId ? getLocalChild(childId) : null;
+      const localList = listLocalChildren();
+
+      if (localRow) {
+        setIsLoading(false);
+        await applyRow(localRow, localList.length || 1);
+        refreshChildrenFromCloudInBackground();
+        void getChildren()
+          .then(children => {
+            setChildrenCount(children.length);
+            const next = children.find(c => c.id === childId);
+            if (next) void applyRow(next, children.length);
+          })
+          .catch(() => {});
+        return;
+      }
+
       setIsLoading(true);
       const children = await getChildren();
       setChildrenCount(children.length);
-      const currentChild = children.find(c => c.id === params.childId);
-
+      const currentChild = children.find(c => c.id === childId);
       if (currentChild) {
-        await setSelectedChild(currentChild.id);
-        const cleaned =
-          Platform.OS === 'web'
-            ? currentChild
-            : await sanitizeChildLocalAvatarIfMissing(currentChild);
-        setChild(cleaned);
-        setName(cleaned.name);
-        setBirthdate(cleaned.birthdate || '');
-        const resolved =
-          resolveChildProfileImageDisplayUri(
-            cleaned.local_photo_path,
-            cleaned.photo_url,
-            cleaned.updated_at,
-          ) ??
-          resolveChildProfileImageUri(cleaned.local_photo_path, cleaned.photo_url) ??
-          '';
-        setPhotoUrl(resolved);
-        // Récupère la source “originale” si dispo, sinon photo affichable (local ou URL).
-        try {
-          const stored = await AsyncStorage.getItem(originalPhotoKey(cleaned.id));
-          setOriginalPhotoUri((stored ?? resolved).trim());
-        } catch {
-          setOriginalPhotoUri(resolved.trim());
-        }
+        await applyRow(currentChild, children.length);
       }
     } catch (error) {
       console.error('Error loading child:', error);
@@ -251,7 +273,7 @@ export default function EditChildScreen() {
     Alert.alert(
       isLastChild ? 'Supprimer ce profil et tous vos souvenirs ?' : 'Supprimer ce profil ?',
       isLastChild
-        ? "C'est votre dernier profil enfant. Tous vos souvenirs et livres seront définitivement supprimés de cet appareil."
+        ? "C'est ton dernier profil enfant. Tous vos souvenirs et livres seront définitivement supprimés de cet appareil."
         : `Le profil de ${childName} sera supprimé. Vos souvenirs restent dans le fil famille.`,
       [
         { text: 'Annuler', style: 'cancel' },
@@ -568,6 +590,7 @@ const styles = StyleSheet.create({
     color: THEME.textPrimary,
     borderWidth: 1,
     borderColor: THEME.familyFlowLine,
+    letterSpacing: 0,
   },
   hint: {
     fontSize: FONT_SIZES.xs,

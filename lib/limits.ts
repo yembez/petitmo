@@ -11,6 +11,12 @@ export const FREE_TIER_VIDEO_MAX_DURATION = 20 // secondes (fil gratuit)
 export const FREE_TIER_VOICE_LIMIT = 5 // max souvenirs audio en gratuit
 export const FREE_TIER_VOICE_MAX_DURATION = 60 // secondes (création de souvenirs audio)
 export const FREE_TIER_BOOK_VOICE_MAX_DURATION = 60 // secondes (livres : QR audio)
+/** Plafond sécurité Petitmo+ — import / QR vidéo (3 min). */
+export const PAID_TIER_VIDEO_MAX_DURATION = 180
+/** Plafond sécurité Petitmo+ — enregistrement audio (5 min). */
+export const PAID_TIER_VOICE_MAX_DURATION = 300
+/** Livre / QR audio : même plafond sécurité que le fil en Petitmo+. */
+export const PAID_TIER_BOOK_VOICE_MAX_DURATION = PAID_TIER_VOICE_MAX_DURATION
 /**
  * @deprecated V1 : plus de plafond composition A/V par livre.
  * Facturation QR au checkout (2 inclus + 0,70 €) — `lib/pricingV1.ts`.
@@ -72,12 +78,16 @@ export function invalidateMemoryLimitCache(_childId?: string): void {
  * Limite gratuite : décompte **uniquement** sur le SQLite local (`memories`).
  * Avant le décompte, on aligne le local sur Supabase (même principe que le fil au premier sync)
  * pour que « 20 souvenirs » corresponde à ce que l’utilisateur voit, sans utiliser un count distant.
+ *
+ * `skipRemotePull` : gate UX (Alert / Capturer) — SQLite immédiat, pas d’attente réseau
+ * (local-first). Le chemin upload peut encore rappeler sans ce flag pour un décompte durci.
  */
 export async function checkMemoryLimit(
   childId: string,
-  opts?: { force?: boolean }
+  opts?: { force?: boolean; skipRemotePull?: boolean }
 ): Promise<LimitCheck> {
   const id = childId.trim()
+  void id
   const now = Date.now()
   if (
     !opts?.force &&
@@ -101,12 +111,14 @@ export async function checkMemoryLimit(
     return paid
   }
 
-  try {
-    if ((await getCachedUserMode()) === 'cloud') {
-      await pullFamilyMemoriesFromRemoteToLocal()
+  if (!opts?.skipRemotePull) {
+    try {
+      if ((await getCachedUserMode()) === 'cloud') {
+        await pullFamilyMemoriesFromRemoteToLocal()
+      }
+    } catch {
+      // hors ligne : on garde le décompte local actuel
     }
-  } catch {
-    // hors ligne : on garde le décompte local actuel
   }
 
   const current = getAllLocalMemories().length
@@ -122,44 +134,8 @@ export async function checkMemoryLimit(
 }
 
 export async function checkVideoLimit(
-  childId: string
-): Promise<{
-  canCreate: boolean
-  current: number
-  limit: number
-  isAtLimit: boolean
-}> {
-  const tier = await getUserTier()
-
-  if (tier === 'paid') {
-    return {
-      canCreate: true,
-      current: 0,
-      limit: Infinity,
-      isAtLimit: false,
-    }
-  }
-
-  try {
-    if ((await getCachedUserMode()) === 'cloud') {
-      await pullFamilyMemoriesFromRemoteToLocal()
-    }
-  } catch {
-    // hors ligne
-  }
-
-  const videoCount = getAllLocalMemories().filter(m => m.type === 'video').length
-
-  return {
-    canCreate: videoCount < FREE_TIER_VIDEO_LIMIT,
-    current: videoCount,
-    limit: FREE_TIER_VIDEO_LIMIT,
-    isAtLimit: videoCount >= FREE_TIER_VIDEO_LIMIT,
-  }
-}
-
-export async function checkVoiceLimit(
-  childId: string
+  childId: string,
+  opts?: { skipRemotePull?: boolean }
 ): Promise<{
   canCreate: boolean
   current: number
@@ -178,12 +154,55 @@ export async function checkVoiceLimit(
     }
   }
 
-  try {
-    if ((await getCachedUserMode()) === 'cloud') {
-      await pullFamilyMemoriesFromRemoteToLocal()
+  if (!opts?.skipRemotePull) {
+    try {
+      if ((await getCachedUserMode()) === 'cloud') {
+        await pullFamilyMemoriesFromRemoteToLocal()
+      }
+    } catch {
+      // hors ligne
     }
-  } catch {
-    // hors ligne
+  }
+
+  const videoCount = getAllLocalMemories().filter(m => m.type === 'video').length
+
+  return {
+    canCreate: videoCount < FREE_TIER_VIDEO_LIMIT,
+    current: videoCount,
+    limit: FREE_TIER_VIDEO_LIMIT,
+    isAtLimit: videoCount >= FREE_TIER_VIDEO_LIMIT,
+  }
+}
+
+export async function checkVoiceLimit(
+  childId: string,
+  opts?: { skipRemotePull?: boolean }
+): Promise<{
+  canCreate: boolean
+  current: number
+  limit: number
+  isAtLimit: boolean
+}> {
+  void childId
+  const tier = await getUserTier()
+
+  if (tier === 'paid') {
+    return {
+      canCreate: true,
+      current: 0,
+      limit: Infinity,
+      isAtLimit: false,
+    }
+  }
+
+  if (!opts?.skipRemotePull) {
+    try {
+      if ((await getCachedUserMode()) === 'cloud') {
+        await pullFamilyMemoriesFromRemoteToLocal()
+      }
+    } catch {
+      // hors ligne
+    }
   }
 
   const voiceCount = getAllLocalMemories().filter(m => m.type === 'voice').length

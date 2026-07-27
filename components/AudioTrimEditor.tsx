@@ -268,7 +268,7 @@ export const AudioTrimEditor = memo(function AudioTrimEditor(props: {
         </View>
         <Text style={styles.editorSub}>
           {props.tier === 'free'
-            ? 'En plan gratuit, votre extrait est limité à 1 minute.'
+            ? 'En plan gratuit, ton extrait est limité à 1 minute.'
             : 'Coupez librement pour garder l’essentiel.'}
         </Text>
 
@@ -334,7 +334,7 @@ export const AudioTrimEditor = memo(function AudioTrimEditor(props: {
       <Text style={[styles.title, c && styles.titleCompact]}>Choisir le meilleur moment</Text>
       <Text style={[styles.sub, c && styles.subCompact]}>
         {props.tier === 'free'
-          ? 'En plan gratuit, votre extrait est limité à 1 minute.'
+          ? 'En plan gratuit, ton extrait est limité à 1 minute.'
           : 'Coupez librement pour garder l’essentiel.'}
       </Text>
 

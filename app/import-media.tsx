@@ -18,14 +18,17 @@ import { THEME } from '@/constants/theme';
 import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import PermissionModal from '@/components/PermissionModal';
 import ImportBatchLayoutModal from '@/components/ImportBatchLayoutModal';
+import { FeedMediaPrepOverlay } from '@/components/FeedMediaPrepOverlay';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { uploadMedia, uploadPhotoAlbum } from '@/services/media';
 import { usePendingMediaUploads } from '@/contexts/PendingMediaUploadsContext';
 import { getOrSelectFirstChild } from '@/services/children';
 import { IMPORT_PHOTO_PICKER_OPTS } from '@/constants/importPicker';
 import { buildImportMetadataFromPickerAsset } from '@/utils/mediaExif';
 import { getUserTier } from '@/lib/userTier';
-import { checkMemoryLimit, checkVideoLimit, FREE_TIER_VIDEO_MAX_DURATION } from '@/lib/limits';
+import { checkMemoryLimit, checkVideoLimit, FREE_TIER_VIDEO_MAX_DURATION, PAID_TIER_VIDEO_MAX_DURATION } from '@/lib/limits';
 import { mediaDurationToSeconds } from '@/utils/mediaDuration';
+import { promptFreeTierLimitThenPaywall } from '@/utils/freeTierLimitGate';
 import { IMPORT_DUPLICATE_ASSET } from '@/lib/importDuplicate';
 import { buildAlbumImportFingerprint, dedupePickerAssetsByLibraryId } from '@/utils/importLibraryDedupe';
 import {
@@ -40,11 +43,17 @@ type ImportStickerPreview = {
 
 const MAX_PHOTOS_AT_ONCE = 10;
 /** Copie sandbox + miniatures en parallèle (le cloud n’est pas attendu ici). */
-const SEPARATE_PHOTOS_IMPORT_CONCURRENCY = 2;
+const SEPARATE_PHOTOS_IMPORT_CONCURRENCY = 3;
 
 async function importSeparatePhotosWithConcurrency(
   assets: ImagePicker.ImagePickerAsset[],
-  childId: string
+  childId: string,
+  opts?: {
+    onProgress?: (done: number, total: number) => void;
+    onInserted?: (memory: NonNullable<Awaited<ReturnType<typeof uploadMedia>>>) => void;
+    /** URIs encore en file (pour la preview pending). */
+    onRemainingPreviewUris?: (uris: string[]) => void;
+  },
 ): Promise<{
   memories: NonNullable<Awaited<ReturnType<typeof uploadMedia>>>[];
   duplicateSkipped: number;
@@ -57,6 +66,17 @@ async function importSeparatePhotosWithConcurrency(
   let otherFailed = 0;
   let limitReached = false;
   let next = 0;
+  let doneCount = 0;
+  const total = assets.length;
+  const remainingUris = assets.map(a => a.uri).filter(u => !!u?.trim());
+
+  const markUriDone = (uri: string | undefined) => {
+    const u = uri?.trim();
+    if (!u) return;
+    const i = remainingUris.indexOf(u);
+    if (i >= 0) remainingUris.splice(i, 1);
+    opts?.onRemainingPreviewUris?.(remainingUris.slice());
+  };
 
   const worker = async () => {
     while (true) {
@@ -80,6 +100,7 @@ async function importSeparatePhotosWithConcurrency(
           importAssetId: asset.assetId ?? null,
         });
         results[idx] = m;
+        if (m) opts?.onInserted?.(m);
       } catch (e) {
         if (e instanceof Error && e.message === IMPORT_DUPLICATE_ASSET) {
           duplicateSkipped += 1;
@@ -94,10 +115,15 @@ async function importSeparatePhotosWithConcurrency(
           console.warn('[import-media] importSeparatePhotos', asset?.uri, e);
         }
         results[idx] = null;
+      } finally {
+        markUriDone(asset.uri);
+        doneCount += 1;
+        opts?.onProgress?.(doneCount, total);
       }
     }
   };
 
+  opts?.onProgress?.(0, total);
   const n = Math.min(SEPARATE_PHOTOS_IMPORT_CONCURRENCY, assets.length);
   await Promise.all(Array.from({ length: n }, () => worker()));
   const memories = results.filter((x): x is Row => x != null);
@@ -123,6 +149,7 @@ function assetIsVideo(asset: ImagePicker.ImagePickerAsset): boolean {
 
 export default function ImportMediaScreen() {
   const router = useRouter();
+  const { t } = useAppTranslation('common');
   const { startBackgroundUploadNavigateToFeed } = usePendingMediaUploads();
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [showPermissionModal, setShowPermissionModal] = useState(false);
@@ -183,6 +210,7 @@ export default function ImportMediaScreen() {
         router.back();
         return;
       }
+      if (res === 'left' || res === 'batch_choice') return;
       if (res !== 'committed') setPickAttemptFinished(true);
     } else {
       setShowPermissionModal(false);
@@ -210,15 +238,64 @@ export default function ImportMediaScreen() {
         setNavigatingToFeed(true);
         const cap = preview?.capturedAtIso ?? null;
         const loc = preview?.locationLabel ?? null;
+
+        /** Vidéo : fil immédiat (quotas / EXIF dans upload) — pas d’attente Importer. */
+        if (kind === 'video') {
+          const pickedAsset = assets[0];
+          if (!pickedAsset) {
+            setNavigatingToFeed(false);
+            return;
+          }
+          const durationSec =
+            pickedAsset.duration != null
+              ? mediaDurationToSeconds(pickedAsset.duration)
+              : undefined;
+          startBackgroundUploadNavigateToFeed({
+            kind: 'video',
+            previewUris: [pickedAsset.uri],
+            capturedAtPreviewIso: cap,
+            locationPreview: loc,
+            upload: async () => {
+              const childIdForVideo = await getOrSelectFirstChild();
+              if (!childIdForVideo) throw new Error('NO_CHILD');
+              const memLimit = await checkMemoryLimit(childIdForVideo, { force: true });
+              if (!memLimit.canCreate) throw new Error('LIMIT_REACHED');
+              const videoLimitCheck = await checkVideoLimit(childIdForVideo);
+              if (!videoLimitCheck.canCreate) throw new Error('VIDEO_LIMIT_REACHED');
+              const meta = await buildImportMetadataFromPickerAsset(pickedAsset, { isVideo: true });
+              const locationOverride =
+                meta.locationLabel && meta.locationLabel.trim()
+                  ? meta.locationLabel.trim()
+                  : loc?.trim() || undefined;
+              const m = await uploadMedia({
+                uri: pickedAsset.uri,
+                type: 'video',
+                childId: childIdForVideo,
+                duration: durationSec,
+                capturedAtIso: meta.capturedAtIso ?? cap ?? undefined,
+                locationOverride,
+                mimeType: pickedAsset.mimeType ?? null,
+                fileName: pickedAsset.fileName ?? null,
+                importAssetId: pickedAsset.assetId ?? null,
+              });
+              return m ? [m] : null;
+            },
+          });
+          return;
+        }
+
         const childId = await getOrSelectFirstChild();
         if (!childId) {
-          Alert.alert('Aucun enfant trouvé', "Veuillez d'abord créer un profil d'enfant");
+          Alert.alert('Aucun enfant trouvé', "Crée d'abord un profil d'enfant");
           setNavigatingToFeed(false);
           router.push('/create-child');
           return;
         }
 
-        const limitCheck = await checkMemoryLimit(childId, { force: true });
+        const limitCheck = await checkMemoryLimit(childId, {
+          force: true,
+          skipRemotePull: true,
+        });
         const tier = await getUserTier();
         const dedupedForSeparate =
           kind === 'photo' && photoBatchLayout === 'separate' && assets.length > 1
@@ -235,22 +312,32 @@ export default function ImportMediaScreen() {
           setNavigatingToFeed(false);
           setPickAttemptFinished(true);
           const left = Math.max(0, limitCheck.limit - limitCheck.current);
+          if (left === 0) {
+            router.replace('/(tabs)/fil');
+            promptFreeTierLimitThenPaywall({
+              kind: 'memories',
+              router,
+              replace: true,
+              returnTo: 'fil',
+            });
+            return;
+          }
           Alert.alert(
             'Limite gratuite',
-            left === 0
-              ? 'Tu as atteint le nombre max de souvenirs pour ce profil.'
-              : `Il reste ${left} emplacement${left > 1 ? 's' : ''} pour ce profil. Réduis ta sélection, ou choisis « Un seul post » pour ne créer qu’un souvenir.`
+            `Il reste ${left} emplacement${left > 1 ? 's' : ''} pour ce profil. Réduis ta sélection, ou choisis « Un seul post » pour ne créer qu’un souvenir.`
           );
-          if (left === 0) {
-            router.replace({ pathname: '/paywall', params: { context: 'LIMIT_REACHED', returnTo: 'fil' } });
-          }
           return;
         }
 
         if (!limitCheck.canCreate) {
           setNavigatingToFeed(false);
-          setPickAttemptFinished(true);
-          router.replace({ pathname: '/paywall', params: { context: 'LIMIT_REACHED', returnTo: 'fil' } });
+          router.replace('/(tabs)/fil');
+          promptFreeTierLimitThenPaywall({
+            kind: 'memories',
+            router,
+            replace: true,
+            returnTo: 'fil',
+          });
           return;
         }
 
@@ -270,19 +357,31 @@ export default function ImportMediaScreen() {
             previewUris: firstUri ? [firstUri] : [],
             capturedAtPreviewIso: cap,
             locationPreview: loc,
-            upload: async () => {
+            batchTotal: dedupedForSeparate.length,
+            upload: async helpers => {
+              const notifiedIds = new Set<string>();
               const { memories: inserted, duplicateSkipped, otherFailed, limitReached } =
-                await importSeparatePhotosWithConcurrency(dedupedForSeparate, childId);
+                await importSeparatePhotosWithConcurrency(dedupedForSeparate, childId, {
+                  onProgress: (done, total) => helpers.reportProgress(done, total),
+                  onRemainingPreviewUris: uris => {
+                    if (uris[0]) helpers.setPreviewUris([uris[0]]);
+                  },
+                  onInserted: m => {
+                    notifiedIds.add(m.id);
+                    helpers.notifyInserted([m]);
+                  },
+                });
               if (limitReached && inserted.length === 0) {
                 throw new Error('LIMIT_REACHED');
               }
               if (limitReached && inserted.length > 0) {
                 requestAnimationFrame(() => {
-                  Alert.alert(
-                    'Limite gratuite',
-                    `Tu as atteint le nombre max de souvenirs (${limitCheck.limit}). Les photos déjà importées restent dans le fil.`
-                  );
-                  router.replace({ pathname: '/paywall', params: { context: 'LIMIT_REACHED', returnTo: 'fil' } });
+                  promptFreeTierLimitThenPaywall({
+                    kind: 'memories',
+                    router,
+                    replace: true,
+                    returnTo: 'fil',
+                  });
                 });
               }
               if (duplicateSkipped > 0 || otherFailed > 0) {
@@ -307,6 +406,13 @@ export default function ImportMediaScreen() {
                     Alert.alert('Import partiel', parts.join(' · ') + '. Réessaie depuis Importer si besoin.');
                   }
                 });
+              }
+              /**
+               * Déjà poussées une par une : retirer le pending sans re-émettre le lot.
+               */
+              if (notifiedIds.size > 0) {
+                helpers.dismissPending();
+                return null;
               }
               return inserted.length > 0 ? inserted : null;
             },
@@ -340,65 +446,27 @@ export default function ImportMediaScreen() {
         }
 
         const pickedAsset = assets[0];
-        const durationSec =
-          kind === 'video' && pickedAsset.duration != null
-            ? mediaDurationToSeconds(pickedAsset.duration)
-            : undefined;
-
-        if (kind === 'photo') {
-          startBackgroundUploadNavigateToFeed({
-            previewUris: [pickedAsset.uri],
-            capturedAtPreviewIso: cap,
-            locationPreview: loc,
-            upload: async () => {
-              const meta = await buildImportMetadataFromPickerAsset(pickedAsset, { isVideo: false });
-              const locationOverride =
-                meta.locationLabel && meta.locationLabel.trim() ? meta.locationLabel.trim() : undefined;
-              const m = await uploadMedia({
-                uri: pickedAsset.uri,
-                type: 'photo',
-                childId,
-                capturedAtIso: meta.capturedAtIso,
-                locationOverride,
-                mimeType: pickedAsset.mimeType ?? null,
-                fileName: pickedAsset.fileName ?? null,
-                importAssetId: pickedAsset.assetId ?? null,
-              });
-              return m ? [m] : null;
-            },
-          });
-        } else {
-          const videoLimitCheck = await checkVideoLimit(childId);
-          if (!videoLimitCheck.canCreate) {
-            setNavigatingToFeed(false);
-            setPickAttemptFinished(true);
-            router.replace({ pathname: '/paywall', params: { context: 'VIDEO_LIMIT_REACHED', returnTo: 'fil' } });
-            return;
-          }
-          startBackgroundUploadNavigateToFeed({
-            kind: 'video',
-            previewUris: [pickedAsset.uri],
-            capturedAtPreviewIso: cap,
-            locationPreview: loc,
-            upload: async () => {
-              const meta = await buildImportMetadataFromPickerAsset(pickedAsset, { isVideo: true });
-              const locationOverride =
-                meta.locationLabel && meta.locationLabel.trim() ? meta.locationLabel.trim() : undefined;
-              const m = await uploadMedia({
-                uri: pickedAsset.uri,
-                type: 'video',
-                childId,
-                duration: durationSec,
-                capturedAtIso: meta.capturedAtIso,
-                locationOverride,
-                mimeType: pickedAsset.mimeType ?? null,
-                fileName: pickedAsset.fileName ?? null,
-                importAssetId: pickedAsset.assetId ?? null,
-              });
-              return m ? [m] : null;
-            },
-          });
-        }
+        startBackgroundUploadNavigateToFeed({
+          previewUris: [pickedAsset.uri],
+          capturedAtPreviewIso: cap,
+          locationPreview: loc,
+          upload: async () => {
+            const meta = await buildImportMetadataFromPickerAsset(pickedAsset, { isVideo: false });
+            const locationOverride =
+              meta.locationLabel && meta.locationLabel.trim() ? meta.locationLabel.trim() : undefined;
+            const m = await uploadMedia({
+              uri: pickedAsset.uri,
+              type: 'photo',
+              childId,
+              capturedAtIso: meta.capturedAtIso,
+              locationOverride,
+              mimeType: pickedAsset.mimeType ?? null,
+              fileName: pickedAsset.fileName ?? null,
+              importAssetId: pickedAsset.assetId ?? null,
+            });
+            return m ? [m] : null;
+          },
+        });
       } catch (error) {
         setNavigatingToFeed(false);
         console.error('Error committing import:', error);
@@ -408,7 +476,7 @@ export default function ImportMediaScreen() {
     [router, startBackgroundUploadNavigateToFeed]
   );
 
-  type PickResult = 'committed' | 'cancelled' | 'not_committed';
+  type PickResult = 'committed' | 'cancelled' | 'not_committed' | 'left' | 'batch_choice';
 
   const pickFromLibrary = useCallback(async (): Promise<PickResult> => {
     try {
@@ -449,98 +517,153 @@ export default function ImportMediaScreen() {
         const v = assets.find(a => assetIsVideo(a));
         if (!v) return 'not_committed';
 
-        const durationSec = mediaDurationToSeconds(v.duration);
+        /**
+         * Gratuit : d’abord le plafond **nombre** de vidéos (et souvenirs),
+         * ensuite seulement le trim si la durée dépasse 20 s.
+         */
+        if (isFreeTierRef.current) {
+          const childId = await getOrSelectFirstChild();
+          if (childId) {
+            const videoLimitCheck = await checkVideoLimit(childId, {
+              skipRemotePull: true,
+            });
+            if (!videoLimitCheck.canCreate) {
+              router.replace('/(tabs)/fil');
+              promptFreeTierLimitThenPaywall({
+                kind: 'videos',
+                router,
+                replace: true,
+                returnTo: 'fil',
+              });
+              return 'left';
+            }
+            const memLimit = await checkMemoryLimit(childId, {
+              force: true,
+              skipRemotePull: true,
+            });
+            if (!memLimit.canCreate) {
+              router.replace('/(tabs)/fil');
+              promptFreeTierLimitThenPaywall({
+                kind: 'memories',
+                router,
+                replace: true,
+                returnTo: 'fil',
+              });
+              return 'left';
+            }
+          }
+        }
 
-        /** +1 s de marge : métadonnées galerie souvent arrondies (ex. 20,4 → 21). */
-        if (
-          isFreeTierRef.current &&
-          durationSec > FREE_TIER_VIDEO_MAX_DURATION + 1
-        ) {
+        const durationSec = mediaDurationToSeconds(v.duration);
+        const maxVideoSec = isFreeTierRef.current
+          ? FREE_TIER_VIDEO_MAX_DURATION
+          : PAID_TIER_VIDEO_MAX_DURATION;
+
+        /** +1 s de marge : métadonnées galerie souvent arrondies. */
+        if (durationSec > maxVideoSec + 1) {
           const trimmedAsset = await new Promise<ImagePicker.ImagePickerAsset | null>(resolve => {
             const runTrimLoop = () => {
-              Alert.alert(
-                'Vidéo trop longue',
-                `En mode gratuit, la vidéo ne peut pas dépasser ${FREE_TIER_VIDEO_MAX_DURATION} secondes pour des raisons de coût de stockage.`,
-                [
-                  {
-                    text: 'Annuler',
-                    style: 'cancel',
-                    onPress: () => resolve(null),
+              const body = isFreeTierRef.current
+                ? `En mode gratuit, la vidéo ne peut pas dépasser ${FREE_TIER_VIDEO_MAX_DURATION} secondes pour des raisons de coût de stockage.`
+                : `Pour garder vos souvenirs légers et fiables, la vidéo ne peut pas dépasser 3 minutes.`;
+              const buttons: {
+                text: string;
+                style?: 'cancel' | 'default' | 'destructive';
+                onPress: () => void;
+              }[] = [
+                {
+                  text: 'Annuler',
+                  style: 'cancel',
+                  onPress: () => resolve(null),
+                },
+              ];
+              if (isFreeTierRef.current) {
+                buttons.push({
+                  text: 'Passer à Petitmo+',
+                  onPress: () => {
+                    router.replace({
+                      pathname: '/paywall',
+                      params: { context: 'GENERAL', returnTo: 'fil' },
+                    });
+                    resolve(null);
                   },
-                  {
-                    text: 'Passer à Petitmo+',
-                    onPress: () => {
-                      router.replace({
-                        pathname: '/paywall',
-                        params: { context: 'VIDEO_LIMIT_REACHED', returnTo: 'fil' },
+                });
+              }
+              buttons.push({
+                text: 'Raccourcir la vidéo',
+                onPress: () => {
+                  void (async () => {
+                    try {
+                      const trimmed = await openVideoTrimEditorOnUri(v.uri, {
+                        maxDurationSec: maxVideoSec,
                       });
-                      resolve(null);
-                    },
-                  },
-                  {
-                    text: 'Raccourcir la vidéo',
-                    onPress: () => {
-                      void (async () => {
-                        try {
-                          /** Éditeur natif sur la même URI — pas de 2ᵉ passage galerie. */
-                          const trimmed = await openVideoTrimEditorOnUri(v.uri, {
-                            maxDurationSec: FREE_TIER_VIDEO_MAX_DURATION,
-                          });
-                          if (!trimmed?.uri) {
-                            /** Annulé dans l’éditeur → on propose encore le choix. */
-                            runTrimLoop();
-                            return;
-                          }
-                          const outSec = trimmed.durationSec > 0
-                            ? trimmed.durationSec
-                            : FREE_TIER_VIDEO_MAX_DURATION;
-                          if (outSec > FREE_TIER_VIDEO_MAX_DURATION + 1) {
-                            Alert.alert(
-                              'Encore trop longue',
-                              `Garde un extrait d’au plus ${FREE_TIER_VIDEO_MAX_DURATION} secondes.`,
-                              [
-                                { text: 'Réessayer', onPress: () => runTrimLoop() },
-                                { text: 'Annuler', style: 'cancel', onPress: () => resolve(null) },
-                              ],
-                            );
-                            return;
-                          }
-                          resolve({
-                            ...v,
-                            uri: trimmed.uri,
-                            duration: outSec * 1000,
-                            type: 'video',
-                            fileName: v.fileName ?? `trim-${Date.now()}.mp4`,
-                            mimeType: v.mimeType ?? 'video/mp4',
-                          });
-                        } catch (e) {
-                          if (e instanceof VideoTrimNativeMissingError) {
-                            Alert.alert(
-                              'Mise à jour requise',
-                              'Le coupe-vidéo nécessite un nouveau build de l’app (dev ou TestFlight). Relance npm run dev:ios:build ou npm run tf:ios, puis réessaie.',
-                              [{ text: 'OK', onPress: () => resolve(null) }],
-                            );
-                            return;
-                          }
-                          console.warn('[import-media] trim', e);
-                          Alert.alert(
-                            'Impossible de raccourcir',
-                            'Réessaie ou passe à Petitmo+.',
-                            [
-                              { text: 'Réessayer', onPress: () => runTrimLoop() },
-                              { text: 'Annuler', style: 'cancel', onPress: () => resolve(null) },
-                            ],
-                          );
-                        }
-                      })();
-                    },
-                  },
-                ],
-              );
+                      if (!trimmed?.uri) {
+                        runTrimLoop();
+                        return;
+                      }
+                      const outSec =
+                        trimmed.durationSec > 0 ? trimmed.durationSec : maxVideoSec;
+                      if (outSec > maxVideoSec + 1) {
+                        Alert.alert(
+                          'Encore trop longue',
+                          isFreeTierRef.current
+                            ? `Garde un extrait d’au plus ${FREE_TIER_VIDEO_MAX_DURATION} secondes.`
+                            : 'Garde un extrait d’au plus 3 minutes.',
+                          [
+                            { text: 'Réessayer', onPress: () => runTrimLoop() },
+                            {
+                              text: 'Annuler',
+                              style: 'cancel',
+                              onPress: () => resolve(null),
+                            },
+                          ],
+                        );
+                        return;
+                      }
+                      resolve({
+                        ...v,
+                        uri: trimmed.uri,
+                        duration: outSec * 1000,
+                        type: 'video',
+                        fileName: v.fileName ?? `trim-${Date.now()}.mp4`,
+                        mimeType: v.mimeType ?? 'video/mp4',
+                      });
+                    } catch (e) {
+                      if (e instanceof VideoTrimNativeMissingError) {
+                        Alert.alert(
+                          'Mise à jour requise',
+                          'Le coupe-vidéo nécessite un nouveau build de l’app (dev ou TestFlight). Relance npm run dev:ios:build ou npm run tf:ios, puis réessaie.',
+                          [{ text: 'OK', onPress: () => resolve(null) }],
+                        );
+                        return;
+                      }
+                      console.warn('[import-media] trim', e);
+                      Alert.alert(
+                        'Impossible de raccourcir',
+                        isFreeTierRef.current
+                          ? 'Réessaie ou passe à Petitmo+.'
+                          : 'Réessaie avec un extrait plus court.',
+                        [
+                          { text: 'Réessayer', onPress: () => runTrimLoop() },
+                          {
+                            text: 'Annuler',
+                            style: 'cancel',
+                            onPress: () => resolve(null),
+                          },
+                        ],
+                      );
+                    }
+                  })();
+                },
+              });
+              Alert.alert('Vidéo trop longue', body, buttons);
             };
             runTrimLoop();
           });
-          if (!trimmedAsset) return 'not_committed';
+          if (!trimmedAsset) {
+            router.replace('/(tabs)/fil');
+            return 'left';
+          }
           const metaTrim = await buildImportMetadataFromPickerAsset(trimmedAsset, { isVideo: true });
           commitSelection([trimmedAsset], 'video', {
             capturedAtIso: metaTrim.capturedAtIso ?? null,
@@ -558,16 +681,24 @@ export default function ImportMediaScreen() {
       }
 
       if (assets.length > 1) {
-        const first = assets[0];
-        const meta = await buildImportMetadataFromPickerAsset(first, { isVideo: false });
+        /** Modale immédiatement — pas d’attente EXIF (évite le flash « Ouvrir photos… »). */
         setBatchChoice({
           assets,
-          preview: {
-            capturedAtIso: meta.capturedAtIso ?? null,
-            locationLabel: meta.locationLabel ?? null,
-          },
+          preview: { capturedAtIso: null, locationLabel: null },
         });
-        return 'not_committed';
+        void buildImportMetadataFromPickerAsset(assets[0], { isVideo: false }).then(meta => {
+          setBatchChoice(prev => {
+            if (!prev || prev.assets !== assets) return prev;
+            return {
+              ...prev,
+              preview: {
+                capturedAtIso: meta.capturedAtIso ?? null,
+                locationLabel: meta.locationLabel ?? null,
+              },
+            };
+          });
+        });
+        return 'batch_choice';
       }
 
       const meta = await buildImportMetadataFromPickerAsset(assets[0], { isVideo: false });
@@ -611,6 +742,10 @@ export default function ImportMediaScreen() {
           router.back();
           return;
         }
+        /** Quota : déjà `replace` fil + Alert — ne pas afficher « Ouvrir photos et vidéos ». */
+        if (res === 'left') return;
+        /** Modale lot album / posts séparés — garder le fond neutre (spinner), pas le CTA fallback. */
+        if (res === 'batch_choice') return;
         if (res !== 'committed') setPickAttemptFinished(true);
       } catch (e) {
         console.error('[import-media] ouverture galerie', e);
@@ -636,7 +771,10 @@ export default function ImportMediaScreen() {
         setBatchChoice(null);
         void commitSelection(b.assets, 'photo', b.preview, 'separate');
       }}
-      onDismiss={() => setBatchChoice(null)}
+      onDismiss={() => {
+        setBatchChoice(null);
+        setPickAttemptFinished(true);
+      }}
     />
   );
 
@@ -668,7 +806,23 @@ export default function ImportMediaScreen() {
     return (
       <>
         {batchLayoutModalEl}
-        <View style={styles.container} />
+        <View style={styles.container}>
+          <FeedMediaPrepOverlay label={t('mediaPrep.addingToFeed')} />
+        </View>
+      </>
+    );
+  }
+
+  /** Pendant la modale lot : fond neutre + spinner, jamais le CTA « Ouvrir photos… ». */
+  if (batchChoice != null) {
+    return (
+      <>
+        {batchLayoutModalEl}
+        <View style={styles.container}>
+          <View style={styles.galleryOpeningWrap}>
+            <ActivityIndicator size="large" color={THEME.accent} />
+          </View>
+        </View>
       </>
     );
   }

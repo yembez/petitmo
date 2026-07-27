@@ -37,7 +37,8 @@ import { uploadMedia } from '@/services/media';
 import { getOrSelectFirstChild } from '@/services/children';
 import { armFeedSnapToLatestOnFocus } from '@/services/feedScrollRestore';
 import { getUserTier } from '@/lib/userTier';
-import { FREE_TIER_VOICE_MAX_DURATION, checkVoiceLimit } from '@/lib/limits';
+import { FREE_TIER_VOICE_MAX_DURATION, PAID_TIER_VOICE_MAX_DURATION, checkMemoryLimit, checkVoiceLimit } from '@/lib/limits';
+import { promptFreeTierLimitThenPaywall, promptFreeTierLimitFromError } from '@/utils/freeTierLimitGate';
 import { isAudioTrimAvailable, trimAudioToLocalFile } from '@/services/audioTrim';
 import { AudioTrimEditor } from '@/components/AudioTrimEditor';
 
@@ -78,17 +79,6 @@ export default function RecordVoiceScreen() {
   const isExcerptPlayingRef = useRef(false);
   const soundRef = useRef<Audio.Sound | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  useEffect(() => {
-    if (!isRecording) return;
-    if (recordingDuration < FREE_TIER_VOICE_MAX_DURATION) return;
-    void (async () => {
-      const tier = await getUserTier();
-      if (tier !== 'free') return;
-      await stopRecording();
-      router.push({ pathname: '/paywall', params: { context: 'VOICE_LIMIT_REACHED' } });
-    })();
-  }, [isRecording, recordingDuration, router]);
 
   useEffect(() => {
     void (async () => {
@@ -156,6 +146,25 @@ export default function RecordVoiceScreen() {
 
   const startRecording = async () => {
     try {
+      const childId = await getOrSelectFirstChild();
+      if (!childId) {
+        Alert.alert('Aucun enfant trouvé', 'Crée d\'abord un profil d\'enfant');
+        router.push('/create-child');
+        return;
+      }
+      if (tier === 'free') {
+        const memLimit = await checkMemoryLimit(childId, { skipRemotePull: true });
+        if (!memLimit.canCreate) {
+          promptFreeTierLimitThenPaywall({ kind: 'memories', router, returnTo: 'fil' });
+          return;
+        }
+        const voiceLimit = await checkVoiceLimit(childId, { skipRemotePull: true });
+        if (!voiceLimit.canCreate) {
+          promptFreeTierLimitThenPaywall({ kind: 'voices', router, returnTo: 'fil' });
+          return;
+        }
+      }
+
       if (soundRef.current) {
         await soundRef.current.unloadAsync();
         soundRef.current = null;
@@ -207,8 +216,9 @@ export default function RecordVoiceScreen() {
       });
 
       setHasRecording(true);
-      // Préremplir l’extrait : libre en paid, max 60s en free.
-      const maxClip = tier === 'free' ? 60 : recordingDuration;
+      // Préremplir l’extrait : max 60 s free / 5 min paid.
+      const maxClip =
+        tier === 'free' ? FREE_TIER_VOICE_MAX_DURATION : PAID_TIER_VOICE_MAX_DURATION;
       setTrimStartSec(0);
       setTrimEndSec(Math.max(0, Math.min(recordingDuration, maxClip)));
     } catch (error) {
@@ -217,19 +227,27 @@ export default function RecordVoiceScreen() {
     }
   };
 
+  useEffect(() => {
+    if (!isRecording) return;
+    const maxSec =
+      tier === 'paid' ? PAID_TIER_VOICE_MAX_DURATION : FREE_TIER_VOICE_MAX_DURATION;
+    if (recordingDuration < maxSec) return;
+    void stopRecording();
+  }, [isRecording, recordingDuration, tier]);
+
   const clampTrim = useCallback(
     (nextStart: number, nextEnd: number) => {
       const total = Math.max(0, recordingDuration);
       let s = Math.max(0, Math.min(total, nextStart));
       let e = Math.max(0, Math.min(total, nextEnd));
       if (e < s) e = s;
-      if (tier === 'free') {
-        if (e - s > 60) {
-          e = s + 60;
-          if (e > total) {
-            e = total;
-            s = Math.max(0, e - 60);
-          }
+      const maxClip =
+        tier === 'free' ? FREE_TIER_VOICE_MAX_DURATION : PAID_TIER_VOICE_MAX_DURATION;
+      if (e - s > maxClip) {
+        e = s + maxClip;
+        if (e > total) {
+          e = total;
+          s = Math.max(0, e - maxClip);
         }
       }
       const q = (x: number) => Math.round(Math.max(0, x) * 1000) / 1000;
@@ -420,26 +438,16 @@ export default function RecordVoiceScreen() {
 
       const childId = await getOrSelectFirstChild();
       if (!childId) {
-        Alert.alert('Aucun enfant trouvé', 'Veuillez d\'abord créer un profil d\'enfant');
+        Alert.alert('Aucun enfant trouvé', 'Crée d\'abord un profil d\'enfant');
         setIsSaving(false);
         router.push('/create-child');
         return;
       }
 
       if (tier === 'free') {
-        const voiceLimit = await checkVoiceLimit(childId);
+        const voiceLimit = await checkVoiceLimit(childId, { skipRemotePull: true });
         if (!voiceLimit.canCreate) {
-          Alert.alert(
-            'Limite gratuite',
-            `Tu as atteint la limite de ${voiceLimit.limit} souvenirs audio. Passe à Petitmo+ pour continuer sans limite.`,
-            [
-              { text: 'OK', style: 'cancel' },
-              {
-                text: 'Découvrir Petitmo+',
-                onPress: () => router.push({ pathname: '/paywall', params: { context: 'GENERAL' } }),
-              },
-            ],
-          );
+          promptFreeTierLimitThenPaywall({ kind: 'voices', router, returnTo: 'fil' });
           setIsSaving(false);
           return;
         }
@@ -462,8 +470,12 @@ export default function RecordVoiceScreen() {
       const needsTrim =
         clipDur > 0.01 && (s > 1e-3 || e < recordingDuration - 1e-3);
 
-      if (tier === 'free' && clipDur > 60.01) {
+      if (tier === 'free' && clipDur > FREE_TIER_VOICE_MAX_DURATION + 0.01) {
         Alert.alert('Dernière étape', 'En plan gratuit, choisis un extrait de 1 minute maximum.');
+        return;
+      }
+      if (tier === 'paid' && clipDur > PAID_TIER_VOICE_MAX_DURATION + 0.01) {
+        Alert.alert('Dernière étape', 'Choisis un extrait de 5 minutes maximum.');
         return;
       }
 
@@ -484,8 +496,11 @@ export default function RecordVoiceScreen() {
           finalDuration = Math.round(clipDur);
           voicePlaybackStartSec = Math.round(s * 1000) / 1000;
         }
-      } else if (tier === 'free' && recordingDuration > 60) {
+      } else if (tier === 'free' && recordingDuration > FREE_TIER_VOICE_MAX_DURATION) {
         Alert.alert('Dernière étape', 'En plan gratuit, choisis un extrait de 1 minute maximum.');
+        return;
+      } else if (tier === 'paid' && recordingDuration > PAID_TIER_VOICE_MAX_DURATION) {
+        Alert.alert('Dernière étape', 'Choisis un extrait de 5 minutes maximum.');
         return;
       }
 
@@ -506,15 +521,11 @@ export default function RecordVoiceScreen() {
         Alert.alert('Erreur', 'Impossible de sauvegarder le souvenir');
       }
     } catch (error) {
-      if (error instanceof Error) {
-        if (error.message === 'LIMIT_REACHED') {
-          router.push({ pathname: '/paywall', params: { context: 'LIMIT_REACHED' } });
-          return;
-        }
-        if (error.message === 'VIDEO_LIMIT_REACHED') {
-          router.push({ pathname: '/paywall', params: { context: 'VIDEO_LIMIT_REACHED' } });
-          return;
-        }
+      if (
+        error instanceof Error &&
+        promptFreeTierLimitFromError(error.message, { router, returnTo: 'fil' })
+      ) {
+        return;
       }
       console.error('Failed to save recording:', error);
       Alert.alert('Erreur', 'Impossible de sauvegarder le souvenir');
@@ -527,7 +538,7 @@ export default function RecordVoiceScreen() {
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
-        Alert.alert('Accès refusé', 'Autorisez l’accès aux photos pour ajouter une illustration.');
+        Alert.alert('Accès refusé', 'Autorise l’accès aux photos pour ajouter une illustration.');
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -592,7 +603,7 @@ export default function RecordVoiceScreen() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.postRecordHead}>
-            <Text style={styles.titlePostRecord}>Capturez des sons</Text>
+            <Text style={styles.titlePostRecord}>Capture des sons</Text>
             <Text style={styles.subtitlePostRecord}>Enregistrement terminé</Text>
           </View>
 
@@ -631,7 +642,7 @@ export default function RecordVoiceScreen() {
               style={styles.bookBannerIcon}
             />
             <Text style={styles.bookBannerText}>
-              Ce souvenir pourra être réécouté dans votre{' '}
+              Ce souvenir pourra être réécouté dans ton{' '}
               <Text style={styles.bookBannerBold}>livre imprimé</Text>.
             </Text>
           </View>
@@ -699,7 +710,7 @@ export default function RecordVoiceScreen() {
       ) : (
         <View style={styles.preRecordBody}>
           <View style={styles.titleSection}>
-            <Text style={styles.title}>Capturez des sons</Text>
+            <Text style={styles.title}>Capture des sons</Text>
             <Text style={styles.subtitle}>
               {isRecording
                 ? 'Enregistrement en cours...'

@@ -3,6 +3,7 @@ import { useFocusEffect } from '@react-navigation/native'
 import {
   checkVideoLimit,
   FREE_TIER_VIDEO_MAX_DURATION,
+  PAID_TIER_VIDEO_MAX_DURATION,
 } from '@/lib/limits'
 import { getUserTier } from '@/lib/userTier'
 
@@ -22,7 +23,9 @@ export function useVideoLimit(childId: string | null) {
       getUserTier(),
     ])
     setVideoLimit(result)
-    setMaxDuration(tier === 'free' ? FREE_TIER_VIDEO_MAX_DURATION : null)
+    setMaxDuration(
+      tier === 'free' ? FREE_TIER_VIDEO_MAX_DURATION : PAID_TIER_VIDEO_MAX_DURATION,
+    )
   }, [childId])
 
   useFocusEffect(

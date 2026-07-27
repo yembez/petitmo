@@ -21,21 +21,21 @@ const permissionConfig = {
   camera: {
     icon: Camera,
     title: 'Accès à la caméra',
-    description: "L'app Petitmo a juste besoin de votre permission une fois pour vous permettre de capturer vos photos et vidéos.",
+    description: "L'app Petitmo a juste besoin de ta permission une fois pour te permettre de capturer vos photos et vidéos.",
     color: '#E5F1F7',
     iconColor: '#5E7C88',
   },
   microphone: {
     icon: Mic,
     title: 'Accès au micro',
-    description: "L'app Petitmo a juste besoin de votre permission une fois pour vous permettre d'enregistrer les sons précieux.",
+    description: "L'app Petitmo a juste besoin de ta permission une fois pour te permettre d'enregistrer les sons précieux.",
     color: '#E8F2F6',
     iconColor: THEME.accent,
   },
   photos: {
     icon: ImageIcon,
     title: 'Accès à la photothèque',
-    description: "L'app Petitmo a juste besoin de votre permission une fois pour vous permettre d'importer vos photos et vidéos existantes.",
+    description: "L'app Petitmo a juste besoin de ta permission une fois pour te permettre d'importer vos photos et vidéos existantes.",
     color: '#F3EAF3',
     iconColor: '#B8A8C8',
   },
@@ -72,7 +72,7 @@ export default function PermissionModal({ visible, type, onRequestPermission, on
             <View style={styles.privacyBadge}>
               <Lock size={scale(16)} color="#88a5b0" strokeWidth={2} />
               <Text style={styles.privacyText}>
-                Rassurez-vous, tout reste totalement privé et sécurisé
+                Rassure-toi, tout reste totalement privé et sécurisé
               </Text>
             </View>
 

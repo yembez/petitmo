@@ -20,6 +20,7 @@ import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmo
 import { supabase } from '@/lib/supabase';
 import { getCachedUserMode } from '@/lib/userMode';
 import { checkMemoryLimit, invalidateMemoryLimitCache } from '@/lib/limits';
+import { promptFreeTierLimitThenPaywall } from '@/utils/freeTierLimitGate';
 import { getOrSelectFirstChild } from '@/services/children';
 import { armFeedSnapToLatestOnFocus } from '@/services/feedScrollRestore';
 import {
@@ -147,7 +148,7 @@ export default function WriteScreen() {
           console.error('Speech recognition error:', event.error);
           setIsListening(false);
           if (event.error !== 'no-speech' && event.error !== 'aborted') {
-            Alert.alert('Erreur', 'Problème avec la dictée vocale. Veuillez réessayer.');
+            Alert.alert('Erreur', 'Problème avec la dictée vocale. Réessaie.');
           }
         };
 
@@ -176,7 +177,7 @@ export default function WriteScreen() {
     }
 
     if (!isWebSpeechSupported) {
-      Alert.alert('Non supporté', 'Votre navigateur ne supporte pas la dictée vocale. Essayez Chrome, Edge ou Safari.');
+      Alert.alert('Non supporté', 'Ton navigateur ne supporte pas la dictée vocale. Essaie Chrome, Edge ou Safari.');
       return;
     }
 
@@ -234,14 +235,14 @@ export default function WriteScreen() {
 
       const childId = await getOrSelectFirstChild();
       if (!childId) {
-        Alert.alert('Aucun enfant trouvé', 'Veuillez d\'abord créer un profil d\'enfant');
+        Alert.alert('Aucun enfant trouvé', 'Crée d\'abord un profil d\'enfant');
         router.push('/create-child');
         return;
       }
 
-      const limitCheck = await checkMemoryLimit(childId);
+      const limitCheck = await checkMemoryLimit(childId, { skipRemotePull: true });
       if (!limitCheck.canCreate) {
-        router.push({ pathname: '/paywall', params: { context: 'LIMIT_REACHED' } });
+        promptFreeTierLimitThenPaywall({ kind: 'memories', router, returnTo: 'fil' });
         return;
       }
 
@@ -277,7 +278,7 @@ export default function WriteScreen() {
     const trimmed = content.trim();
     const textToSave = clampText(trimmed);
     if (!textToSave) {
-      Alert.alert('Erreur', 'Veuillez saisir du texte');
+      Alert.alert('Erreur', 'Saisis du texte');
       return;
     }
 

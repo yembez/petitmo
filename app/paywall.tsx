@@ -9,7 +9,6 @@ import {
   Alert,
   ScrollView,
   Platform,
-  DeviceEventEmitter,
 } from 'react-native'
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -24,13 +23,16 @@ import {
   DMSans_600SemiBold,
   DMSans_700Bold,
 } from '@expo-google-fonts/dm-sans'
-import { BookOpen, ChevronRight, Cloud, Heart, Lock, X } from 'lucide-react-native'
+import { BookOpen, ChevronRight, Cloud, Lock, X } from 'lucide-react-native'
 import PetitmoLogoManuscrit, { PETITMO_LOGO_VIEWBOX } from '@/components/PetitmoLogoManuscrit'
 import { upgradeToFullCloud } from '@/services/migration'
 import { flushPendingCloudUploadsOnce } from '@/services/pendingCloudFlush'
 import { hydrateTabScreensFromLocal } from '@/services/tabScreensHydrate'
+import { getChildren } from '@/services/children'
+import { listLocalChildrenForUser } from '@/lib/localDb'
+import { peekLastRealAuthUserId } from '@/services/accountLocalReset'
 import { grantDigitalExportPurchase } from '@/lib/digitalExportPurchase'
-import { FREE_TIER_LIMIT, FREE_TIER_VIDEO_LIMIT } from '@/lib/limits'
+import { FREE_TIER_LIMIT, FREE_TIER_VIDEO_LIMIT, PAID_TIER_VIDEO_MAX_DURATION, PAID_TIER_VOICE_MAX_DURATION } from '@/lib/limits'
 import { THEME } from '@/constants/theme'
 import { hp, scale, screenHeight, screenWidth, verticalScale } from '@/utils/responsive'
 
@@ -53,6 +55,8 @@ type PaywallParams = {
   childName?: string
   /** Où renvoyer l’utilisatrice à la fermeture (ex. quota atteint pendant import → fil). */
   returnTo?: string
+  /** Depuis onboarding « S’abonner » : après paywall → profil enfant si besoin. */
+  from?: string
 }
 
 function normalizePaywallReturnTo(raw: unknown): 'fil' | null {
@@ -61,10 +65,13 @@ function normalizePaywallReturnTo(raw: unknown): 'fil' | null {
   return key === 'fil' ? 'fil' : null
 }
 
+function isSubscribeOnboarding(raw: unknown): boolean {
+  const v = Array.isArray(raw) ? raw[0] : raw
+  return typeof v === 'string' && v.trim() === 'subscribe'
+}
+
 /** Hero souscription hors quota souvenirs : pas de « X premiers souvenirs » (cf. AGENTS.md). */
-/** Saut de ligne après « moment », puis ligne suivante + cœur Lucide rosé (`PAYWALL_HEART`). */
-const PAYWALL_NEUTRAL_HEAD_LINE1 = 'Préservez chaque moment'
-const PAYWALL_NEUTRAL_HEAD_LINE2_TEXT = 'avec votre enfant, sans limite'
+const PAYWALL_NEUTRAL_HEADLINE = 'Les abonnements pour préserver chaque moment'
 
 const VALID_PAYWALL_CONTEXTS = [
   'GENERAL',
@@ -101,8 +108,7 @@ const PAYWALL_MESSAGES: Record<
 > = {
   GENERAL: {
     eyebrow: 'Petitmo+',
-    title: () =>
-      `${PAYWALL_NEUTRAL_HEAD_LINE1}\n${PAYWALL_NEUTRAL_HEAD_LINE2_TEXT}`,
+    title: () => PAYWALL_NEUTRAL_HEADLINE,
     subtitle: '',
   },
   LIMIT_REACHED: {
@@ -113,12 +119,12 @@ const PAYWALL_MESSAGES: Record<
   VIDEO_LIMIT_REACHED: {
     eyebrow: 'Petitmo+',
     title: n => `Tu as utilisé tes ${FREE_TIER_VIDEO_LIMIT} vidéos gratuites de ${n}.`,
-    subtitle: 'Des vidéos illimitées et sans limite de durée avec Petitmo+.',
+    subtitle: `Des vidéos illimitées en nombre, jusqu’à ${Math.round(PAID_TIER_VIDEO_MAX_DURATION / 60)} min chacune avec Petitmo+.`,
   },
   VOICE_LIMIT_REACHED: {
     eyebrow: 'Petitmo+',
     title: n => `2 minutes, c'est déjà une belle histoire de ${n}.`,
-    subtitle: 'Enregistre des vocaux illimités en durée avec Petitmo+.',
+    subtitle: `Des vocaux illimités en nombre, jusqu’à ${Math.round(PAID_TIER_VOICE_MAX_DURATION / 60)} min avec Petitmo+.`,
   },
   EXPORT_PAYWALL: {
     eyebrow: 'Petitmo+',
@@ -181,16 +187,44 @@ export default function PaywallScreen() {
   const params = useLocalSearchParams<PaywallParams>()
   const context: PaywallContext = normalizePaywallContext(params.context)
   const returnTo = normalizePaywallReturnTo(params.returnTo)
+  const fromSubscribe = isSubscribeOnboarding(params.from)
 
-  const dismissPaywall = () => {
+  const continueAfterPaywall = useCallback(async () => {
+    if (fromSubscribe) {
+      const uid = peekLastRealAuthUserId()
+      let count = uid ? listLocalChildrenForUser(uid).length : 0
+      if (count === 0) {
+        try {
+          const children = await getChildren()
+          count = children.length
+        } catch (e) {
+          console.warn('[paywall] getChildren after subscribe', e)
+        }
+      }
+      if (count === 0) {
+        router.replace({
+          pathname: '/create-child',
+          params: { intent: 'subscribe' },
+        })
+        return
+      }
+    }
     if (returnTo === 'fil') {
       router.replace('/(tabs)/fil')
       return
     }
-    router.back()
+    if (router.canGoBack()) {
+      router.back()
+      return
+    }
+    router.replace('/(tabs)')
+  }, [fromSubscribe, returnTo, router])
+
+  const dismissPaywall = () => {
+    void continueAfterPaywall()
   }
 
-  const [selectedPlan, setSelectedPlan] = useState<Plan>('yearly')
+  const [selectedPlan, setSelectedPlan] = useState<Plan>('monthly')
   const [isLoading, setIsLoading] = useState(false)
 
   const [dmLoaded] = useDmSansFonts({
@@ -201,7 +235,7 @@ export default function PaywallScreen() {
 
   const msg = useMemo(() => PAYWALL_MESSAGES[context], [context])
   const childName =
-    typeof params.childName === 'string' && params.childName.trim() ? params.childName : 'votre enfant'
+    typeof params.childName === 'string' && params.childName.trim() ? params.childName : 'ton enfant'
   const isExportDigitalPdf = context === 'EXPORT_DIGITAL_PDF'
 
   const handlePurchase = async (plan: Plan) => {
@@ -212,7 +246,7 @@ export default function PaywallScreen() {
       await flushPendingCloudUploadsOnce()
       await AsyncStorage.setItem('petitmo_subscribed_at', new Date().toISOString())
       await hydrateTabScreensFromLocal()
-      DeviceEventEmitter.emit('petitmo:memories-invalidate')
+      // Sync-only : pas d’invalidate (fil / favoris ne flashent pas après abonnement).
 
       if (__DEV__) {
         const c = report.children
@@ -231,12 +265,12 @@ export default function PaywallScreen() {
           lines.push('', 'Erreurs :', ...allErrors.slice(0, 6))
         }
         Alert.alert('Migration cloud (dev)', lines.join('\n'), [
-          { text: 'OK', onPress: () => router.replace('/(tabs)') },
+          { text: 'OK', onPress: () => void continueAfterPaywall() },
         ])
         return
       }
 
-      router.replace('/(tabs)')
+      await continueAfterPaywall()
     } catch (e) {
       Alert.alert(
         'Erreur',
@@ -395,12 +429,12 @@ export default function PaywallScreen() {
         {showMemoryLimitHero ? (
           <>
             <Text style={[styles.headline, dm700 && { fontFamily: dm700 }]}>
-              Vous avez capturé vos{'\n'}
+              Tu as capturé vos{'\n'}
               <Text style={styles.headlineCount}>{FREE_TIER_LIMIT}</Text> premiers souvenirs{' '}
               <Text style={styles.headlineHeart}>♥</Text>
             </Text>
             <Text style={[styles.subline, dm500 && { fontFamily: dm500 }]}>
-              Continuez à préserver chaque moment, {'\n'}sans limite.
+              Continue à préserver chaque moment, {'\n'}sans limite.
             </Text>
           </>
         ) : (
@@ -408,36 +442,17 @@ export default function PaywallScreen() {
             <View
               style={styles.headlineNeutralWrap}
               accessibilityRole="header"
-              accessibilityLabel={`${PAYWALL_NEUTRAL_HEAD_LINE1}. ${PAYWALL_NEUTRAL_HEAD_LINE2_TEXT}`}
+              accessibilityLabel={PAYWALL_NEUTRAL_HEADLINE}
             >
               <Text
                 style={[styles.headlineNeutralLine1, dm700 && { fontFamily: dm700 }]}
-                numberOfLines={1}
+                numberOfLines={2}
                 adjustsFontSizeToFit
                 minimumFontScale={0.78}
                 maxFontSizeMultiplier={1.35}
               >
-                {PAYWALL_NEUTRAL_HEAD_LINE1}
+                {PAYWALL_NEUTRAL_HEADLINE}
               </Text>
-              <View style={styles.headlineNeutralRow2}>
-                <Text
-                  style={[styles.headlineNeutralLine2Text, dm700 && { fontFamily: dm700 }]}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.74}
-                  maxFontSizeMultiplier={1.35}
-                >
-                  {PAYWALL_NEUTRAL_HEAD_LINE2_TEXT}
-                </Text>
-                <Heart
-                  size={scale(20)}
-                  color={PAYWALL_HEART}
-                  fill={PAYWALL_HEART}
-                  strokeWidth={2}
-                  accessibilityElementsHidden
-                  importantForAccessibility="no"
-                />
-              </View>
             </View>
             <View style={styles.neutralHeadlineSpacer} />
           </>
@@ -454,24 +469,33 @@ export default function PaywallScreen() {
             accessibilityRole="button"
             accessibilityState={{ selected: selectedPlan === 'yearly' }}
           >
-            <View style={styles.planBadge}>
-              <Text style={[styles.planBadgeText, dm600 && { fontFamily: dm600 }]}>Meilleure valeur</Text>
-            </View>
-            <View style={styles.planCardFill}>
-              <View style={styles.planSelectRow}>
-                <View style={[styles.radioOuter, selectedPlan === 'yearly' && styles.radioOuterOn]}>
-                  {selectedPlan === 'yearly' ? <View style={styles.radioInner} /> : null}
-                </View>
-                <View style={styles.planPriceBlock}>
-                  <Text style={[styles.planPriceMain, styles.planPriceMainYear, dm700 && { fontFamily: dm700 }]}>
-                    {ANNUAL_PER_MONTH} €{' '}
-                    <Text style={styles.planPerMoInline}>/ mois</Text>
-                  </Text>
-                </View>
+            <View style={styles.planSelectRow}>
+              <View style={[styles.radioOuter, selectedPlan === 'yearly' && styles.radioOuterOn]}>
+                {selectedPlan === 'yearly' ? <View style={styles.radioInner} /> : null}
               </View>
-              <Text style={[styles.planFine, dm500 && { fontFamily: dm500 }]}>
-                {formatEuro(ANNUAL_FACTURE)} par an
-              </Text>
+              <View style={styles.planPriceBlock}>
+                <View style={styles.planNameRow}>
+                  <Text style={[styles.planName, dm700 && { fontFamily: dm700 }]}>Annuel</Text>
+                  <View style={styles.planDiscountPill}>
+                    <Text style={[styles.planDiscountPillText, dm600 && { fontFamily: dm600 }]}>
+                      -30%
+                    </Text>
+                  </View>
+                </View>
+                <Text
+                  style={[
+                    styles.planPriceMain,
+                    styles.planPriceMainYear,
+                    dm700 && { fontFamily: dm700 },
+                  ]}
+                >
+                  {formatEuro(ANNUAL_FACTURE)}
+                  <Text style={styles.planPerMoInline}>/an</Text>
+                </Text>
+                <Text style={[styles.planFine, dm500 && { fontFamily: dm500 }]}>
+                  {ANNUAL_PER_MONTH} €/mois
+                </Text>
+              </View>
             </View>
           </Pressable>
 
@@ -485,17 +509,22 @@ export default function PaywallScreen() {
             accessibilityRole="button"
             accessibilityState={{ selected: selectedPlan === 'monthly' }}
           >
-            <View style={styles.planCardFill}>
-              <View style={styles.planSelectRow}>
-                <View style={[styles.radioOuter, selectedPlan === 'monthly' && styles.radioOuterOn]}>
-                  {selectedPlan === 'monthly' ? <View style={styles.radioInner} /> : null}
-                </View>
-                <View style={styles.planPriceBlock}>
-                  <Text style={[styles.planPriceMain, styles.planPriceMainMonth, dm700 && { fontFamily: dm700 }]}>
-                    {MONTHLY.toFixed(2).replace('.', ',')} €{' '}
-                    <Text style={styles.planPerMoInline}>/ mois</Text>
-                  </Text>
-                </View>
+            <View style={styles.planSelectRow}>
+              <View style={[styles.radioOuter, selectedPlan === 'monthly' && styles.radioOuterOn]}>
+                {selectedPlan === 'monthly' ? <View style={styles.radioInner} /> : null}
+              </View>
+              <View style={styles.planPriceBlock}>
+                <Text style={[styles.planName, dm700 && { fontFamily: dm700 }]}>Mensuel</Text>
+                <Text
+                  style={[
+                    styles.planPriceMain,
+                    styles.planPriceMainMonth,
+                    dm700 && { fontFamily: dm700 },
+                  ]}
+                >
+                  {MONTHLY.toFixed(2).replace('.', ',')} €
+                  <Text style={styles.planPerMoInline}>/mois</Text>
+                </Text>
               </View>
             </View>
           </Pressable>
@@ -504,8 +533,8 @@ export default function PaywallScreen() {
         <View style={styles.benefitsCard}>
           <BenefitRow
             icon={<Text style={styles.benefitInfinityGlyph}>∞</Text>}
-            title="Souvenirs illimités"
-            desc="Mots, vocaux, photos et vidéos."
+            title="Nombre de souvenirs illimités."
+            desc="Textes, photos, vidéos jusqu'à 3mn, audios jusqu'à 5mn."
             dm600={dm600}
             dm500={dm500}
           />
@@ -519,16 +548,16 @@ export default function PaywallScreen() {
                 </View>
               </View>
             }
-            title="Cloud sécurisé"
-            desc="Retrouvez tout, même en changeant de téléphone."
+            title="Sauvegardés en toute sécurité"
+            desc="Retrouve tout, même en changeant de téléphone."
             dm600={dm600}
             dm500={dm500}
           />
           <View style={styles.benefitRule} />
           <BenefitRow
             icon={<BookOpen size={13} color={ACCENT} strokeWidth={1.75} />}
-            title="–10 % + QR illimités"
-            desc="Sur vos livres imprimés"
+            title={'-10% sur les livres "vivants"'}
+            desc="Avec les audios et vidéos inclus (via QR codes)"
             dm600={dm600}
             dm500={dm500}
           />
@@ -550,7 +579,7 @@ export default function PaywallScreen() {
           ) : (
             <View style={styles.primaryCtaInner}>
               <Text style={[styles.primaryCtaText, dm600 && { fontFamily: dm600 }]}>
-                Protéger mes souvenirs
+                S&apos;abonner
               </Text>
               <ChevronRight size={20} color="#FFFFFF" strokeWidth={2.5} />
             </View>
@@ -682,27 +711,6 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 16,
   },
-  headlineNeutralRow2: {
-    marginTop: verticalScale(5),
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexWrap: 'nowrap',
-    gap: scale(5),
-    maxWidth: screenWidth - 48,
-    alignSelf: 'center',
-  },
-  headlineNeutralLine2Text: {
-    flexShrink: 1,
-    textAlign: 'center',
-    fontSize: scale(18),
-    lineHeight: scale(24),
-    letterSpacing: -0.28,
-    color: '#1C1C1E',
-    textShadowColor: 'rgba(255,255,255,1)',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 16,
-  },
   headlineCount: {
     color: ACCENT,
   },
@@ -798,14 +806,12 @@ const styles = StyleSheet.create({
   },
   planCard: {
     flex: 1,
-    flexDirection: 'column',
     borderRadius: 16,
     paddingHorizontal: 10,
-    paddingTop: 18,
-    paddingBottom: 8,
+    paddingVertical: 10,
     borderWidth: 1.5,
     minHeight: 0,
-    position: 'relative',
+    justifyContent: 'center',
   },
   planCardSelected: {
     borderColor: ACCENT,
@@ -815,47 +821,44 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(0,0,0,0.1)',
     backgroundColor: CARD,
   },
-  planBadge: {
-    position: 'absolute',
-    top: -11,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    zIndex: 2,
-  },
-  planCardFill: {
-    flexDirection: 'column',
-  },
-  planLabel: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#1C1C1E',
-    marginBottom: 6,
-  },
-  planBadgeText: {
-    backgroundColor: ACCENT,
-    color: '#FFFFFF',
-    fontSize: 10,
-    fontWeight: '700',
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 999,
-    overflow: 'hidden',
-  },
   planSelectRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    marginBottom: 4,
+    gap: 8,
   },
   planPriceBlock: {
     flex: 1,
     minWidth: 0,
   },
+  planNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 2,
+  },
+  planName: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1C1C1E',
+    lineHeight: 16,
+  },
+  planDiscountPill: {
+    backgroundColor: 'rgba(255, 127, 79, 0.16)',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 999,
+  },
+  planDiscountPillText: {
+    color: ACCENT,
+    fontSize: 10,
+    fontWeight: '700',
+    lineHeight: 13,
+  },
   planPriceMain: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '800',
-    letterSpacing: -0.35,
+    letterSpacing: -0.3,
+    lineHeight: 20,
   },
   planPriceMainYear: {
     color: ACCENT,
@@ -864,14 +867,14 @@ const styles = StyleSheet.create({
     color: '#1C1C1E',
   },
   planPerMoInline: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
     color: MUTED,
   },
   radioOuter: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     borderWidth: 2,
     borderColor: 'rgba(0,0,0,0.2)',
     alignItems: 'center',
@@ -881,13 +884,13 @@ const styles = StyleSheet.create({
     borderColor: ACCENT,
   },
   radioInner: {
-    width: 10,
-    height: 10,
+    width: 9,
+    height: 9,
     borderRadius: 5,
     backgroundColor: ACCENT,
   },
   planFine: {
-    marginTop: 4,
+    marginTop: 1,
     fontSize: 11,
     color: MUTED,
     lineHeight: 14,

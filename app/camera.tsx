@@ -14,6 +14,7 @@ import { usePendingMediaUploads } from '@/contexts/PendingMediaUploadsContext';
 import { getOrSelectFirstChild } from '@/services/children';
 import { getUserTier } from '@/lib/userTier';
 import { checkMemoryLimit, checkVideoLimit, FREE_TIER_VIDEO_MAX_DURATION } from '@/lib/limits';
+import { promptFreeTierLimitThenPaywall } from '@/utils/freeTierLimitGate';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -148,15 +149,15 @@ export default function CameraScreen() {
           setIsProcessing(true);
           const childId = await getOrSelectFirstChild();
           if (!childId) {
-            Alert.alert('Aucun enfant trouvé', "Veuillez d'abord créer un profil d'enfant");
+            Alert.alert('Aucun enfant trouvé', "Crée d'abord un profil d'enfant");
             setIsProcessing(false);
             router.push('/create-child');
             return;
           }
-          const limitCheck = await checkMemoryLimit(childId);
+          const limitCheck = await checkMemoryLimit(childId, { skipRemotePull: true });
           if (!limitCheck.canCreate) {
             setIsProcessing(false);
-            router.push({ pathname: '/paywall', params: { context: 'LIMIT_REACHED' } });
+            promptFreeTierLimitThenPaywall({ kind: 'memories', router, returnTo: 'fil' });
             return;
           }
           const localUri = photo.uri;
@@ -184,20 +185,37 @@ export default function CameraScreen() {
 
   const startRecording = async () => {
     if (cameraRef.current && !isRecording && !isProcessing) {
-      setIsRecording(true);
-      setRecordingTime(0);
-
-      recordingTimerRef.current = setInterval(() => {
-        setRecordingTime(prev => {
-          if (prev >= MAX_RECORDING_TIME - 1) {
-            stopRecording();
-            return prev;
-          }
-          return prev + 1;
-        });
-      }, 1000);
-
       try {
+        const childId = await getOrSelectFirstChild();
+        if (!childId) {
+          Alert.alert('Aucun enfant trouvé', 'Crée d\'abord un profil d\'enfant');
+          router.push('/create-child');
+          return;
+        }
+        const memLimit = await checkMemoryLimit(childId, { skipRemotePull: true });
+        if (!memLimit.canCreate) {
+          promptFreeTierLimitThenPaywall({ kind: 'memories', router, returnTo: 'fil' });
+          return;
+        }
+        const videoLimit = await checkVideoLimit(childId, { skipRemotePull: true });
+        if (!videoLimit.canCreate) {
+          promptFreeTierLimitThenPaywall({ kind: 'videos', router, returnTo: 'fil' });
+          return;
+        }
+
+        setIsRecording(true);
+        setRecordingTime(0);
+
+        recordingTimerRef.current = setInterval(() => {
+          setRecordingTime(prev => {
+            if (prev >= MAX_RECORDING_TIME - 1) {
+              stopRecording();
+              return prev;
+            }
+            return prev + 1;
+          });
+        }, 1000);
+
         const tier = await getUserTier();
         const isFree = tier === 'free';
         const maxDuration = isFree ? FREE_TIER_VIDEO_MAX_DURATION : MAX_RECORDING_TIME;
@@ -238,7 +256,7 @@ export default function CameraScreen() {
 
       const childId = await getOrSelectFirstChild();
       if (!childId) {
-        Alert.alert('Aucun enfant trouvé', 'Veuillez d\'abord créer un profil d\'enfant');
+        Alert.alert('Aucun enfant trouvé', 'Crée d\'abord un profil d\'enfant');
         setIsProcessing(false);
         setRecordingTime(0);
         router.push('/create-child');
@@ -247,14 +265,14 @@ export default function CameraScreen() {
 
       setIsProcessing(false);
       setRecordingTime(0);
-      const limitCheck = await checkMemoryLimit(childId);
+      const limitCheck = await checkMemoryLimit(childId, { skipRemotePull: true });
       if (!limitCheck.canCreate) {
-        router.push({ pathname: '/paywall', params: { context: 'LIMIT_REACHED' } });
+        promptFreeTierLimitThenPaywall({ kind: 'memories', router, returnTo: 'fil' });
         return;
       }
-      const videoLimitCheck = await checkVideoLimit(childId);
+      const videoLimitCheck = await checkVideoLimit(childId, { skipRemotePull: true });
       if (!videoLimitCheck.canCreate) {
-        router.push({ pathname: '/paywall', params: { context: 'VIDEO_LIMIT_REACHED' } });
+        promptFreeTierLimitThenPaywall({ kind: 'videos', router, returnTo: 'fil' });
         return;
       }
       startBackgroundUploadNavigateToFeed({

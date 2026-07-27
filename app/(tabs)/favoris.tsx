@@ -49,7 +49,11 @@ import {
   useMemoryEditorialFont,
   useMemoryEditorialBoldFont,
 } from '@/contexts/MemoryTextFontContext';
-import { loadMemoriesForFavorisTab, memoryShouldAppearInFavoris } from '@/services/favorisMemories';
+import {
+  loadMemoriesForFavorisTab,
+  memoryShouldAppearInFavoris,
+  syncFavorisMemoriesFromCloudInBackground,
+} from '@/services/favorisMemories';
 import {
   buildFavorisGridItems,
   buildMemoryPhotoRefsFromItems,
@@ -70,6 +74,10 @@ import {
   feedChildHydrationSnapshot,
   feedMemoriesHydrationSnapshot,
 } from '@/services/tabScreensCache';
+import {
+  filMemoryVisualEqual,
+  mergeMemoriesListPreservingVisualRowRefs,
+} from '@/utils/feedHelpers';
 import type { Memory } from '@/types/local';
 import { isBareMediaBucketPath, useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { Image as ExpoImage } from 'expo-image';
@@ -292,6 +300,7 @@ function FavorisSlideshow({
   topLayerRef.current = topLayer;
   const readyRef = useRef<[boolean, boolean]>([false, false]);
   const pendingAdvanceRef = useRef(false);
+  const prevItemsKeyRef = useRef(itemsKey);
 
   const layer0Item: FavListItem | null =
     n <= 1 ? (items[0] ?? null) : topLayer === 0 ? items[visibleIdx] ?? null : items[(visibleIdx + 1) % n] ?? null;
@@ -307,12 +316,15 @@ function FavorisSlideshow({
     readyRef.current[1] = false;
   }, [layer0Item?.key, layer1Item?.key]);
 
+  /** Reset diaporama seulement si les clés slides changent — pas au seul focus onglet / sync métadonnées. */
   useEffect(() => {
-    if (isActive && n > 0) {
+    if (prevItemsKeyRef.current === itemsKey) return;
+    prevItemsKeyRef.current = itemsKey;
+    if (n > 0) {
       setVisibleIdx(0);
       setTopLayer(0);
     }
-  }, [isActive, n, itemsKey]);
+  }, [itemsKey, n]);
 
   useEffect(() => {
     if (!isActive || n === 0) {
@@ -1297,22 +1309,17 @@ export const FavorisScreen = memo(function FavorisScreen({
     }
     setHasChild(true);
 
+    // Local-first : peindre SQLite tout de suite (pas d’await pull cloud).
     const list = await loadMemoriesForFavorisTab();
-    setMemories(prev => {
-      if (
-        prev.length === list.length &&
-        prev.every(
-          (m, i) =>
-            m.id === list[i]?.id &&
-            m.updated_at === list[i]?.updated_at &&
-            m.is_favorite === list[i]?.is_favorite,
-        )
-      ) {
-        return prev;
-      }
-      return list;
-    });
+    setMemories(prev => mergeMemoriesListPreservingVisualRowRefs(prev, list));
     setLoading(false);
+
+    const applyCloudList = (refreshed: Memory[]) => {
+      setMemories(prev => mergeMemoriesListPreservingVisualRowRefs(prev, refreshed));
+    };
+
+    // Pull + reconcile favoris en fond (ne bloque jamais la grille / le héros).
+    syncFavorisMemoriesFromCloudInBackground(applyCloudList);
 
     const bookAddSession = peekFavorisAddToBookSession() != null;
     const healList = list.filter(m => memoryShouldAppearInFavoris(m));
@@ -1321,31 +1328,15 @@ export const FavorisScreen = memo(function FavorisScreen({
         max: bookAddSession ? 16 : 64,
       });
       const refreshed = await loadMemoriesForFavorisTab();
-      setMemories(prev => {
-        if (
-          prev.length === refreshed.length &&
-          prev.every(
-            (m, i) =>
-              m.id === refreshed[i]?.id &&
-              m.updated_at === refreshed[i]?.updated_at &&
-              m.is_favorite === refreshed[i]?.is_favorite,
-          )
-        ) {
-          return prev;
-        }
-        return refreshed;
-      });
+      applyCloudList(refreshed);
       if (!bookAddSession) {
         void requestMissingMediaDerivatives(refreshed);
       }
     };
-    if (bookAddSession || opts?.background) {
-      InteractionManager.runAfterInteractions(() => {
-        void runHeavy();
-      });
-    } else {
-      await runHeavy();
-    }
+    // Heal médias toujours en fond — ne jamais bloquer l’onglet sur le réseau / I/O.
+    InteractionManager.runAfterInteractions(() => {
+      void runHeavy();
+    });
   }, []);
 
   const exitSelection = useCallback(() => {
@@ -1481,7 +1472,7 @@ export const FavorisScreen = memo(function FavorisScreen({
 
   useEffect(() => {
     const subInvalidate = DeviceEventEmitter.addListener('petitmo:memories-invalidate', () => {
-      void load();
+      void load({ background: true });
     });
     const subUpdated = DeviceEventEmitter.addListener('petitmo:memories-updated', (payload: unknown) => {
       const memoryId =
@@ -1498,6 +1489,8 @@ export const FavorisScreen = memo(function FavorisScreen({
           setMemories(prev => {
             const idx = prev.findIndex(m => m.id === memoryId);
             if (idx < 0) return [...prev, row];
+            const cur = prev[idx];
+            if (filMemoryVisualEqual(cur, row)) return prev;
             const next = [...prev];
             next[idx] = row;
             return next;
@@ -1677,10 +1670,9 @@ export const FavorisScreen = memo(function FavorisScreen({
         return;
       }
       const newBookId = updated.id;
-      router.replace({ pathname: '/book-preview', params: { bookId: newBookId } });
-      InteractionManager.runAfterInteractions(() => {
-        exitSelection();
-      });
+      // push (pas replace+pop) : sinon Favoris reste visible pendant l’anim « retour ».
+      exitSelection();
+      router.push({ pathname: '/book-preview', params: { bookId: newBookId } });
       return;
     }
 

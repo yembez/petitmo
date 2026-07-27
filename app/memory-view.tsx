@@ -32,7 +32,8 @@ import { feedMemoryTextEditPreviewVariant } from '@/utils/memoryTextEditStyles';
 import { bookLineBudgetForMemoryType, bookCharsPerLineForMemoryType } from '@/utils/textLimits';
 import { getMemoryById, updateMemoryContent } from '@/services/media';
 import { resolveChildProfileImageDisplayUri } from '@/utils/childPhotoUri';
-import { getChildren } from '@/services/children';
+import { getChildren, refreshChildrenFromCloudInBackground } from '@/services/children';
+import { getLocalMemoryById, listLocalChildren } from '@/lib/localDb';
 import {
   getVideoPosterUriForFeedAndViewer,
   getVoiceCoverUriForFeedAndViewer,
@@ -47,7 +48,14 @@ import {
   formatDuration,
   formatBookLocationShort,
 } from '@/utils/date';
-import { addMemoryToBook, createBookWithMemories, listBooks, removeMemoryFromBook, type Book } from '@/services/books';
+import {
+  addMemoryToBook,
+  createBookWithMemories,
+  listBooks,
+  listBooksFromSqliteSync,
+  removeMemoryFromBook,
+  type Book,
+} from '@/services/books';
 import type { Child, Memory } from '@/types/local';
 import { formatFamilyAgesLine, sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 
@@ -66,13 +74,25 @@ export default function MemoryViewScreen() {
 
   const newBookInputRef = useRef<TextInput | null>(null);
 
-  const [memory, setMemory] = useState<Memory | null>(null);
-  const [child, setChild] = useState<Child | null>(null);
-  const [familyChildren, setFamilyChildren] = useState<Child[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [memory, setMemory] = useState<Memory | null>(() =>
+    memoryId ? getLocalMemoryById(memoryId) : null,
+  );
+  const [child, setChild] = useState<Child | null>(() => {
+    const m = memoryId ? getLocalMemoryById(memoryId) : null;
+    if (!m) return null;
+    const sorted = sortChildrenByBirthdateAsc(listLocalChildren());
+    return sorted.find(c => c.id === m.child_id) ?? sorted[0] ?? null;
+  });
+  const [familyChildren, setFamilyChildren] = useState<Child[]>(() =>
+    sortChildrenByBirthdateAsc(listLocalChildren()),
+  );
+  const [loading, setLoading] = useState(() => {
+    if (!memoryId) return false;
+    return !getLocalMemoryById(memoryId);
+  });
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [isPlayingVideo, setIsPlayingVideo] = useState(false);
-  const [books, setBooks] = useState<Book[]>([]);
+  const [books, setBooks] = useState<Book[]>(() => listBooksFromSqliteSync());
   const [bookModalVisible, setBookModalVisible] = useState(false);
   const [createBookMode, setCreateBookMode] = useState(false);
   const [newBookTitle, setNewBookTitle] = useState('');
@@ -86,11 +106,36 @@ export default function MemoryViewScreen() {
       setLoading(false);
       return;
     }
+
+    const local = getLocalMemoryById(memoryId);
+    if (local) {
+      setMemory(local);
+      const sorted = sortChildrenByBirthdateAsc(listLocalChildren());
+      setFamilyChildren(sorted);
+      setChild(sorted.find(c => c.id === local.child_id) ?? sorted[0] ?? null);
+      setBooks(listBooksFromSqliteSync());
+      setIsPlayingVideo(false);
+      setLoading(false);
+      refreshChildrenFromCloudInBackground();
+      void listBooks().then(setBooks);
+      return;
+    }
+
     setLoading(true);
     const m = await getMemoryById(memoryId);
     setMemory(m);
     setIsPlayingVideo(false);
     if (m) {
+      const localKids = sortChildrenByBirthdateAsc(listLocalChildren());
+      if (localKids.length > 0) {
+        setFamilyChildren(localKids);
+        setChild(localKids.find(c => c.id === m.child_id) ?? localKids[0] ?? null);
+        setBooks(listBooksFromSqliteSync());
+        setLoading(false);
+        refreshChildrenFromCloudInBackground();
+        void listBooks().then(setBooks);
+        return;
+      }
       const [children, b] = await Promise.all([getChildren(), listBooks()]);
       const sorted = sortChildrenByBirthdateAsc(children);
       setFamilyChildren(sorted);

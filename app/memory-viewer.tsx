@@ -25,6 +25,7 @@ import {
   clearMemoryViewerSession,
   peekMemoryViewerSession,
 } from '@/services/memoryViewerSession';
+import { safeRouterBack } from '@/utils/safeRouterBack';
 import type { Memory, Child } from '@/types/local';
 import { listLocalChildren } from '@/lib/localDb';
 import { getChildren } from '@/services/children';
@@ -266,7 +267,7 @@ function MemoryViewerScreenInner() {
     if (didHydrateRef.current) return;
     const payload = peekMemoryViewerSession();
     if (!payload?.memories?.length) {
-      router.back();
+      safeRouterBack(router, '/(tabs)');
       return;
     }
     didHydrateRef.current = true;
@@ -292,9 +293,36 @@ function MemoryViewerScreenInner() {
     setChild(sessionFamily.find(c => c.id === cid) ?? sessionFamily[0] ?? null);
     void getChildren().then(list => {
       const sorted = sortChildrenByBirthdateAsc(list);
-      setFamilyChildren(sorted);
+      setFamilyChildren(prev => {
+        if (
+          prev.length === sorted.length &&
+          prev.every(
+            (c, i) =>
+              c.id === sorted[i]?.id &&
+              (c.local_photo_path ?? '') === (sorted[i]?.local_photo_path ?? '') &&
+              (c.photo_url ?? '') === (sorted[i]?.photo_url ?? '') &&
+              c.name === sorted[i]?.name,
+          )
+        ) {
+          return prev;
+        }
+        return sorted;
+      });
       const memCid = payload.memories[0]?.child_id;
-      setChild(sorted.find(c => c.id === memCid) ?? sorted[0] ?? null);
+      setChild(prev => {
+        const next = sorted.find(c => c.id === memCid) ?? sorted[0] ?? null;
+        if (
+          prev &&
+          next &&
+          prev.id === next.id &&
+          (prev.local_photo_path ?? '') === (next.local_photo_path ?? '') &&
+          (prev.photo_url ?? '') === (next.photo_url ?? '') &&
+          prev.name === next.name
+        ) {
+          return prev;
+        }
+        return next;
+      });
     });
   }, [parsedInitial, router]);
 
@@ -476,7 +504,7 @@ function MemoryViewerScreenInner() {
       <Pressable
         onPress={() => {
           clearMemoryViewerSession();
-          router.back();
+          safeRouterBack(router, '/(tabs)');
         }}
         style={[
           styles.closeBtn,
