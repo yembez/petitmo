@@ -3,12 +3,43 @@ import * as WebBrowser from 'expo-web-browser';
 import { Platform } from 'react-native';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
+import { setCloudAccountKind } from '@/lib/userMode';
 import { setUserTier, type UserTier } from '@/lib/userTier';
 import { getGoogleIosClientId, getGoogleWebClientId } from '@/lib/googleAuthConfig';
+import { prepareLocalWorkspaceForRealUser } from '@/services/accountLocalReset';
+import { claimLocalDataForCloudUser } from '@/services/claimLocalDataForCloud';
+import { ensureSupabaseSession } from '@/lib/ensureSupabaseSession';
+import { clearSelectedChildAndCaptureSnapshot } from '@/services/children';
 
 WebBrowser.maybeCompleteAuthSession();
 
 const DEVICE_EMAIL_SUFFIX = '@petitmo.local';
+
+/** Cache sync pour UI paramètres (évite pop différé de « Se déconnecter »). */
+let realAuthEmailMemory: string | null = null;
+let hasRealAuthMemory = false;
+
+export function peekHasRealAuthAccount(): boolean {
+  return hasRealAuthMemory;
+}
+
+export function peekRealAuthEmail(): string {
+  return realAuthEmailMemory ?? '';
+}
+
+function rememberRealAuthUser(user: User | null | undefined): void {
+  if (!user || isDeviceUserEmail(user.email)) {
+    hasRealAuthMemory = false;
+    realAuthEmailMemory = null;
+    return;
+  }
+  hasRealAuthMemory = true;
+  const raw =
+    user.email ??
+    (typeof user.user_metadata?.email === 'string' ? user.user_metadata.email : '') ??
+    '';
+  realAuthEmailMemory = raw.trim() || null;
+}
 
 export type AuthAccountResult =
   | { ok: true; user: User; session: Session | null; needsEmailConfirmation?: boolean }
@@ -22,8 +53,15 @@ export function isDeviceUserEmail(email: string | null | undefined): boolean {
 /** Compte produit (Google / Apple / email), pas le device-user technique. */
 export async function getRealAuthUser(): Promise<User | null> {
   const { data, error } = await supabase.auth.getUser();
-  if (error || !data.user) return null;
-  if (isDeviceUserEmail(data.user.email)) return null;
+  if (error || !data.user) {
+    rememberRealAuthUser(null);
+    return null;
+  }
+  if (isDeviceUserEmail(data.user.email)) {
+    rememberRealAuthUser(null);
+    return null;
+  }
+  rememberRealAuthUser(data.user);
   return data.user;
 }
 
@@ -41,6 +79,68 @@ export async function syncUserTierFromSessionUser(user: User | null | undefined)
   const tier = tierFromUserAppMetadata(user);
   await setUserTier(tier);
   return tier;
+}
+
+/**
+ * Après auth produit réussie : isole l’espace local au compte, active sync,
+ * claim orphelins seulement, flush en arrière-plan — sans bloquer l’UI.
+ */
+export async function activateCloudSyncAfterRealAuth(user: User): Promise<void> {
+  if (isDeviceUserEmail(user.email)) return;
+
+  rememberRealAuthUser(user);
+
+  try {
+    await prepareLocalWorkspaceForRealUser(user.id);
+  } catch (e) {
+    console.warn('[auth] prepareLocalWorkspaceForRealUser', e);
+  }
+
+  await setCloudAccountKind('real');
+  await syncUserTierFromSessionUser(user);
+
+  try {
+    await claimLocalDataForCloudUser(user.id);
+  } catch (e) {
+    console.warn('[auth] claimLocalDataForCloudUser', e);
+  }
+
+  try {
+    const { flushPendingCloudUploadsOnce } = await import('@/services/pendingCloudFlush');
+    void flushPendingCloudUploadsOnce();
+  } catch (e) {
+    console.warn('[auth] flushPendingCloudUploadsOnce', e);
+  }
+}
+
+/**
+ * Au boot : aligne `cloudAccountKind` sur la session (vrai compte vs device-user).
+ * Ne flush pas ici — `_layout` le fait déjà si mode cloud.
+ */
+export async function syncCloudAccountKindFromSession(): Promise<void> {
+  const { data } = await supabase.auth.getSession();
+  const user = data.session?.user;
+  if (!user || isDeviceUserEmail(user.email)) {
+    rememberRealAuthUser(null);
+    await setCloudAccountKind('none');
+    return;
+  }
+
+  rememberRealAuthUser(user);
+
+  try {
+    await prepareLocalWorkspaceForRealUser(user.id);
+  } catch (e) {
+    console.warn('[auth] prepareLocalWorkspaceForRealUser (boot)', e);
+  }
+
+  await setCloudAccountKind('real');
+  await syncUserTierFromSessionUser(user);
+  try {
+    await claimLocalDataForCloudUser(user.id);
+  } catch (e) {
+    console.warn('[auth] claimLocalDataForCloudUser (boot)', e);
+  }
 }
 
 /**
@@ -64,7 +164,7 @@ function mapAuthError(message: string): string {
     return 'Un compte existe déjà avec cet e-mail. Connecte-toi ou réinitialise ton mot de passe.';
   }
   if (m.includes('password should be at least') || m.includes('password')) {
-    return 'Le mot de passe doit contenir au moins 6 caractères.';
+    return 'Le mot de passe doit contenir au moins 8 caractères.';
   }
   if (m.includes('email')) {
     return message;
@@ -80,8 +180,8 @@ export async function signUpWithEmailPassword(
   if (!trimmed || !password) {
     return { ok: false, error: 'E-mail et mot de passe requis.' };
   }
-  if (password.length < 6) {
-    return { ok: false, error: 'Le mot de passe doit contenir au moins 6 caractères.' };
+  if (password.length < 8) {
+    return { ok: false, error: 'Le mot de passe doit contenir au moins 8 caractères.' };
   }
 
   await clearDeviceUserSessionIfNeeded();
@@ -100,7 +200,7 @@ export async function signUpWithEmailPassword(
 
   const needsEmailConfirmation = !data.session;
   if (data.session?.user) {
-    await syncUserTierFromSessionUser(data.session.user);
+    await activateCloudSyncAfterRealAuth(data.session.user);
   }
 
   return {
@@ -109,6 +209,72 @@ export async function signUpWithEmailPassword(
     session: data.session,
     needsEmailConfirmation,
   };
+}
+
+/**
+ * Vérifie le code e-mail 6 chiffres après `signUp` (confirmation in-app).
+ * Prérequis dashboard : template « Confirm signup » avec `{{ .Token }}`.
+ */
+export async function verifySignupEmailOtp(
+  email: string,
+  token: string,
+): Promise<AuthAccountResult> {
+  const trimmed = email.trim().toLowerCase();
+  const code = token.replace(/\s+/g, '').trim();
+  if (!trimmed || !code) {
+    return { ok: false, error: 'E-mail et code requis.' };
+  }
+  if (!/^\d{6}$/.test(code)) {
+    return { ok: false, error: 'Le code doit contenir 6 chiffres.' };
+  }
+
+  await clearDeviceUserSessionIfNeeded();
+
+  const { data, error } = await supabase.auth.verifyOtp({
+    email: trimmed,
+    token: code,
+    type: 'signup',
+  });
+
+  if (error) {
+    const msg = error.message.toLowerCase();
+    if (msg.includes('expired') || msg.includes('otp_expired')) {
+      return { ok: false, error: 'Code expiré. Demande un nouveau code.' };
+    }
+    if (msg.includes('invalid') || msg.includes('token')) {
+      return { ok: false, error: 'Code incorrect. Vérifie-le ou renvoie un nouveau code.' };
+    }
+    return { ok: false, error: mapAuthError(error.message) };
+  }
+  if (!data.user || !data.session) {
+    return { ok: false, error: 'Vérification impossible pour le moment.' };
+  }
+
+  await activateCloudSyncAfterRealAuth(data.user);
+  return { ok: true, user: data.user, session: data.session };
+}
+
+/** Renvoie l’e-mail de confirmation (nouveau code 6 chiffres). */
+export async function resendSignupEmailOtp(
+  email: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const trimmed = email.trim().toLowerCase();
+  if (!trimmed) {
+    return { ok: false, error: 'Indique ton adresse e-mail.' };
+  }
+
+  const { error } = await supabase.auth.resend({
+    type: 'signup',
+    email: trimmed,
+  });
+  if (error) {
+    const msg = error.message.toLowerCase();
+    if (msg.includes('security') || msg.includes('60') || msg.includes('rate')) {
+      return { ok: false, error: 'Patiente quelques secondes avant de renvoyer un code.' };
+    }
+    return { ok: false, error: mapAuthError(error.message) };
+  }
+  return { ok: true };
 }
 
 export async function signInWithEmailPassword(
@@ -134,7 +300,7 @@ export async function signInWithEmailPassword(
     return { ok: false, error: 'Connexion impossible pour le moment.' };
   }
 
-  await syncUserTierFromSessionUser(data.user);
+  await activateCloudSyncAfterRealAuth(data.user);
   return { ok: true, user: data.user, session: data.session };
 }
 
@@ -247,7 +413,7 @@ export async function signInWithAppleNative(): Promise<AuthAccountResult> {
     }
   }
 
-  await syncUserTierFromSessionUser(data.user);
+  await activateCloudSyncAfterRealAuth(data.user);
   return { ok: true, user: data.user, session: data.session };
 }
 
@@ -313,7 +479,7 @@ async function signInWithGoogleNative(): Promise<AuthAccountResult | null> {
       return { ok: false, error: 'Connexion Google impossible.' };
     }
 
-    await syncUserTierFromSessionUser(data.user);
+    await activateCloudSyncAfterRealAuth(data.user);
     return { ok: true, user: data.user, session: data.session };
   } catch (e: unknown) {
     const code =
@@ -379,11 +545,80 @@ async function signInWithGoogleWebOAuth(): Promise<AuthAccountResult> {
     };
   }
 
-  await syncUserTierFromSessionUser(sessionData.user);
+  await activateCloudSyncAfterRealAuth(sessionData.user);
   return { ok: true, user: sessionData.user, session: sessionData.session };
 }
 
 export async function signOutRealAccount(): Promise<void> {
   await supabase.auth.signOut();
-  await setUserTier('free');
+  rememberRealAuthUser(null);
+  await Promise.all([
+    setCloudAccountKind('none'),
+    setUserTier('free'),
+    clearSelectedChildAndCaptureSnapshot(),
+  ]);
+  // Device-user technique en arrière-plan — ne bloque pas le retour onboarding / auth.
+  void ensureSupabaseSession();
+}
+
+/**
+ * Suppression définitive du compte Auth (Edge Function) + purge locale.
+ * Règle d’or V2 / Apple : P0 in-app.
+ */
+export async function deleteRealAccount(): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await getRealAuthUser();
+  if (!user) {
+    return { ok: false, error: 'Aucun compte à supprimer.' };
+  }
+
+  const { data: sessionData } = await supabase.auth.getSession();
+  const accessToken = sessionData.session?.access_token;
+  if (!accessToken) {
+    return { ok: false, error: 'Session expirée. Reconnecte-toi puis réessaie.' };
+  }
+
+  const { data, error } = await supabase.functions.invoke('delete-account', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (error) {
+    console.warn('[auth] delete-account', error);
+    return {
+      ok: false,
+      error: 'Impossible de supprimer le compte pour le moment. Réessaie ou écris à contact@petitmo.app.',
+    };
+  }
+  if (data && typeof data === 'object' && 'error' in data && data.error) {
+    return {
+      ok: false,
+      error: typeof data.error === 'string' ? data.error : 'Suppression impossible.',
+    };
+  }
+
+  try {
+    const { clearLocalAccountWorkspace, setLastRealAuthUserId } = await import(
+      '@/services/accountLocalReset'
+    );
+    const { clearOnboardingPermissionsSeen } = await import('@/lib/onboardingPermissionsSeen');
+    await clearLocalAccountWorkspace('delete-account');
+    await clearOnboardingPermissionsSeen(user.id);
+    await setLastRealAuthUserId(null);
+  } catch (e) {
+    console.warn('[auth] clearLocalAccountWorkspace after delete', e);
+  }
+
+  rememberRealAuthUser(null);
+  try {
+    await supabase.auth.signOut();
+  } catch (e) {
+    console.warn('[auth] signOut after delete', e);
+  }
+  await Promise.all([
+    setCloudAccountKind('none'),
+    setUserTier('free'),
+    clearSelectedChildAndCaptureSnapshot(),
+  ]);
+  void ensureSupabaseSession();
+  return { ok: true };
 }

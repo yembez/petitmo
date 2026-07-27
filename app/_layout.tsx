@@ -8,7 +8,6 @@ import {
   StyleSheet,
   AppState,
   AppStateStatus,
-  DeviceEventEmitter,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -76,7 +75,11 @@ function RootLayout() {
   useLayoutEffect(() => {
     initLocalDb();
     pruneOrphanEmptyBookDuplicates();
-    hydrateTabScreensFromSqliteSync();
+    void import('@/services/accountLocalReset').then(({ getLastRealAuthUserId }) =>
+      getLastRealAuthUserId().then(() => {
+        hydrateTabScreensFromSqliteSync();
+      }),
+    );
   }, []);
 
   useEffect(() => {
@@ -91,7 +94,9 @@ function RootLayout() {
     void runWeeklyCleanup();
     void processPendingGuestRawUploads();
 
-    void warmSelectedChildIdFromStorage().then(() => {
+    void warmSelectedChildIdFromStorage().then(async () => {
+      const { getLastRealAuthUserId } = await import('@/services/accountLocalReset');
+      await getLastRealAuthUserId();
       hydrateTabScreensFromSqliteSync();
     });
 
@@ -110,6 +115,11 @@ function RootLayout() {
         const session = await ensureSupabaseSession();
         if (session.ok) {
           console.log('User authenticated:', session.userId);
+          const { syncCloudAccountKindFromSession } = await import('@/lib/authAccount');
+          await syncCloudAccountKindFromSession();
+          // Warm cache sync pour hydratation / Capture scopés au compte.
+          const { getLastRealAuthUserId } = await import('@/services/accountLocalReset');
+          await getLastRealAuthUserId();
           void hydrateTabScreensFromLocal();
         } else {
           console.error('[auth]', session.error);
@@ -164,11 +174,12 @@ function RootLayout() {
         void warmSelectedChildIdFromStorage()
           .then(() => {
             hydrateTabScreensFromSqliteSync();
+            // Flush upload = fond uniquement (pas d’invalidate UI).
             return flushPendingCloudUploadsOnce();
           })
-          .then(() => hydrateTabScreensFromLocal())
           .then(() => {
-            DeviceEventEmitter.emit('petitmo:memories-invalidate');
+            // Local d’abord ; pull cloud en fond → `memories-updated` soft si merge.
+            void hydrateTabScreensFromLocal();
           });
       }, 450);
     });
@@ -193,9 +204,9 @@ function RootLayout() {
       await backupBooksToSupabaseIfPremium();
       await warmSelectedChildIdFromStorage();
       hydrateTabScreensFromSqliteSync();
+      // Sync-only : pas d’invalidate (favoris/fil ne doivent pas recharger « pour le cloud »).
       await flushPendingCloudUploadsOnce();
-      await hydrateTabScreensFromLocal();
-      DeviceEventEmitter.emit('petitmo:memories-invalidate');
+      void hydrateTabScreensFromLocal();
     })();
   }, [isAuthReady]);
 
@@ -221,9 +232,23 @@ function RootLayout() {
         }}
       >
         <Stack.Screen name="index" />
-        <Stack.Screen name="onboarding" />
-        <Stack.Screen name="auth" />
+        <Stack.Screen
+          name="onboarding"
+          options={{
+            contentStyle: { flex: 1, backgroundColor: '#2A1A14' },
+            animation: 'fade',
+          }}
+        />
+        <Stack.Screen
+          name="auth"
+          options={{
+            contentStyle: { flex: 1, backgroundColor: '#2A1A14' },
+            animation: 'fade',
+          }}
+        />
+        <Stack.Screen name="auth-verify-otp" />
         <Stack.Screen name="create-child" />
+        <Stack.Screen name="onboarding-permissions" />
         <Stack.Screen name="edit-child" />
         <Stack.Screen name="parent-space" />
         <Stack.Screen name="(tabs)" />

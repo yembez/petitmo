@@ -12,8 +12,8 @@ import {
   ActivityIndicator,
   useWindowDimensions,
 } from 'react-native';
-import { useState } from 'react';
-import { useRouter } from 'expo-router';
+import { useState, useCallback } from 'react';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft, ImageIcon } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
@@ -22,12 +22,20 @@ import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
 import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import { createChild, setSelectedChild } from '@/services/children';
+import { signOutRealAccount } from '@/lib/authAccount';
+import { listLocalChildrenForUser } from '@/lib/localDb';
+import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
 import DatePicker from '@/components/DatePicker';
 import PetitmoLogoManuscrit from '@/components/PetitmoLogoManuscrit';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
 
 export default function CreateChildScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ intent?: string }>();
+  const authIntent =
+    (Array.isArray(params.intent) ? params.intent[0] : params.intent) === 'subscribe'
+      ? 'subscribe'
+      : undefined;
   const insets = useSafeAreaInsets();
   const { loaded: fontsLoaded, dm500, dm600, dm700 } = useDmSansFamilyFlowFonts();
   const { height: windowH } = useWindowDimensions();
@@ -35,6 +43,40 @@ export default function CreateChildScreen() {
   const [birthDate, setBirthDate] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [backBusy, setBackBusy] = useState(false);
+
+  const handleBack = useCallback(async () => {
+    if (backBusy) return;
+    setBackBusy(true);
+    try {
+      const uid = peekLastRealAuthUserId();
+      const localCount = uid ? listLocalChildrenForUser(uid).length : 0;
+      // Ajout d’un enfant depuis l’app (profils déjà présents) : retour normal.
+      if (localCount > 0 && router.canGoBack()) {
+        router.back();
+        return;
+      }
+      await signOutRealAccount();
+      router.replace({
+        pathname: '/auth',
+        params: {
+          mode: 'signup',
+          ...(authIntent ? { intent: authIntent } : {}),
+        },
+      });
+    } catch (e) {
+      console.warn('[create-child] handleBack', e);
+      router.replace({
+        pathname: '/auth',
+        params: {
+          mode: 'signup',
+          ...(authIntent ? { intent: authIntent } : {}),
+        },
+      });
+    } finally {
+      setBackBusy(false);
+    }
+  }, [authIntent, backBusy, router]);
 
   const handlePhotoUpload = async () => {
     const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -108,10 +150,11 @@ export default function CreateChildScreen() {
       >
         <View style={styles.topBar}>
           <TouchableOpacity
-            onPress={() => router.back()}
+            onPress={() => void handleBack()}
             style={styles.backButton}
             accessibilityRole="button"
             accessibilityLabel="Retour"
+            disabled={backBusy}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
             <ChevronLeft size={ICON_SIZES.lg} color={THEME.textPrimary} strokeWidth={2} />
@@ -123,7 +166,7 @@ export default function CreateChildScreen() {
         </View>
 
         <Text style={[styles.title, dm700 ? { fontFamily: dm700 } : null]}>
-          Créer le profil de votre enfant
+          Créer le profil de ton enfant
         </Text>
 
         <View style={styles.photoSection}>
@@ -282,5 +325,7 @@ const styles = StyleSheet.create({
     paddingVertical: verticalScale(14),
     fontSize: FONT_SIZES.md,
     color: THEME.textPrimary,
+    // iOS : le letterSpacing de l’écran OTP peut fuiter vers les TextInput suivants.
+    letterSpacing: 0,
   },
 });

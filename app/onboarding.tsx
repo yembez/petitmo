@@ -15,8 +15,10 @@ import PetitmoLogoManuscrit from '@/components/PetitmoLogoManuscrit';
 import { SPACING, FONT_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
 import { LinearGradient } from 'expo-linear-gradient';
-import { getChildren } from '@/services/children';
+import { getChildren, refreshChildrenFromCloudInBackground } from '@/services/children';
 import { hasRealAuthAccount } from '@/lib/authAccount';
+import { listLocalChildrenForUser } from '@/lib/localDb';
+import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
 
 /**
  * Règle d'or V2 (AGENTS.md) :
@@ -29,7 +31,7 @@ export default function OnboardingScreen() {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   /**
-   * Début du bloc « Capturez… » + CTA : plus `top` est grand, plus le texte descend.
+   * Début du bloc « Capture… » + CTA : plus `top` est grand, plus le texte descend.
    * Plafond pour garder assez de place aux boutons sur très petits écrans.
    */
   const captureFooterReserve = verticalScale(274) + insets.bottom;
@@ -42,11 +44,23 @@ export default function OnboardingScreen() {
     const checkExisting = async () => {
       const hasAccount = await hasRealAuthAccount();
       if (!hasAccount) return;
+
+      const uid = peekLastRealAuthUserId();
+      const localKids = uid ? listLocalChildrenForUser(uid) : [];
+      if (localKids.length > 0) {
+        refreshChildrenFromCloudInBackground();
+        router.replace('/(tabs)');
+        return;
+      }
+
       const children = await getChildren();
       if (children.length > 0) {
         router.replace('/(tabs)');
       } else {
-        router.replace('/create-child');
+        const { replaceToOnboardingPermissionsOrCreateChild } = await import(
+          '@/utils/onboardingPermissionsRoute'
+        );
+        await replaceToOnboardingPermissionsOrCreateChild(router);
       }
     };
 
@@ -100,7 +114,7 @@ export default function OnboardingScreen() {
           ]}
         >
           <Text style={styles.subtitle}>
-            Capturez, gardez et retrouvez{'\n'}les moments avec votre enfant.
+            Capture, garde et retrouve{'\n'}les moments avec ton enfant.
           </Text>
 
           <TouchableOpacity
@@ -116,7 +130,10 @@ export default function OnboardingScreen() {
           <TouchableOpacity
             style={styles.ctaButtonSecondary}
             onPress={() =>
-              router.push({ pathname: '/paywall', params: { context: 'GENERAL' } })
+              router.push({
+                pathname: '/auth',
+                params: { mode: 'signup', intent: 'subscribe' },
+              })
             }
             activeOpacity={0.85}
             accessibilityRole="button"
@@ -150,7 +167,7 @@ export default function OnboardingScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: THEME.bg,
+    backgroundColor: '#2A1A14',
   },
   backgroundImage: {
     flex: 1,

@@ -21,3 +21,6 @@ verify_jwt = false
 
 [functions.crm-marketing-opt-in]
 verify_jwt = false
+
+[functions.delete-account]
+verify_jwt = false

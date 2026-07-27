@@ -21,9 +21,20 @@ import { useFocusEffect } from '@react-navigation/native';
 import type { Child } from '@/types/local';
 import { scale, verticalScale } from '@/utils/responsive';
 import { calculateAge } from '@/utils/date';
-import { getUserTier, type UserTier } from '@/lib/userTier';
-import { supabase } from '@/lib/supabase';
-import { getLocalMemoriesPendingCloudSync } from '@/lib/localDb';
+import { getUserTier, peekUserTier, type UserTier } from '@/lib/userTier';
+import {
+  deleteRealAccount,
+  getRealAuthUser,
+  peekHasRealAuthAccount,
+  peekRealAuthEmail,
+  signOutRealAccount,
+} from '@/lib/authAccount';
+import {
+  getLocalMemoriesPendingCloudSync,
+  listLocalChildren,
+  listLocalChildrenForUser,
+} from '@/lib/localDb';
+import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
 import { ChildAvatar } from '@/components/ChildAvatar';
 import {
@@ -34,11 +45,19 @@ import {
 } from '@/lib/bugReportContext';
 import { captureUserBugReport, isSentryEnabled } from '@/lib/sentry';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
+import { safeRouterBack } from '@/utils/safeRouterBack';
+import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 
 const CONTACT_EMAIL = 'contact@petitmo.app';
 const URL_PRIVACY = 'https://petitmo.app/privacy';
 const URL_TERMS = 'https://petitmo.app/terms';
 const URL_LEGAL = 'https://petitmo.app/legal';
+
+function readLocalChildrenForSettings(): Child[] {
+  const uid = peekLastRealAuthUserId();
+  const list = uid ? listLocalChildrenForUser(uid) : listLocalChildren().filter(c => !(c.user_id ?? '').trim());
+  return sortChildrenByBirthdateAsc(list);
+}
 
 function manageSubscriptionUrl(): string {
   return Platform.OS === 'ios'
@@ -58,16 +77,23 @@ export default function ParentSpaceScreen() {
   const insets = useSafeAreaInsets();
   const { t } = useAppTranslation('common');
   const { loaded: fontsLoaded, dm500, dm600, dm700 } = useDmSansFamilyFlowFonts();
-  const [children, setChildrenState] = useState<Child[]>([]);
-  const [tier, setTierState] = useState<UserTier>('free');
-  const [accountEmail, setAccountEmail] = useState('');
-  const [backupStatus, setBackupStatus] = useState('');
+  /** Local-first : 1er paint complet (pas de pop différé « Mon compte »). */
+  const [children, setChildrenState] = useState<Child[]>(() => readLocalChildrenForSettings());
+  const [tier, setTierState] = useState<UserTier>(() => peekUserTier());
+  const [hasRealAccount, setHasRealAccount] = useState(() => peekHasRealAuthAccount());
+  const [accountEmail, setAccountEmail] = useState(() => peekRealAuthEmail() || '—');
+  const [backupStatus, setBackupStatus] = useState(() => {
+    if (!peekHasRealAuthAccount()) return '';
+    const pending = getLocalMemoriesPendingCloudSync().length;
+    return pending > 0 ? `Synchronisation (${pending})` : 'À jour';
+  });
   const [versionLabel, setVersionLabel] = useState('—');
   const [reportBusy, setReportBusy] = useState(false);
+  const [signOutBusy, setSignOutBusy] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const list = await getChildren();
-    setChildrenState(list);
+    setChildrenState(readLocalChildrenForSettings());
 
     const tTier = await getUserTier();
     setTierState(tTier);
@@ -78,21 +104,25 @@ export default function ParentSpaceScreen() {
     });
     setVersionLabel(formatAppVersionLabel(ctx));
 
-    if (tTier === 'paid') {
-      const { data: { session } } = await supabase.auth.getSession();
-      const u = session?.user;
+    const realUser = await getRealAuthUser();
+    setHasRealAccount(!!realUser);
+    if (realUser) {
       const rawEmail =
-        u?.email ??
-        (typeof u?.user_metadata?.email === 'string' ? u.user_metadata.email : '') ??
+        realUser.email ??
+        (typeof realUser.user_metadata?.email === 'string' ? realUser.user_metadata.email : '') ??
         '';
       setAccountEmail(rawEmail.trim() || '—');
-
       const pending = getLocalMemoriesPendingCloudSync().length;
       setBackupStatus(pending > 0 ? `Synchronisation (${pending})` : 'À jour');
     } else {
       setAccountEmail('');
       setBackupStatus('');
     }
+
+    // Enrichit enfants depuis getChildren (réseau en fond) sans masquer le local déjà peint.
+    void getChildren().then(list => {
+      setChildrenState(list);
+    });
   }, [pathname]);
 
   useFocusEffect(
@@ -101,16 +131,59 @@ export default function ParentSpaceScreen() {
     }, [load])
   );
 
-  const handleSignOut = useCallback(async () => {
+  const performSignOut = useCallback(async () => {
+    if (signOutBusy || deleteBusy) return;
+    setSignOutBusy(true);
     try {
-      const { signOutRealAccount } = await import('@/lib/authAccount');
+      // Navigation d’abord côté UX : signOut est déjà rapide (device-user en bg).
       await signOutRealAccount();
       router.replace('/onboarding');
     } catch {
-      Alert.alert('Erreur', 'Impossible de te déconnecter pour le moment.');
+      Alert.alert(t('error'), t('parent.account.signOutFailed'));
+      setSignOutBusy(false);
     }
-  }, [router]);
+  }, [deleteBusy, router, signOutBusy, t]);
 
+  const handleSignOut = useCallback(() => {
+    if (signOutBusy || deleteBusy) return;
+    Alert.alert(t('parent.account.signOutConfirmTitle'), t('parent.account.signOutConfirmBody'), [
+      { text: t('cancel'), style: 'cancel' },
+      {
+        text: t('parent.account.signOut'),
+        style: 'destructive',
+        onPress: () => void performSignOut(),
+      },
+    ]);
+  }, [deleteBusy, performSignOut, signOutBusy, t]);
+
+  const performDeleteAccount = useCallback(async () => {
+    if (deleteBusy || signOutBusy) return;
+    setDeleteBusy(true);
+    try {
+      const result = await deleteRealAccount();
+      if (!result.ok) {
+        Alert.alert(t('error'), result.error);
+        setDeleteBusy(false);
+        return;
+      }
+      router.replace('/onboarding');
+    } catch {
+      Alert.alert(t('error'), t('parent.account.deleteFailed'));
+      setDeleteBusy(false);
+    }
+  }, [deleteBusy, router, signOutBusy, t]);
+
+  const handleDeleteAccount = useCallback(() => {
+    if (deleteBusy || signOutBusy) return;
+    Alert.alert(t('parent.account.deleteConfirmTitle'), t('parent.account.deleteConfirmBody'), [
+      { text: t('cancel'), style: 'cancel' },
+      {
+        text: t('parent.account.deleteAccount'),
+        style: 'destructive',
+        onPress: () => void performDeleteAccount(),
+      },
+    ]);
+  }, [deleteBusy, performDeleteAccount, signOutBusy, t]);
   const handleReportProblem = useCallback(async () => {
     if (reportBusy) return;
     setReportBusy(true);
@@ -159,7 +232,11 @@ export default function ParentSpaceScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.headerButton} activeOpacity={0.8}>
+        <TouchableOpacity
+          onPress={() => safeRouterBack(router, '/(tabs)')}
+          style={styles.headerButton}
+          activeOpacity={0.8}
+        >
           <ChevronLeft size={ICON_SIZES.lg} color={THEME.textPrimary} strokeWidth={2} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, dm600 ? { fontFamily: dm600 } : null]}>Espace parent</Text>
@@ -171,28 +248,7 @@ export default function ParentSpaceScreen() {
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + verticalScale(24) }]}
         showsVerticalScrollIndicator={false}
       >
-        {paid ? (
-          <Section title="Mon compte" titleFontFamily={dm600}>
-            <StaticRow label={accountEmail || '—'} labelFontFamily={dm500} />
-            <TouchableOpacity
-              style={[styles.row, styles.rowBorderTop]}
-              onPress={() => void handleSignOut()}
-              activeOpacity={0.85}
-              accessibilityRole="button"
-              accessibilityLabel="Se déconnecter"
-            >
-              <View style={styles.rowIconPlaceholder} />
-              <View style={styles.rowText}>
-                <Text style={[styles.rowLabelDestructive, dm500 ? { fontFamily: dm500 } : null]}>
-                  Se déconnecter
-                </Text>
-              </View>
-              <View style={styles.rowValuePlaceholder} />
-            </TouchableOpacity>
-          </Section>
-        ) : null}
-
-        <Section title="Mon abonnement" titleFontFamily={dm600}>
+        <Section title="Mon abonnement" titleFontFamily={dm700}>
           {paid ? (
             <>
               <StaticRow label="Plan actuel" value="Petitmo+" labelFontFamily={dm500} />
@@ -235,7 +291,7 @@ export default function ParentSpaceScreen() {
           )}
         </Section>
 
-        <Section title="Mes enfants" titleFontFamily={dm600}>
+        <Section title="Mes enfants" titleFontFamily={dm700}>
           {children.length === 0 ? (
             <Text style={[styles.emptyText, dm500 ? { fontFamily: dm500 } : null]}>
               Aucun enfant pour le moment.
@@ -268,13 +324,7 @@ export default function ParentSpaceScreen() {
           </TouchableOpacity>
         </Section>
 
-        {paid ? (
-          <Section title="Sauvegarde cloud" titleFontFamily={dm600}>
-            <StaticRow label="Sauvegarde" value={backupStatus} labelFontFamily={dm500} />
-          </Section>
-        ) : null}
-
-        <Section title="Aide" titleFontFamily={dm600}>
+        <Section title="Aide" titleFontFamily={dm700}>
           <TouchableOpacity
             style={styles.row}
             onPress={() => void handleReportProblem()}
@@ -306,7 +356,7 @@ export default function ParentSpaceScreen() {
           </TouchableOpacity>
         </Section>
 
-        <Section title="Informations légales" titleFontFamily={dm600}>
+        <Section title="Informations légales" titleFontFamily={dm700}>
           <TouchableOpacity
             style={styles.row}
             onPress={() => void openUrl(URL_PRIVACY)}
@@ -352,6 +402,50 @@ export default function ParentSpaceScreen() {
         <Text style={[styles.versionText, dm500 ? { fontFamily: dm500 } : null]} accessibilityRole="text">
           Version {versionLabel}
         </Text>
+
+        {hasRealAccount ? (
+          <Section title={t('parent.account.sectionTitle')} titleFontFamily={dm700}>
+            <StaticRow label={accountEmail || '—'} labelFontFamily={dm500} />
+            <TouchableOpacity
+              style={[styles.row, styles.rowBorderTop]}
+              onPress={handleSignOut}
+              activeOpacity={0.85}
+              disabled={signOutBusy || deleteBusy}
+              accessibilityRole="button"
+              accessibilityLabel={t('parent.account.signOut')}
+            >
+              <View style={styles.rowIconPlaceholder} />
+              <View style={styles.rowText}>
+                <Text style={[styles.rowLabelDestructive, dm500 ? { fontFamily: dm500 } : null]}>
+                  {signOutBusy ? '…' : t('parent.account.signOut')}
+                </Text>
+              </View>
+              <View style={styles.rowValuePlaceholder} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.row, styles.rowBorderTop]}
+              onPress={handleDeleteAccount}
+              activeOpacity={0.85}
+              disabled={signOutBusy || deleteBusy}
+              accessibilityRole="button"
+              accessibilityLabel={t('parent.account.deleteAccount')}
+            >
+              <View style={styles.rowIconPlaceholder} />
+              <View style={styles.rowText}>
+                <Text style={[styles.rowLabelDestructive, dm500 ? { fontFamily: dm500 } : null]}>
+                  {deleteBusy ? '…' : t('parent.account.deleteAccount')}
+                </Text>
+              </View>
+              <View style={styles.rowValuePlaceholder} />
+            </TouchableOpacity>
+          </Section>
+        ) : null}
+
+        {hasRealAccount ? (
+          <Section title="Sauvegarde cloud" titleFontFamily={dm700}>
+            <StaticRow label="Sauvegarde" value={backupStatus || 'À jour'} labelFontFamily={dm500} />
+          </Section>
+        ) : null}
       </ScrollView>
     </View>
   );
@@ -474,16 +568,17 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: SPACING.md,
-    paddingTop: SPACING.sm,
+    paddingTop: SPACING.md,
   },
   section: {
-    marginBottom: SPACING.lg,
+    marginBottom: SPACING.xl,
   },
   sectionTitle: {
-    fontSize: FONT_SIZES.sm,
-    fontWeight: '600',
-    color: THEME.textMuted,
-    marginBottom: SPACING.sm,
+    fontSize: FONT_SIZES.xl,
+    fontWeight: '700',
+    color: THEME.textPrimary,
+    letterSpacing: -0.3,
+    marginBottom: SPACING.md,
     paddingHorizontal: SPACING.xs,
   },
   card: {
