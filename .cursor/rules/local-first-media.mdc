@@ -22,6 +22,19 @@ Un souvenir a **deux familles de pointeurs en parallèle**, dans la même ligne 
 
 Les deux peuvent être renseignés en même temps (mode cloud après upload). En **mode local**, seuls les `local_*` sont fiables.
 
+### Sync cloud silencieuse (non négociable)
+
+**L’UI / UX ne doit jamais ressentir une sync** — règle toujours appliquée : `.cursor/rules/local-first-ux.mdc`.
+
+L’upload / flush / merge / pull métadonnées cloud :
+
+- SQLite peut être mis à jour (`thumb_url`, `sync_status`, …) en silence.
+- **Peindre d’abord** le local ; `await` réseau **après** (ou en fond).
+- **Interdit** : spinner tant que le pull n’a pas fini si SQLite a déjà des lignes.
+- **Interdit** : `petitmo:memories-invalidate` après `flushPendingCloudUploadsOnce`.
+- Events `petitmo:memories-updated` seulement si l’affichage local change (`emitMemoriesUpdatedIfVisualChanged` / `filMemoryVisualEqual`).
+- Merge listes : `mergeMemoriesListPreservingVisualRowRefs` (égalité visuelle, pas les URLs cloud).
+
 Chaque écran a une **hiérarchie de fallback différente** :
 - Fil : `display` → `thumb` → `print` → `original` → `media`.
 - Livre / PDF : `print` → `display` → `thumb` → `original` → `media`.

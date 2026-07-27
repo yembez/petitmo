@@ -8,10 +8,19 @@ alwaysApply: true
 Petitmo a **deux plans** sur une **même identité** (compte obligatoire).  
 **Source longue** : `AGENTS.md` (prime sur les specs historiques encore en local-only).
 
+## 0. LOCAL-FIRST UX — absolu (toute évolution)
+
+**L’UI et l’UX ne doivent jamais ressentir une sync cloud.**  
+Peindre SQLite + sandbox d’abord ; réseau / pull / flush / materialisation **uniquement en fond**.  
+Pas de roue, flash, remount ou écran bloqué « en attendant le cloud » quand le local existe.  
+Règle dédiée (toujours appliquée) : `.cursor/rules/local-first-ux.mdc`.
+
 ## 1. PLAN GRATUIT — compte + cloud limité (local-first)
 
 - Compte obligatoire dès le début du parcours (après présentation) : Google → Apple → email + mdp (+ mot de passe oublié), puis profil enfant.
 - **Local-first** : UI = SQLite + sandbox ; sync cloud en arrière-plan dès le gratuit.
+- **Isolation multi-compte** : un profil enfant / souvenir appartient au **compte** (`user_id` / e-mail), jamais au téléphone. Changement de compte → purge de l’espace local + restore cloud du compte courant (`prepareLocalWorkspaceForRealUser`). **Même e-mail** : SQLite **conservé** à la déconnexion (reconnexion instantanée). Claim = orphelins seulement.
+- **Sync = fond uniquement** : upload / flush / upsert URLs cloud **ne doivent jamais** faire tressauter fil, Capturer, favoris (pas d’`invalidate` post-flush ; events UI seulement si l’affichage local change — `filMemoryVisualEqual` / `emitMemoriesUpdatedIfVisualChanged`).
 - Promesse : *souvenirs privés et sauvegardés*. Pas de partage familial. Zéro pub.
 - Quotas : **50** souvenirs ; **5** vidéos × **20 s** ; audio **60 s**/souvenir (pas de cap nombre séparé — code peut encore avoir `VOICE_LIMIT = 5`).
 - Photos : thumb + print A5 cloud ; HD original local jusqu’à Petitmo+.
@@ -39,6 +48,7 @@ Petitmo a **deux plans** sur une **même identité** (compte obligatoire).
 
 ## Comportement attendu
 
-1. Citer la règle d'or V2 en une ligne au début de tout plan/patch auth/import/souvenirs/livres/paywall/sync.
+1. Citer la règle d'or V2 **et** local-first UX (« UI ne ressent jamais la sync ») au début de tout plan/patch auth/import/souvenirs/livres/paywall/sync/fil/Capturer.
 2. Signalement immédiat si demande en conflit.
 3. Ne pas réintroduire « gratuit sans compte » / local-only comme modèle produit.
+4. Avant « done » : checklist `.cursor/rules/local-first-ux.mdc` (avion mode + pas de spinner cloud si local plein).

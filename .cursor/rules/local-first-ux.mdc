@@ -1,0 +1,59 @@
+---
+description: Local-first UX — l’UI ne doit JAMAIS ressentir une sync cloud (toujours appliqué).
+alwaysApply: true
+---
+
+# Local-first UX — non négociable
+
+**Règle d’or produit :** SQLite + sandbox = source d’affichage. Le cloud synchronise en silence.  
+**L’utilisatrice ne doit jamais ressentir une sync** (pas de roue, flash, remount, freeze, écran vide « en attendant le réseau »).
+
+Citer en une ligne au début de tout plan/patch touchant : fil, Capturer, favoris, livres, auth, login, sync, import, souvenirs, paramètres.
+
+## Interdit (bloqueurs PR / revue)
+
+1. **Attendre le réseau avant de peindre** — `await pull*` / `getFamilyMemories({ waitForRemote: true })` / `getChildren` cloud **avant** d’afficher du SQLite déjà là.
+2. **`await getOrSelectFirstChild` / `getChildren` / `getUser()` sur un chemin d’affichage** (focus Capturer, hydrate onglets, login même compte) alors que SQLite a déjà le profil — utiliser session cache + SQLite, pull en **fond** (`refreshChildrenFromCloudInBackground`).
+3. **Spinner / skeleton liés au pull cloud** quand le local a déjà des données (même après reconnexion au même compte).
+4. **`petitmo:memories-invalidate` après flush / upload / claim** — la sync ne recharge pas le fil.
+5. **Events UI** pour de seules métadonnées cloud (`thumb_url`, `sync_status`, `updated_at`, cache avatar remote→local) — `filMemoryVisualEqual` / `captureChildDisplayEqual` / pas d’opacity 0 si l’URI ne fait que « matérialiser » le même visuel.
+6. **Écraser les `local_*`** lors d’un merge serveur — passer par `mergeServerMemoryRowWithExistingLocal` / `mergeRemoteChildRowWithLocal`.
+7. **Lire Supabase dans un composant d’affichage** pour remplacer le local — hydrater SQLite en fond, UI = local.
+
+## Obligatoire sur chaque évolution
+
+| Moment | Comportement |
+|---|---|
+| Ouverture écran | Peindre SQLite / snapshot **immédiatement** ; sync en fond |
+| Reconnexion même e-mail | Données locales **conservées** ; fil / Capturer instantanés ; pull silencieux |
+| Changement d’e-mail | Purge locale puis restore cloud du **nouveau** compte (isolation) |
+| Upload / flush | SQLite OK ; **zéro** flash fil / Capturer |
+| Auth / Google | Shell de chargement OK ; **pas** de flash formulaire entre OAuth et l’écran suivant |
+| Photo profil Capturer | Priorité `local_photo_path` ; pas de blank frame si cache sandbox remplace une URL déjà affichée |
+
+## Checklist agent (avant de dire « done »)
+
+### Ressenti sync — parcours à **simuler mentalement** (pas seulement grep `invalidate`)
+
+- [ ] **Avion mode** : fil + Capturer + favoris OK si SQLite déjà rempli ?
+- [ ] **Reconnexion même e-mail** : aucun `await getChildren()` / pull avant 1er paint Capturer / fil ?
+- [ ] **Focus Capturer** : pas d’attente réseau ; hero ne passe pas par opacity 0 pour un simple refresh sync ?
+- [ ] **Hydrate onglets / AppState active** : snapshot SQLite d’abord ; cloud en fond ?
+- [ ] Aucun `setIsLoading(true)` jusqu’à la fin d’un `await` réseau alors que le local existe ?
+- [ ] Aucun nouvel `emit('petitmo:memories-invalidate')` sur un chemin sync-only ?
+- [ ] Refs liste préservées si seul le cloud change (`filMemoryVisualEqual`) ?
+- [ ] Grep ciblé des hotspots : `getOrSelectFirstChild`, `getChildren(`, `getUser(`, `useSignedMediaUrl`, `cacheRemoteChild`, `notifyChildProfileUpdated`, `recyclingKey`, `opacity:.*imageReady`
+
+### Méthode d’audit (exigence)
+
+Un audit « local-first » **ne suffit pas** à chercher `memories-invalidate`. Il doit suivre **chaque écran d’accueil** (Capturer, fil, favoris, livres) depuis : boot → login même compte → focus onglet → AppState foreground, et lister tout `await` réseau **avant** paint ou tout changement d’URI Image.
+
+## Pointeurs
+
+- Détail médias / helpers : `.cursor/rules/local-first-media.mdc`
+- Isolation comptes : `services/accountLocalReset.ts`
+- Enfants local-first : `getOrSelectFirstChild` / `refreshChildrenFromCloudInBackground` (`services/children.ts`)
+- Fil : `hooks/useFeedData.ts` (peindre local d’abord)
+- Hydrate onglets : `services/tabScreensHydrate.ts`
+- Sync silencieuse : `services/memoriesUiNotify.ts`, `utils/feedHelpers.ts`
+- Spec : `docs/specs/architecture-locale-cloud.md` §1.3 ; `AGENTS.md`

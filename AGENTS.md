@@ -76,7 +76,7 @@ Petitmo a **deux plans** sur une **même identité** (compte obligatoire) :
   4. entrée dans l’app (fil).
 - **Auth** (ordre de présentation) : **Google** → **Apple** → **email + mot de passe**, avec **mot de passe oublié** prévu dès le départ. Lien **« J’ai déjà un compte »** = login.
 - **Local-first** : l’UI lit **SQLite + sandbox** en premier ; sync cloud **en arrière-plan** dès le gratuit.
-- **Promesse** : *« tes souvenirs restent privés et sauvegardés »*.  
+- **Promesse** : *« vos souvenirs restent privés et sauvegardés »*.  
   **Pas** de partage familial / diffusion (Petitmo = relation intime parent–enfant, pas TinyBeans).  
   **Zéro pub**, même en gratuit.
 - **Quotas fil gratuit** (cible produit — aligner `lib/limits.ts`) :
@@ -99,12 +99,12 @@ Petitmo a **deux plans** sur une **même identité** (compte obligatoire) :
 ## Conséquences UX directes
 
 - **« J’ai déjà un compte »** : login Google / Apple / email+mdp (pas un placeholder « bientôt » une fois le chantier auth livré).
-- Textes du type **« tes souvenirs sont sauvegardés »** : **autorisés** dès le gratuit (c’est la promesse).
+- Textes du type **« vos souvenirs sont sauvegardés »** : **autorisés** dès le gratuit (c’est la promesse).
 - **Interdit** : promettre du partage familial / multi-membres comme bénéfice cœur (hors scope V1).
 - **Suppression de compte in-app** : **P0** avant TestFlight public / App Store (exigence Apple) dès qu’on crée des comptes.
 - Paywall — hero selon le contexte (`app/paywall.tsx`) :
-  - **Quota souvenirs gratuit atteint** (`context=LIMIT_REACHED` uniquement) : hero chiffré du type « Vous avez capturé vos N premiers souvenirs » + sous-texte « Continuez à préserver… ».
-  - **Toute autre entrée** : hero **neutre** — ligne 1 « Préservez chaque moment », ligne 2 « avec votre enfant, sans limite » + cœur Lucide rosé (`THEME.brandPrimary`). CTA principal **rosé charte**.
+  - **Quota souvenirs gratuit atteint** (`context=LIMIT_REACHED` uniquement) : hero chiffré du type « Tu as capturé vos N premiers souvenirs » + sous-texte « Continue à préserver… ».
+  - **Toute autre entrée** : hero **neutre** — « Les abonnements pour préserver chaque moment ». CTA principal **rosé charte**.
   - Exception : flux **export PDF numérique à l’acte** (`EXPORT_DIGITAL_PDF`) — titre / sous-titre propres.
   - Passer explicitement `params.context` ; défaut = **`GENERAL`**.
 
@@ -114,7 +114,7 @@ Petitmo a **deux plans** sur une **même identité** (compte obligatoire) :
 
 | Concept | Fichier |
 |---|---|
-| Mode / tier (à réaligner free=compte+sync) | [`lib/userMode.ts`](lib/userMode.ts) · [`lib/userTier.ts`](lib/userTier.ts) |
+| Mode / tier | [`lib/userMode.ts`](lib/userMode.ts) (`cloud` = compte produit) · [`lib/userTier.ts`](lib/userTier.ts) (`paid` = HD/quotas) |
 | i18n FR/EN — migration EN **gelée** pendant bêta FR | [`lib/i18n.ts`](lib/i18n.ts) · [`docs/specs/i18n-en-roadmap.md`](docs/specs/i18n-en-roadmap.md) |
 | Go / no-go bêta FR | [`docs/qa/BETA_FR_GO_NOGO.md`](docs/qa/BETA_FR_GO_NOGO.md) |
 | Limites plan gratuit | [`lib/limits.ts`](lib/limits.ts) |
@@ -151,7 +151,13 @@ Aperçu (`MaquetteBookPages.tsx`) et PDF (`htmlBook.ts`) = même contenu de page
 
 ### Local-first universel (gratuit et Petitmo+)
 
+> **Absolu :** l’UI / UX **ne doit jamais ressentir une sync cloud** (roue, flash, remount, écran bloqué réseau alors que SQLite a les données).  
+> Règle agent toujours appliquée : [`.cursor/rules/local-first-ux.mdc`](.cursor/rules/local-first-ux.mdc).
+
 - **Affichage** : SQLite + sandbox — jamais un `supabase.from(...).select` direct dans un composant UI (y compris aperçu livre).
+- **Peindre d’abord** : tout écran (fil, Capturer, favoris…) affiche le local **immédiatement** ; pull / flush / materialisation **en fond**.
+- **Reconnexion même e-mail** : SQLite **conservé** à la déconnexion → fil instantané ; pas de restore « à froid » si le téléphone a déjà les données.
+- **Changement d’e-mail** : purge locale puis restore cloud du nouveau compte (`accountLocalReset`).
 - **Cycle** : hydratation cloud → merge SQLite → **materialisation sandbox** → affichage local ; repli URL signée **transitoire** seulement.
 - **Cloud** : sync / pull / upload **en arrière-plan** dès le **gratuit** (dans les quotas) ; merge via `mergeServerMemoryRowWithExistingLocal`.
 - **Aperçu livre ≠ export PDF** : maquette local-first ; export via payload serveur.
@@ -202,10 +208,11 @@ flowchart LR
 ## Comportement attendu de l'agent
 
 1. **Toujours** lire ce fichier en début de session avant tout correctif sensible.
-2. **Citer la règle d'or en une ligne** au début de tout plan ou patch touchant : import, souvenirs, livres, paywall, auth, sync, écran d'accueil, paramètres.  
-   Exemple : *« Règle d’or V2 : compte gratuit + sync cloud limitée ; Petitmo+ = quotas/HD/−10 % print. »*
-3. Si une demande entre en conflit avec la règle d'or, **lever le drapeau immédiatement**.
-4. Ne **pas** réintroduire « gratuit sans compte » / « perte téléphone = perte données assumée » / interdiction de dire « sauvegardés » en gratuit.
-5. Export PDF livre : **uniquement** serveur.
-6. Changement livre / maquette : [`.cursor/rules/book-maquette-pdf-parity.mdc`](.cursor/rules/book-maquette-pdf-parity.mdc).
-7. Remise print Petitmo+ = **10 %** — ne pas inventer 15 %.
+2. **Citer la règle d'or en une ligne** au début de tout plan ou patch touchant : import, souvenirs, livres, paywall, auth, sync, écran d'accueil, paramètres, fil, Capturer.  
+   Exemple : *« Règle d’or V2 : compte + sync limitée ; local-first — l’UI ne ressent jamais la sync cloud. »*
+3. **Avant tout done** : checklist [`.cursor/rules/local-first-ux.mdc`](.cursor/rules/local-first-ux.mdc) — peindre SQLite d’abord ; pas de spinner / flash liés au réseau si le local existe ; **audit ressenti** = parcours boot / login / focus Capturer+fil (pas seulement grep `invalidate`).
+4. Si une demande entre en conflit avec la règle d'or ou le local-first UX, **lever le drapeau immédiatement**.
+5. Ne **pas** réintroduire « gratuit sans compte » / « perte téléphone = perte données assumée » / interdiction de dire « sauvegardés » en gratuit.
+6. Export PDF livre : **uniquement** serveur.
+7. Changement livre / maquette : [`.cursor/rules/book-maquette-pdf-parity.mdc`](.cursor/rules/book-maquette-pdf-parity.mdc).
+8. Remise print Petitmo+ = **10 %** — ne pas inventer 15 %.

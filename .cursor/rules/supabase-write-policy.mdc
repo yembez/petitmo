@@ -1,62 +1,48 @@
 ---
-description: Quand a-t-on le droit d'écrire dans Supabase. Garde-fou code de la règle d'or.
+description: Quand a-t-on le droit d'écrire dans Supabase. Garde-fou code de la règle d'or V2.
 globs: services/**,lib/**,app/**/*.tsx,hooks/**,contexts/**,server/**
 alwaysApply: false
 ---
 
-# Politique d'écriture Supabase
+# Politique d'écriture Supabase (V2)
 
-Conséquence directe de la règle d'or local/cloud (`architecture.mdc`). Avant toute écriture distante, vérifier que le contexte est explicitement autorisé.
+Conséquence de la règle d'or (`architecture.mdc` / `AGENTS.md`). Avant toute écriture distante, vérifier le mode.
 
 ## Lectures Supabase
 
-Autorisées partout où c'est utile — la lecture cloud n'efface rien en local.
-**MAIS** : pour lire les souvenirs, préférer `pullMemoriesFromRemoteToLocal` (`services/memoriesLocalSync.ts`) à un `supabase.from('memories').select(...)` ad hoc, pour bénéficier du merge `mergeServerMemoryRowWithExistingLocal` (cf. `local-first-media.mdc` règle 3).
+Autorisées pour hydrater / restaurer — **jamais** comme source d’affichage UI.
+Pour les souvenirs : `pullMemoriesFromRemoteToLocal` + `mergeServerMemoryRowWithExistingLocal` (cf. `local-first-media.mdc`).
 
 ## Écritures Supabase (`.insert`, `.update`, `.upsert`, `.delete`)
 
-### En mode CLOUD (`getUserMode() === 'cloud'`, soit `userTier === 'paid'`)
+### En mode CLOUD (`getUserMode() === 'cloud'`)
 
-Autorisées dans les fichiers suivants (état actuel du code) :
-- `services/media.ts` — upload + patch dérivés sur `memories`.
-- `services/children.ts` — sync profil enfant.
-- `services/migration.ts` — migration locale → cloud lors d'un upgrade.
-- `app/edit-photo.tsx` — upload version éditée d'une photo.
+= **compte produit authentifié** (gratuit **ou** Petitmo+), **pas** le device-user.
 
-Toute nouvelle écriture cloud doit être **encadrée** par `if ((await getCachedUserMode()) === 'cloud') { … }` ou par `isSupabaseAllowed(...)` (cf. `lib/userMode.ts`).
+Autorisées (arrière-plan, local-first UI) :
+- `services/media.ts` — upload souvenirs (gratuit : thumb + print A5 ; paid : + HD)
+- `services/children.ts` — sync profil enfant
+- `services/migration.ts` / `pendingCloudFlush.ts` / `claimLocalDataForCloud.ts`
+- `app/edit-photo.tsx` — version éditée
 
-### En mode LOCAL (gratuit) — **deux exceptions, et seulement deux**
+Encadrer par `if ((await getCachedUserMode()) === 'cloud') { … }`.
 
-1. **Commande livre / achat PDF**. Flux dédiés :
-   - `services/books.ts`
-   - `services/printBookOrder.ts`
-   - `lib/digitalExportPurchase.ts`
-   - `services/initExportApi.ts`
-2. **Stockage cloud d'un audio ou d'une vidéo pour QR pérenne** dans un livre **commandé ou exporté payé** (sous-cas du flux livre — **pas** une sync du fil). Spec : [`docs/specs/free-tier-book-qr-av.md`](../docs/specs/free-tier-book-qr-av.md).
+`getUserTier() === 'paid'` décide **HD / quotas / livres premium**, pas l’autorisation de sync.
 
-Le device-user Supabase auto-créé dans `app/_layout.tsx` est la mécanique technique pour ces deux cas. Il n'est **jamais** présenté à l'utilisatrice gratuite comme un compte.
+### En mode LOCAL (device-user / pas de compte produit) — **deux exceptions**
 
-### Toute autre écriture en gratuit est interdite
+1. **Commande livre / achat PDF** — `services/books.ts`, `printBookOrder.ts`, `lib/digitalExportPurchase.ts`, `initExportApi.ts`
+2. **QR audio/vidéo** après commande / export payé — `docs/specs/free-tier-book-qr-av.md`
 
-Pas de "petite sync gentille en arrière-plan". Pas de backup auto. Pas de `.upsert` "au cas où". Pas de telemetry, pas d'opt-in marketing tant que ce n'est pas explicitement listé ici.
+### Interdit
 
-## Comment écrire un nouveau code qui touche Supabase
+- Sync fil / enfants sans compte produit
+- Écritures cloud depuis un composant UI pour « afficher »
+- Bloquer capture / scroll / navigation en attendant le réseau
 
-1. **Toujours** lire le tier/mode d'abord :
-   ```ts
-   const mode = await getCachedUserMode(); // 'local' | 'cloud'
-   ```
-2. Si l'écriture relève d'une exception gratuit, passer par les services dédiés ci-dessus — **ne pas appeler `supabase.from(...)` directement** depuis un screen ou un hook.
-3. Si l'écriture est cloud-only, garder explicitement par `if (mode !== 'cloud') return;`. Pas de "best effort silencieux".
-4. Un `try/catch` qui avale silencieusement une erreur d'écriture cloud n'est **pas** un garde-fou — c'est un piège qui masque un bug à 100 % du temps. Préférer un retour explicite + log.
-5. Si on rajoute une exception, l'ajouter à cette règle **et** à `AGENTS.md` dans le même PR.
+## Checklist nouveau code
 
-## Edge functions et server/
-
-`supabase/functions/**` et `server/**` sont du backend (Deno / Node). Ils ne **doivent jamais** déclencher une écriture sur `memories` ou `children` pour le compte d'un utilisateur gratuit hors d'un flux livre/PDF/QR.
-
-### Déploiement `server/` (Railway) et migrations Supabase
-
-Si une PR modifie des `insert`/`update` ou des types alignés sur le schéma Postgres : **vérifier qu’une migration existe** sous `supabase/migrations/` et qu’elle est **appliquée sur le projet Supabase prod** avant ou en même temps que le déploiement du service PDF. Un décalage (code qui envoie une colonne inexistante, ex. `expires_at` sur `public_media_tokens`) fait échouer la route `generate-pdf` et peut produire des **502** côté edge.
-
-Après correction serveur (handlers async), l’erreur peut devenir un **500 JSON** avec `detail` — le problème reste **schéma / RLS**, pas Railway « vide ».
+1. `const mode = await getCachedUserMode()`
+2. Exception livre/QR → services dédiés seulement
+3. Sync cloud → `mode === 'cloud'` + arrière-plan (`void` / flush)
+4. UI lit SQLite + sandbox via helpers `utils/memoryPhotos.ts`
