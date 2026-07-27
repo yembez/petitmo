@@ -16,7 +16,7 @@ import { Heart } from 'lucide-react-native';
 import { THEME } from '@/constants/theme';
 import { scale } from '@/utils/responsive';
 
-export const BOOK_PDF_GENERATING_TITLE = 'Votre livre prend vie ❤️';
+export const BOOK_PDF_GENERATING_TITLE = 'Ton livre prend vie ❤️';
 
 export const BOOK_PDF_GENERATING_SUBTITLE =
   'Merci de garder Petitmo ouvert pendant la préparation.';

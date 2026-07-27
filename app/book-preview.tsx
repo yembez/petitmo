@@ -58,6 +58,7 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import Reanimated, {
   Easing,
@@ -88,12 +89,18 @@ import {
   gelatoMinInnerPagesAlertMessage,
   GELATO_MIN_INNER_PAGES,
 } from '@/utils/bookGelatoInnerPages';
-import { getChildren, getOrSelectFirstChild } from '@/services/children';
+import { getChildren, getOrSelectFirstChild, refreshChildrenFromCloudInBackground } from '@/services/children';
 import { getMemoryById, updateMemoryContent } from '@/services/media';
 import { healDeadLocalMediaPointersForMemories } from '@/services/memoryDisplayHeal';
 import { ensureVoiceMemoryCloudForBookExport } from '@/services/migration';
 import { supabase } from '@/lib/supabase';
-import { getLocalMemoryById, updateLocalMemoryContent } from '@/lib/localDb';
+import {
+  getAllLocalMemories,
+  getLocalChild,
+  getLocalMemoryById,
+  listLocalChildren,
+  updateLocalMemoryContent,
+} from '@/lib/localDb';
 import { awaitVideoPosterForBookMemory, awaitVoiceCoverPrintDerivativeForMemory } from '@/services/memoryLocalStore';
 import { loadBookSelectionKeys, memoryIdFromBookSelectionKey } from '@/services/bookSelection';
 import {
@@ -147,7 +154,6 @@ import {
 } from '@/services/favorisMemories';
 import { buildFavorisGridItems } from '@/utils/favorisGridItems';
 import { FavoriteCoverPickerTile } from '@/components/FavoriteCoverPickerTile';
-import { getAllLocalMemories } from '@/lib/localDb';
 import { peekSyncBookVideoPosterDisplayUri } from '@/utils/bookVideoPosterUri';
 import { runBookExportPrepInBackground } from '@/services/bookExportPrep';
 import { getBookExportPrepIssues } from '@/services/bookExportPrep';
@@ -164,6 +170,7 @@ import { isDeviceLocalMediaUri } from '@/utils/memoryPhotos';
 import { bookLineBudgetForMemoryType, bookCharsPerLineForMemoryType } from '@/utils/textLimits';
 
 import type { Child, Memory } from '@/types/local';
+import { mergeMemoriesListPreservingVisualRowRefs } from '@/utils/feedHelpers';
 import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 import { canExportBookPdfViaServer } from '@/lib/digitalExportPurchase';
 import { setLastGuestExportEmail } from '@/lib/guestExportPrefs';
@@ -202,6 +209,22 @@ type TextEditTarget =
 
 
 const EMPTY_MEMORY_EDITS: Record<string, Partial<Memory>> = {};
+
+/** Dims px hors cover pour crop aspect PDF (évite bandeau blanc Chromium sur posters vidéo). */
+function cropImgPxByMemoryIdFromDpiMeta(
+  meta: Record<string, { imgPxW?: number; imgPxH?: number } | undefined>,
+): Record<string, { w: number; h: number }> {
+  const out: Record<string, { w: number; h: number }> = {};
+  for (const [key, v] of Object.entries(meta)) {
+    if (key === 'cover' || !v) continue;
+    const w = v.imgPxW;
+    const h = v.imgPxH;
+    if (typeof w === 'number' && typeof h === 'number' && w > 0 && h > 0) {
+      out[key] = { w, h };
+    }
+  }
+  return out;
+}
 
 function monthNameFrLower(d: Date): string {
   const raw = d.toLocaleDateString('fr-FR', { month: 'long' });
@@ -336,8 +359,11 @@ function photoRefFromBookPage(
 
 export default function BookPreviewScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ bookId?: string }>();
+  const { t } = useAppTranslation('common');
+  const params = useLocalSearchParams<{ bookId?: string; fromOrderReview?: string }>();
   const bookId = typeof params.bookId === 'string' ? params.bookId : undefined;
+  const fromOrderReview =
+    params.fromOrderReview === '1' || params.fromOrderReview === 'true';
   const insets = useSafeAreaInsets();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const [fontsLoaded] = useFonts({
@@ -795,18 +821,33 @@ export default function BookPreviewScreen() {
         setBookSelectionKeys([]);
         return;
       }
-      const children = await getChildren();
-      setFamilyChildren(sortChildrenByBirthdateAsc(children));
-      const ch = children.find(c => c.id === childId) ?? null;
-      if (!ch) {
-        setError('Profil enfant introuvable');
-        setChild(null);
-        setFamilyChildren([]);
-        setBookMemories([]);
-        setBookSelectionKeys([]);
-        return;
+
+      /** Local-first : peindre enfants SQLite ; `getChildren` seulement si local vide. */
+      const localChildren = sortChildrenByBirthdateAsc(listLocalChildren());
+      let ch: Child | null =
+        localChildren.find(c => c.id === childId) ??
+        getLocalChild(childId) ??
+        localChildren[0] ??
+        null;
+
+      if (ch) {
+        setFamilyChildren(localChildren.length > 0 ? localChildren : [ch]);
+        setChild(ch);
+        refreshChildrenFromCloudInBackground();
+      } else {
+        const children = await getChildren();
+        setFamilyChildren(sortChildrenByBirthdateAsc(children));
+        ch = children.find(c => c.id === childId) ?? null;
+        if (!ch) {
+          setError('Profil enfant introuvable');
+          setChild(null);
+          setFamilyChildren([]);
+          setBookMemories([]);
+          setBookSelectionKeys([]);
+          return;
+        }
+        setChild(ch);
       }
-      setChild(ch);
 
       let memoryIds: Set<string>;
       let bookForHeal: Book | null = null;
@@ -962,7 +1003,7 @@ export default function BookPreviewScreen() {
             .map(m => getLocalMemoryById(m.id))
             .filter((m): m is Memory => m != null);
           if (refreshed.length > 0) {
-            setBookMemories(refreshed);
+            setBookMemories(prev => mergeMemoriesListPreservingVisualRowRefs(prev, refreshed));
           }
           const { data: auth } = await supabase.auth.getUser();
           const userId = auth.user?.id;
@@ -1395,13 +1436,57 @@ export default function BookPreviewScreen() {
 
   const unlockAndBack = useCallback(() => {
     unlockOrientationPortrait();
-    /** `back()` = pop stack : l’écran précédent (ex. Livres) glisse depuis la gauche. */
+    /** Depuis « Revoir mon livre » : resauver le pending (posters vidéo custom, cover…) puis pop. */
+    if (fromOrderReview && child) {
+      void setPendingBookOrderPdfPayload({
+        bookId: bookId ?? `draft-${child.id}`,
+        childId: child.id,
+        child,
+        coverPhotoUrl: coverPhotoPrintUri || bookSnapshot?.coverPhotoUrl?.trim() || null,
+        coverPhotoImgPxW: coverPhotoImgPxForPdf?.w,
+        coverPhotoImgPxH: coverPhotoImgPxForPdf?.h,
+        coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
+        coverYearLabel,
+        chapterTitle: chapterTitleLine ?? 'Notre histoire',
+        pages,
+        rotations,
+        photoCrops,
+        localEdits: EMPTY_MEMORY_EDITS,
+        memoryPhotoRefs: bookSnapshot?.memoryPhotoRefs,
+        cropImgPxByMemoryId: cropImgPxByMemoryIdFromDpiMeta(cropDpiMetaByKey),
+        exportMode: 'print',
+      });
+    }
     if (router.canGoBack()) {
       router.back();
       return;
     }
+    if (fromOrderReview && bookId) {
+      router.replace({
+        pathname: '/book-order',
+        params: { bookId, exportMode: 'print' },
+      });
+      return;
+    }
     router.replace('/(tabs)/livres');
-  }, [router, unlockOrientationPortrait]);
+  }, [
+    bookId,
+    bookSnapshot?.coverPhotoUrl,
+    bookSnapshot?.memoryPhotoRefs,
+    chapterTitleLine,
+    child,
+    coverPhotoImgPxForPdf,
+    coverPhotoPrintUri,
+    coverTitleLine,
+    coverYearLabel,
+    cropDpiMetaByKey,
+    fromOrderReview,
+    pages,
+    photoCrops,
+    rotations,
+    router,
+    unlockOrientationPortrait,
+  ]);
 
   const unlockAndGoToFavoris = useCallback(() => {
     unlockOrientationPortrait();
@@ -1934,7 +2019,7 @@ export default function BookPreviewScreen() {
         if (e instanceof Error && e.message === 'LIMIT_REACHED') {
           Alert.alert(
             'Limite atteinte',
-            'Vous avez atteint le nombre maximum de souvenirs gratuits. Passez à Petitmo+ pour continuer.',
+            'Tu as atteint le nombre maximum de souvenirs gratuits. Passe à Petitmo+ pour continuer.',
           );
           return;
         }
@@ -1950,7 +2035,7 @@ export default function BookPreviewScreen() {
       if (!perm.granted) {
         Alert.alert(
           'Accès refusé',
-          'Autorisez l’accès à vos photos dans les réglages pour choisir une image de couverture.',
+          'Autorise l’accès à vos photos dans les réglages pour choisir une image de couverture.',
         );
         return;
       }
@@ -2522,6 +2607,7 @@ export default function BookPreviewScreen() {
             photoCrops,
             localEdits: EMPTY_MEMORY_EDITS,
             memoryPhotoRefs: bookSnapshot?.memoryPhotoRefs,
+            cropImgPxByMemoryId: cropImgPxByMemoryIdFromDpiMeta(cropDpiMetaByKey),
           };
 
           let localUri: string;
@@ -2612,6 +2698,7 @@ export default function BookPreviewScreen() {
       photoCrops,
       localEdits: EMPTY_MEMORY_EDITS,
       memoryPhotoRefs: bookSnapshot?.memoryPhotoRefs,
+      cropImgPxByMemoryId: cropImgPxByMemoryIdFromDpiMeta(cropDpiMetaByKey),
       exportMode: 'screen',
     });
     router.push({
@@ -2633,6 +2720,7 @@ export default function BookPreviewScreen() {
     coverPhotoImgPxForPdf,
     coverTitleLine,
     coverYearLabel,
+    cropDpiMetaByKey,
     exporting,
     guestExportSubmitting,
     pages,
@@ -2672,6 +2760,7 @@ export default function BookPreviewScreen() {
       photoCrops,
       localEdits: EMPTY_MEMORY_EDITS,
       memoryPhotoRefs: bookSnapshot?.memoryPhotoRefs,
+      cropImgPxByMemoryId: cropImgPxByMemoryIdFromDpiMeta(cropDpiMetaByKey),
       exportMode: 'print',
     });
     router.push({
@@ -2694,6 +2783,7 @@ export default function BookPreviewScreen() {
     coverPhotoImgPxForPdf,
     coverTitleLine,
     coverYearLabel,
+    cropDpiMetaByKey,
     exporting,
     guestExportSubmitting,
     pages,
@@ -2737,6 +2827,7 @@ export default function BookPreviewScreen() {
           photoCrops,
           localEdits: EMPTY_MEMORY_EDITS,
           memoryPhotoRefs: bookSnapshot?.memoryPhotoRefs,
+          cropImgPxByMemoryId: cropImgPxByMemoryIdFromDpiMeta(cropDpiMetaByKey),
           exportMode: mode,
           consent: {
             email,
@@ -2762,12 +2853,15 @@ export default function BookPreviewScreen() {
     },
     [
       bookId,
+      bookSnapshot?.coverPhotoUrl,
+      bookSnapshot?.memoryPhotoRefs,
       child,
       chapterTitleLine,
       coverPhotoPrintUri,
       coverPhotoImgPxForPdf,
       coverTitleLine,
       coverYearLabel,
+      cropDpiMetaByKey,
       pages,
       photoCrops,
       rotations,
@@ -2852,8 +2946,17 @@ export default function BookPreviewScreen() {
   return (
     <View style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
       <View style={styles.header}>
-        <Pressable onPress={unlockAndBack} hitSlop={12} accessibilityRole="button">
-          <Text style={[styles.headerBack, dm500 && { fontFamily: dm500 }]}>← Retour</Text>
+        <Pressable
+          onPress={unlockAndBack}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel={
+            fromOrderReview ? t('bookOrder.backToOrder') : 'Retour'
+          }
+        >
+          <Text style={[styles.headerBack, dm500 && { fontFamily: dm500 }]}>
+            {fromOrderReview ? `← ${t('bookOrder.backToOrderShort')}` : '← Retour'}
+          </Text>
         </Pressable>
         <Text
           style={[
@@ -2870,7 +2973,19 @@ export default function BookPreviewScreen() {
         >
           {gelatoPrintPageLabel}
         </Text>
-        {isLandscape ? (
+        {fromOrderReview ? (
+          <Pressable
+            onPress={unlockAndBack}
+            hitSlop={12}
+            style={({ pressed }) => [styles.headerCtaOrange, pressed && { opacity: 0.85 }]}
+            accessibilityRole="button"
+            accessibilityLabel={t('bookOrder.backToOrder')}
+          >
+            <Text style={[styles.headerCtaText, dm700 && { fontFamily: dm700 }]} numberOfLines={1}>
+              {isLandscape ? t('bookOrder.backToOrderShort') : t('bookOrder.backToOrder')}
+            </Text>
+          </Pressable>
+        ) : isLandscape ? (
           bookId ? (
             <Pressable
               onPress={unlockAndGoToFavorisForAdd}

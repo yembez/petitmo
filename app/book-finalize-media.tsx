@@ -245,7 +245,7 @@ export default function BookFinalizeMediaScreen() {
         {phase === 'done' ? (
           <>
             <Text style={styles.title}>Tout est prêt ❤️</Text>
-            <Text style={styles.sub}>Votre commande est confirmée. Nous préparons maintenant votre livre.</Text>
+            <Text style={styles.sub}>Ta commande est confirmée. Nous préparons maintenant ton livre.</Text>
             <Pressable style={styles.cta} onPress={goToConfirmation} hitSlop={10}>
               <Text style={styles.ctaText}>Parfait</Text>
             </Pressable>
@@ -254,7 +254,7 @@ export default function BookFinalizeMediaScreen() {
           <>
             <Text style={styles.title}>Petite pause ❤️</Text>
             <Text style={styles.sub}>
-              Nous avons besoin d’une meilleure connexion pour terminer les audios et vidéos (QR) de votre livre.
+              Nous avons besoin d’une meilleure connexion pour terminer les audios et vidéos (QR) de ton livre.
             </Text>
             {statusLine ? <Text style={styles.errLine}>{statusLine}</Text> : null}
             <Pressable style={styles.cta} onPress={onRetry} hitSlop={10}>
@@ -267,7 +267,7 @@ export default function BookFinalizeMediaScreen() {
         ) : (
           <>
             <Text style={styles.title}>Dernière étape ❤️</Text>
-            <Text style={styles.sub}>Nous sécurisons les audios et vidéos (QR) de votre livre.</Text>
+            <Text style={styles.sub}>Nous sécurisons les audios et vidéos (QR) de ton livre.</Text>
             <Text style={styles.sub2}>Gardez cette fenêtre ouverte quelques instants.</Text>
 
             <View
@@ -292,7 +292,7 @@ export default function BookFinalizeMediaScreen() {
                 </Pressable>
               </>
             ) : (
-              <Text style={styles.hint}>Cela peut prendre jusqu’à une minute selon votre connexion.</Text>
+              <Text style={styles.hint}>Cela peut prendre jusqu’à une minute selon ta connexion.</Text>
             )}
 
             {loading ? (

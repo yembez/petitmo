@@ -1,5 +1,6 @@
 import type { Database } from '@/types/database'
 import type { Memory, UploadStatus } from '@/types/local'
+import { isDeviceLocalMediaUri } from '@/utils/memoryPhotos'
 
 export type MemoryRowDb = Database['public']['Tables']['memories']['Row']
 
@@ -102,7 +103,18 @@ export function mergeServerMemoryRowWithExistingLocal(
     print_url: preferRemoteElseLocal(base.print_url, existing.print_url),
     edited_media_url: preferRemoteElseLocal(base.edited_media_url, existing.edited_media_url),
     poster_url: preferRemoteElseLocal(base.poster_url, existing.poster_url),
-    poster_print_url: preferRemoteElseLocal(base.poster_print_url, existing.poster_print_url),
+    // Poster print custom local : ne pas laisser le HTTPS worker (frame t≈0) écraser le choix livre.
+    poster_print_url: (() => {
+      const localPrintPath = pickPath(existing.local_poster_print_path)
+      if (localPrintPath) {
+        const existingPrint = nonEmptyTrimmed(existing.poster_print_url)
+        if (existingPrint && isDeviceLocalMediaUri(existingPrint)) return existingPrint
+        return localPrintPath
+      }
+      const existingPrint = nonEmptyTrimmed(existing.poster_print_url)
+      if (existingPrint && isDeviceLocalMediaUri(existingPrint)) return existingPrint
+      return preferRemoteElseLocal(base.poster_print_url, existing.poster_print_url)
+    })(),
     thumbnail_url: preferRemoteElseLocal(base.thumbnail_url, existing.thumbnail_url),
     thumbnail_path: preferRemoteElseLocal(base.thumbnail_path, existing.thumbnail_path),
     voice_cover_url: preferRemoteElseLocal(base.voice_cover_url, existing.voice_cover_url),

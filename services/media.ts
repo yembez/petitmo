@@ -35,6 +35,7 @@ import {
   downloadCloudOriginalToSandbox,
   materializeCloudMediaToSandboxForMemory,
 } from '@/services/memoryCloudMaterialize';
+import { emitMemoriesUpdatedIfVisualChanged } from '@/services/memoriesUiNotify';
 import {
   checkMemoryLimit,
   checkVideoLimit,
@@ -44,7 +45,7 @@ import {
   VIDEO_POSTER_FEED_JPEG_QUALITY,
   VIDEO_POSTER_PRINT_JPEG_QUALITY,
 } from '@/lib/limits';
-import { persistDefaultVideoPostersAtImport, extractVideoFrameJpeg } from '@/services/videoPosterLocal';
+import { persistDefaultVideoPostersAtImport, extractVideoFrameJpeg, persistVideoPosterFiles } from '@/services/videoPosterLocal';
 import { getUserTier } from '@/lib/userTier';
 import { deleteLocalMediaFiles } from '@/lib/localCleanup';
 import {
@@ -86,6 +87,7 @@ import {
   getAlbumCanonicalFavoriteUrls,
   getVideoPosterUriForBookPreview,
   getVoiceCoverUriForBookPreview,
+  hasCustomVideoPrintPoster,
   isFeedMultiPhotoAlbum,
 } from '@/utils/memoryPhotos';
 import {
@@ -583,7 +585,7 @@ async function processMemoryDerivativesOnDeviceFallback(memoryId: string): Promi
         return false;
       }
       upsertLocalMemory({ ...row, ...localPatch, updated_at: updatedAt });
-      DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId: id });
+      emitMemoriesUpdatedIfVisualChanged(id, row);
       return true;
     }
 
@@ -948,7 +950,11 @@ function newCloudSyncMemoryId(): string {
 /** URIs sandbox / picker pour un album (photo principale + extras locaux). */
 function albumLocalPhotoUris(memory: Memory): string[] {
   const primary = (memory.local_original_path ?? memory.local_media_path ?? '').trim();
-  const extraRaw = [...(memory.extra_photo_paths ?? []), ...(memory.extra_photo_urls ?? [])];
+  const extraPaths = Array.isArray(memory.extra_photo_paths)
+    ? memory.extra_photo_paths
+    : [];
+  const extraUrls = Array.isArray(memory.extra_photo_urls) ? memory.extra_photo_urls : [];
+  const extraRaw = [...extraPaths, ...extraUrls];
   const extras = extraRaw
     .map(u => (typeof u === 'string' ? u : '').trim())
     .filter(u => u.length > 0 && !/^https?:\/\//i.test(u));
@@ -962,15 +968,18 @@ function albumLocalPhotoUris(memory: Memory): string[] {
 
 function memoryIsPhotoAlbum(memory: Memory): boolean {
   if (memory.type !== 'photo') return false;
-  if ((memory.extra_photo_paths?.length ?? 0) > 0) return true;
-  return (memory.extra_photo_urls ?? []).some(u => {
-    const t = (u ?? '').trim();
+  const extraPaths = Array.isArray(memory.extra_photo_paths) ? memory.extra_photo_paths : [];
+  if (extraPaths.length > 0) return true;
+  const extraUrls = Array.isArray(memory.extra_photo_urls) ? memory.extra_photo_urls : [];
+  return extraUrls.some(u => {
+    const t = (typeof u === 'string' ? u : '').trim();
     return t.length > 0 && !/^https?:\/\//i.test(t);
   });
 }
 
 /**
- * Petitmo+ album : upload de toutes les photos + insert Supabase en arrière-plan.
+ * Album photo local-first : upload Supabase en arrière-plan.
+ * Gratuit authentifié = thumb + print A5 ; paid = original HD + dérivés.
  */
 async function syncCloudPhotoAlbumInBackground(params: {
   memoryId: string;
@@ -980,8 +989,6 @@ async function syncCloudPhotoAlbumInBackground(params: {
   capturedAtIso?: string;
   locationLabel: string | null;
 }): Promise<void> {
-  if (!params.isPaid) return;
-
   const { memoryId, childId, userId, capturedAtIso, locationLabel } = params;
   try {
     const memory = getLocalMemoryById(memoryId);
@@ -991,12 +998,27 @@ async function syncCloudPhotoAlbumInBackground(params: {
     if (uris.length === 0) return;
 
     const results = await Promise.all(
-      uris.map(uri => readAndUploadPhotoFile(uri, userId, childId)),
+      uris.map(uri =>
+        stratifiedUpload({
+          userId,
+          childId,
+          type: 'photo',
+          uri,
+          isPaid: params.isPaid,
+        }),
+      ),
     );
-    const publicUrls = results.map(r => r.publicUrl);
-    const paths = results.map(r => r.path);
-    const totalSize = results.reduce((s, r) => s + r.size, 0);
-    const extras = publicUrls.slice(1);
+    const primary = results[0];
+    if (!primary) return;
+    const extras = results.slice(1);
+    const extraPhotoUrls = extras.map(
+      r => r.media_url ?? r.print_url ?? r.display_url ?? r.thumb_url ?? '',
+    );
+    const extraDisplayUrls = extras.map(r => r.display_url ?? r.thumb_url ?? '');
+    const extraThumbUrls = extras.map(r => r.thumb_url ?? r.display_url ?? '');
+    const extraPhotoPaths = extras.map(r => r.media_path ?? '');
+    const totalSize = results.reduce((s, r) => s + r.file_size, 0);
+    const insertedUploadStatus = params.isPaid ? 'full' : 'print_only';
     const insertedAtIso = memory.inserted_at ?? new Date().toISOString();
 
     const insertPayload: Database['public']['Tables']['memories']['Insert'] = {
@@ -1004,20 +1026,22 @@ async function syncCloudPhotoAlbumInBackground(params: {
       child_id: childId,
       user_id: userId,
       type: 'photo',
-      media_url: publicUrls[0],
-      media_path: paths[0] ?? null,
-      extra_photo_urls: extras,
-      extra_photo_paths: paths.slice(1),
-      thumb_url: publicUrls[0],
-      display_url: publicUrls[0],
-      extra_thumb_urls: extras,
-      extra_display_urls: extras,
+      media_url: primary.media_url,
+      media_path: primary.media_path,
+      extra_photo_urls: extraPhotoUrls,
+      extra_photo_paths: extraPhotoPaths,
+      thumb_url: primary.thumb_url,
+      display_url: primary.display_url,
+      print_url: primary.print_url,
+      extra_thumb_urls: extraThumbUrls,
+      extra_display_urls: extraDisplayUrls,
       duration: null,
       file_size: totalSize,
       location: locationLabel,
       voice_cover_url: null,
       voice_cover_path: null,
       inserted_at: insertedAtIso,
+      upload_status: insertedUploadStatus,
     };
 
     if (capturedAtIso) {
@@ -1042,12 +1066,12 @@ async function syncCloudPhotoAlbumInBackground(params: {
         user_id: userId,
         type: 'photo',
         content: null,
-        media_url: publicUrls[0] ?? null,
-        media_path: paths[0] ?? null,
-        extra_photo_urls: extras as MemoryRowDb['extra_photo_urls'],
-        extra_photo_paths: paths.slice(1) as MemoryRowDb['extra_photo_paths'],
-        extra_thumb_urls: extras as MemoryRowDb['extra_thumb_urls'],
-        extra_display_urls: extras as MemoryRowDb['extra_display_urls'],
+        media_url: primary.media_url ?? null,
+        media_path: primary.media_path ?? null,
+        extra_photo_urls: extraPhotoUrls as MemoryRowDb['extra_photo_urls'],
+        extra_photo_paths: extraPhotoPaths as MemoryRowDb['extra_photo_paths'],
+        extra_thumb_urls: extraThumbUrls as MemoryRowDb['extra_thumb_urls'],
+        extra_display_urls: extraDisplayUrls as MemoryRowDb['extra_display_urls'],
         favorite_photo_urls: [] as MemoryRowDb['favorite_photo_urls'],
         voice_cover_url: null,
         voice_cover_path: null,
@@ -1061,12 +1085,12 @@ async function syncCloudPhotoAlbumInBackground(params: {
         location: locationLabel,
         inserted_at: insertedAtIso,
         captured_overlay_ink: null,
-        thumb_url: publicUrls[0] ?? null,
-        display_url: publicUrls[0] ?? null,
-        print_url: null,
+        thumb_url: primary.thumb_url ?? null,
+        display_url: primary.display_url ?? null,
+        print_url: primary.print_url ?? null,
         poster_url: null,
         poster_print_url: null,
-        upload_status: 'full',
+        upload_status: insertedUploadStatus,
         created_at: insertPayload.created_at ?? nowIso,
         updated_at: nowIso,
       };
@@ -1074,15 +1098,16 @@ async function syncCloudPhotoAlbumInBackground(params: {
 
     if (!insertedRow?.id) return;
 
-    for (let i = 0; i < results.length; i++) {
-      const loc = results[i].compressedLocalUri;
+    const thumbLocals = [memory.local_thumb_path, ...albumLocalPhotoUris(memory).slice(1)];
+    for (let i = 0; i < thumbLocals.length; i++) {
+      const loc = thumbLocals[i]?.trim();
       if (loc) await persistFeedLocalThumbnail(insertedRow.id, loc, i);
     }
     void triggerProcessMemory(insertedRow.id);
 
     const prev = getLocalMemoryById(insertedRow.id);
     const out: Memory = {
-      ...withLocalFields(insertedRow, { clientUploadStatus: 'full' }),
+      ...withLocalFields(insertedRow, { clientUploadStatus: insertedUploadStatus }),
       local_media_path: prev?.local_media_path ?? prev?.local_thumb_path ?? null,
       local_original_path: prev?.local_original_path ?? null,
       local_thumb_path: prev?.local_thumb_path ?? null,
@@ -1097,7 +1122,7 @@ async function syncCloudPhotoAlbumInBackground(params: {
       import_source_fingerprint: prev?.import_source_fingerprint ?? null,
     };
     upsertLocalMemory(out);
-    DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId: insertedRow.id });
+    emitMemoriesUpdatedIfVisualChanged(insertedRow.id, prev);
   } catch (e) {
     console.warn('[media] syncCloudPhotoAlbumInBackground', params.memoryId, e);
   }
@@ -1109,7 +1134,6 @@ export async function pushPhotoAlbumMemoryToCloud(
   userId: string,
   isPaid: boolean,
 ): Promise<void> {
-  if (!isPaid) return;
   if (memory.type !== 'photo' || !memoryIsPhotoAlbum(memory)) return;
   await syncCloudPhotoAlbumInBackground({
     memoryId: memory.id,
@@ -1205,7 +1229,7 @@ async function syncCloudPhotoMemoryInBackground(params: {
       import_source_fingerprint: prev?.import_source_fingerprint ?? null,
     };
     upsertLocalMemory(out);
-    DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId: insertedRow.id });
+    emitMemoriesUpdatedIfVisualChanged(insertedRow.id, prev);
   } catch (e) {
     console.warn('[media] syncCloudPhotoMemoryInBackground', params.memoryId, e);
   }
@@ -1310,7 +1334,7 @@ async function syncCloudVideoMemoryInBackground(params: {
       import_source_fingerprint: prev?.import_source_fingerprint ?? null,
     };
     upsertLocalMemory(out);
-    DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId: insertedRow.id });
+    emitMemoriesUpdatedIfVisualChanged(insertedRow.id, prev);
   } catch (e) {
     console.warn('[media] syncCloudVideoMemoryInBackground', params.memoryId, e);
   }
@@ -1426,7 +1450,7 @@ async function syncCloudVoiceMemoryInBackground(params: {
       import_source_fingerprint: prev?.import_source_fingerprint ?? null,
     };
     upsertLocalMemory(out);
-    DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId: insertedRow.id });
+    emitMemoriesUpdatedIfVisualChanged(insertedRow.id, prev);
   } catch (e) {
     console.warn('[media] syncCloudVoiceMemoryInBackground', params.memoryId, e);
   }
@@ -1451,7 +1475,7 @@ export async function resumePetitmoPlusCloudCaptureOrMerge(
     const prev = getLocalMemoryById(memory.id);
     const merged = mergeServerMemoryRowWithExistingLocal(remote as MemoryRowDb, prev ?? undefined);
     upsertLocalMemory({ ...merged, sync_status: 'synced' });
-    DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId: memory.id });
+    emitMemoriesUpdatedIfVisualChanged(memory.id, prev);
     return true;
   }
 
@@ -1730,7 +1754,19 @@ export async function uploadMedia({
       const feedPath = await persistFeedLocalVideo(memoryId, uri);
       const mediaPathLocal = feedPath ?? src;
 
+      /**
+       * Emit immédiat : le fil a déjà une frame preview (pending).
+       * Poster sandbox / print en fond — ne jamais bloquer l’insert sur l’extraction.
+       */
       let thumbDest: string | null = null;
+      try {
+        const { peekFeedVideoPosterStableCache } = await import('@/hooks/feedVideoPosterStableCache');
+        const previewFrame = peekFeedVideoPosterStableCache(memoryId)?.trim();
+        // Parfois le pending a déjà mis le cache sous tempId ; on le reprendira au bridge.
+        if (previewFrame) thumbDest = previewFrame;
+      } catch {
+        /* ignore */
+      }
       setFeedBootstrapVideoUri(memoryId, mediaPathLocal);
 
       const mem: Memory = {
@@ -1768,7 +1804,7 @@ export async function uploadMedia({
         updated_at: insertedAt,
         local_media_path: mediaPathLocal,
         local_original_path: localOriginalUri,
-        local_thumb_path: null,
+        local_thumb_path: thumbDest,
         local_display_path: null,
         local_print_path: null,
         original_px_w: null,
@@ -1785,41 +1821,49 @@ export async function uploadMedia({
         DeviceEventEmitter.emit('petitmo:memories-inserted', { memories: [mem] });
       }
 
-      /** Poster après interactions : le décodage vidéo ne doit pas figer le fil à l’insert. */
+      /** Poster fil + print livre en fond (ne bloque pas le fil). */
       InteractionManager.runAfterInteractions(() => {
-        setTimeout(() => {
-          void (async () => {
-            try {
-              const { feedPath, printPath } = await persistDefaultVideoPostersAtImport({
-                memoryId,
-                videoUri: mediaPathLocal,
-              });
-              if (!feedPath && !printPath) return;
-              const cur = getLocalMemoryById(memoryId);
-              if (!cur) return;
-              upsertLocalMemory({
-                ...cur,
-                ...(feedPath
-                  ? {
-                      thumbnail_url: feedPath,
-                      poster_url: feedPath,
-                      local_thumb_path: feedPath,
-                    }
-                  : {}),
-                ...(printPath
-                  ? {
-                      local_poster_print_path: printPath,
-                      poster_print_url: printPath,
-                    }
-                  : {}),
-                updated_at: new Date().toISOString(),
-              });
-              DeviceEventEmitter.emit('petitmo:memories-invalidate');
-            } catch {
-              /* ignore */
+        void (async () => {
+          try {
+            const { feedPath: feedPoster, printPath } = await persistVideoPosterFiles({
+              memoryId,
+              videoUri: mediaPathLocal,
+              writeFeed: true,
+              writePrint: true,
+              quality: VIDEO_POSTER_PRINT_JPEG_QUALITY,
+            });
+            if (!feedPoster && !printPath) return;
+            const cur = getLocalMemoryById(memoryId);
+            if (!cur) return;
+            const before = cur;
+            if (feedPoster) {
+              const { setFeedVideoPosterStableCache } = await import(
+                '@/hooks/feedVideoPosterStableCache'
+              );
+              setFeedVideoPosterStableCache(memoryId, feedPoster);
             }
-          })();
-        }, 320);
+            upsertLocalMemory({
+              ...cur,
+              ...(feedPoster
+                ? {
+                    thumbnail_url: feedPoster,
+                    poster_url: feedPoster,
+                    local_thumb_path: feedPoster,
+                  }
+                : {}),
+              ...(printPath
+                ? {
+                    local_poster_print_path: printPath,
+                    poster_print_url: printPath,
+                  }
+                : {}),
+              updated_at: new Date().toISOString(),
+            });
+            emitMemoriesUpdatedIfVisualChanged(memoryId, before);
+          } catch {
+            /* ignore */
+          }
+        })();
       });
 
       void syncCloudVideoMemoryInBackground({
@@ -2271,10 +2315,18 @@ export async function getMemories(childId: string): Promise<MemoryRow[]> {
   return getLocalMemories(childId) as unknown as MemoryRow[];
 }
 
-/** Fil / favoris famille : tous les souvenirs locaux (sync cloud multi-enfants si besoin). */
-export async function getFamilyMemories(): Promise<MemoryRow[]> {
+/** Fil / favoris famille : lecture SQLite d’abord ; pull cloud optionnel (bloquant si demandé). */
+export async function getFamilyMemories(opts?: {
+  /** Défaut true — attendre le pull. Passer false pour local-first non bloquant. */
+  waitForRemote?: boolean;
+}): Promise<MemoryRow[]> {
+  const local = getAllLocalMemories() as unknown as MemoryRow[];
   if ((await getCachedUserMode()) === 'local') {
-    return getAllLocalMemories() as unknown as MemoryRow[];
+    return local;
+  }
+
+  if (opts?.waitForRemote === false) {
+    return local;
   }
 
   try {
@@ -2688,7 +2740,13 @@ export async function persistVideoPosterToCloudForPdfExport(
   memoryId: string,
   childId: string,
   localPosterUri: string,
-  opts?: { retriggerProcessMemory?: boolean },
+  opts?: {
+    retriggerProcessMemory?: boolean;
+    /** Ignore un poster_url HTTPS existant (frame t≈0) — obligatoire pour un poster_print custom. */
+    forceUpload?: boolean;
+    /** Met aussi à jour `poster_print_url` (illustration livre). */
+    asPrintPoster?: boolean;
+  },
 ): Promise<string | null> {
   try {
     const {
@@ -2697,10 +2755,16 @@ export async function persistVideoPosterToCloudForPdfExport(
     if (!user) return null;
 
     const row = getLocalMemoryById(memoryId);
-    const existingHttps = [row?.poster_url, row?.thumbnail_url]
-      .map(u => (u ?? '').trim())
-      .find(u => /^https:\/\//i.test(u));
-    if (existingHttps) return existingHttps;
+    const customPrint = row ? hasCustomVideoPrintPoster(row) : false;
+    const asPrint = opts?.asPrintPoster === true || customPrint;
+    const forceUpload = opts?.forceUpload === true || asPrint;
+
+    if (!forceUpload) {
+      const existingHttps = [row?.poster_url, row?.thumbnail_url]
+        .map(u => (u ?? '').trim())
+        .find(u => /^https:\/\//i.test(u));
+      if (existingHttps) return existingHttps;
+    }
 
     let publicUrl: string | null = null;
     let storagePath: string | null = null;
@@ -2712,9 +2776,11 @@ export async function persistVideoPosterToCloudForPdfExport(
 
     if (readablePoster && !/^https?:\/\//i.test(readablePoster)) {
       const ts = Date.now();
-      storagePath = `${user.id}/${childId}/derived/video_poster_${ts}.jpg`;
+      storagePath = asPrint
+        ? `${user.id}/${childId}/derived/video_poster_print_${ts}.jpg`
+        : `${user.id}/${childId}/derived/video_poster_${ts}.jpg`;
       publicUrl = await uploadFileToSupabase(readablePoster, storagePath);
-    } else if (row) {
+    } else if (row && !asPrint) {
       const videoUri = await pickFirstReadableLocalMediaUri(
         collectVideoCloudSyncUriCandidates(row).filter(u => !u.endsWith('poster.jpg')),
       );
@@ -2732,13 +2798,25 @@ export async function persistVideoPosterToCloudForPdfExport(
 
     if (!publicUrl) return null;
 
-    const { error } = await supabase
-      .from('memories')
-      .update({
-        poster_url: publicUrl,
-        thumbnail_url: publicUrl,
-      })
-      .eq('id', memoryId);
+    const updatePayload: {
+      poster_url?: string;
+      thumbnail_url?: string;
+      poster_print_url?: string;
+    } = asPrint
+      ? { poster_print_url: publicUrl }
+      : { poster_url: publicUrl, thumbnail_url: publicUrl };
+
+    // PDF htmlBook lit poster_print puis poster : pour un print custom, pousser aussi poster/thumb
+    // dans l’override guest ; en cloud on conserve poster_url fil (t≈0) sauf s’il manquait.
+    if (asPrint) {
+      const feedPoster = (row?.poster_url ?? '').trim();
+      if (!/^https:\/\//i.test(feedPoster)) {
+        updatePayload.poster_url = publicUrl;
+        updatePayload.thumbnail_url = publicUrl;
+      }
+    }
+
+    const { error } = await supabase.from('memories').update(updatePayload).eq('id', memoryId);
 
     if (error) {
       console.error('persistVideoPosterToCloudForPdfExport:', error);
@@ -2748,12 +2826,14 @@ export async function persistVideoPosterToCloudForPdfExport(
     if (existing) {
       upsertLocalMemory({
         ...existing,
-        poster_url: publicUrl,
-        thumbnail_url: publicUrl,
+        ...(updatePayload.poster_url ? { poster_url: updatePayload.poster_url } : {}),
+        ...(updatePayload.thumbnail_url ? { thumbnail_url: updatePayload.thumbnail_url } : {}),
+        // Ne pas écraser le chemin sandbox local par l’HTTPS : l’UI livre reste local-first.
         updated_at: new Date().toISOString(),
       });
     }
-    if (opts?.retriggerProcessMemory !== false) {
+    // Jamais retrigger process-memory après un print custom : le worker régénère la frame t≈0.
+    if (!asPrint && opts?.retriggerProcessMemory !== false) {
       void triggerProcessMemory(memoryId);
     }
     return publicUrl;

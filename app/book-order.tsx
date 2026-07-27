@@ -10,6 +10,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Linking,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,6 +21,7 @@ import { getUserTier } from '@/lib/userTier';
 import { getLastGuestExportEmail, setLastGuestExportEmail } from '@/lib/guestExportPrefs';
 import { PRINT_V1_INCLUDED_QR, quotePrintOrderV1 } from '@/lib/pricingV1';
 import { PRINT_V1_PAID_DISCOUNT_PERCENT, type DiscountPercent } from '@/lib/printedBookQuote';
+import { PRINT_ORDER_CGV_URL, PRINT_ORDER_CGV_VERSION } from '@/lib/printOrderLegal';
 import { getBook, resolveBookCoverPrintUri } from '@/services/books';
 import { getChildren } from '@/services/children';
 import { isInitExportConfigured } from '@/services/initExportApi';
@@ -29,6 +31,7 @@ import {
   generateBookPdfViaServerAsGuest,
   generateBookPdfWithExportTicket,
   collectMemoriesFromPagesForPdf,
+  refreshBookPdfPagesMemoriesFromSqlite,
   type GenerateBookPdfServerInput,
 } from '@/services/bookPdfServer';
 import { BookPdfGeneratingOverlay } from '@/components/BookPdfGeneratingOverlay';
@@ -49,6 +52,7 @@ import {
   gelatoMinInnerPagesAlertMessage,
   GELATO_MIN_INNER_PAGES,
 } from '@/utils/bookGelatoInnerPages';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
 
 const COUNTRY_OPTIONS = [
   { code: 'FR' as const, label: 'France' },
@@ -74,21 +78,29 @@ function isValidEmail(s: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim().toLowerCase());
 }
 
-/** Couverture fraîche depuis SQLite (évite un pending stale après changement dans l’aperçu). */
-async function withFreshBookCoverPhotoUrl(
+/** Couverture + souvenirs frais depuis SQLite (évite un pending stale après changement dans l’aperçu). */
+async function withFreshBookPayloadForExport(
   payload: GenerateBookPdfServerInput,
 ): Promise<GenerateBookPdfServerInput> {
   try {
     const book = await getBook(payload.bookId);
-    if (!book) return payload;
-    // Local-first : URI print / book_covers résolue avant la ref cloud stockée.
-    const fresh = resolveBookCoverPrintUri(book)?.trim() || null;
-    const stored = (book.coverPhotoUrl ?? '').trim();
-    const next = fresh || stored;
-    if (!next) return payload;
-    return { ...payload, coverPhotoUrl: next };
+    let next: GenerateBookPdfServerInput = {
+      ...payload,
+      pages: refreshBookPdfPagesMemoriesFromSqlite(payload.pages),
+    };
+    if (book) {
+      // Local-first : URI print / book_covers résolue avant la ref cloud stockée.
+      const fresh = resolveBookCoverPrintUri(book)?.trim() || null;
+      const stored = (book.coverPhotoUrl ?? '').trim();
+      const cover = fresh || stored;
+      if (cover) next = { ...next, coverPhotoUrl: cover };
+    }
+    return next;
   } catch {
-    return payload;
+    return {
+      ...payload,
+      pages: refreshBookPdfPagesMemoriesFromSqlite(payload.pages),
+    };
   }
 }
 
@@ -129,6 +141,7 @@ function localUriForAvRawUpload(m: { local_original_path?: string | null; local_
 export default function BookOrderScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { t } = useAppTranslation('common');
   const params = useLocalSearchParams<{
     bookId?: string;
     childId?: string;
@@ -158,7 +171,8 @@ export default function BookOrderScreen() {
 
   const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');
-  const [marketingOptIn, setMarketingOptIn] = useState(false);
+  /** Case légale impression — décochée par défaut. */
+  const [contentVerified, setContentVerified] = useState(false);
   const [shippingName, setShippingName] = useState('');
   const [line1, setLine1] = useState('');
   const [line2, setLine2] = useState('');
@@ -190,7 +204,11 @@ export default function BookOrderScreen() {
     return DIGITAL_EXPORT_PDF_EUR;
   }, [exportMode, printPriceEuros, pdfEntitled.digitalPaid, pdfEntitled.premium]);
 
-  const ctaLabel = `Commander — ${displayPriceEuros.toFixed(2).replace('.', ',')}€`;
+  const priceLabel = `${displayPriceEuros.toFixed(2).replace('.', ',')}€`;
+  const ctaLabel =
+    exportMode === 'print'
+      ? t('bookOrder.ctaPay', { price: priceLabel })
+      : `Commander — ${priceLabel}`;
 
   const clearError = useCallback((k: FieldKey) => {
     setFieldErrors(prev => {
@@ -293,6 +311,7 @@ export default function BookOrderScreen() {
     if (!email.trim() || !isValidEmail(email)) return false;
     if (exportMode === 'print') {
       return (
+        contentVerified &&
         shippingName.trim().length > 0 &&
         line1.trim().length > 0 &&
         city.trim().length > 0 &&
@@ -300,7 +319,7 @@ export default function BookOrderScreen() {
       );
     }
     return true;
-  }, [email, city, exportMode, line1, shippingName, zip]);
+  }, [contentVerified, email, city, exportMode, line1, shippingName, zip]);
 
   const navigateToConfirmation = useCallback(
     (p: { pricePaidEuros: number; emailNorm: string }) => {
@@ -310,11 +329,11 @@ export default function BookOrderScreen() {
           exportMode,
           priceEuros: String(p.pricePaidEuros),
           email: p.emailNorm,
-          marketingOptIn: marketingOptIn ? '1' : '0',
+          marketingOptIn: '0',
         },
       });
     },
-    [exportMode, marketingOptIn, router]
+    [exportMode, router]
   );
 
   const navigateToFinalizeMedia = useCallback(
@@ -333,12 +352,12 @@ export default function BookOrderScreen() {
             exportMode,
             priceEuros: String(p.pricePaidEuros),
             email: p.emailNorm,
-            marketingOptIn: marketingOptIn ? '1' : '0',
+            marketingOptIn: '0',
           },
         });
       })();
     },
-    [exportMode, marketingOptIn, router]
+    [exportMode, router]
   );
 
   const submitOrder = useCallback(async () => {
@@ -352,6 +371,10 @@ export default function BookOrderScreen() {
     const errs = getFieldErrors();
     if (Object.keys(errs).length > 0) {
       setFieldErrors(errs);
+      return;
+    }
+    if (exportMode === 'print' && !contentVerified) {
+      setFieldErrors({ submit: t('bookOrder.needVerify') });
       return;
     }
     setFieldErrors({});
@@ -387,7 +410,7 @@ export default function BookOrderScreen() {
           setFieldErrors({ submit: 'Aucun aperçu de livre chargé. Repasse par l’aperçu du livre.' });
           return;
         }
-        const payload = await withFreshBookCoverPhotoUrl(pendingPayload);
+        const payload = await withFreshBookPayloadForExport(pendingPayload);
 
         void getBookExportPrepIssues({
           pages: payload.pages,
@@ -408,8 +431,10 @@ export default function BookOrderScreen() {
           audioVideoPageCount: qrCount,
           email: mail,
           gdprConsentAtIso: nowIso,
+          contentVerifiedAtIso: nowIso,
+          cgvVersion: PRINT_ORDER_CGV_VERSION,
           fullName: contactFullName,
-          marketingOptIn: marketingOptIn,
+          marketingOptIn: false,
           shippingName: shippingName.trim(),
           shippingAddress: {
             line1: line1.trim(),
@@ -522,7 +547,7 @@ export default function BookOrderScreen() {
         setFieldErrors({ submit: 'Aucun aperçu de livre chargé. Repasse par l’aperçu du livre.' });
         return;
       }
-      const payload = await withFreshBookCoverPhotoUrl(pending);
+      const payload = await withFreshBookPayloadForExport(pending);
 
       // Le flux guest gère désormais photo + audio + vidéo via upload vers le serveur PDF (ticket),
       // donc on ne bloque plus ici sur des médias locaux (préparation best-effort uniquement).
@@ -547,7 +572,7 @@ export default function BookOrderScreen() {
           email: mail,
           gdprConsentAtIso: nowIso,
           fullName: contactFullName,
-          marketingOptIn: marketingOptIn === true,
+          marketingOptIn: false,
         },
       });
 
@@ -606,6 +631,7 @@ export default function BookOrderScreen() {
     bookId,
     child,
     childId,
+    contentVerified,
     country,
     discountPercent,
     email,
@@ -614,13 +640,13 @@ export default function BookOrderScreen() {
     getFieldErrors,
     line1,
     line2,
-    marketingOptIn,
     memoryPageCount,
     navigateToConfirmation,
     navigateToFinalizeMedia,
     router,
     shippingName,
     subscriptionDb,
+    t,
     zip,
     city,
   ]);
@@ -725,6 +751,7 @@ export default function BookOrderScreen() {
               <Text style={styles.rowMuted}>Remise abonnée −10 % sur le livre</Text>
             ) : null}
             <Text style={styles.price}>{printPriceEuros.toFixed(2).replace('.', ',')} € TTC</Text>
+            <Text style={styles.deliveryIncl}>{t('bookOrder.deliveryIncluded')}</Text>
             {tier === 'free' && printQuote.premiumUpsell ? (
               <View style={{ marginTop: scale(12) }}>
                 <Text style={styles.cardTitle}>Avec Petitmo+</Text>
@@ -873,14 +900,52 @@ export default function BookOrderScreen() {
           </>
         ) : null}
 
-        <Pressable
-          style={styles.checkRow}
-          onPress={() => setMarketingOptIn(v => !v)}
-          hitSlop={4}
-        >
-          <View style={[styles.checkbox, marketingOptIn && styles.checkboxOn]} />
-          <Text style={styles.checkLabel}>Recevoir les conseils et offres petitmo</Text>
-        </Pressable>
+        {exportMode === 'print' ? (
+          <View style={styles.legalCard}>
+            <Text style={styles.legalTitle}>{t('bookOrder.legalTitle')}</Text>
+            <Text style={styles.legalBody}>{t('bookOrder.legalBody')}</Text>
+            <Pressable
+              style={styles.reviewBtn}
+              onPress={() => {
+                if (!bookId) return;
+                // push (pas back) : l’écran commande reste monté → formulaire conservé.
+                router.push({
+                  pathname: '/book-preview',
+                  params: { bookId, fromOrderReview: '1' },
+                });
+              }}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={t('bookOrder.reviewBook')}
+            >
+              <Text style={styles.reviewBtnText}>{t('bookOrder.reviewBook')}</Text>
+            </Pressable>
+            <Pressable
+              style={styles.checkRow}
+              onPress={() => {
+                setContentVerified(v => !v);
+                clearError('submit');
+              }}
+              hitSlop={4}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: contentVerified }}
+            >
+              <View style={[styles.checkbox, contentVerified && styles.checkboxOn]} />
+              <Text style={styles.checkLabel}>{t('bookOrder.legalCheckbox')}</Text>
+            </Pressable>
+            <Text style={styles.legalNoWithdraw}>{t('bookOrder.legalNoWithdraw')}</Text>
+            <Text style={styles.legalCgvLine}>
+              {t('bookOrder.legalCgvBefore')}
+              <Text
+                style={styles.legalCgvLink}
+                onPress={() => void Linking.openURL(PRINT_ORDER_CGV_URL)}
+              >
+                {t('bookOrder.legalCgvLink')}
+              </Text>
+              {t('bookOrder.legalCgvAfter')}
+            </Text>
+          </View>
+        ) : null}
 
         {fieldErrors.submit ? <Text style={styles.err}>{fieldErrors.submit}</Text> : null}
 
@@ -944,6 +1009,64 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: scale(16), fontWeight: '700', color: THEME.textPrimary, marginBottom: scale(8) },
   rowMuted: { fontSize: scale(14), color: THEME.textMuted, marginBottom: scale(4) },
   price: { fontSize: scale(22), fontWeight: '700', color: THEME.textPrimary, marginTop: scale(8) },
+  deliveryIncl: {
+    fontSize: scale(14),
+    fontWeight: '600',
+    color: THEME.textPrimary,
+    marginTop: scale(4),
+  },
+  legalCard: {
+    backgroundColor: THEME.bg,
+    borderRadius: scale(12),
+    padding: scale(16),
+    marginTop: scale(8),
+    marginBottom: scale(12),
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.08)',
+  },
+  legalTitle: {
+    fontSize: scale(16),
+    fontWeight: '700',
+    color: THEME.textPrimary,
+    marginBottom: scale(8),
+  },
+  legalBody: {
+    fontSize: scale(14),
+    color: THEME.textMuted,
+    lineHeight: scale(20),
+    marginBottom: scale(12),
+  },
+  reviewBtn: {
+    alignSelf: 'flex-start',
+    marginBottom: scale(14),
+    paddingVertical: scale(8),
+    paddingHorizontal: scale(12),
+    borderRadius: scale(8),
+    backgroundColor: 'rgba(28, 28, 30, 0.06)',
+  },
+  reviewBtnText: {
+    fontSize: scale(14),
+    fontWeight: '600',
+    color: THEME.accent,
+  },
+  legalNoWithdraw: {
+    fontSize: scale(12),
+    color: THEME.textMuted,
+    lineHeight: scale(17),
+    marginTop: scale(10),
+  },
+  legalCgvLine: {
+    fontSize: scale(12),
+    color: THEME.textMuted,
+    lineHeight: scale(17),
+    marginTop: scale(10),
+  },
+  legalCgvLink: {
+    fontSize: scale(12),
+    color: THEME.accent,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
+  },
   section: {
     fontSize: scale(13),
     fontWeight: '600',

@@ -236,6 +236,10 @@ export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient,
           if (g.type === 'video') {
             const poster = typeof g.poster_url === 'string' ? g.poster_url.trim() : '';
             const thumb = typeof g.thumbnail_url === 'string' ? g.thumbnail_url.trim() : '';
+            const print = typeof g.poster_print_url === 'string' ? g.poster_print_url.trim() : '';
+            if (print && /^https:\/\//i.test(print)) {
+              row.poster_print_url = print;
+            }
             if (poster && /^https:\/\//i.test(poster)) {
               row.poster_url = poster;
             }
@@ -243,6 +247,14 @@ export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient,
               row.thumbnail_url = thumb;
             } else if (poster && /^https:\/\//i.test(poster)) {
               row.thumbnail_url = poster;
+            }
+            // htmlBook préfère poster_print_url : si seul poster_url est fourni, aligner le print.
+            if (
+              poster &&
+              /^https:\/\//i.test(poster) &&
+              !(row.poster_print_url && /^https:\/\//i.test(String(row.poster_print_url).trim()))
+            ) {
+              row.poster_print_url = poster;
             }
             continue;
           }

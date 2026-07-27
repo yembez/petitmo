@@ -19,6 +19,8 @@ import { supabase } from '@/lib/supabase';
 import {
   FREE_TIER_BOOK_VOICE_MAX_DURATION,
   FREE_TIER_VIDEO_MAX_DURATION,
+  PAID_TIER_BOOK_VOICE_MAX_DURATION,
+  PAID_TIER_VIDEO_MAX_DURATION,
 } from '@/lib/limits';
 import { Platform } from 'react-native';
 import { copyAsync, documentDirectory, downloadAsync, makeDirectoryAsync } from 'expo-file-system/legacy';
@@ -172,7 +174,7 @@ export type FreeTierBookMemoryRow = {
 };
 
 /**
- * Garde-fou plan gratuit : durées audio/vidéo **dans un livre**.
+ * Garde-fou durées audio/vidéo **dans un livre** (gratuit + plafond sécurité Petitmo+).
  * V1 : plus de plafond 5+5 — composition libre ; facturation QR au checkout
  * (2 inclus + 0,70 €) — `lib/pricingV1.ts`, `docs/specs/pricing-v1-migration.md`.
  * QR cloud : upload **après paiement** commande livre imprimée.
@@ -182,21 +184,28 @@ export async function validateFreeTierBookMemoryLimits(
   memories: readonly FreeTierBookMemoryRow[],
 ): Promise<void> {
   const tier = await getUserTier();
-  if (tier !== 'free') return;
+  const maxVideo =
+    tier === 'paid' ? PAID_TIER_VIDEO_MAX_DURATION : FREE_TIER_VIDEO_MAX_DURATION;
+  const maxAudio =
+    tier === 'paid' ? PAID_TIER_BOOK_VOICE_MAX_DURATION : FREE_TIER_BOOK_VOICE_MAX_DURATION;
 
   const videos = memories.filter(m => m.type === 'video');
-  const tooLongVideo = videos.find(m => (m.duration ?? 0) > FREE_TIER_VIDEO_MAX_DURATION);
+  const tooLongVideo = videos.find(m => (m.duration ?? 0) > maxVideo);
   if (tooLongVideo) {
     throw new Error(
-      `Avec le plan gratuit, chaque souvenir vidéo est limité à ${FREE_TIER_VIDEO_MAX_DURATION} secondes.`,
+      tier === 'paid'
+        ? 'Chaque souvenir vidéo est limité à 3 minutes.'
+        : `Avec le plan gratuit, chaque souvenir vidéo est limité à ${FREE_TIER_VIDEO_MAX_DURATION} secondes.`,
     );
   }
 
   const audios = memories.filter(m => m.type === 'voice');
-  const tooLongAudio = audios.find(m => (m.duration ?? 0) > FREE_TIER_BOOK_VOICE_MAX_DURATION);
+  const tooLongAudio = audios.find(m => (m.duration ?? 0) > maxAudio);
   if (tooLongAudio) {
     throw new Error(
-      `Avec le plan gratuit, chaque souvenir audio est limité à ${FREE_TIER_BOOK_VOICE_MAX_DURATION} secondes.`,
+      tier === 'paid'
+        ? 'Chaque souvenir audio est limité à 5 minutes.'
+        : `Avec le plan gratuit, chaque souvenir audio est limité à ${FREE_TIER_BOOK_VOICE_MAX_DURATION} secondes.`,
     );
   }
 }

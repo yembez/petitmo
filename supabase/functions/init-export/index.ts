@@ -59,6 +59,8 @@ type InitBody = {
   audio_video_page_count?: number;
   email?: string;
   gdpr_consent_at?: string;
+  content_verified_at?: string;
+  cgv_version?: string;
   full_name?: string | null;
   marketing_opt_in?: boolean;
   /** print_order */
@@ -427,6 +429,22 @@ Deno.serve(async (req: Request) => {
     const printerName =
       typeof body.printer_name === 'string' && body.printer_name.trim() ? body.printer_name.trim() : null;
 
+    const verifiedRaw = body.content_verified_at;
+    if (typeof verifiedRaw !== 'string' || !verifiedRaw.trim()) {
+      return jsonRes({ error: 'content_verified_at required (ISO-8601)' }, 400);
+    }
+    const contentVerifiedAt = new Date(verifiedRaw);
+    if (!Number.isFinite(contentVerifiedAt.getTime())) {
+      return jsonRes({ error: 'content_verified_at invalid' }, 400);
+    }
+    const cgvVersion =
+      typeof body.cgv_version === 'string' && body.cgv_version.trim()
+        ? body.cgv_version.trim().slice(0, 32)
+        : null;
+    if (!cgvVersion) {
+      return jsonRes({ error: 'cgv_version required' }, 400);
+    }
+
     const { data: inserted, error: insErr } = await supabase
       .from('export_requests')
       .insert({
@@ -447,6 +465,8 @@ Deno.serve(async (req: Request) => {
         price_cents: priceCents,
         discount_percent: discountPercent,
         printer_name: printerName,
+        content_verified_at: contentVerifiedAt.toISOString(),
+        cgv_version: cgvVersion,
       })
       .select('id')
       .single();

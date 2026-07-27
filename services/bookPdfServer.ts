@@ -6,7 +6,7 @@ import { downloadAsync, documentDirectory, makeDirectoryAsync, deleteAsync } fro
 import { readAsStringAsync, EncodingType } from 'expo-file-system/legacy';
 import { uploadAsync as uploadAsyncLegacy } from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { Platform } from 'react-native';
+import { Image, Platform } from 'react-native';
 import {
   isIosBackgroundSignedPutUploadAvailable,
   uploadFileToSignedPutUrlIosBackground,
@@ -41,8 +41,10 @@ import {
   getPhotoUriForBookMaquetteDisplay,
   getVideoPosterUriForBookPreview,
   getVoiceCoverUriForBookPreview,
+  hasCustomVideoPrintPoster,
   indexOfPhotoUrlInFeed,
   inferLocalDisplayPathFromPrint,
+  isDeviceLocalMediaUri,
   memoryPhotoMatchesUrl,
   normalizePhotoUrlForCompare,
 } from '@/utils/memoryPhotos';
@@ -177,18 +179,38 @@ function mergeMemoryWithLocalRowForVoiceCover(m: Memory): Memory {
   }
 }
 
+function nonEmptyMediaUri(u: string | null | undefined): string | null {
+  const t = (u ?? '').trim();
+  return t ? t : null;
+}
+
+/**
+ * Export PDF : SQLite gagne pour le poster print custom (`poster_print.jpg`).
+ * Le pending commande / pages peuvent encore porter un `poster_url` HTTPS (frame t≈0)
+ * ou un `poster_print_url` cloud régénéré par le worker — ne pas les laisser masquer le local.
+ */
 function mergeMemoryWithLocalRowForVideoPoster(m: Memory): Memory {
   if (m.type !== 'video') return m;
   if (Platform.OS === 'web') return m;
   try {
     const row = getLocalMemoryById(m.id);
     if (!row) return m;
+    const localPrintPath =
+      nonEmptyMediaUri(row.local_poster_print_path) ?? nonEmptyMediaUri(m.local_poster_print_path);
+    const rowPrint = nonEmptyMediaUri(row.poster_print_url);
+    const pagePrint = nonEmptyMediaUri(m.poster_print_url);
+    const localPrintUri =
+      localPrintPath ??
+      (rowPrint && isDeviceLocalMediaUri(rowPrint) ? rowPrint : null) ??
+      (pagePrint && isDeviceLocalMediaUri(pagePrint) ? pagePrint : null);
     return {
       ...m,
       local_thumb_path: m.local_thumb_path ?? row.local_thumb_path ?? null,
       poster_url: m.poster_url ?? row.poster_url ?? null,
       thumbnail_url: m.thumbnail_url ?? row.thumbnail_url ?? null,
-      poster_print_url: m.poster_print_url ?? row.poster_print_url ?? null,
+      local_poster_print_path: localPrintPath,
+      // Chemin sandbox custom d’abord ; sinon URI locale ; sinon remote (HTTPS worker).
+      poster_print_url: localPrintUri ?? rowPrint ?? pagePrint ?? null,
       local_original_path: m.local_original_path ?? row.local_original_path ?? null,
       local_media_path: m.local_media_path ?? row.local_media_path ?? null,
       media_url: m.media_url ?? row.media_url ?? null,
@@ -198,6 +220,32 @@ function mergeMemoryWithLocalRowForVideoPoster(m: Memory): Memory {
   } catch {
     return m;
   }
+}
+
+/**
+ * Rafraîchit les souvenirs des pages depuis SQLite (posters vidéo custom, covers…).
+ * À appeler avant export commande : le pending AsyncStorage peut être stale après « Revoir mon livre ».
+ */
+export function refreshBookPdfPagesMemoriesFromSqlite(pages: BookPage[]): BookPage[] {
+  if (Platform.OS === 'web') return pages;
+  return pages.map(p => {
+    if (p.type === 'cover' || p.type === 'chapter' || p.type === 'back-cover') return p;
+    const mem = p.memory;
+    if (!mem?.id) return p;
+    try {
+      const row = getLocalMemoryById(mem.id);
+      if (!row) return p;
+      if (row.type === 'video' && p.type === 'video') {
+        return { ...p, memory: mergeMemoryWithLocalRowForVideoPoster({ ...mem, ...row, type: 'video' }) };
+      }
+      if (row.type === 'voice' && p.type === 'audio') {
+        return { ...p, memory: mergeMemoryWithLocalRowForVoiceCover({ ...mem, ...row, type: 'voice' }) };
+      }
+      return { ...p, memory: { ...mem, ...row } };
+    } catch {
+      return p;
+    }
+  });
 }
 
 /** Vocal : chemins audio + cover depuis SQLite (export livre). */
@@ -266,9 +314,39 @@ async function ensureVideoPostersPersistedForServerPdf(
     if (m.type !== 'video') continue;
     const ed = localEdits[m.id];
     const merged = mergeMemoryWithLocalRowForVideoPoster(ed ? { ...m, ...ed } : m);
+    const customPrint = hasCustomVideoPrintPoster(merged);
+    const posterUri = getVideoPosterUriForBookPreview(merged).trim();
+
+    // Poster print custom : toujours uploader le fichier local — ne pas se fier à un poster_url HTTPS (t≈0).
+    if (customPrint) {
+      try {
+        const readable =
+          (await pickFirstReadableLocalMediaUri(collectVideoPosterLocalUploadUriCandidates(merged))) ??
+          (posterUri && !isHttps(posterUri) && !isBareMediaBucketPath(posterUri) ? posterUri : null);
+        if (!readable) continue;
+        const url = await persistVideoPosterToCloudForPdfExport(m.id, childId, readable, {
+          forceUpload: true,
+          asPrintPoster: true,
+          retriggerProcessMemory: false,
+        });
+        if (url) {
+          overrides.push({
+            id: m.id,
+            type: 'video',
+            poster_url: url,
+            thumbnail_url: url,
+            poster_print_url: url,
+            created_at: m.created_at,
+          });
+        }
+      } catch (e) {
+        console.warn('[bookPdfServer] ensureVideoPostersPersistedForServerPdf custom', m.id, e);
+      }
+      continue;
+    }
+
     const existingHttps = [merged.poster_url, merged.thumbnail_url].find(u => isHttps((u ?? '').trim()));
     if (existingHttps) continue;
-    const posterUri = getVideoPosterUriForBookPreview(merged).trim();
     if (posterUri && isHttps(posterUri)) continue;
     if (posterUri && isBareMediaBucketPath(posterUri)) continue;
     try {
@@ -279,6 +357,7 @@ async function ensureVideoPostersPersistedForServerPdf(
           type: 'video',
           poster_url: url,
           thumbnail_url: url,
+          poster_print_url: url,
           created_at: m.created_at,
         });
       }
@@ -442,6 +521,50 @@ export function collectMemoriesFromPagesForPdf(
     seen.add(m.id);
     const e = localEdits[m.id];
     out.push(e ? { ...m, ...e } : m);
+  }
+  return out;
+}
+
+function measureLocalJpegPx(uri: string): Promise<{ w: number; h: number } | null> {
+  const src = uri.trim();
+  if (!src || Platform.OS === 'web') return Promise.resolve(null);
+  return new Promise(resolve => {
+    Image.getSize(
+      src,
+      (w, h) => resolve(w > 0 && h > 0 ? { w, h } : null),
+      () => resolve(null),
+    );
+  });
+}
+
+/**
+ * Dims posters vidéo (et seed) pour crop aspect PDF — sans ça Chromium + object-fit
+ * sans `coverCropImgInlineStyle` laissait des bandeaux blancs si un transform crop était appliqué.
+ */
+async function resolveCropImgPxByMemoryIdForPdf(
+  pages: BookPage[],
+  localEdits: Record<string, Partial<Memory>>,
+  seed?: Record<string, { w: number; h: number }>,
+): Promise<Record<string, { w: number; h: number }>> {
+  const out: Record<string, { w: number; h: number }> = { ...(seed ?? {}) };
+  if (Platform.OS === 'web') return out;
+  const memories = collectMemoriesFromPagesForPdf(pages, localEdits);
+  for (const m of memories) {
+    const existing = out[m.id];
+    if (existing && existing.w > 0 && existing.h > 0) continue;
+    if (m.type !== 'video') continue;
+    const ed = localEdits[m.id];
+    const merged = mergeMemoryWithLocalRowForVideoPoster(ed ? { ...m, ...ed } : m);
+    try {
+      const readable = await pickFirstReadableLocalMediaUri(
+        collectVideoPosterLocalUploadUriCandidates(merged),
+      );
+      if (!readable) continue;
+      const px = await measureLocalJpegPx(readable);
+      if (px) out[m.id] = px;
+    } catch {
+      /* ignore */
+    }
   }
   return out;
 }
@@ -964,7 +1087,7 @@ async function callInitExportPdf(body: Record<string, unknown>): Promise<InitExp
     const max = typeof json.maxAllowed === 'number' ? json.maxAllowed : 10;
     const cur = typeof json.current === 'number' ? json.current : 0;
     throw new Error(
-      `Limite audio/vidéo atteinte (offre gratuite) : ${cur}/${max} pages cumulées sur tous tes livres.`
+      `Limite audio/vidéo atteinte (offre gratuite) : ${cur}/${max} pages cumulées sur tous vos livres.`
     );
   }
 
@@ -997,6 +1120,8 @@ export function mapBookPagesToServerPayload(
   photoCrops: Record<string, { xPct: number; yPct: number; scale: number }>,
   localEdits: Record<string, Partial<Memory>>,
   memoryPhotoRefs?: Record<string, string>,
+  /** Dims fichier pour crop aspect PDF (posters vidéo, print photo…). */
+  cropImgPxByMemoryId?: Record<string, { w: number; h: number }>,
 ): GenerateBookPdfPayload['pages'] {
   return pages.map(p => {
     switch (p.type) {
@@ -1015,7 +1140,8 @@ export function mapBookPagesToServerPayload(
         const rot = rotations[m.id] ?? 0;
         const crop = photoCrops[m.id];
         const photoRef = p.photoRef?.trim() || memoryPhotoRefs?.[m.id]?.trim();
-        const px = getBookPhotoPrintPixelSize(m, photoRef);
+        const fromMeta = cropImgPxByMemoryId?.[m.id];
+        const px = fromMeta ?? getBookPhotoPrintPixelSize(m, photoRef);
         return {
           type: p.type,
           memoryId: m.id,
@@ -1040,10 +1166,12 @@ export function mapBookPagesToServerPayload(
           p.type === 'photo-note'
             ? p.photoRef?.trim() || memoryPhotoRefs?.[m.id]?.trim()
             : undefined;
+        const fromMeta = cropImgPxByMemoryId?.[m.id];
         const px =
-          p.type === 'photo-note' || p.type === 'audio'
+          fromMeta ??
+          (p.type === 'photo-note' || p.type === 'audio'
             ? getBookPhotoPrintPixelSize(m, photoRef)
-            : null;
+            : null);
         return {
           type: p.type,
           memoryId: m.id,
@@ -1074,6 +1202,8 @@ export type GenerateBookPdfServerInput = {
   localEdits: Record<string, Partial<Memory>>;
   /** Slot photo album par souvenir — parité aperçu livre / SQLite `memoryPhotoRefs`. */
   memoryPhotoRefs?: Record<string, string>;
+  /** Dims px pour crop aspect PDF (ex. `cropDpiMetaByKey` hors cover). */
+  cropImgPxByMemoryId?: Record<string, { w: number; h: number }>;
   /** `screen` → digital, `print` → print */
   exportMode: 'screen' | 'print';
 };
@@ -1119,20 +1249,22 @@ export async function generateBookPdfViaServer(input: GenerateBookPdfServerInput
     throw new Error('Session requise pour exporter via le serveur.');
   }
 
-  await ensureVoiceRowsCloudSyncedForSessionPdf(input.pages, input.localEdits, userId, input.childId);
+  const pages = refreshBookPdfPagesMemoriesFromSqlite(input.pages);
+
+  await ensureVoiceRowsCloudSyncedForSessionPdf(pages, input.localEdits, userId, input.childId);
 
   const voiceCoverOverrides = await ensureVoiceCoversPersistedForServerPdf(
-    input.pages,
+    pages,
     input.localEdits,
     input.childId
   );
   const videoPosterOverrides = await ensureVideoPostersPersistedForServerPdf(
-    input.pages,
+    pages,
     input.localEdits,
     input.childId
   );
   const photoPrintOverrides = await ensurePhotoPrintUrlsForServerPdf(
-    input.pages,
+    pages,
     input.localEdits,
     input.childId,
     input.memoryPhotoRefs,
@@ -1141,14 +1273,20 @@ export async function generateBookPdfViaServer(input: GenerateBookPdfServerInput
 
   const { subscriptionTier, digitalExportPaid } = await resolveServerPdfEntitlements();
 
-  const slotHttpsSession = await buildPagePhotoRefHttpsMapSession(input.pages, input.childId);
+  const cropImgPxByMemoryId = await resolveCropImgPxByMemoryIdForPdf(
+    pages,
+    input.localEdits,
+    input.cropImgPxByMemoryId,
+  );
+  const slotHttpsSession = await buildPagePhotoRefHttpsMapSession(pages, input.childId);
   const pagesPayload = applyHttpsPhotoRefsToServerPages(
     mapBookPagesToServerPayload(
-      input.pages,
+      pages,
       input.rotations,
       input.photoCrops,
       input.localEdits,
       input.memoryPhotoRefs,
+      cropImgPxByMemoryId,
     ),
     slotHttpsSession,
   );
@@ -1287,7 +1425,8 @@ async function generateBookPdfWithExportTicketBody(
   input: GenerateBookPdfWithExportTicketInput,
 ): Promise<{ localUri: string; response: GenerateBookPdfResponse }> {
   const { subscriptionTier, digitalExportPaid = false } = input;
-  const memories = collectMemoriesFromPagesForPdf(input.pages, input.localEdits);
+  const pages = refreshBookPdfPagesMemoriesFromSqlite(input.pages);
+  const memories = collectMemoriesFromPagesForPdf(pages, input.localEdits);
 
   let coverPhotoUrlOut: string | null = input.coverPhotoUrl ?? null;
   const coverLocal = (coverPhotoUrlOut ?? '').trim();
@@ -1442,11 +1581,12 @@ async function generateBookPdfWithExportTicketBody(
       }
       if (m.type === 'video') {
         const mergedVideo = mergeMemoryWithLocalRowForVideoPoster(m);
+        const customPrint = hasCustomVideoPrintPoster(mergedVideo);
         const local = (mergedVideo.local_original_path ?? mergedVideo.local_media_path ?? '').trim();
 
         let thumbLocal = getVideoPosterUriForBookPreview(mergedVideo).trim();
         if (thumbLocal && isHttps(thumbLocal)) {
-          /* ok */
+          /* remote — may still need local custom upload below */
         } else if (Platform.OS !== 'web' && local && !thumbLocal) {
           try {
             const { uri: t } = await VideoThumbnails.getThumbnailAsync(local, {
@@ -1459,14 +1599,26 @@ async function generateBookPdfWithExportTicketBody(
           }
         }
 
-        let thumbPublicUrl: string | null = isHttps(thumbLocal) ? thumbLocal : null;
+        // Custom print local : toujours uploader (ne pas réutiliser un poster_url HTTPS t≈0).
+        let thumbPublicUrl: string | null =
+          !customPrint && isHttps(thumbLocal) ? thumbLocal : null;
         try {
-          if (thumbLocal && !isHttps(thumbLocal)) {
+          const mustUploadLocal =
+            Platform.OS !== 'web' &&
+            (customPrint || (Boolean(thumbLocal) && !isHttps(thumbLocal)));
+          if (mustUploadLocal) {
             const posterCandidates = collectVideoPosterLocalUploadUriCandidates(mergedVideo);
             const readableThumb = await pickFirstReadableLocalMediaUri(
-              posterCandidates.length > 0 ? posterCandidates : [thumbLocal],
+              posterCandidates.length > 0
+                ? posterCandidates
+                : thumbLocal && !isHttps(thumbLocal)
+                  ? [thumbLocal]
+                  : [],
             );
-            if (!readableThumb) throw new Error('VIDEO_THUMB_NOT_READABLE');
+            if (!readableThumb) {
+              if (customPrint) throw new Error('VIDEO_PRINT_POSTER_NOT_READABLE');
+              throw new Error('VIDEO_THUMB_NOT_READABLE');
+            }
             const compressed = await compressLocalJpegForGuestUpload(readableThumb);
             const { readUrl } = await guestUploadMediaImageThenReadUrl({
               pdfTicket,
@@ -1477,7 +1629,8 @@ async function generateBookPdfWithExportTicketBody(
             thumbPublicUrl = readUrl;
           }
         } catch {
-          /* ignore */
+          /* ignore — repli HTTPS si dispo */
+          if (!thumbPublicUrl && isHttps(thumbLocal)) thumbPublicUrl = thumbLocal;
         }
         return {
           ...g,
@@ -1517,14 +1670,20 @@ async function generateBookPdfWithExportTicketBody(
     },
   );
 
-  const slotHttps = await buildPagePhotoRefHttpsMap(input.pages, pdfTicket);
+  const slotHttps = await buildPagePhotoRefHttpsMap(pages, pdfTicket);
+  const cropImgPxByMemoryId = await resolveCropImgPxByMemoryIdForPdf(
+    pages,
+    input.localEdits,
+    input.cropImgPxByMemoryId,
+  );
   const pagesPayload = applyHttpsPhotoRefsToServerPages(
     mapBookPagesToServerPayload(
-      input.pages,
+      pages,
       input.rotations,
       input.photoCrops,
       input.localEdits,
       input.memoryPhotoRefs,
+      cropImgPxByMemoryId,
     ),
     slotHttps,
   );

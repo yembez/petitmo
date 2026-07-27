@@ -20,6 +20,10 @@ export type InitPrintOrderParams = {
   audioVideoPageCount: number;
   email: string;
   gdprConsentAtIso: string;
+  /** Case « contenu vérifié » — ISO-8601 obligatoire pour print. */
+  contentVerifiedAtIso: string;
+  /** Version CGV affichée / acceptée (`PRINT_ORDER_CGV_VERSION`). */
+  cgvVersion: string;
   fullName?: string | null;
   marketingOptIn?: boolean;
   shippingName: string;
@@ -52,6 +56,8 @@ export async function initPrintOrderExport(params: InitPrintOrderParams): Promis
     audio_video_page_count: params.audioVideoPageCount,
     email: params.email,
     gdpr_consent_at: params.gdprConsentAtIso,
+    content_verified_at: params.contentVerifiedAtIso,
+    cgv_version: params.cgvVersion,
     full_name: params.fullName ?? null,
     marketing_opt_in: params.marketingOptIn === true,
     shipping_name: params.shippingName,

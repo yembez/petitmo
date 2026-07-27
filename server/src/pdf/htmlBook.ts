@@ -75,14 +75,7 @@ function mergedMemory(m: MemoryRow, textOverride?: string): MemoryRow {
 
 type PhotoCrop = { xPct: number; yPct: number; scale: number };
 
-function cropCss(crop?: PhotoCrop): string {
-  const x = crop?.xPct ?? 0;
-  const y = crop?.yPct ?? 0;
-  const s = Math.max(1, crop?.scale ?? 1);
-  return `transform: translate(${x}%, ${y}%) scale(${s}); transform-origin:center center;`;
-}
-
-/** Crop aspect (parité éditeur / cover) si dims connues, sinon transform historique. */
+/** Crop aspect (parité éditeur) si dims connues ; sinon cover plein cadre (sans transform). */
 function photoCropImgStyle(
   crop: PhotoCrop | undefined,
   imgPxW: number | undefined,
@@ -100,7 +93,12 @@ function photoCropImgStyle(
     const base = coverCropImgInlineStyle(crop, imgPxW, imgPxH, frameWmm, frameHmm);
     return rotCss ? `${base};${rotCss}` : base;
   }
-  return `${cropCss(crop)}${rotCss}`;
+  /**
+   * Parité `BookPagePhotoFrame` : sans dims fichier → cover plein cadre.
+   * Ne pas injecter `transform: translate/scale` : sous Chromium print-to-PDF,
+   * ça casse `object-fit:cover` (bandeau blanc haut + tête coupée), surtout posters vidéo.
+   */
+  return rotCss;
 }
 
 function sanitizeText(s: string): string {
@@ -241,7 +239,7 @@ function pageCover(
   const coverFrameWmm = printBleed ? pageWmm + 2 * PRINT_BLEED_MM : pageWmm;
   const imgStyle = hasCoverDims
     ? coverCropImgInlineStyle(crop, coverImgPxW, coverImgPxH, coverFrameWmm, coverFrameHmm)
-    : `position:absolute;inset:-1px;width:calc(100% + 2px);height:calc(100% + 2px);object-fit:cover;${cropCss(crop)}`;
+    : `position:absolute;inset:-1px;width:calc(100% + 2px);height:calc(100% + 2px);object-fit:cover;`;
   return `<div class="page cover">
   <div class="cover-photo${bleedCls}">
     ${
@@ -569,7 +567,7 @@ function pageGelatoWraparoundSpread(
         contentFront.widthMm,
         frontPhotoHmm,
       )
-    : `position:absolute;inset:-1px;width:calc(100% + 2px);height:calc(100% + 2px);object-fit:cover;${cropCss(coverCrop)}`;
+    : `position:absolute;inset:-1px;width:calc(100% + 2px);height:calc(100% + 2px);object-fit:cover;`;
 
   const spineTitle = esc(input.coverTitle.slice(0, 48));
 
