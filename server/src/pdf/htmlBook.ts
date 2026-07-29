@@ -20,7 +20,7 @@ import type { GelatoCoverLayout } from '../gelato/coverDimensions';
 import { gelatoInnerPages } from '../gelato/photobookLayout';
 import { memoryBookDisplayDateIso } from './memoryBookDisplayDate';
 import { clampMediaBookCaption } from './mediaBookCaption';
-import { coverCropImgInlineStyle } from './bookPhotoCropLayout';
+import { coverCropFrameHtml } from './bookPhotoCropLayout';
 import {
   audioWaveformSvg,
   bookPdfLocationLabel,
@@ -75,30 +75,25 @@ function mergedMemory(m: MemoryRow, textOverride?: string): MemoryRow {
 
 type PhotoCrop = { xPct: number; yPct: number; scale: number };
 
-/** Crop aspect (parité éditeur) si dims connues ; sinon cover plein cadre (sans transform). */
-function photoCropImgStyle(
+/** Markup image cadre (cover / photo / A-V) — préfère wrapper HTML si crop custom. */
+function croppedFrameHtml(
+  srcAttr: string,
   crop: PhotoCrop | undefined,
   imgPxW: number | undefined,
   imgPxH: number | undefined,
   frameWmm: number,
   frameHmm: number,
-  rotCss: string,
+  rotCss = '',
 ): string {
-  const hasDims =
-    typeof imgPxW === 'number' &&
-    typeof imgPxH === 'number' &&
-    imgPxW > 0 &&
-    imgPxH > 0;
-  if (hasDims) {
-    const base = coverCropImgInlineStyle(crop, imgPxW, imgPxH, frameWmm, frameHmm);
-    return rotCss ? `${base};${rotCss}` : base;
-  }
-  /**
-   * Parité `BookPagePhotoFrame` : sans dims fichier → cover plein cadre.
-   * Ne pas injecter `transform: translate/scale` : sous Chromium print-to-PDF,
-   * ça casse `object-fit:cover` (bandeau blanc haut + tête coupée), surtout posters vidéo.
-   */
-  return rotCss;
+  return coverCropFrameHtml({
+    srcAttr,
+    crop,
+    imgPxW,
+    imgPxH,
+    frameRefW: frameWmm,
+    frameRefH: frameHmm,
+    extraImgStyle: rotCss || undefined,
+  });
 }
 
 function sanitizeText(s: string): string {
@@ -227,26 +222,17 @@ function pageCover(
   const explicit = (coverPhotoUrl ?? '').trim();
   const src = explicit ? imgAttr(explicit) : imgAttr(child.photo_url);
   const bleedCls = printBleed ? ' bleed-x' : '';
-  const hasCoverDims =
-    typeof coverImgPxW === 'number' &&
-    typeof coverImgPxH === 'number' &&
-    coverImgPxW > 0 &&
-    coverImgPxH > 0;
   // Cadre = bandeau réel (parité maquette : pageW × pageH×142/216), pas 216:142.
   const pageWmm = printBleed ? PRINT_PAGE_WIDTH_MM : DIGITAL_PAGE_WIDTH_MM;
   const pageHmm = printBleed ? PRINT_PAGE_HEIGHT_MM : DIGITAL_PAGE_HEIGHT_MM;
   const coverFrameHmm = pageHmm * BOOK_COVER_PHOTO_HEIGHT_RATIO;
   const coverFrameWmm = printBleed ? pageWmm + 2 * PRINT_BLEED_MM : pageWmm;
-  const imgStyle = hasCoverDims
-    ? coverCropImgInlineStyle(crop, coverImgPxW, coverImgPxH, coverFrameWmm, coverFrameHmm)
-    : `position:absolute;inset:-1px;width:calc(100% + 2px);height:calc(100% + 2px);object-fit:cover;`;
+  const visual = src
+    ? croppedFrameHtml(src, crop, coverImgPxW, coverImgPxH, coverFrameWmm, coverFrameHmm)
+    : '<div class="cover-placeholder"></div>';
   return `<div class="page cover">
   <div class="cover-photo${bleedCls}">
-    ${
-      src
-        ? `<div class="crop-frame" style="width:100%;height:100%;"><img class="crop-img" src="${src}" alt="" style="${imgStyle}" /></div>`
-        : '<div class="cover-placeholder"></div>'
-    }
+    ${visual}
   </div>
   <div class="cover-text">
     <div class="cover-title">${esc(title)}</div>
@@ -301,14 +287,15 @@ function pagePhotoFull(
     frameWmm = pageWmm - 2 * BOOK_VISUAL_MARGIN_MM;
     frameHmm = pageHmm * PHOTO_FULL_BAND_HEIGHT_RATIO - 2 * BOOK_VISUAL_MARGIN_MM;
   }
-  const imgStyle = photoCropImgStyle(crop, cropImgPxW, cropImgPxH, frameWmm, frameHmm, rotCss);
+  const visual = src
+    ? croppedFrameHtml(src, crop, cropImgPxW, cropImgPxH, frameWmm, frameHmm, rotCss)
+    : '<div class="placeholder" style="width:100%;height:100%;"></div>';
+  const imageInner = isFp
+    ? visual
+    : `<div class="pn-visual-frame pf-visual-frame">${visual}</div>`;
   return `<div class="page photo-full-stack${variantCls}">
   <div class="pf-image${bleedCls}">
-    ${
-      src
-        ? `<div class="crop-frame" style="width:100%;height:100%;"><img class="crop-img" src="${src}" alt="" style="${imgStyle}" /></div>`
-        : '<div class="placeholder" style="width:100%;height:100%;"></div>'
-    }
+    ${imageInner}
   </div>
   <div class="pf-footer">
     <div class="pf-meta-row">
@@ -338,12 +325,14 @@ function pagePhotoNote(
   const pageWmm = DIGITAL_PAGE_WIDTH_MM;
   const frameWmm = pageWmm - 2 * BOOK_VISUAL_MARGIN_MM;
   const frameHmm = PHOTO_NOTE_BAND_HEIGHT_MM - 2 * BOOK_VISUAL_MARGIN_MM;
-  const imgStyle = photoCropImgStyle(crop, cropImgPxW, cropImgPxH, frameWmm, frameHmm, rotCss);
+  const visual = src
+    ? croppedFrameHtml(src, crop, cropImgPxW, cropImgPxH, frameWmm, frameHmm, rotCss)
+    : '<div class="placeholder" style="width:100%;height:100%;"></div>';
   return `<div class="page photo-note">
   <div class="pn-image">
-    ${src
-      ? `<div class="crop-frame" style="width:100%;height:100%;"><img class="crop-img" src="${src}" alt="" style="${imgStyle}" /></div>`
-      : '<div class="placeholder" style="width:100%;height:100%;"></div>'}
+    <div class="pn-visual-frame">
+      ${visual}
+    </div>
   </div>
   <div class="pn-text">
     <div class="pn-meta-row">
@@ -466,15 +455,16 @@ function pageMediaQr(
   const pageWmm = DIGITAL_PAGE_WIDTH_MM;
   const frameWmm = pageWmm - 2 * BOOK_VISUAL_MARGIN_MM;
   const frameHmm = PHOTO_NOTE_BAND_HEIGHT_MM - 2 * BOOK_VISUAL_MARGIN_MM;
-  const audioImgStyle = photoCropImgStyle(crop, cropImgPxW, cropImgPxH, frameWmm, frameHmm, rotCss);
 
   const visualInner = visualUrl
-    ? `<div class="crop-frame" style="width:100%;height:100%;"><img class="crop-img" src="${visualUrl}" alt="" style="${audioImgStyle}" /></div>`
+    ? croppedFrameHtml(visualUrl, crop, cropImgPxW, cropImgPxH, frameWmm, frameHmm, rotCss)
     : mediaQrVisualFallbackHtml(kind, m.id);
 
   return `<div class="page media-qr media-qr-${kind} audio-note-layout">
   <div class="pn-image">
-    ${visualInner}
+    <div class="pn-visual-frame">
+      ${visualInner}
+    </div>
   </div>
   <div class="pn-text media-qr-below">
     <div class="media-qr-meta-row">
@@ -552,22 +542,31 @@ function pageGelatoWraparoundSpread(
   const { contentFront, contentBack, spine, spreadWidthMm, spreadHeightMm } = layout;
   const explicit = (coverPhotoUrl ?? '').trim();
   const src = explicit ? imgAttr(explicit) : imgAttr(child.photo_url);
-  const hasCoverDims =
-    typeof coverPhotoImgPxW === 'number' &&
-    typeof coverPhotoImgPxH === 'number' &&
-    coverPhotoImgPxW > 0 &&
-    coverPhotoImgPxH > 0;
   const coverCrop = input.pages.find(p => p.type === 'cover')?.crop;
-  const frontPhotoHmm = contentFront.heightMm * BOOK_COVER_PHOTO_HEIGHT_RATIO;
-  const imgStyle = hasCoverDims
-    ? coverCropImgInlineStyle(
+
+  /**
+   * Parité maquette : photo flush haut / côtés du panneau avant.
+   * `contentFront` Gelato = zone safe (inset ~20 mm du wraparound) — si on y confine
+   * la photo, le preview commande montre des bandes blanches. On étend la photo dans
+   * le fond perdu haut + droite jusqu’au bord du spread.
+   */
+  const photoLeftMm = contentFront.leftMm;
+  const photoTopMm = 0;
+  const photoWidthMm = Math.max(contentFront.widthMm, spreadWidthMm - contentFront.leftMm);
+  const photoHeightMm =
+    contentFront.topMm + contentFront.heightMm * BOOK_COVER_PHOTO_HEIGHT_RATIO;
+  const spacerPct = (BOOK_COVER_PHOTO_HEIGHT_RATIO * 100).toFixed(2);
+
+  const visual = src
+    ? croppedFrameHtml(
+        src,
         coverCrop,
         coverPhotoImgPxW,
         coverPhotoImgPxH,
-        contentFront.widthMm,
-        frontPhotoHmm,
+        photoWidthMm,
+        photoHeightMm,
       )
-    : `position:absolute;inset:-1px;width:calc(100% + 2px);height:calc(100% + 2px);object-fit:cover;`;
+    : '<div class="cover-placeholder"></div>';
 
   const spineTitle = esc(input.coverTitle.slice(0, 48));
 
@@ -583,14 +582,11 @@ function pageGelatoWraparoundSpread(
     <div class="gw-panel gw-spine" style="left:${spine.leftMm}mm;top:${spine.topMm}mm;width:${spine.widthMm}mm;height:${spine.heightMm}mm;">
       <div class="gw-spine-title">${spineTitle}</div>
     </div>
+    <div class="gw-front-photo-bleed" style="left:${photoLeftMm}mm;top:${photoTopMm}mm;width:${photoWidthMm}mm;height:${photoHeightMm}mm;">
+      ${visual}
+    </div>
     <div class="gw-panel gw-front" style="left:${contentFront.leftMm}mm;top:${contentFront.topMm}mm;width:${contentFront.widthMm}mm;height:${contentFront.heightMm}mm;">
-      <div class="gw-front-photo">
-        ${
-          src
-            ? `<div class="crop-frame" style="width:100%;height:100%;"><img class="crop-img" src="${src}" alt="" style="${imgStyle}" /></div>`
-            : '<div class="cover-placeholder"></div>'
-        }
-      </div>
+      <div class="gw-front-photo-spacer" style="height:${spacerPct}%;"></div>
       <div class="gw-front-text">
         <div class="cover-title">${esc(input.coverTitle)}</div>
         <div class="cover-period">${esc(input.coverYearLabel)}</div>
@@ -702,6 +698,7 @@ function buildHtmlDocument(
 }
 .gw-canvas { position: relative; background: #fff; overflow: hidden; }
 .gw-panel { position: absolute; overflow: hidden; background: #fff; }
+.gw-front { background: transparent; }
 .gw-back-inner {
   width: 100%; height: 100%;
   display: flex; flex-direction: column;
@@ -724,17 +721,25 @@ function buildHtmlDocument(
   text-align: center;
 }
 .gw-front { display: flex; flex-direction: column; }
-.gw-front-photo {
-  width: 100%;
-  height: ${(BOOK_COVER_PHOTO_HEIGHT_RATIO * 100).toFixed(2)}%;
-  flex-shrink: 0;
+.gw-front-photo-bleed {
+  position: absolute;
   overflow: hidden;
+  background: #fff;
+  z-index: 1;
+}
+.gw-front-photo-spacer {
+  width: 100%;
+  flex-shrink: 0;
+  /* Réserve la place sous la photo bleed (qui déborde au-dessus de contentFront). */
 }
 .gw-front-text {
   flex: 1;
   display: flex;
   flex-direction: column;
   justify-content: center;
+  position: relative;
+  z-index: 2;
+  background: #fff;
   /* +${COVER_TITLE_SPINE_SAFE_EXTRA_MM}mm à gauche : marge hinge / rigole Gelato */
   padding: 3mm 8mm 6mm ${8 + COVER_TITLE_SPINE_SAFE_EXTRA_MM}mm;
 }
@@ -845,13 +850,14 @@ body.print-bleed .inner {
 
 .cover { flex-direction:column; }
 .cover-photo { width:var(--page-w); height:var(--cover-photo-h); overflow:hidden; flex-shrink:0; }
-.crop-frame { position:relative; overflow:hidden; }
+.crop-frame { position:relative; overflow:hidden; width:100%; height:100%; max-height:100%; }
 .crop-img {
   position:absolute;
   inset:-1px;
   width:calc(100% + 2px);
   height:calc(100% + 2px);
   object-fit:cover;
+  max-width:none;
 }
 .cover-placeholder { width:100%; height:100%; background:#E8E8ED; }
 .cover-text {
@@ -886,12 +892,15 @@ body.print-bleed .chapter-inner {
 
 .photo-full-stack { flex-direction:column; }
 .pf-image {
-  width:var(--page-w); flex-shrink:0; overflow:hidden;
-  box-sizing:border-box; background:#FFFFFF;
+  width:var(--page-w); flex:0 0 auto; flex-shrink:0; overflow:hidden;
+  box-sizing:border-box; background:#FFFFFF; position:relative;
 }
 .pf-variant-m .pf-image {
   height:var(--pf-img-h);
-  padding:var(--visual-margin);
+  padding:0;
+}
+.pf-visual-frame {
+  height:calc(var(--pf-img-h) - 2 * var(--visual-margin));
 }
 .pf-variant-fp .pf-image {
   height:var(--pf-fp-img-h);
@@ -940,8 +949,21 @@ body.print-bleed .pf-footer {
 
 .photo-note { flex-direction:column; }
 .pn-image {
-  width:var(--page-w); height:var(--pn-img-h); flex-shrink:0; overflow:hidden;
-  box-sizing:border-box; padding:var(--visual-margin); background:#FFFFFF;
+  width:var(--page-w); height:var(--pn-img-h); flex:0 0 var(--pn-img-h);
+  max-height:var(--pn-img-h); flex-shrink:0; overflow:hidden;
+  box-sizing:border-box; padding:0; background:#FFFFFF;
+  position:relative;
+}
+/* Parité maquette VisualBand : marges = cadre absolu, pas padding (Chromium print
+   peignait le crop custom dans le padding → photo sans marge + date collée). */
+.pn-visual-frame {
+  position:absolute;
+  left:var(--visual-margin);
+  top:var(--visual-margin);
+  width:calc(var(--page-w) - 2 * var(--visual-margin));
+  height:calc(var(--pn-img-h) - 2 * var(--visual-margin));
+  overflow:hidden;
+  background:#FFFFFF;
 }
 .pn-text {
   flex:1; min-height:0; overflow:hidden;
@@ -1115,15 +1137,19 @@ body.print-bleed .bleed-x {
 .quote-rule-seg { flex:1; height:.3pt; background:rgba(0,0,0,.08); }
 .quote-rule-dot { width:4pt; height:4pt; border-radius:50%; background:rgba(0,0,0,.08); }
 
-/* Audio : même squelette que photo-note (image bords + bandeau bas). */
+/* Audio / vidéo : même squelette que photo-note (image bords + bandeau bas + QR). */
 .audio-note-layout { flex-direction:column; }
 .media-qr-below {
   display:flex;
   flex-direction:column;
-  flex:1;
-  min-height:0;
+  flex:1 1 auto;
+  min-height:52mm;
   margin-top:-7mm;
   padding-top:0;
+  overflow:visible;
+  position:relative;
+  z-index:2;
+  background:#FFFFFF;
 }
 .media-qr-meta-row {
   display:flex;
