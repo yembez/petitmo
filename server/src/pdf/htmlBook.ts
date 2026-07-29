@@ -461,8 +461,11 @@ function pageMediaQr(
   const frameHmm = PHOTO_NOTE_BAND_HEIGHT_MM - 2 * BOOK_VISUAL_MARGIN_MM;
   const margin = BOOK_VISUAL_MARGIN_MM;
 
+  // Pages A/V : toujours object-fit cover (ignorer crop custom PDF).
+  // Le chemin crop custom + dims laissait le poster du 27 mai invisible sous Chromium
+  // alors que le 29 mai (crop neutre) s’affichait. Marges via pn-visual-frame en mm.
   const visualInner = visualUrl
-    ? croppedFrameHtml(visualUrl, crop, cropImgPxW, cropImgPxH, frameWmm, frameHmm, rotCss, true)
+    ? croppedFrameHtml(visualUrl, undefined, undefined, undefined, frameWmm, frameHmm, '', true)
     : mediaQrVisualFallbackHtml(kind, m.id);
 
   return `<div class="page media-qr media-qr-${kind} audio-note-layout">

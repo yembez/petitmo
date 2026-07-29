@@ -152,12 +152,10 @@ export function coverCropFrameHtml(params: {
   const lock = !!params.lockFrameMm;
   const clip = lock ? 'clip-path:inset(0);-webkit-clip-path:inset(0);' : '';
 
-  // `lockFrameMm` : le parent (pn-visual-frame) a déjà la taille en mm.
-  // Le crop-frame doit remplir ce parent (inset:0) — un 2ᵉ bloc en mm
-  // cassait Chromium print (hauteur 0 → page blanche sans poster).
-  const frameBox = lock
-    ? `position:absolute;inset:0;width:100%;height:100%;overflow:hidden;${clip}`
-    : 'width:100%;height:100%;position:relative;overflow:hidden;';
+  // Cadre fluide 100% du parent. Éviter `position:absolute;inset:0` ici :
+  // sous Chromium print + crop custom, le containing block peut finir à hauteur 0
+  // → poster invisible (page blanche, date seule).
+  const frameBox = `width:100%;height:100%;position:relative;overflow:hidden;${clip}`;
 
   if (!custom) {
     const base = lock ? PDF_STRICT_FIT_STYLE : PDF_COVER_FIT_STYLE;
@@ -166,7 +164,6 @@ export function coverCropFrameHtml(params: {
   }
 
   const rect = bookPhotoCropImageRect(fw, fh, params.imgPxW!, params.imgPxH!, params.crop ?? undefined);
-  // Toujours en % du crop-frame (qui remplit le cadre mm parent).
   const wrapStyle = [
     'position:absolute',
     `left:${((rect.left / fw) * 100).toFixed(4)}%`,
@@ -174,7 +171,6 @@ export function coverCropFrameHtml(params: {
     `width:${((rect.width / fw) * 100).toFixed(4)}%`,
     `height:${((rect.height / fh) * 100).toFixed(4)}%`,
     'overflow:hidden',
-    clip,
   ].join(';');
   const imgStyle = extra
     ? `position:absolute;inset:0;width:100%;height:100%;object-fit:fill;display:block;${extra}`
