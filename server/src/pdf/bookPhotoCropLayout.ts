@@ -113,12 +113,15 @@ export function isDefaultPhotoCrop(crop: PhotoCrop | undefined | null): boolean 
 const PDF_COVER_FIT_STYLE =
   'position:absolute;inset:-1px;width:calc(100% + 2px);height:calc(100% + 2px);object-fit:cover;display:block;';
 
+/** Sans bleed 1px — pages à marges blanches (photo-note / A-V). */
+const PDF_STRICT_FIT_STYLE =
+  'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;';
+
 /**
  * Markup cadre photo PDF (couverture / pages) — Chromium-safe.
  * - crop défaut ou sans dims → `object-fit:cover` plein cadre
- * - crop custom + dims → wrapper en **% du cadre** (pas mm absolus : print Chromium
- *   décalait l’image dans les marges blanches → date collée sous la photo).
- *   Ancien chemin mm : OK pour cover full-bleed, KO pour `.pn-image` paddé.
+ * - crop custom + dims → wrapper positionné dans le cadre
+ * - `lockFrameMm` : cadre en mm explicites + clip-path (pages A/V / photo-note)
  */
 export function coverCropFrameHtml(params: {
   srcAttr: string;
@@ -129,6 +132,11 @@ export function coverCropFrameHtml(params: {
   frameRefH: number;
   /** ex. `transform: rotate(90deg); transform-origin: center;` */
   extraImgStyle?: string;
+  /**
+   * Verrouille largeur/hauteur en mm (pas de %). Requis pour photo-note / audio / vidéo :
+   * Chromium print ignore souvent overflow sur les cadres en %.
+   */
+  lockFrameMm?: boolean;
 }): string {
   const src = (params.srcAttr ?? '').trim();
   if (!src) return '';
@@ -141,31 +149,39 @@ export function coverCropFrameHtml(params: {
     params.imgPxW > 0 &&
     params.imgPxH > 0;
   const custom = hasDims && !isDefaultPhotoCrop(params.crop);
+  const lock = !!params.lockFrameMm;
+  const clip = lock ? 'clip-path:inset(0);-webkit-clip-path:inset(0);' : '';
 
-  // Remplit le parent (cover / pn-image / gw-front-photo). Hauteur en mm ici
-  // cassait la couverture Gelato (cadre plus petit que le panneau → bandes blanches).
-  const frameBox = 'width:100%;height:100%;position:relative;overflow:hidden;';
+  const frameBox = lock
+    ? `width:${fw.toFixed(3)}mm;height:${fh.toFixed(3)}mm;position:relative;overflow:hidden;${clip}`
+    : 'width:100%;height:100%;position:relative;overflow:hidden;';
 
   if (!custom) {
-    const style = extra ? `${PDF_COVER_FIT_STYLE}${extra}` : PDF_COVER_FIT_STYLE;
+    const base = lock ? PDF_STRICT_FIT_STYLE : PDF_COVER_FIT_STYLE;
+    const style = extra ? `${base}${extra}` : base;
     return `<div class="crop-frame" style="${frameBox}"><img class="crop-img" src="${src}" alt="" style="${style}" /></div>`;
   }
 
   const rect = bookPhotoCropImageRect(fw, fh, params.imgPxW!, params.imgPxH!, params.crop ?? undefined);
-  // % du cadre (pas mm absolus) : aligne le crop sur la boîte réelle rendue par Chromium
-  // (sinon débordement dans les marges blanches `.pn-image` / date collée sous la photo).
-  const leftPct = (rect.left / fw) * 100;
-  const topPct = (rect.top / fh) * 100;
-  const widthPct = (rect.width / fw) * 100;
-  const heightPct = (rect.height / fh) * 100;
-  const wrapStyle = [
-    'position:absolute',
-    `left:${leftPct.toFixed(4)}%`,
-    `top:${topPct.toFixed(4)}%`,
-    `width:${widthPct.toFixed(4)}%`,
-    `height:${heightPct.toFixed(4)}%`,
-    'overflow:hidden',
-  ].join(';');
+  // Cadre verrouillé en mm → coords mm (cohérentes). Sinon % du parent fluide.
+  const wrapStyle = lock
+    ? [
+        'position:absolute',
+        `left:${rect.left.toFixed(3)}mm`,
+        `top:${rect.top.toFixed(3)}mm`,
+        `width:${rect.width.toFixed(3)}mm`,
+        `height:${rect.height.toFixed(3)}mm`,
+        'overflow:hidden',
+        clip,
+      ].join(';')
+    : [
+        'position:absolute',
+        `left:${((rect.left / fw) * 100).toFixed(4)}%`,
+        `top:${((rect.top / fh) * 100).toFixed(4)}%`,
+        `width:${((rect.width / fw) * 100).toFixed(4)}%`,
+        `height:${((rect.height / fh) * 100).toFixed(4)}%`,
+        'overflow:hidden',
+      ].join(';');
   const imgStyle = extra
     ? `position:absolute;inset:0;width:100%;height:100%;object-fit:fill;display:block;${extra}`
     : 'position:absolute;inset:0;width:100%;height:100%;object-fit:fill;display:block;';

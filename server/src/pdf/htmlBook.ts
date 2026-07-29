@@ -84,6 +84,7 @@ function croppedFrameHtml(
   frameWmm: number,
   frameHmm: number,
   rotCss = '',
+  lockFrameMm = false,
 ): string {
   return coverCropFrameHtml({
     srcAttr,
@@ -93,6 +94,7 @@ function croppedFrameHtml(
     frameRefW: frameWmm,
     frameRefH: frameHmm,
     extraImgStyle: rotCss || undefined,
+    lockFrameMm,
   });
 }
 
@@ -288,11 +290,12 @@ function pagePhotoFull(
     frameHmm = pageHmm * PHOTO_FULL_BAND_HEIGHT_RATIO - 2 * BOOK_VISUAL_MARGIN_MM;
   }
   const visual = src
-    ? croppedFrameHtml(src, crop, cropImgPxW, cropImgPxH, frameWmm, frameHmm, rotCss)
+    ? croppedFrameHtml(src, crop, cropImgPxW, cropImgPxH, frameWmm, frameHmm, rotCss, !isFp)
     : '<div class="placeholder" style="width:100%;height:100%;"></div>';
+  const margin = BOOK_VISUAL_MARGIN_MM;
   const imageInner = isFp
     ? visual
-    : `<div class="pn-visual-frame pf-visual-frame">${visual}</div>`;
+    : `<div class="pn-visual-frame" style="left:${margin}mm;top:${margin}mm;width:${frameWmm.toFixed(3)}mm;height:${frameHmm.toFixed(3)}mm;">${visual}</div>`;
   return `<div class="page photo-full-stack${variantCls}">
   <div class="pf-image${bleedCls}">
     ${imageInner}
@@ -325,12 +328,13 @@ function pagePhotoNote(
   const pageWmm = DIGITAL_PAGE_WIDTH_MM;
   const frameWmm = pageWmm - 2 * BOOK_VISUAL_MARGIN_MM;
   const frameHmm = PHOTO_NOTE_BAND_HEIGHT_MM - 2 * BOOK_VISUAL_MARGIN_MM;
+  const margin = BOOK_VISUAL_MARGIN_MM;
   const visual = src
-    ? croppedFrameHtml(src, crop, cropImgPxW, cropImgPxH, frameWmm, frameHmm, rotCss)
+    ? croppedFrameHtml(src, crop, cropImgPxW, cropImgPxH, frameWmm, frameHmm, rotCss, true)
     : '<div class="placeholder" style="width:100%;height:100%;"></div>';
   return `<div class="page photo-note">
   <div class="pn-image">
-    <div class="pn-visual-frame">
+    <div class="pn-visual-frame" style="left:${margin}mm;top:${margin}mm;width:${frameWmm.toFixed(3)}mm;height:${frameHmm.toFixed(3)}mm;">
       ${visual}
     </div>
   </div>
@@ -455,14 +459,15 @@ function pageMediaQr(
   const pageWmm = DIGITAL_PAGE_WIDTH_MM;
   const frameWmm = pageWmm - 2 * BOOK_VISUAL_MARGIN_MM;
   const frameHmm = PHOTO_NOTE_BAND_HEIGHT_MM - 2 * BOOK_VISUAL_MARGIN_MM;
+  const margin = BOOK_VISUAL_MARGIN_MM;
 
   const visualInner = visualUrl
-    ? croppedFrameHtml(visualUrl, crop, cropImgPxW, cropImgPxH, frameWmm, frameHmm, rotCss)
+    ? croppedFrameHtml(visualUrl, crop, cropImgPxW, cropImgPxH, frameWmm, frameHmm, rotCss, true)
     : mediaQrVisualFallbackHtml(kind, m.id);
 
   return `<div class="page media-qr media-qr-${kind} audio-note-layout">
   <div class="pn-image">
-    <div class="pn-visual-frame">
+    <div class="pn-visual-frame" style="left:${margin}mm;top:${margin}mm;width:${frameWmm.toFixed(3)}mm;height:${frameHmm.toFixed(3)}mm;">
       ${visualInner}
     </div>
   </div>
@@ -899,9 +904,6 @@ body.print-bleed .chapter-inner {
   height:var(--pf-img-h);
   padding:0;
 }
-.pf-visual-frame {
-  height:calc(var(--pf-img-h) - 2 * var(--visual-margin));
-}
 .pf-variant-fp .pf-image {
   height:var(--pf-fp-img-h);
   padding:0;
@@ -954,16 +956,14 @@ body.print-bleed .pf-footer {
   box-sizing:border-box; padding:0; background:#FFFFFF;
   position:relative;
 }
-/* Parité maquette VisualBand : marges = cadre absolu, pas padding (Chromium print
-   peignait le crop custom dans le padding → photo sans marge + date collée). */
+/* Parité maquette VisualBand : marges = cadre absolu en mm (inline) + clip.
+   Pas de padding ni calc(var) — Chromium print les gère mal. */
 .pn-visual-frame {
   position:absolute;
-  left:var(--visual-margin);
-  top:var(--visual-margin);
-  width:calc(var(--page-w) - 2 * var(--visual-margin));
-  height:calc(var(--pn-img-h) - 2 * var(--visual-margin));
   overflow:hidden;
   background:#FFFFFF;
+  clip-path:inset(0);
+  -webkit-clip-path:inset(0);
 }
 .pn-text {
   flex:1; min-height:0; overflow:hidden;
