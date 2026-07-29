@@ -152,8 +152,11 @@ export function coverCropFrameHtml(params: {
   const lock = !!params.lockFrameMm;
   const clip = lock ? 'clip-path:inset(0);-webkit-clip-path:inset(0);' : '';
 
+  // `lockFrameMm` : le parent (pn-visual-frame) a déjà la taille en mm.
+  // Le crop-frame doit remplir ce parent (inset:0) — un 2ᵉ bloc en mm
+  // cassait Chromium print (hauteur 0 → page blanche sans poster).
   const frameBox = lock
-    ? `width:${fw.toFixed(3)}mm;height:${fh.toFixed(3)}mm;position:relative;overflow:hidden;${clip}`
+    ? `position:absolute;inset:0;width:100%;height:100%;overflow:hidden;${clip}`
     : 'width:100%;height:100%;position:relative;overflow:hidden;';
 
   if (!custom) {
@@ -163,25 +166,16 @@ export function coverCropFrameHtml(params: {
   }
 
   const rect = bookPhotoCropImageRect(fw, fh, params.imgPxW!, params.imgPxH!, params.crop ?? undefined);
-  // Cadre verrouillé en mm → coords mm (cohérentes). Sinon % du parent fluide.
-  const wrapStyle = lock
-    ? [
-        'position:absolute',
-        `left:${rect.left.toFixed(3)}mm`,
-        `top:${rect.top.toFixed(3)}mm`,
-        `width:${rect.width.toFixed(3)}mm`,
-        `height:${rect.height.toFixed(3)}mm`,
-        'overflow:hidden',
-        clip,
-      ].join(';')
-    : [
-        'position:absolute',
-        `left:${((rect.left / fw) * 100).toFixed(4)}%`,
-        `top:${((rect.top / fh) * 100).toFixed(4)}%`,
-        `width:${((rect.width / fw) * 100).toFixed(4)}%`,
-        `height:${((rect.height / fh) * 100).toFixed(4)}%`,
-        'overflow:hidden',
-      ].join(';');
+  // Toujours en % du crop-frame (qui remplit le cadre mm parent).
+  const wrapStyle = [
+    'position:absolute',
+    `left:${((rect.left / fw) * 100).toFixed(4)}%`,
+    `top:${((rect.top / fh) * 100).toFixed(4)}%`,
+    `width:${((rect.width / fw) * 100).toFixed(4)}%`,
+    `height:${((rect.height / fh) * 100).toFixed(4)}%`,
+    'overflow:hidden',
+    clip,
+  ].join(';');
   const imgStyle = extra
     ? `position:absolute;inset:0;width:100%;height:100%;object-fit:fill;display:block;${extra}`
     : 'position:absolute;inset:0;width:100%;height:100%;object-fit:fill;display:block;';
