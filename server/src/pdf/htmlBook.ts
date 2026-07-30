@@ -939,6 +939,7 @@ body.print-bleed .chapter-inner {
 .pf-image {
   width:var(--page-w); flex:0 0 auto; flex-shrink:0; overflow:hidden;
   box-sizing:border-box; background:#FFFFFF; position:relative;
+  z-index:0;
 }
 .pf-variant-m .pf-image {
   height:var(--pf-img-h);
@@ -957,6 +958,11 @@ body.print-bleed .chapter-inner {
 .pf-variant-m .pf-footer {
   flex:1; min-height:0;
   margin-top:-7mm; padding-top:0;
+  /* Parité .media-qr-below : le -7mm chevauche la bande image — sans z-index
+     Chromium print peint le crop par-dessus → date/âge invisibles. */
+  position:relative;
+  z-index:2;
+  background:#FFFFFF;
 }
 .pf-body-wrap {
   flex:1; min-height:0;
@@ -995,6 +1001,7 @@ body.print-bleed .pf-footer {
   max-height:var(--pn-img-h); flex-shrink:0; overflow:hidden;
   box-sizing:border-box; padding:0; background:#FFFFFF;
   position:relative;
+  z-index:0;
 }
 /* Parité maquette VisualBand : marges = cadre absolu en mm (inline) + clip.
    Pas de padding ni calc(var) — Chromium print les gère mal. */
@@ -1012,6 +1019,10 @@ body.print-bleed .pf-footer {
 .photo-note .pn-text {
   display:flex; flex-direction:column;
   margin-top:-7mm; padding-top:0;
+  /* Même garde-fou que A/V (.media-qr-below) : date/âge au-dessus du crop. */
+  position:relative;
+  z-index:2;
+  background:#FFFFFF;
 }
 .pn-body-wrap {
   flex:1; min-height:0;

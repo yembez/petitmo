@@ -74,7 +74,10 @@ function CroppedPhotoStatic({
       </View>
     );
   }
-  /** Sans dims : cover plein cadre (ignore pan/scale tant que le DPI n’est pas prêt). */
+  // Sans dims : garder le crop via transform (ne pas ignorer pan/scale → flash « photo non recadrée »).
+  const x = ((crop?.xPct ?? 0) / 100) * width;
+  const y = ((crop?.yPct ?? 0) / 100) * height;
+  const s = Math.max(1, crop?.scale ?? 1);
   return (
     <View style={{ width, height, overflow: 'hidden', backgroundColor: '#FFFFFF' }}>
       <ExpoImage
@@ -83,7 +86,10 @@ function CroppedPhotoStatic({
         cachePolicy="memory-disk"
         transition={0}
         priority="high"
-        style={StyleSheet.absoluteFillObject}
+        style={[
+          StyleSheet.absoluteFillObject,
+          { transform: [{ translateX: x }, { translateY: y }, { scale: s }] },
+        ]}
         contentFit="cover"
       />
     </View>

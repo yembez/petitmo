@@ -76,6 +76,33 @@ function cropFromShared(tx: number, ty: number, scale: number, frameW: number, f
   };
 }
 
+function seedCropSharedValues(params: {
+  crop?: PhotoCrop;
+  useAspect: boolean;
+  baseW: number;
+  baseH: number;
+  frameW: number;
+  frameH: number;
+}): { scale: number; tx: number; ty: number } {
+  const ic = params.crop ?? defaultPhotoCrop();
+  const s = Math.max(1, ic.scale);
+  const rawTx = (ic.xPct / 100) * params.frameW;
+  const rawTy = (ic.yPct / 100) * params.frameH;
+  const { maxTx, maxTy } = panMaxWorklet(
+    params.useAspect,
+    params.baseW,
+    params.baseH,
+    params.frameW,
+    params.frameH,
+    s,
+  );
+  return {
+    scale: s,
+    tx: Math.max(-maxTx, Math.min(maxTx, rawTx)),
+    ty: Math.max(-maxTy, Math.min(maxTy, rawTy)),
+  };
+}
+
 export function BookInlinePhotoCrop({
   uri,
   frameW,
@@ -107,9 +134,11 @@ export function BookInlinePhotoCrop({
     [useAspect, frameW, frameH, imgPxW, imgPxH],
   );
 
-  const scale = useSharedValue(1);
-  const tx = useSharedValue(0);
-  const ty = useSharedValue(0);
+  // Seed immédiat = crop persisté (évite 1 frame à scale 1 → flash « ancien » cadrage).
+  const seed = seedCropSharedValues({ crop, useAspect, baseW, baseH, frameW, frameH });
+  const scale = useSharedValue(seed.scale);
+  const tx = useSharedValue(seed.tx);
+  const ty = useSharedValue(seed.ty);
   const panStartX = useSharedValue(0);
   const panStartY = useSharedValue(0);
   const pinchStartScale = useSharedValue(1);
@@ -119,17 +148,13 @@ export function BookInlinePhotoCrop({
   }, [frameH, frameW, onChange, scale, tx, ty]);
 
   useEffect(() => {
-    const ic = crop ?? defaultPhotoCrop();
-    const s = Math.max(1, ic.scale);
-    const rawTx = (ic.xPct / 100) * frameW;
-    const rawTy = (ic.yPct / 100) * frameH;
-    const { maxTx, maxTy } = panMaxWorklet(useAspect, baseW, baseH, frameW, frameH, s);
-    scale.value = s;
-    tx.value = Math.max(-maxTx, Math.min(maxTx, rawTx));
-    ty.value = Math.max(-maxTy, Math.min(maxTy, rawTy));
+    const next = seedCropSharedValues({ crop, useAspect, baseW, baseH, frameW, frameH });
+    scale.value = next.scale;
+    tx.value = next.tx;
+    ty.value = next.ty;
   }, [crop, useAspect, baseW, baseH, frameH, frameW, scale, tx, ty, uri]);
 
-  const [liveScale, setLiveScale] = useState(1);
+  const [liveScale, setLiveScale] = useState(seed.scale);
   useAnimatedReaction(
     () => scale.value,
     (next, prev) => {
