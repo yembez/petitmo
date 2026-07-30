@@ -3,6 +3,7 @@ import { awaitVideoPosterForBookMemory } from '@/services/memoryLocalStore';
 import {
   collectVideoFeedPosterLocalUriCandidates,
   collectVideoPosterLocalUploadUriCandidates,
+  appendLocalMediaCacheBuster,
   getBookVideoPosterDisplayUri,
   hasCustomVideoPrintPoster,
   isDeviceLocalMediaUri,
@@ -63,9 +64,31 @@ async function resolveRemoteBookPoster(memory: Memory): Promise<string> {
   return '';
 }
 
+async function resolveRemotePrintPosterOnly(memory: Memory): Promise<string> {
+  const t = (memory.poster_print_url ?? '').trim();
+  if (!t || isDeviceLocalMediaUri(t)) return '';
+  if (/^https?:\/\//i.test(t)) return normalizePosterDisplay(t);
+  const signed = (await getSignedMediaDisplayUrl(t)).trim();
+  return signed ? normalizePosterDisplay(signed) : '';
+}
+
+/**
+ * Resolve poster livre.
+ * Custom print : **jamais** de repli sur `poster.jpg` (frame t≈0) — sinon le spread
+ * fige la mauvaise image au cold start quand le print local n’est pas encore lisible.
+ */
 async function resolveReadableBookPoster(memory: Memory): Promise<string> {
-  const custom = await readableCustomPrintPosterUri(memory);
-  if (custom) return getBookVideoPosterDisplayUri(memory).trim() || custom;
+  if (hasCustomVideoPrintPoster(memory)) {
+    const customLocal = await readableCustomPrintPosterUri(memory);
+    if (customLocal) {
+      return getBookVideoPosterDisplayUri(memory).trim() || customLocal;
+    }
+    const remotePrint = await resolveRemotePrintPosterOnly(memory);
+    if (remotePrint) return remotePrint;
+    // Garder l’URI print revendiquée (path / buster) plutôt que downgrade feed.
+    const live = getBookVideoPosterDisplayUri(memory).trim();
+    return live ? normalizePosterDisplay(live) : '';
+  }
 
   const feed = await readableFeedPosterUri(memory);
   if (feed) return feed;
@@ -106,17 +129,41 @@ export async function hasReadableBookVideoPoster(memory: Memory): Promise<boolea
 /**
  * Sync local-first : print custom d’abord, puis feed, puis https.
  * La lisibilité FS est confirmée en async (`resolveBookVideoPosterDisplayUri`).
+ *
+ * Important : ne jamais préférer un cache session stale quand `poster_print.jpg`
+ * est réécrit au même chemin (`updated_at` / `?petitmo_v=` changent).
  */
 export function peekSyncBookVideoPosterDisplayUri(memory: Memory): string {
   if (memory.type !== 'video') return '';
-  const cached = peekBookVideoPosterStableCache(memory.id);
+
+  const live = getBookVideoPosterDisplayUri(memory).trim();
+  const cached = peekBookVideoPosterStableCache(memory.id)?.trim() ?? '';
+  const base = (u: string) => (u.split('?')[0] ?? u).trim();
+
+  if (live) {
+    if (!cached) return normalizePosterDisplay(live);
+    // Même fichier (rewrite) ou print custom → toujours l’URI live bustée.
+    if (
+      base(cached) === base(live) ||
+      hasCustomVideoPrintPoster(memory) ||
+      live.includes('poster_print')
+    ) {
+      return normalizePosterDisplay(live);
+    }
+    return normalizePosterDisplay(cached);
+  }
+
   if (cached) return normalizePosterDisplay(cached);
 
   for (const u of collectVideoPrintPosterLocalUriCandidates(memory)) {
     const t = (u ?? '').trim();
     if (!t || !isDeviceLocalMediaUri(t)) continue;
     if (isSandboxUriFromForeignContainer(t)) continue;
-    return normalizePosterDisplay(t);
+    return normalizePosterDisplay(
+      hasCustomVideoPrintPoster(memory)
+        ? appendLocalMediaCacheBuster(t, memory.updated_at)
+        : t,
+    );
   }
 
   for (const u of collectVideoFeedPosterLocalUriCandidates(memory)) {

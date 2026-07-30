@@ -578,7 +578,11 @@ export async function uploadChildPhoto(childId: string, photoUri: string): Promi
     const detectedFace = faceSource
       ? await detectFaceBounds(faceSource).catch(() => null)
       : null;
-    const faceMeta = pickFaceBounds(detectedFace);
+    const faceMeta = detectedFace
+      ? pickFaceBounds(detectedFace)
+      : faceSource
+        ? await estimatePortraitFaceBounds(faceSource)
+        : await estimatePortraitFaceBounds('');
 
     const existing = getLocalChild(childId);
     const now = new Date().toISOString();

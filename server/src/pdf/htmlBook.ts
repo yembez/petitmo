@@ -75,7 +75,7 @@ function mergedMemory(m: MemoryRow, textOverride?: string): MemoryRow {
 
 type PhotoCrop = { xPct: number; yPct: number; scale: number };
 
-/** Markup image cadre (cover / photo / A-V) — préfère wrapper HTML si crop custom. */
+/** Markup image cadre (cover / photo / A-V) — toujours mm absolus (Chromium-safe). */
 function croppedFrameHtml(
   srcAttr: string,
   crop: PhotoCrop | undefined,
@@ -84,7 +84,7 @@ function croppedFrameHtml(
   frameWmm: number,
   frameHmm: number,
   rotCss = '',
-  lockFrameMm = false,
+  fitMode: 'bleed' | 'strict' = 'strict',
 ): string {
   return coverCropFrameHtml({
     srcAttr,
@@ -94,7 +94,7 @@ function croppedFrameHtml(
     frameRefW: frameWmm,
     frameRefH: frameHmm,
     extraImgStyle: rotCss || undefined,
-    lockFrameMm,
+    fitMode,
   });
 }
 
@@ -230,7 +230,7 @@ function pageCover(
   const coverFrameHmm = pageHmm * BOOK_COVER_PHOTO_HEIGHT_RATIO;
   const coverFrameWmm = printBleed ? pageWmm + 2 * PRINT_BLEED_MM : pageWmm;
   const visual = src
-    ? croppedFrameHtml(src, crop, coverImgPxW, coverImgPxH, coverFrameWmm, coverFrameHmm)
+    ? croppedFrameHtml(src, crop, coverImgPxW, coverImgPxH, coverFrameWmm, coverFrameHmm, '', 'bleed')
     : '<div class="cover-placeholder"></div>';
   return `<div class="page cover">
   <div class="cover-photo${bleedCls}">
@@ -256,6 +256,24 @@ function pageChapter(month: string, chapterNum: number, chapterTitle: string, pa
 </div>`;
 }
 
+/**
+ * Cadre visuel [M] (photo-note / A-V / photo-full marges) :
+ * taille = trim 210 − 2×12 (= 186), jamais page print 218 (sinon G/D asymétriques).
+ * En print, inset depuis le bord feuille = bleed + 12.
+ */
+function visualBandFrameMm(printBleed: boolean): {
+  insetMm: number;
+  frameWmm: number;
+  frameHmm: number;
+} {
+  const insetMm = printBleed ? PRINT_BLEED_MM + BOOK_VISUAL_MARGIN_MM : BOOK_VISUAL_MARGIN_MM;
+  return {
+    insetMm,
+    frameWmm: DIGITAL_PAGE_WIDTH_MM - 2 * BOOK_VISUAL_MARGIN_MM,
+    frameHmm: PHOTO_NOTE_INNER_MM,
+  };
+}
+
 function pagePhotoFull(
   m: MemoryRow,
   rot: number,
@@ -277,25 +295,26 @@ function pagePhotoFull(
   const variantCls = isFp ? ' pf-variant-fp' : ' pf-variant-m';
   const bleedCls = isFp && printBleed ? ' bleed-x' : '';
   const pageWmm = printBleed ? PRINT_PAGE_WIDTH_MM : DIGITAL_PAGE_WIDTH_MM;
-  const pageHmm = printBleed ? PRINT_PAGE_HEIGHT_MM : DIGITAL_PAGE_HEIGHT_MM;
   let frameWmm: number;
   let frameHmm: number;
+  let insetMm = BOOK_VISUAL_MARGIN_MM;
   if (isFp) {
     frameWmm = printBleed ? pageWmm + 2 * PRINT_BLEED_MM : pageWmm;
     frameHmm = printBleed
       ? PRINT_PAGE_HEIGHT_MM - PHOTO_FULL_FP_FOOTER_MM
       : PHOTO_FULL_FP_IMAGE_HEIGHT_MM;
   } else {
-    frameWmm = pageWmm - 2 * BOOK_VISUAL_MARGIN_MM;
-    frameHmm = pageHmm * PHOTO_FULL_BAND_HEIGHT_RATIO - 2 * BOOK_VISUAL_MARGIN_MM;
+    const band = visualBandFrameMm(printBleed);
+    insetMm = band.insetMm;
+    frameWmm = band.frameWmm;
+    frameHmm = DIGITAL_PAGE_HEIGHT_MM * PHOTO_FULL_BAND_HEIGHT_RATIO - 2 * BOOK_VISUAL_MARGIN_MM;
   }
   const visual = src
-    ? croppedFrameHtml(src, crop, cropImgPxW, cropImgPxH, frameWmm, frameHmm, rotCss, !isFp)
+    ? croppedFrameHtml(src, crop, cropImgPxW, cropImgPxH, frameWmm, frameHmm, rotCss, 'strict')
     : '<div class="placeholder" style="width:100%;height:100%;"></div>';
-  const margin = BOOK_VISUAL_MARGIN_MM;
   const imageInner = isFp
     ? visual
-    : `<div class="pn-visual-frame" style="left:${margin}mm;top:${margin}mm;width:${frameWmm.toFixed(3)}mm;height:${frameHmm.toFixed(3)}mm;">${visual}</div>`;
+    : `<div class="pn-visual-frame" style="left:${insetMm}mm;top:${insetMm}mm;width:${frameWmm.toFixed(3)}mm;height:${frameHmm.toFixed(3)}mm;">${visual}</div>`;
   return `<div class="page photo-full-stack${variantCls}">
   <div class="pf-image${bleedCls}">
     ${imageInner}
@@ -320,21 +339,19 @@ function pagePhotoNote(
   photoRef?: string | null,
   cropImgPxW?: number,
   cropImgPxH?: number,
+  printBleed = false,
 ): string {
   const src = imgAttr(photoUrlForPage(m, photoRef));
   const legend = sanitizeText((m.content ?? '').trim());
   const rotCss = rot ? `transform: rotate(${rot}deg); transform-origin: center;` : '';
   const locLabel = bookPdfLocationLabel(m.location);
-  const pageWmm = DIGITAL_PAGE_WIDTH_MM;
-  const frameWmm = pageWmm - 2 * BOOK_VISUAL_MARGIN_MM;
-  const frameHmm = PHOTO_NOTE_BAND_HEIGHT_MM - 2 * BOOK_VISUAL_MARGIN_MM;
-  const margin = BOOK_VISUAL_MARGIN_MM;
+  const { insetMm, frameWmm, frameHmm } = visualBandFrameMm(printBleed);
   const visual = src
-    ? croppedFrameHtml(src, crop, cropImgPxW, cropImgPxH, frameWmm, frameHmm, rotCss, true)
+    ? croppedFrameHtml(src, crop, cropImgPxW, cropImgPxH, frameWmm, frameHmm, rotCss, 'strict')
     : '<div class="placeholder" style="width:100%;height:100%;"></div>';
   return `<div class="page photo-note">
   <div class="pn-image">
-    <div class="pn-visual-frame" style="left:${margin}mm;top:${margin}mm;width:${frameWmm.toFixed(3)}mm;height:${frameHmm.toFixed(3)}mm;">
+    <div class="pn-visual-frame" style="left:${insetMm}mm;top:${insetMm}mm;width:${frameWmm.toFixed(3)}mm;height:${frameHmm.toFixed(3)}mm;">
       ${visual}
     </div>
   </div>
@@ -446,6 +463,7 @@ function pageMediaQr(
   birthdate: string | null | undefined,
   cropImgPxW?: number,
   cropImgPxH?: number,
+  printBleed = false,
 ): string {
   const captionRaw = clampMediaBookCaption(sanitizeText((m.content ?? '').trim()));
   const captionHtml = captionRaw ? romanHtml(captionRaw) : '';
@@ -456,21 +474,16 @@ function pageMediaQr(
   const typeLabel = kind === 'audio' ? 'Audio' : 'Video';
   const qrHint = kind === 'audio' ? 'Scanner pour écouter' : 'Scanner pour visionner';
 
-  const pageWmm = DIGITAL_PAGE_WIDTH_MM;
-  const frameWmm = pageWmm - 2 * BOOK_VISUAL_MARGIN_MM;
-  const frameHmm = PHOTO_NOTE_BAND_HEIGHT_MM - 2 * BOOK_VISUAL_MARGIN_MM;
-  const margin = BOOK_VISUAL_MARGIN_MM;
+  // Cadre 186×186 (trim) ; print : inset bleed+12 → marges G/D égales sur feuille 218.
+  const { insetMm, frameWmm, frameHmm } = visualBandFrameMm(printBleed);
 
-  // Pages A/V : toujours object-fit cover (ignorer crop custom PDF).
-  // Le chemin crop custom + dims laissait le poster du 27 mai invisible sous Chromium
-  // alors que le 29 mai (crop neutre) s’affichait. Marges via pn-visual-frame en mm.
   const visualInner = visualUrl
-    ? croppedFrameHtml(visualUrl, undefined, undefined, undefined, frameWmm, frameHmm, '', true)
+    ? croppedFrameHtml(visualUrl, crop, cropImgPxW, cropImgPxH, frameWmm, frameHmm, rotCss, 'strict')
     : mediaQrVisualFallbackHtml(kind, m.id);
 
   return `<div class="page media-qr media-qr-${kind} audio-note-layout">
   <div class="pn-image">
-    <div class="pn-visual-frame" style="left:${margin}mm;top:${margin}mm;width:${frameWmm.toFixed(3)}mm;height:${frameHmm.toFixed(3)}mm;">
+    <div class="pn-visual-frame" style="left:${insetMm}mm;top:${insetMm}mm;width:${frameWmm.toFixed(3)}mm;height:${frameHmm.toFixed(3)}mm;">
       ${visualInner}
     </div>
   </div>
@@ -507,8 +520,9 @@ function pageAudio(
   birthdate: string | null | undefined,
   cropImgPxW?: number,
   cropImgPxH?: number,
+  printBleed = false,
 ): string {
-  return pageMediaQr('audio', m, qrUrl, pageNum, rot, crop, birthdate, cropImgPxW, cropImgPxH);
+  return pageMediaQr('audio', m, qrUrl, pageNum, rot, crop, birthdate, cropImgPxW, cropImgPxH, printBleed);
 }
 
 function pageVideo(
@@ -520,8 +534,9 @@ function pageVideo(
   birthdate: string | null | undefined,
   cropImgPxW?: number,
   cropImgPxH?: number,
+  printBleed = false,
 ): string {
-  return pageMediaQr('video', m, qrUrl, pageNum, rot, crop, birthdate, cropImgPxW, cropImgPxH);
+  return pageMediaQr('video', m, qrUrl, pageNum, rot, crop, birthdate, cropImgPxW, cropImgPxH, printBleed);
 }
 
 function pageBackCover(pageNum: number): string {
@@ -573,6 +588,8 @@ function pageGelatoWraparoundSpread(
         coverPhotoImgPxH,
         photoWidthMm,
         photoHeightMm,
+        '',
+        'bleed',
       )
     : '<div class="cover-placeholder"></div>';
 
@@ -660,18 +677,39 @@ function renderPage(page: BookPageServer, input: BuildBookHtmlInput, pageNum: nu
             page.photoRef,
             page.cropImgPxW,
             page.cropImgPxH,
+            printBleed,
           );
         case 'quote':
           return pageQuote(m, pageNum, birthdate);
         case 'audio': {
           const tok = qrTokensByMemoryId.get(id) ?? '';
           const qrTarget = tok ? `${qrBaseUrl}/${tok}` : '';
-          return pageAudio(m, qrTarget, pageNum, rot, crop, birthdate, page.cropImgPxW, page.cropImgPxH);
+          return pageAudio(
+            m,
+            qrTarget,
+            pageNum,
+            rot,
+            crop,
+            birthdate,
+            page.cropImgPxW,
+            page.cropImgPxH,
+            printBleed,
+          );
         }
         case 'video': {
           const tok = qrTokensByMemoryId.get(id) ?? '';
           const qrTarget = tok ? `${qrBaseUrl}/${tok}` : '';
-          return pageVideo(m, qrTarget, pageNum, rot, crop, birthdate, page.cropImgPxW, page.cropImgPxH);
+          return pageVideo(
+            m,
+            qrTarget,
+            pageNum,
+            rot,
+            crop,
+            birthdate,
+            page.cropImgPxW,
+            page.cropImgPxH,
+            printBleed,
+          );
         }
         default:
           return '';
@@ -693,7 +731,12 @@ function buildHtmlDocument(
   gelatoSpread?: { widthMm: number; heightMm: number },
 ): string {
   const bleedMm = isPrint ? PRINT_BLEED_MM : 0;
-  const pnImgHmm = (PHOTO_NOTE_INNER_MM + 2 * BOOK_VISUAL_MARGIN_MM).toFixed(2);
+  // Print : bande = bleed haut + bande trim 210 (cadre inset bleed+12).
+  const pnImgHmm = (
+    isPrint
+      ? PRINT_BLEED_MM + PHOTO_NOTE_BAND_HEIGHT_MM
+      : PHOTO_NOTE_BAND_HEIGHT_MM
+  ).toFixed(2);
   const coverPhotoHmm = (pageHmm * BOOK_COVER_PHOTO_HEIGHT_RATIO).toFixed(2);
   const pfImgHmm = (pageHmm * PHOTO_FULL_BAND_HEIGHT_RATIO).toFixed(2);
   const gelatoPageCss = gelatoSpread
@@ -858,15 +901,9 @@ body.print-bleed .inner {
 
 .cover { flex-direction:column; }
 .cover-photo { width:var(--page-w); height:var(--cover-photo-h); overflow:hidden; flex-shrink:0; }
-.crop-frame { position:relative; overflow:hidden; width:100%; height:100%; max-height:100%; }
-.crop-img {
-  position:absolute;
-  inset:-1px;
-  width:calc(100% + 2px);
-  height:calc(100% + 2px);
-  object-fit:cover;
-  max-width:none;
-}
+/* Cadre / img : tailles via inline mm (bookPhotoCropLayout). Pas de left/top % ici. */
+.crop-frame { position:relative; overflow:hidden; }
+.crop-img { display:block; max-width:none; }
 .cover-placeholder { width:100%; height:100%; background:#E8E8ED; }
 .cover-text {
   flex:1; display:flex; flex-direction:column; justify-content:center;

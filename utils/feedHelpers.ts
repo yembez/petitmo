@@ -81,6 +81,51 @@ export function filMemoryVisualEqual(a: Memory, b: Memory): boolean {
   );
 }
 
+/**
+ * Égalité maquette livre — inclut posters vidéo / print (ignorés par `filMemoryVisualEqual`).
+ * Sans ça, un heal/materialize qui pose `poster_print` ne re-rend pas le spread.
+ */
+export function bookMemoryMaquetteEqual(a: Memory, b: Memory): boolean {
+  if (!filMemoryVisualEqual(a, b)) return false;
+  return (
+    (a.updated_at ?? '') === (b.updated_at ?? '') &&
+    (a.local_poster_print_path ?? '') === (b.local_poster_print_path ?? '') &&
+    (a.poster_print_url ?? '') === (b.poster_print_url ?? '') &&
+    (a.poster_url ?? '') === (b.poster_url ?? '') &&
+    (a.thumbnail_url ?? '') === (b.thumbnail_url ?? '') &&
+    (a.print_px_w ?? null) === (b.print_px_w ?? null) &&
+    (a.print_px_h ?? null) === (b.print_px_h ?? null)
+  );
+}
+
+/**
+ * Merge liste pour **aperçu livre** : préserve les refs stables sauf si le poster / crop change.
+ */
+export function mergeBookMemoriesPreservingMaquetteRefs(prev: Memory[], next: Memory[]): Memory[] {
+  if (prev.length === 0) return [...next].sort(compareMemoriesByEventDateDesc);
+  if (next.length === 0) return [...prev].sort(compareMemoriesByEventDateDesc);
+
+  const prevById = new Map(prev.map(m => [m.id, m]));
+  const mergedById = new Map<string, Memory>();
+
+  for (const s of next) {
+    const p = prevById.get(s.id);
+    if (p && bookMemoryMaquetteEqual(p, s)) {
+      mergedById.set(s.id, p);
+    } else {
+      mergedById.set(s.id, s);
+    }
+  }
+
+  for (const p of prev) {
+    if (!mergedById.has(p.id)) {
+      mergedById.set(p.id, p);
+    }
+  }
+
+  return [...mergedById.values()].sort(compareMemoriesByEventDateDesc);
+}
+
 function compareMemoriesByEventDateDesc(a: Memory, b: Memory): number {
   const ta = new Date(a.created_at).getTime();
   const tb = new Date(b.created_at).getTime();

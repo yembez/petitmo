@@ -414,7 +414,9 @@ export function getBookPhotoPrintPixelSize(
   memory: Memory,
   _photoRef?: string,
 ): { w: number; h: number } | null {
-  if (memory.type !== 'photo' && memory.type !== 'voice') return null;
+  if (memory.type !== 'photo' && memory.type !== 'voice' && memory.type !== 'video') {
+    return null;
+  }
   const pw = memory.print_px_w;
   const ph = memory.print_px_h;
   if (typeof pw === 'number' && typeof ph === 'number' && pw > 0 && ph > 0) {
@@ -759,6 +761,33 @@ export function collectVideoPosterLocalUploadUriCandidates(memory: Memory): stri
   add(pickVideoPosterSandboxPath(memory));
   for (const u of sandboxVideoFileCandidatesForMemoryId(memory.id)) {
     if (u.endsWith('poster.jpg') || u.endsWith('poster_print.jpg')) add(u);
+  }
+  return out;
+}
+
+/**
+ * Candidats **print only** (`poster_print.jpg`) — export livre quand un poster custom existe.
+ * Ne jamais inclure `poster.jpg` (frame t≈0) : sinon Gelato reçoit la mauvaise image.
+ */
+export function collectVideoPosterPrintOnlyUploadUriCandidates(memory: Memory): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (u: string | null | undefined) => {
+    const t = (u ?? '').trim();
+    if (!t || seen.has(t)) return;
+    // HTTPS remote print OK à lister pour pick lisible local seulement si file/content.
+    if (/^https?:\/\//i.test(t)) return;
+    seen.add(t);
+    out.push(t);
+  };
+  if (memory.type !== 'video') return out;
+  add(memory.local_poster_print_path);
+  const printLocal = pickVideoPosterPrintSandboxPath(memory);
+  if (printLocal) add(printLocal);
+  const pp = (memory.poster_print_url ?? '').trim();
+  if (pp && isDeviceLocalMediaUri(pp) && pp.includes('poster_print')) add(pp);
+  for (const u of sandboxVideoFileCandidatesForMemoryId(memory.id)) {
+    if (u.endsWith('poster_print.jpg')) add(u);
   }
   return out;
 }

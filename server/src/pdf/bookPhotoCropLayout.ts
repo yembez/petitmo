@@ -1,5 +1,14 @@
 /**
- * Miroir de `utils/bookPhotoCropLayout.ts` (aperçu livre) — parité export PDF couverture.
+ * Miroir de `utils/bookPhotoCropLayout.ts` (aperçu livre) — parité export PDF.
+ *
+ * ─── Chromium print-to-PDF (règle absolue) ───
+ * Ne jamais positionner un crop custom avec left/top/width/height en **%**.
+ * Blink ignore souvent ces % quand le containing block est un flex/% instable
+ * → `<img>` invisible → page avec date/filet seuls (photo-full FP, vidéo, etc.).
+ *
+ * Contrat unique : cadre + image en **mm absolus** (frameRefW/H = mm du bandeau réel).
+ * - crop défaut / sans dims px → object-fit:cover dans le cadre mm
+ * - crop custom + dims px → left/top/width/height en mm sur l’`<img>`
  */
 
 export type PhotoCrop = { xPct: number; yPct: number; scale: number };
@@ -67,14 +76,18 @@ export function bookPhotoCropImageRect(
   };
 }
 
+/** Crop identité (cover centré, pas de pan/zoom utilisateur). */
+export function isDefaultPhotoCrop(crop: PhotoCrop | undefined | null): boolean {
+  if (!crop) return true;
+  const s = typeof crop.scale === 'number' && Number.isFinite(crop.scale) ? crop.scale : 1;
+  const x = typeof crop.xPct === 'number' && Number.isFinite(crop.xPct) ? crop.xPct : 0;
+  const y = typeof crop.yPct === 'number' && Number.isFinite(crop.yPct) ? crop.yPct : 0;
+  return Math.abs(x) < 0.05 && Math.abs(y) < 0.05 && Math.abs(s - 1) < 0.005;
+}
+
 /**
- * Style inline `<img>` couverture (pourcentages du cadre photo).
- * `frameRefW` / `frameRefH` doivent être le **vrai** bandeau rendu
- * (digital : pageW × pageH×142/216 ; print+bleed : pageW+2×bleed × pageH×142/216).
- * Ne jamais utiliser le cadre historique 216:142 — il zoome trop (ratio ~1,52 vs ~1,14).
- *
- * Préférer `coverCropFrameHtml` pour le PDF : Chromium print-to-PDF gère mal
- * left/top/width/height % directement sur `<img>` (bandeau blanc haut).
+ * Style inline `<img>` crop custom — **mm uniquement** (jamais %).
+ * `frameRefW` / `frameRefH` = bandeau réel en mm (pas le ratio historique 216:142).
  */
 export function coverCropImgInlineStyle(
   crop: PhotoCrop | undefined,
@@ -86,42 +99,34 @@ export function coverCropImgInlineStyle(
   const fw = Math.max(1, frameRefW);
   const fh = Math.max(1, frameRefH);
   const rect = bookPhotoCropImageRect(fw, fh, imgPxW, imgPxH, crop);
-  const leftPct = (rect.left / fw) * 100;
-  const topPct = (rect.top / fh) * 100;
-  const widthPct = (rect.width / fw) * 100;
-  const heightPct = (rect.height / fh) * 100;
   return [
     'position:absolute',
     'inset:auto',
-    `left:${leftPct.toFixed(4)}%`,
-    `top:${topPct.toFixed(4)}%`,
-    `width:${widthPct.toFixed(4)}%`,
-    `height:${heightPct.toFixed(4)}%`,
+    `left:${rect.left.toFixed(3)}mm`,
+    `top:${rect.top.toFixed(3)}mm`,
+    `width:${rect.width.toFixed(3)}mm`,
+    `height:${rect.height.toFixed(3)}mm`,
     'object-fit:fill',
+    'display:block',
   ].join(';');
 }
 
-/** Crop identité (cover centré, pas de pan/zoom utilisateur). */
-export function isDefaultPhotoCrop(crop: PhotoCrop | undefined | null): boolean {
-  if (!crop) return true;
-  const s = typeof crop.scale === 'number' && Number.isFinite(crop.scale) ? crop.scale : 1;
-  const x = typeof crop.xPct === 'number' && Number.isFinite(crop.xPct) ? crop.xPct : 0;
-  const y = typeof crop.yPct === 'number' && Number.isFinite(crop.yPct) ? crop.yPct : 0;
-  return Math.abs(x) < 0.05 && Math.abs(y) < 0.05 && Math.abs(s - 1) < 0.005;
-}
-
-const PDF_COVER_FIT_STYLE =
+/** Anti-gap 1px (couverture / wraparound) — % relatifs au cadre déjà dimensionné en mm. */
+const PDF_FIT_BLEED_STYLE =
   'position:absolute;inset:-1px;width:calc(100% + 2px);height:calc(100% + 2px);object-fit:cover;display:block;';
 
-/** Sans bleed 1px — pages à marges blanches (photo-note / A-V). */
-const PDF_STRICT_FIT_STYLE =
+/** Pages à marges blanches : fill strict du cadre mm. */
+const PDF_FIT_STRICT_STYLE =
   'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;';
 
+export type CoverCropFitMode = 'bleed' | 'strict';
+
 /**
- * Markup cadre photo PDF (couverture / pages) — Chromium-safe.
- * - crop défaut ou sans dims → `object-fit:cover` plein cadre
- * - crop custom + dims → wrapper positionné dans le cadre
- * - `lockFrameMm` : cadre en mm explicites + clip-path (pages A/V / photo-note)
+ * Markup cadre photo PDF — **toujours** Chromium-safe (cadre en mm).
+ * Plus de chemin `%` pour crop custom (supprimé : fragile sous print-to-PDF).
+ *
+ * @param frameRefW / frameRefH — dimensions du cadre en **mm**
+ * @param fitMode — `bleed` couverture ; `strict` photo-full / note / A-V (défaut)
  */
 export function coverCropFrameHtml(params: {
   srcAttr: string;
@@ -132,9 +137,9 @@ export function coverCropFrameHtml(params: {
   frameRefH: number;
   /** ex. `transform: rotate(90deg); transform-origin: center;` */
   extraImgStyle?: string;
+  fitMode?: CoverCropFitMode;
   /**
-   * Verrouille largeur/hauteur en mm (pas de %). Requis pour photo-note / audio / vidéo :
-   * Chromium print ignore souvent overflow sur les cadres en %.
+   * @deprecated Toujours true. Conservé pour compat appelants ; ignoré.
    */
   lockFrameMm?: boolean;
 }): string {
@@ -149,31 +154,30 @@ export function coverCropFrameHtml(params: {
     params.imgPxW > 0 &&
     params.imgPxH > 0;
   const custom = hasDims && !isDefaultPhotoCrop(params.crop);
-  const lock = !!params.lockFrameMm;
-  const clip = lock ? 'clip-path:inset(0);-webkit-clip-path:inset(0);' : '';
-
-  // Cadre fluide 100% du parent. Éviter `position:absolute;inset:0` ici :
-  // sous Chromium print + crop custom, le containing block peut finir à hauteur 0
-  // → poster invisible (page blanche, date seule).
-  const frameBox = `width:100%;height:100%;position:relative;overflow:hidden;${clip}`;
+  const fitMode: CoverCropFitMode = params.fitMode === 'bleed' ? 'bleed' : 'strict';
+  const clip = 'clip-path:inset(0);-webkit-clip-path:inset(0);';
+  const frameBox = `width:${fw.toFixed(3)}mm;height:${fh.toFixed(3)}mm;position:relative;overflow:hidden;${clip}`;
 
   if (!custom) {
-    const base = lock ? PDF_STRICT_FIT_STYLE : PDF_COVER_FIT_STYLE;
+    const base = fitMode === 'bleed' ? PDF_FIT_BLEED_STYLE : PDF_FIT_STRICT_STYLE;
     const style = extra ? `${base}${extra}` : base;
     return `<div class="crop-frame" style="${frameBox}"><img class="crop-img" src="${src}" alt="" style="${style}" /></div>`;
   }
 
-  const rect = bookPhotoCropImageRect(fw, fh, params.imgPxW!, params.imgPxH!, params.crop ?? undefined);
-  const wrapStyle = [
-    'position:absolute',
-    `left:${((rect.left / fw) * 100).toFixed(4)}%`,
-    `top:${((rect.top / fh) * 100).toFixed(4)}%`,
-    `width:${((rect.width / fw) * 100).toFixed(4)}%`,
-    `height:${((rect.height / fh) * 100).toFixed(4)}%`,
-    'overflow:hidden',
-  ].join(';');
-  const imgStyle = extra
-    ? `position:absolute;inset:0;width:100%;height:100%;object-fit:fill;display:block;${extra}`
-    : 'position:absolute;inset:0;width:100%;height:100%;object-fit:fill;display:block;';
-  return `<div class="crop-frame" style="${frameBox}"><div style="${wrapStyle}"><img src="${src}" alt="" style="${imgStyle}" /></div></div>`;
+  const imgStyle = [
+    coverCropImgInlineStyle(params.crop ?? undefined, params.imgPxW!, params.imgPxH!, fw, fh),
+    extra,
+  ]
+    .filter(Boolean)
+    .join(';');
+  return `<div class="crop-frame" style="${frameBox}"><img class="crop-img" src="${src}" alt="" style="${imgStyle}" /></div>`;
+}
+
+/**
+ * Garde-fou tests / CI : le markup crop ne doit jamais repositionner via des %.
+ * (Les `width:100%` de object-fit cover à l’intérieur d’un cadre mm sont OK.)
+ */
+export function cropMarkupUsesFragilePercentPositioning(html: string): boolean {
+  // left/top/width/height en % sur un style de positionnement crop (pas width:100% seul).
+  return /(?:^|[;"\s])(?:left|top)\s*:\s*-?[\d.]+%/i.test(html);
 }

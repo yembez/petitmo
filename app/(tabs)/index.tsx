@@ -65,7 +65,10 @@ import { promptFreeTierLimitThenPaywall } from '@/utils/freeTierLimitGate';
 import { getLocalChild, listLocalChildren, listLocalChildrenForUser } from '@/lib/localDb';
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
-import { resolveChildProfileImageUri } from '@/utils/childPhotoUri';
+import {
+  resolveChildProfileImageDisplayUri,
+  resolveChildProfileImageUri,
+} from '@/utils/childPhotoUri';
 import { childDisplayGivenName, childDisplayInitial } from '@/utils/childDisplayName';
 import { formatCaptureChildAge, formatCaptureHeaderDate } from '@/utils/date';
 import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
@@ -73,6 +76,8 @@ import { CaptureFamilyMosaic } from '@/components/CaptureFamilyMosaic';
 import {
   CAPTURE_HERO_IMAGE_CONTENT_POSITION,
   CAPTURE_HERO_IMAGE_OBJECT_POSITION,
+  CHILD_PROFILE_PHOTO_ASPECT,
+  CHILD_PROFILE_PHOTO_ASPECT_COMPACT,
 } from '@/utils/captureHeroMetrics';
 
 /** Enfants visibles pour le compte courant — jamais ceux d’un autre e-mail. */
@@ -90,8 +95,8 @@ const CAPTURE_HERO_BREATHE_MAX = 1.03;
 const CAPTURE_HERO_BREATHE_HALF_MS = 8500;
 
 const CAPTURE_PHOTO_CARD_RADIUS = scale(32);
-const CAPTURE_PHOTO_CARD_ASPECT = 0.93;
-const CAPTURE_PHOTO_CARD_ASPECT_COMPACT = 0.85;
+const CAPTURE_PHOTO_CARD_ASPECT = CHILD_PROFILE_PHOTO_ASPECT;
+const CAPTURE_PHOTO_CARD_ASPECT_COMPACT = CHILD_PROFILE_PHOTO_ASPECT_COMPACT;
 /** Padding horizontal du scroll ; la photo utilise `capturePhotoBleed` pour des bords symétriques. */
 const CAPTURE_CONTENT_PADDING_H = scale(20);
 const CAPTURE_PHOTO_EDGE_PADDING_H = scale(14);
@@ -124,11 +129,16 @@ function captureCtaHaloStyle(color: string) {
   });
 }
 
-/** Révision photo — chemin local prioritaire ; ignore `photo_url` cloud (sync silencieuse). */
+/**
+ * Révision photo hero — chemin local + `updated_at` (fichier souvent écrasé au même path).
+ * Sans `updated_at`, plusieurs changements de photo sont ignorés par `captureChildDisplayEqual`.
+ * Remote-only : path + updated_at (pas de fichier local).
+ */
 function captureHeroPhotoRevision(child: Child): string {
   const local = (child.local_photo_path ?? '').trim();
-  if (local) return `local:${local}`;
-  return `remote:${(child.photo_url ?? '').trim()}`;
+  const rev = (child.updated_at ?? '').trim();
+  if (local) return `local:${local}|${rev}`;
+  return `remote:${(child.photo_url ?? '').trim()}|${rev}`;
 }
 
 function captureChildDisplayEqual(a: Child | null, b: Child | null): boolean {
@@ -320,9 +330,13 @@ function CapturerScreen() {
   const captureScrollMaxYRef = useRef(0);
 
   const heroDisplayUri = child
-    ? // Pas de `?petitmo_v=updated_at` : un pull cloud qui touche `updated_at` ne doit
-      // **jamais** changer l’URI hero (sinon ExpoImage opacity 0 = flash plein écran).
-      resolveChildProfileImageUri(child.local_photo_path, child.photo_url)
+    ? // Cache-buster local sur `updated_at` (même path sandbox écrasé).
+      // Ne touche pas les URL https (signatures) — `resolveChildProfileImageDisplayUri`.
+      resolveChildProfileImageDisplayUri(
+        child.local_photo_path,
+        child.photo_url,
+        child.updated_at,
+      )
     : null;
   const heroIsLocalAsset =
     !!heroDisplayUri &&
@@ -356,13 +370,23 @@ function CapturerScreen() {
       PETITMO_CHILD_PROFILE_UPDATED_EVENT,
       (payload: ChildProfileUpdatedPayload) => {
         const sorted = sortChildrenByBirthdateAsc(listCaptureScopedChildren());
-        setFamilyChildren(sorted);
         const id = payload?.childId?.trim();
+        const fromPayload =
+          payload?.child && (!id || payload.child.id === id) ? payload.child : null;
         const active =
+          fromPayload ??
           (id ? sorted.find(c => c.id === id) : null) ??
           sorted.find(c => c.id === childRef.current?.id) ??
           sorted[0] ??
           null;
+        const familyNext = fromPayload
+          ? sortChildrenByBirthdateAsc(
+              sorted.some(c => c.id === fromPayload.id)
+                ? sorted.map(c => (c.id === fromPayload.id ? fromPayload : c))
+                : [...sorted, fromPayload],
+            )
+          : sorted;
+        setFamilyChildren(familyNext);
         if (!active) {
           setChild(null);
           return;
@@ -1122,7 +1146,9 @@ function CaptureHeroImageStack({
         .replace(/\?&+/, '?')
         .replace(/[?&]$/, '');
     if (strip(lastReadyUriRef.current) === strip(photoUri) && photoUri.trim()) {
+      // Même path + révision (fichier écrasé) : garder opaque, ExpoImage recycle via recyclingKey.
       setImageReady(true);
+      lastReadyUriRef.current = photoUri;
       return;
     }
     const prev = lastReadyUriRef.current;
@@ -1143,7 +1169,7 @@ function CaptureHeroImageStack({
     if (!upgradingRemoteToLocal && !sameRemoteHost) {
       setImageReady(false);
     }
-  }, [photoUri]);
+  }, [photoUri, imageRevision]);
 
   useEffect(() => {
     breatheScale.setValue(CAPTURE_HERO_BREATHE_MIN);

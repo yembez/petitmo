@@ -1680,8 +1680,8 @@ function MaquetteVideoPosterVisual({
     imgPxW,
     imgPxH,
   } as const;
-  /** `key` force le remontage ExpoImage quand le poster print change (même path fichier). */
-  const visualKey = `vp-${memory.id}-${memory.updated_at ?? ''}-${baseUri.slice(-48)}`;
+  /** `key` : URI complète (query `petitmo_v`) pour remonter ExpoImage après rewrite poster_print. */
+  const visualKey = `vp-${memory.id}-${memory.updated_at ?? ''}-${raw.slice(-80)}`;
   if (isDeviceLocalMediaUri(baseUri)) {
     return (
       <BookPagePhotoFrame

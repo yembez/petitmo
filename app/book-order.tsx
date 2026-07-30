@@ -13,16 +13,29 @@ import {
   Linking,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFonts, EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
+import { ChevronRight } from 'lucide-react-native';
 import { THEME } from '@/constants/theme';
 import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
+import {
+  BOOK_COVER_THUMB_HEIGHT,
+  BOOK_COVER_THUMB_WIDTH,
+} from '@/constants/bookCoverThumbnail';
 import { scale } from '@/utils/responsive';
+import { formatAppCurrency } from '@/utils/appLocale';
 import { getUserTier } from '@/lib/userTier';
 import { getLastGuestExportEmail, setLastGuestExportEmail } from '@/lib/guestExportPrefs';
 import { PRINT_V1_INCLUDED_QR, quotePrintOrderV1 } from '@/lib/pricingV1';
 import { PRINT_V1_PAID_DISCOUNT_PERCENT, type DiscountPercent } from '@/lib/printedBookQuote';
 import { PRINT_ORDER_CGV_URL, PRINT_ORDER_CGV_VERSION } from '@/lib/printOrderLegal';
-import { getBook, resolveBookCoverPrintUri } from '@/services/books';
+import {
+  getBook,
+  resolveBookCoverPrintUri,
+  resolveBookListRowCoverUri,
+  type Book,
+} from '@/services/books';
 import { getChildren } from '@/services/children';
 import { isInitExportConfigured } from '@/services/initExportApi';
 import { initPrintOrderExport } from '@/services/printBookOrder';
@@ -35,7 +48,11 @@ import {
   type GenerateBookPdfServerInput,
 } from '@/services/bookPdfServer';
 import { BookPdfGeneratingOverlay } from '@/components/BookPdfGeneratingOverlay';
-import { getBookExportPrepIssues, runBookExportPrepInBackground } from '@/services/bookExportPrep';
+import BookCoverThumbnail from '@/components/BookCoverThumbnail';
+import PetitmoLogoManuscrit, {
+  PetitmoLogoManuscritTight,
+} from '@/components/PetitmoLogoManuscrit';
+import { getBookExportPrepIssues } from '@/services/bookExportPrep';
 import {
   clearPendingBookOrderPdfPayload,
   getPendingBookOrderPdfPayload,
@@ -44,6 +61,7 @@ import {
 import { setPendingExportUploadTicket } from '@/lib/pendingExportUploadTicket';
 import { canExportBookPdfViaServer, grantDigitalExportPurchase, resolveServerPdfEntitlements } from '@/lib/digitalExportPurchase';
 import { DIGITAL_EXPORT_PDF_EUR } from '@/lib/bookExportPricing';
+import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import type { Child } from '@/types/local';
 import { getPendingGuestRawUploadsCountForKeys } from '@/services/pendingRawGuestUploads';
 import {
@@ -52,7 +70,14 @@ import {
   gelatoMinInnerPagesAlertMessage,
   GELATO_MIN_INNER_PAGES,
 } from '@/utils/bookGelatoInnerPages';
+import { bookCoverPeriodLabelForBook } from '@/utils/bookCoverPeriodLabel';
+import { normalizeMemoryMediaUriForDisplay } from '@/utils/memoryPhotos';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
+import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
+import { useAppLanguage } from '@/hooks/useAppLanguage';
+
+/** Miniature couverture carte commande — même composant que l’onglet Livres, un cran plus petit. */
+const ORDER_COVER_SCALE = 0.78;
 
 const COUNTRY_OPTIONS = [
   { code: 'FR' as const, label: 'France' },
@@ -78,15 +103,16 @@ function isValidEmail(s: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim().toLowerCase());
 }
 
-/** Couverture + souvenirs frais depuis SQLite (évite un pending stale après changement dans l’aperçu). */
+/** Couverture + souvenirs + crops frais depuis SQLite (évite un pending stale après la maquette). */
 async function withFreshBookPayloadForExport(
   payload: GenerateBookPdfServerInput,
 ): Promise<GenerateBookPdfServerInput> {
   try {
     const book = await getBook(payload.bookId);
+    const pages = refreshBookPdfPagesMemoriesFromSqlite(payload.pages);
     let next: GenerateBookPdfServerInput = {
       ...payload,
-      pages: refreshBookPdfPagesMemoriesFromSqlite(payload.pages),
+      pages,
     };
     if (book) {
       // Local-first : URI print / book_covers résolue avant la ref cloud stockée.
@@ -94,6 +120,30 @@ async function withFreshBookPayloadForExport(
       const stored = (book.coverPhotoUrl ?? '').trim();
       const cover = fresh || stored;
       if (cover) next = { ...next, coverPhotoUrl: cover };
+      // Crops / rotations du livre persisté (= maquette auto-save), pas le snapshot pending.
+      if (book.photoCrops && Object.keys(book.photoCrops).length > 0) {
+        next = { ...next, photoCrops: book.photoCrops };
+      }
+      if (book.rotations && Object.keys(book.rotations).length > 0) {
+        next = { ...next, rotations: book.rotations };
+      }
+    }
+    // Invalider les dims vidéo du pending → re-mesure du poster_print local à l’upload.
+    if (next.cropImgPxByMemoryId) {
+      const videoIds = new Set<string>();
+      for (const p of pages) {
+        if (p.type !== 'video') continue;
+        const id = 'memory' in p && p.memory?.id ? p.memory.id : '';
+        if (id) videoIds.add(id);
+      }
+      if (videoIds.size > 0) {
+        const cropped = { ...next.cropImgPxByMemoryId };
+        for (const id of videoIds) delete cropped[id];
+        next = {
+          ...next,
+          cropImgPxByMemoryId: Object.keys(cropped).length > 0 ? cropped : undefined,
+        };
+      }
     }
     return next;
   } catch {
@@ -142,6 +192,10 @@ export default function BookOrderScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { t } = useAppTranslation('common');
+  const lang = useAppLanguage();
+  const { dm500, dm600, dm700 } = useDmSansFamilyFlowFonts();
+  const [coverFontsLoaded] = useFonts({ EBGaramond_400Regular_Italic });
+  const coverTitleFontFamily = coverFontsLoaded ? 'EBGaramond_400Regular_Italic' : undefined;
   const params = useLocalSearchParams<{
     bookId?: string;
     childId?: string;
@@ -160,14 +214,21 @@ export default function BookOrderScreen() {
 
   const [loading, setLoading] = useState(true);
   const [child, setChild] = useState<Child | null>(null);
-  const [bookTitle, setBookTitle] = useState('');
+  const [book, setBook] = useState<Book | null>(null);
   const [memoryPageCount, setMemoryPageCount] = useState(0);
+  /** Compteurs devis — rafraîchis au retour de « Revoir mon livre » (ajout / suppression). */
+  const [qrCountForQuote, setQrCountForQuote] = useState(Math.max(0, avPageCountParam));
+  const [gelatoPagesForQuote, setGelatoPagesForQuote] = useState(
+    gelatoPageCountParam >= 0 ? gelatoPageCountParam : Math.max(GELATO_MIN_INNER_PAGES, 0),
+  );
   const [tier, setTier] = useState<'free' | 'paid'>('free');
   const [submitting, setSubmitting] = useState(false);
   const [pdfEntitled, setPdfEntitled] = useState({ premium: false, digitalPaid: false });
   const [blockedEmptyMemories, setBlockedEmptyMemories] = useState(false);
   const emptyBookAlertShownRef = useRef(false);
   const [prepHint, setPrepHint] = useState<string | null>(null);
+  const [priceDetailOpen, setPriceDetailOpen] = useState(false);
+  const [emailEditing, setEmailEditing] = useState(false);
 
   const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');
@@ -181,15 +242,23 @@ export default function BookOrderScreen() {
   const [country, setCountry] = useState<CountryCode>('FR');
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<FieldKey, string>>>({});
 
-  const gelatoPagesForQuote =
-    gelatoPageCountParam >= 0 ? gelatoPageCountParam : Math.max(GELATO_MIN_INNER_PAGES, 0);
-  const qrCountForQuote = Math.max(0, avPageCountParam);
+  const coverRaw = book ? resolveBookListRowCoverUri(book) : '';
+  const coverSigned = useSignedMediaUrl(coverRaw || null) ?? '';
+  const coverUri =
+    normalizeMemoryMediaUriForDisplay((coverSigned || coverRaw).trim()) || null;
+  const coverCrop = book?.photoCrops?.cover;
+  const coverCropKey = coverCrop
+    ? `${coverCrop.xPct}-${coverCrop.yPct}-${coverCrop.scale}`
+    : '';
+  const coverDateLabel = book ? bookCoverPeriodLabelForBook(book) : '';
+  const bookTitle = book?.title?.trim() || '';
+
   const discountPercent: DiscountPercent =
     tier === 'paid' ? PRINT_V1_PAID_DISCOUNT_PERCENT : 0;
   const printQuote = useMemo(
     () =>
       quotePrintOrderV1({
-        gelatoPages: gelatoPagesForQuote,
+        gelatoPages: gelatoPagesForQuote > 0 ? gelatoPagesForQuote : GELATO_MIN_INNER_PAGES,
         qrCount: qrCountForQuote,
         tier,
       }),
@@ -204,11 +273,23 @@ export default function BookOrderScreen() {
     return DIGITAL_EXPORT_PDF_EUR;
   }, [exportMode, printPriceEuros, pdfEntitled.digitalPaid, pdfEntitled.premium]);
 
-  const priceLabel = `${displayPriceEuros.toFixed(2).replace('.', ',')}€`;
+  const priceLabel = formatAppCurrency(displayPriceEuros, lang);
   const ctaLabel =
     exportMode === 'print'
       ? t('bookOrder.ctaPay', { price: priceLabel })
-      : `Commander — ${priceLabel}`;
+      : t('bookOrder.ctaPay', { price: priceLabel });
+
+  const pagesForMeta =
+    printQuote.billedPages > 0 ? printQuote.billedPages : Math.max(gelatoPagesForQuote, GELATO_MIN_INNER_PAGES);
+  const pagesQrMeta = t(
+    qrCountForQuote === 1 ? 'bookOrder.pagesQrMetaOne' : 'bookOrder.pagesQrMeta',
+    { pages: pagesForMeta, qr: qrCountForQuote },
+  );
+
+  const countryLabel =
+    COUNTRY_OPTIONS.find(o => o.code === country)?.label ?? country;
+
+  const showEmailDisplay = !emailEditing && isValidEmail(email);
 
   const clearError = useCallback((k: FieldKey) => {
     setFieldErrors(prev => {
@@ -243,7 +324,7 @@ export default function BookOrderScreen() {
         const ch = children.find(c => c.id === childId) ?? null;
         setChild(ch);
         if (book) {
-          setBookTitle(book.title);
+          setBook(book);
         }
         const mpc =
           memoryPageCountParam >= 0
@@ -266,6 +347,7 @@ export default function BookOrderScreen() {
         const startEmail = tLast?.trim() ?? '';
         if (startEmail) {
           setEmail(startEmail);
+          setEmailEditing(false);
           const pre = await fetchCrmPrefillByEmail(startEmail);
           if (pre) {
             if (pre.full_name) {
@@ -291,6 +373,43 @@ export default function BookOrderScreen() {
       }
     })();
   }, [bookId, childId, memoryPageCountParam, router]);
+
+  /** Au retour de la revue livre : recalcule pages / QR / prix depuis le pending rafraîchi. */
+  useFocusEffect(
+    useCallback(() => {
+      let alive = true;
+      void (async () => {
+        if (!bookId) return;
+        try {
+          const freshBook = await getBook(bookId);
+          if (alive && freshBook) setBook(freshBook);
+        } catch {
+          /* ignore */
+        }
+        if (exportMode !== 'print') return;
+        const pending = await getPendingBookOrderPdfPayload();
+        if (!alive || !pending || pending.bookId !== bookId) return;
+        const pages = pending.pages ?? [];
+        if (!Array.isArray(pages) || pages.length === 0) return;
+        const av = pages.filter(p => p.type === 'audio' || p.type === 'video').length;
+        const gelato = gelatoCatalogPageCount(pages);
+        const mpc = pages.filter(
+          p =>
+            p.type === 'photo-full' ||
+            p.type === 'photo-note' ||
+            p.type === 'quote' ||
+            p.type === 'audio' ||
+            p.type === 'video',
+        ).length;
+        setQrCountForQuote(av);
+        if (gelato > 0) setGelatoPagesForQuote(gelato);
+        if (mpc > 0) setMemoryPageCount(mpc);
+      })();
+      return () => {
+        alive = false;
+      };
+    }, [bookId, exportMode]),
+  );
 
   const getFieldErrors = useCallback((): Partial<Record<FieldKey, string>> => {
     const e: Partial<Record<FieldKey, string>> = {};
@@ -655,10 +774,10 @@ export default function BookOrderScreen() {
     return (
       <View style={[styles.root, { paddingTop: insets.top + scale(12) }]}>
         <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backRow}>
-          <Text style={styles.backText}>← Retour</Text>
+          <Text style={[styles.backText, dm500 && { fontFamily: dm500 }]}>← Retour</Text>
         </Pressable>
-        <Text style={styles.title}>Commande</Text>
-        <Text style={styles.muted}>
+        <Text style={[styles.title, dm700 && { fontFamily: dm700 }]}>{t('bookOrder.title')}</Text>
+        <Text style={[styles.muted, dm500 && { fontFamily: dm500 }]}>
           Ouvre cette page depuis l’aperçu d’un livre (commande PDF ou impression).
         </Text>
       </View>
@@ -681,6 +800,45 @@ export default function BookOrderScreen() {
     );
   }
 
+  const openCountryPicker = () => {
+    Alert.alert(
+      t('bookOrder.fieldCountry'),
+      undefined,
+      [
+        ...COUNTRY_OPTIONS.map(o => ({
+          text: o.label,
+          onPress: () => setCountry(o.code),
+        })),
+        { text: 'Annuler', style: 'cancel' as const },
+      ],
+    );
+  };
+
+  const stickyCta = (
+    <View style={[styles.stickyCtaWrap, { paddingBottom: Math.max(insets.bottom, scale(12)) }]}>
+      <Pressable
+        style={[
+          petitmoCtaStyles.primary,
+          petitmoCtaStyles.primaryFullWidth,
+          styles.cta,
+          (submitting || !formIsComplete) && petitmoCtaStyles.primaryDisabled,
+        ]}
+        disabled={submitting || !formIsComplete}
+        onPress={() => void submitOrder()}
+        accessibilityRole="button"
+        accessibilityLabel={ctaLabel}
+      >
+        {submitting ? (
+          <ActivityIndicator color={PETITMO_CTA_SPINNER_COLOR} />
+        ) : (
+          <Text style={[petitmoCtaStyles.primaryText, styles.ctaText, dm700 && { fontFamily: dm700 }]}>
+            {ctaLabel}
+          </Text>
+        )}
+      </Pressable>
+    </View>
+  );
+
   return (
     <KeyboardAvoidingView
       style={styles.flex}
@@ -690,122 +848,175 @@ export default function BookOrderScreen() {
         style={styles.flex}
         contentContainerStyle={[
           styles.scroll,
-          { paddingTop: insets.top + scale(12), paddingBottom: insets.bottom + scale(24) },
+          {
+            paddingTop: insets.top + scale(8),
+            paddingBottom: scale(24),
+          },
         ]}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
         <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backRow}>
-          <Text style={styles.backText}>← Retour</Text>
+          <Text style={[styles.backText, dm500 && { fontFamily: dm500 }]}>← Retour</Text>
         </Pressable>
 
-        <Text style={styles.title}>
-          {exportMode === 'print' ? 'Livre imprimé' : 'Livre PDF'}
+        <Text style={[styles.title, dm700 && { fontFamily: dm700 }]}>
+          {exportMode === 'print' ? t('bookOrder.title') : t('bookOrder.titlePdf')}
         </Text>
-        <Text style={styles.sub}>
-          {bookTitle || 'Ton livre'} · {child?.name ?? 'Enfant'}
-        </Text>
-
-        {exportMode === 'print' && tier === 'free' ? (
-          <Pressable
-            style={styles.banner}
-            onPress={() =>
-              router.push({ pathname: '/paywall', params: { context: 'BOOK_ORDER_DISCOUNT' } })
-            }
-          >
-            <Text style={styles.bannerText}>
-              Petitmo+ : −10 % sur l’impression et QR audio/vidéo illimités. Touche ici pour en profiter.
-            </Text>
-          </Pressable>
-        ) : null}
+        {/* Pas de sous-titre : carte de résumé à côté de la cover */}
 
         {exportMode === 'print' ? (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Tarif impression</Text>
-            <Text style={styles.rowMuted}>
-              {printQuote.billedPages} pages
-              {gelatoPageCountParam >= 0 && gelatoPageCountParam < GELATO_MIN_INNER_PAGES
-                ? ` (min. ${GELATO_MIN_INNER_PAGES})`
-                : ''}
-            </Text>
-            <Text style={styles.rowMuted}>
-              Livre : {printQuote.bookPartEuros.toFixed(2).replace('.', ',')} €
-              {printQuote.extraPages > 0
-                ? ` (39 € + ${printQuote.extraPages} × 0,70 €)`
-                : ' (forfait 30 pages)'}
-            </Text>
-            {tier === 'free' ? (
-              <Text style={styles.rowMuted}>
-                QR audio/vidéo : {printQuote.qrCount} (
-                {PRINT_V1_INCLUDED_QR} inclus
-                {printQuote.extraQr > 0
-                  ? ` + ${printQuote.extraQr} × 0,70 € = ${printQuote.qrPartEuros.toFixed(2).replace('.', ',')} €`
-                  : ''}
-                )
-              </Text>
-            ) : (
-              <Text style={styles.rowMuted}>
-                QR audio/vidéo : {printQuote.qrCount} · inclus Petitmo+
-              </Text>
-            )}
-            {tier === 'paid' ? (
-              <Text style={styles.rowMuted}>Remise abonnée −10 % sur le livre</Text>
-            ) : null}
-            <Text style={styles.price}>{printPriceEuros.toFixed(2).replace('.', ',')} € TTC</Text>
-            <Text style={styles.deliveryIncl}>{t('bookOrder.deliveryIncluded')}</Text>
-            {tier === 'free' && printQuote.premiumUpsell ? (
-              <View style={{ marginTop: scale(12) }}>
-                <Text style={styles.cardTitle}>Avec Petitmo+</Text>
-                <Text style={styles.rowMuted}>
-                  Livre −10 % : {printQuote.premiumUpsell.bookPartEuros.toFixed(2).replace('.', ',')} €
+          <View style={styles.summaryCard}>
+            <View style={styles.summaryRow}>
+              <View
+                style={[
+                  styles.coverClip,
+                  {
+                    width: BOOK_COVER_THUMB_WIDTH * ORDER_COVER_SCALE,
+                    height: BOOK_COVER_THUMB_HEIGHT * ORDER_COVER_SCALE,
+                  },
+                ]}
+              >
+                <View
+                  style={{
+                    width: BOOK_COVER_THUMB_WIDTH,
+                    height: BOOK_COVER_THUMB_HEIGHT,
+                    transform: [{ scale: ORDER_COVER_SCALE }],
+                    marginLeft:
+                      -(BOOK_COVER_THUMB_WIDTH * (1 - ORDER_COVER_SCALE)) / 2,
+                    marginTop:
+                      -(BOOK_COVER_THUMB_HEIGHT * (1 - ORDER_COVER_SCALE)) / 2,
+                  }}
+                >
+                  <BookCoverThumbnail
+                    title={bookTitle || 'Mon livre'}
+                    coverImageUri={coverUri}
+                    coverPhotoCrop={coverCrop}
+                    dateLabel={coverDateLabel}
+                    imageRecyclingKey={`order-cover-${bookId}-${book?.coverPhotoUrl ?? ''}-${coverCropKey}`}
+                    titleFontFamily={coverTitleFontFamily}
+                  />
+                </View>
+              </View>
+              <View style={styles.summaryInfo}>
+                <Text
+                  style={[styles.summaryTitle, dm700 && { fontFamily: dm700 }]}
+                  numberOfLines={2}
+                >
+                  {bookTitle || 'Ton livre'}
                 </Text>
-                {printQuote.qrPartEuros > 0 ? (
-                  <Text style={styles.rowMuted}>
-                    QR inclus : −{printQuote.qrPartEuros.toFixed(2).replace('.', ',')} €
-                  </Text>
-                ) : null}
-                <Text style={styles.rowMuted}>
-                  Total : {printQuote.premiumUpsell.totalEuros.toFixed(2).replace('.', ',')} € ·
-                  économie {printQuote.premiumUpsell.savingsEuros.toFixed(2).replace('.', ',')} €
+                <Text style={[styles.summaryMeta, dm500 && { fontFamily: dm500 }]}>
+                  {pagesQrMeta}
+                </Text>
+                <Text style={[styles.summaryPrice, dm700 && { fontFamily: dm700 }]}>
+                  {t('bookOrder.priceTtc', { price: priceLabel })}
+                </Text>
+                <Text style={[styles.summaryDelivery, dm500 && { fontFamily: dm500 }]}>
+                  {t('bookOrder.deliveryIncluded')}
                 </Text>
               </View>
-            ) : null}
-            {__DEV__ ? (
-              <Text style={[styles.rowMuted, { marginTop: 8 }]}>
-                Dev : aucun paiement réel. Gelato draft si Railway a GELATO_ORDER_TYPE=draft.
+            </View>
+            <Pressable
+              onPress={() => setPriceDetailOpen(v => !v)}
+              hitSlop={8}
+              style={styles.priceDetailLink}
+              accessibilityRole="button"
+              accessibilityLabel={
+                priceDetailOpen ? t('bookOrder.hidePriceDetail') : t('bookOrder.seePriceDetail')
+              }
+            >
+              <Text style={[styles.priceDetailLinkText, dm600 && { fontFamily: dm600 }]}>
+                {priceDetailOpen ? t('bookOrder.hidePriceDetail') : t('bookOrder.seePriceDetail')}
+                {' >'}
               </Text>
+            </Pressable>
+            {priceDetailOpen ? (
+              <View style={styles.priceDetailBox}>
+                <Text style={[styles.priceDetailLine, dm500 && { fontFamily: dm500 }]}>
+                  Livre : {formatAppCurrency(printQuote.bookPartEuros, lang)}
+                  {printQuote.extraPages > 0
+                    ? ` (39 € + ${printQuote.extraPages} × 0,70 €)`
+                    : ' (forfait 30 pages)'}
+                </Text>
+                {tier === 'free' ? (
+                  <Text style={[styles.priceDetailLine, dm500 && { fontFamily: dm500 }]}>
+                    QR audio/vidéo : {printQuote.qrCount} (
+                    {PRINT_V1_INCLUDED_QR} inclus
+                    {printQuote.extraQr > 0
+                      ? ` + ${printQuote.extraQr} × 0,70 € = ${formatAppCurrency(printQuote.qrPartEuros, lang)}`
+                      : ''}
+                    )
+                  </Text>
+                ) : (
+                  <Text style={[styles.priceDetailLine, dm500 && { fontFamily: dm500 }]}>
+                    QR audio/vidéo : {printQuote.qrCount} · inclus Petitmo+
+                  </Text>
+                )}
+                {tier === 'paid' ? (
+                  <Text style={[styles.priceDetailLine, dm500 && { fontFamily: dm500 }]}>
+                    Remise abonnée −10 % sur le livre
+                  </Text>
+                ) : null}
+                {__DEV__ ? (
+                  <Text style={[styles.priceDetailLine, { marginTop: 4 }]}>
+                    Dev : aucun paiement réel. Gelato draft si Railway a GELATO_ORDER_TYPE=draft.
+                  </Text>
+                ) : null}
+              </View>
             ) : null}
           </View>
         ) : (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Livre PDF</Text>
-            <Text style={styles.rowMuted}>
+          <View style={styles.summaryCard}>
+            <Text style={[styles.summaryTitle, dm700 && { fontFamily: dm700 }]}>Livre PDF</Text>
+            <Text style={[styles.summaryMeta, dm500 && { fontFamily: dm500 }]}>
               {pdfEntitled.premium || pdfEntitled.digitalPaid
                 ? 'Inclus dans ton forfait ou achat actuel.'
                 : 'Tarif hors forfait : l’achat est pris en compte au moment de la commande.'}
             </Text>
-            <Text style={styles.price}>
-              {displayPriceEuros.toFixed(2).replace('.', ',')} € TTC
+            <Text style={[styles.summaryPrice, dm700 && { fontFamily: dm700 }]}>
+              {t('bookOrder.priceTtc', { price: priceLabel })}
             </Text>
-            {prepHint ? <Text style={[styles.rowMuted, { marginTop: 8, color: '#B91C1C' }]}>{prepHint}</Text> : null}
+            {prepHint ? (
+              <Text style={[styles.err, { marginTop: 8 }]}>{prepHint}</Text>
+            ) : null}
           </View>
         )}
 
-        <Text style={styles.section}>Contact</Text>
-        <TextInput
-          style={[styles.input, fieldErrors.email && styles.inputError]}
-          value={email}
-          onChangeText={t => {
-            setEmail(t);
-            clearError('email');
-          }}
-          placeholder="Email"
-          autoCapitalize="none"
-          keyboardType="email-address"
-        />
-        {fieldErrors.email ? <Text style={styles.err}>{fieldErrors.email}</Text> : null}
-        <Text style={styles.hintDiscreet}>
-          Utilisé uniquement pour le suivi de ta commande.
-        </Text>
+        {exportMode === 'print' && tier === 'free' && printQuote.premiumUpsell ? (
+          <Pressable
+            style={styles.plusBanner}
+            onPress={() =>
+              router.push({ pathname: '/paywall', params: { context: 'BOOK_ORDER_DISCOUNT' } })
+            }
+            accessibilityRole="button"
+            accessibilityLabel={t('bookOrder.discoverPlus')}
+          >
+            <View style={styles.plusLogoWrap}>
+              <PetitmoLogoManuscritTight
+                width={scale(130)}
+                height={scale(40)}
+                color={THEME.brandCtaOrange}
+              />
+              <Text style={[styles.plusLogoMark, dm700 && { fontFamily: dm700 }]}>+</Text>
+            </View>
+            <View style={styles.plusCopy}>
+              <Text style={[styles.plusSave, dm700 && { fontFamily: dm700 }]}>
+                {t('bookOrder.plusSave', {
+                  savings: formatAppCurrency(printQuote.premiumUpsell.savingsEuros, lang),
+                })}
+              </Text>
+              <Text style={[styles.plusPrice, dm500 && { fontFamily: dm500 }]}>
+                {t('bookOrder.plusPrice', {
+                  price: formatAppCurrency(printQuote.premiumUpsell.totalEuros, lang),
+                })}
+              </Text>
+              <Text style={[styles.plusLink, dm600 && { fontFamily: dm600 }]}>
+                {t('bookOrder.discoverPlus')}
+                {' >'}
+              </Text>
+            </View>
+          </Pressable>
+        ) : null}
 
         {exportMode === 'print' && __DEV__ ? (
           <Pressable
@@ -813,6 +1024,7 @@ export default function BookOrderScreen() {
             onPress={() => {
               const stamp = Date.now().toString(36);
               setEmail(`qa+gelato-${stamp}@example.com`);
+              setEmailEditing(false);
               setShippingName('Test Petitmo Gelato');
               setLine1('12 rue Example');
               setLine2('');
@@ -828,144 +1040,269 @@ export default function BookOrderScreen() {
 
         {exportMode === 'print' ? (
           <>
-            <Text style={styles.section}>Livraison</Text>
-            <TextInput
-              style={[styles.input, fieldErrors.shippingName && styles.inputError]}
-              value={shippingName}
-              onChangeText={t => {
-                setShippingName(t);
-                clearError('shippingName');
-              }}
-              placeholder="Prénom et nom"
-            />
-            {fieldErrors.shippingName ? <Text style={styles.err}>{fieldErrors.shippingName}</Text> : null}
+            <Text style={[styles.section, dm600 && { fontFamily: dm600 }]}>
+              {t('bookOrder.sectionDelivery')}
+            </Text>
+            <View style={styles.formCard}>
+              <View style={styles.fieldBlock}>
+                <Text style={[styles.fieldLabel, dm500 && { fontFamily: dm500 }]}>
+                  {t('bookOrder.fieldFullName')}
+                </Text>
+                <TextInput
+                  style={[
+                    styles.fieldInput,
+                    dm500 && { fontFamily: dm500 },
+                    fieldErrors.shippingName && styles.inputError,
+                  ]}
+                  value={shippingName}
+                  onChangeText={v => {
+                    setShippingName(v);
+                    clearError('shippingName');
+                  }}
+                  placeholder={t('bookOrder.fieldFullName')}
+                  placeholderTextColor={THEME.textSecondary}
+                />
+              </View>
+              {fieldErrors.shippingName ? (
+                <Text style={styles.err}>{fieldErrors.shippingName}</Text>
+              ) : null}
 
-            <TextInput
-              style={[styles.input, fieldErrors.line1 && styles.inputError]}
-              value={line1}
-              onChangeText={t => {
-                setLine1(t);
-                clearError('line1');
-              }}
-              placeholder="Adresse ligne 1"
-            />
-            {fieldErrors.line1 ? <Text style={styles.err}>{fieldErrors.line1}</Text> : null}
-            <TextInput
-              style={styles.input}
-              value={line2}
-              onChangeText={setLine2}
-              placeholder="Appartement, bâtiment..."
-            />
-            <View style={styles.row2}>
-              <View style={styles.grow}>
+              <View style={styles.fieldDivider} />
+              <View style={styles.fieldBlock}>
+                <Text style={[styles.fieldLabel, dm500 && { fontFamily: dm500 }]}>
+                  {t('bookOrder.fieldAddress')}
+                </Text>
                 <TextInput
-                  style={[styles.input, fieldErrors.zip && styles.inputError]}
-                  value={zip}
-                  onChangeText={t => {
-                    setZip(t);
-                    clearError('zip');
+                  style={[
+                    styles.fieldInput,
+                    dm500 && { fontFamily: dm500 },
+                    fieldErrors.line1 && styles.inputError,
+                  ]}
+                  value={line1}
+                  onChangeText={v => {
+                    setLine1(v);
+                    clearError('line1');
                   }}
-                  placeholder="Code postal"
+                  placeholder={t('bookOrder.placeholderAddress')}
+                  placeholderTextColor={THEME.textSecondary}
                 />
-                {fieldErrors.zip ? <Text style={styles.err}>{fieldErrors.zip}</Text> : null}
               </View>
-              <View style={styles.grow2}>
+              {fieldErrors.line1 ? <Text style={styles.err}>{fieldErrors.line1}</Text> : null}
+
+              <View style={styles.fieldDivider} />
+              <View style={styles.fieldBlock}>
+                <Text style={[styles.fieldLabel, dm500 && { fontFamily: dm500 }]}>
+                  {t('bookOrder.fieldAddress2')}
+                </Text>
                 <TextInput
-                  style={[styles.input, fieldErrors.city && styles.inputError]}
-                  value={city}
-                  onChangeText={t => {
-                    setCity(t);
-                    clearError('city');
-                  }}
-                  placeholder="Ville"
+                  style={[styles.fieldInput, dm500 && { fontFamily: dm500 }]}
+                  value={line2}
+                  onChangeText={setLine2}
+                  placeholder={t('bookOrder.placeholderAddress2')}
+                  placeholderTextColor={THEME.textSecondary}
                 />
-                {fieldErrors.city ? <Text style={styles.err}>{fieldErrors.city}</Text> : null}
               </View>
+
+              <View style={styles.fieldDivider} />
+              <View style={styles.row2}>
+                <View style={[styles.grow, styles.fieldBlock]}>
+                  <Text style={[styles.fieldLabel, dm500 && { fontFamily: dm500 }]}>
+                    {t('bookOrder.fieldZip')}
+                  </Text>
+                  <TextInput
+                    style={[
+                      styles.fieldInput,
+                      dm500 && { fontFamily: dm500 },
+                      fieldErrors.zip && styles.inputError,
+                    ]}
+                    value={zip}
+                    onChangeText={v => {
+                      setZip(v);
+                      clearError('zip');
+                    }}
+                    placeholder={t('bookOrder.fieldZip')}
+                    placeholderTextColor={THEME.textSecondary}
+                    keyboardType="numbers-and-punctuation"
+                  />
+                  {fieldErrors.zip ? <Text style={styles.err}>{fieldErrors.zip}</Text> : null}
+                </View>
+                <View style={styles.colDivider} />
+                <View style={[styles.grow2, styles.fieldBlock]}>
+                  <Text style={[styles.fieldLabel, dm500 && { fontFamily: dm500 }]}>
+                    {t('bookOrder.fieldCity')}
+                  </Text>
+                  <TextInput
+                    style={[
+                      styles.fieldInput,
+                      dm500 && { fontFamily: dm500 },
+                      fieldErrors.city && styles.inputError,
+                    ]}
+                    value={city}
+                    onChangeText={v => {
+                      setCity(v);
+                      clearError('city');
+                    }}
+                    placeholder={t('bookOrder.fieldCity')}
+                    placeholderTextColor={THEME.textSecondary}
+                  />
+                  {fieldErrors.city ? <Text style={styles.err}>{fieldErrors.city}</Text> : null}
+                </View>
+              </View>
+
+              <View style={styles.fieldDivider} />
+              <Pressable
+                style={styles.countryRow}
+                onPress={openCountryPicker}
+                accessibilityRole="button"
+                accessibilityLabel={t('bookOrder.fieldCountry')}
+              >
+                <View style={styles.fieldBlockGrow}>
+                  <Text style={[styles.fieldLabel, dm500 && { fontFamily: dm500 }]}>
+                    {t('bookOrder.fieldCountry')}
+                  </Text>
+                  <Text style={[styles.fieldValue, dm500 && { fontFamily: dm500 }]}>
+                    {countryLabel}
+                  </Text>
+                </View>
+                <ChevronRight size={scale(18)} color={THEME.textSecondary} strokeWidth={2} />
+              </Pressable>
             </View>
-            <Text style={styles.sectionLabel}>Pays</Text>
-            <View style={styles.countryRow}>
-              {COUNTRY_OPTIONS.map(o => {
-                const sel = o.code === country;
-                return (
-                  <Pressable
-                    key={o.code}
-                    style={[styles.chip, sel && styles.chipOn]}
-                    onPress={() => setCountry(o.code)}
-                  >
-                    <Text style={[styles.chipText, sel && styles.chipTextOn]}>{o.label}</Text>
+
+            <View style={[styles.formCard, styles.emailCard]}>
+              <View style={styles.emailHeader}>
+                <Text style={[styles.fieldLabel, dm500 && { fontFamily: dm500 }]}>
+                  {t('bookOrder.fieldEmail')}
+                </Text>
+                {showEmailDisplay ? (
+                  <Pressable onPress={() => setEmailEditing(true)} hitSlop={8}>
+                    <Text style={[styles.emailEdit, dm600 && { fontFamily: dm600 }]}>
+                      {t('bookOrder.emailEdit')}
+                    </Text>
                   </Pressable>
-                );
-              })}
+                ) : null}
+              </View>
+              {showEmailDisplay ? (
+                <Text style={[styles.fieldValue, dm500 && { fontFamily: dm500 }]} numberOfLines={1}>
+                  {email.trim()}
+                </Text>
+              ) : (
+                <TextInput
+                  style={[
+                    styles.fieldInput,
+                    dm500 && { fontFamily: dm500 },
+                    fieldErrors.email && styles.inputError,
+                  ]}
+                  value={email}
+                  onChangeText={v => {
+                    setEmail(v);
+                    clearError('email');
+                  }}
+                  onBlur={() => {
+                    if (isValidEmail(email)) setEmailEditing(false);
+                  }}
+                  placeholder="email@exemple.com"
+                  placeholderTextColor={THEME.textSecondary}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  autoFocus={emailEditing}
+                />
+              )}
+              {fieldErrors.email ? <Text style={styles.err}>{fieldErrors.email}</Text> : null}
+            </View>
+          </>
+        ) : (
+          <>
+            <Text style={[styles.section, dm600 && { fontFamily: dm600 }]}>
+              {t('bookOrder.fieldEmail')}
+            </Text>
+            <View style={styles.formCard}>
+              <TextInput
+                style={[
+                  styles.fieldInput,
+                  dm500 && { fontFamily: dm500 },
+                  fieldErrors.email && styles.inputError,
+                ]}
+                value={email}
+                onChangeText={v => {
+                  setEmail(v);
+                  clearError('email');
+                }}
+                placeholder="email@exemple.com"
+                placeholderTextColor={THEME.textSecondary}
+                autoCapitalize="none"
+                keyboardType="email-address"
+              />
+              {fieldErrors.email ? <Text style={styles.err}>{fieldErrors.email}</Text> : null}
+            </View>
+          </>
+        )}
+
+        {exportMode === 'print' ? (
+          <>
+            <Text style={[styles.section, dm600 && { fontFamily: dm600 }]}>
+              {t('bookOrder.sectionBeforeOrder')}
+            </Text>
+            <View style={styles.formCard}>
+              <Pressable
+                style={styles.reviewRow}
+                onPress={() => {
+                  if (!bookId) return;
+                  router.push({
+                    pathname: '/book-preview',
+                    params: { bookId, fromOrderReview: '1' },
+                  });
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={t('bookOrder.reviewBook')}
+              >
+                <Text style={[styles.reviewRowText, dm500 && { fontFamily: dm500 }]}>
+                  {t('bookOrder.reviewBook')}
+                </Text>
+                <ChevronRight size={scale(18)} color={THEME.textSecondary} strokeWidth={2} />
+              </Pressable>
+
+              <View style={styles.fieldDivider} />
+
+              <Pressable
+                style={styles.checkRow}
+                onPress={() => {
+                  setContentVerified(v => !v);
+                  clearError('submit');
+                }}
+                hitSlop={4}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: contentVerified }}
+              >
+                <View style={[styles.checkbox, contentVerified && styles.checkboxOn]}>
+                  {contentVerified ? (
+                    <Text style={styles.checkboxMark}>✓</Text>
+                  ) : null}
+                </View>
+                <Text style={[styles.checkLabel, dm500 && { fontFamily: dm500 }]}>
+                  {t('bookOrder.legalCheckbox')}
+                </Text>
+              </Pressable>
+
+              <View style={styles.fieldDivider} />
+
+              <Text style={[styles.legalBody, dm500 && { fontFamily: dm500 }]}>
+                {t('bookOrder.legalBody')}
+                <Text
+                  style={[styles.legalCgvLink, dm600 && { fontFamily: dm600 }]}
+                  onPress={() => void Linking.openURL(PRINT_ORDER_CGV_URL)}
+                >
+                  {t('bookOrder.legalCgvLink')}
+                </Text>
+                .
+              </Text>
             </View>
           </>
         ) : null}
 
-        {exportMode === 'print' ? (
-          <View style={styles.legalCard}>
-            <Text style={styles.legalTitle}>{t('bookOrder.legalTitle')}</Text>
-            <Text style={styles.legalBody}>{t('bookOrder.legalBody')}</Text>
-            <Pressable
-              style={styles.reviewBtn}
-              onPress={() => {
-                if (!bookId) return;
-                // push (pas back) : l’écran commande reste monté → formulaire conservé.
-                router.push({
-                  pathname: '/book-preview',
-                  params: { bookId, fromOrderReview: '1' },
-                });
-              }}
-              hitSlop={8}
-              accessibilityRole="button"
-              accessibilityLabel={t('bookOrder.reviewBook')}
-            >
-              <Text style={styles.reviewBtnText}>{t('bookOrder.reviewBook')}</Text>
-            </Pressable>
-            <Pressable
-              style={styles.checkRow}
-              onPress={() => {
-                setContentVerified(v => !v);
-                clearError('submit');
-              }}
-              hitSlop={4}
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: contentVerified }}
-            >
-              <View style={[styles.checkbox, contentVerified && styles.checkboxOn]} />
-              <Text style={styles.checkLabel}>{t('bookOrder.legalCheckbox')}</Text>
-            </Pressable>
-            <Text style={styles.legalNoWithdraw}>{t('bookOrder.legalNoWithdraw')}</Text>
-            <Text style={styles.legalCgvLine}>
-              {t('bookOrder.legalCgvBefore')}
-              <Text
-                style={styles.legalCgvLink}
-                onPress={() => void Linking.openURL(PRINT_ORDER_CGV_URL)}
-              >
-                {t('bookOrder.legalCgvLink')}
-              </Text>
-              {t('bookOrder.legalCgvAfter')}
-            </Text>
-          </View>
-        ) : null}
-
         {fieldErrors.submit ? <Text style={styles.err}>{fieldErrors.submit}</Text> : null}
-
-        <Pressable
-          style={[
-            petitmoCtaStyles.primary,
-            petitmoCtaStyles.primaryFullWidth,
-            styles.cta,
-            (submitting || !formIsComplete) && petitmoCtaStyles.primaryDisabled,
-          ]}
-          disabled={submitting || !formIsComplete}
-          onPress={() => void submitOrder()}
-        >
-          {submitting ? (
-            <ActivityIndicator color={PETITMO_CTA_SPINNER_COLOR} />
-          ) : (
-            <Text style={[petitmoCtaStyles.primaryText, styles.ctaText]}>{ctaLabel}</Text>
-          )}
-        </Pressable>
       </ScrollView>
+
+      {stickyCta}
 
       <BookPdfGeneratingOverlay visible={submitting && (exportMode === 'pdf' || exportMode === 'print')} />
     </KeyboardAvoidingView>
@@ -974,21 +1311,269 @@ export default function BookOrderScreen() {
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: THEME.bgScreen },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: THEME.bgScreen },
+  center: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: THEME.bgScreen,
+  },
   root: { flex: 1, backgroundColor: THEME.bgScreen, paddingHorizontal: scale(20) },
   scroll: { paddingHorizontal: scale(20) },
-  backRow: { marginBottom: scale(8), alignSelf: 'flex-start' },
-  backText: { fontSize: scale(16), color: THEME.accent, fontWeight: '600' },
-  title: { fontSize: scale(22), fontWeight: '700', color: THEME.textPrimary, marginBottom: scale(4) },
-  sub: { fontSize: scale(15), color: THEME.textMuted, marginBottom: scale(16) },
+  backRow: { marginBottom: scale(10), alignSelf: 'flex-start' },
+  backText: { fontSize: scale(16), color: THEME.textPrimary, fontWeight: '600' },
+  title: {
+    fontSize: scale(26),
+    fontWeight: '700',
+    color: THEME.textPrimary,
+    marginBottom: scale(4),
+  },
+  sub: { fontSize: scale(15), color: THEME.textMuted, marginBottom: scale(18) },
   muted: { fontSize: scale(15), color: THEME.textMuted, marginTop: scale(12) },
-  banner: {
-    backgroundColor: 'rgba(28, 28, 30, 0.06)',
+
+  summaryCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: scale(16),
     padding: scale(14),
-    borderRadius: scale(12),
+    marginBottom: scale(12),
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,0,0,0.08)',
+  },
+  summaryRow: { flexDirection: 'row', gap: scale(14), alignItems: 'flex-start' },
+  coverClip: {
+    overflow: 'hidden',
+    borderRadius: scale(8),
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,0,0,0.1)',
+    backgroundColor: '#FFFFFF',
+  },
+  summaryInfo: { flex: 1, minWidth: 0, paddingTop: scale(2) },
+  summaryTitle: {
+    fontSize: scale(17),
+    fontWeight: '700',
+    color: THEME.textPrimary,
+    marginBottom: scale(4),
+  },
+  summaryMeta: {
+    fontSize: scale(13),
+    color: THEME.textMuted,
+    marginBottom: scale(10),
+  },
+  summaryPrice: {
+    fontSize: scale(22),
+    fontWeight: '700',
+    color: THEME.textPrimary,
+  },
+  summaryDelivery: {
+    fontSize: scale(14),
+    color: THEME.textPrimary,
+    marginTop: scale(2),
+  },
+  priceDetailLink: {
+    alignSelf: 'flex-end',
+    marginTop: scale(10),
+  },
+  priceDetailLinkText: {
+    fontSize: scale(14),
+    fontWeight: '600',
+    color: THEME.brandCtaOrange,
+  },
+  priceDetailBox: {
+    marginTop: scale(10),
+    paddingTop: scale(10),
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(0,0,0,0.08)',
+    gap: scale(4),
+  },
+  priceDetailLine: {
+    fontSize: scale(13),
+    color: THEME.textMuted,
+    lineHeight: scale(18),
+  },
+
+  plusBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: scale(12),
+    backgroundColor: 'rgba(255, 127, 79, 0.10)',
+    borderRadius: scale(14),
+    paddingVertical: scale(12),
+    paddingHorizontal: scale(14),
     marginBottom: scale(16),
   },
-  bannerText: { fontSize: scale(14), color: THEME.textPrimary, lineHeight: scale(20) },
+  plusLogoWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  plusLogoMark: {
+    fontSize: scale(24),
+    color: THEME.brandCtaOrange,
+    marginLeft: scale(-22),
+    marginTop: scale(-1.5),
+  },
+  plusCopy: { flex: 1, minWidth: 0 },
+  plusSave: {
+    fontSize: scale(15),
+    fontWeight: '700',
+    color: THEME.textPrimary,
+    marginBottom: scale(2),
+  },
+  plusPrice: {
+    fontSize: scale(13),
+    color: THEME.textMuted,
+    marginBottom: scale(4),
+  },
+  plusLink: {
+    fontSize: scale(13),
+    fontWeight: '600',
+    color: THEME.brandCtaOrange,
+  },
+
+  section: {
+    fontSize: scale(12),
+    fontWeight: '700',
+    color: THEME.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom: scale(8),
+    marginTop: scale(4),
+  },
+  formCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: scale(16),
+    paddingHorizontal: scale(14),
+    paddingVertical: scale(4),
+    marginBottom: scale(14),
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,0,0,0.08)',
+    overflow: 'hidden',
+  },
+  emailCard: {
+    paddingVertical: scale(12),
+  },
+  fieldBlock: {
+    paddingVertical: scale(10),
+  },
+  fieldBlockGrow: { flex: 1, minWidth: 0, paddingVertical: scale(10) },
+  fieldLabel: {
+    fontSize: scale(12),
+    color: THEME.textMuted,
+    marginBottom: scale(4),
+  },
+  fieldInput: {
+    fontSize: scale(16),
+    color: THEME.textPrimary,
+    paddingVertical: Platform.OS === 'ios' ? scale(2) : 0,
+    margin: 0,
+  },
+  fieldValue: {
+    fontSize: scale(16),
+    color: THEME.textPrimary,
+  },
+  fieldDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(0,0,0,0.08)',
+  },
+  colDivider: {
+    width: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(0,0,0,0.08)',
+    marginVertical: scale(8),
+  },
+  row2: { flexDirection: 'row', alignItems: 'stretch' },
+  grow: { flex: 1, minWidth: 0 },
+  grow2: { flex: 1.35, minWidth: 0 },
+  countryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: scale(8),
+  },
+  emailHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: scale(2),
+  },
+  emailEdit: {
+    fontSize: scale(14),
+    fontWeight: '600',
+    color: THEME.brandCtaOrange,
+  },
+
+  reviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: scale(14),
+  },
+  reviewRowText: {
+    flex: 1,
+    fontSize: scale(15),
+    color: THEME.textPrimary,
+    paddingRight: scale(8),
+  },
+  checkRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: scale(12),
+    paddingVertical: scale(12),
+  },
+  checkbox: {
+    width: scale(22),
+    height: scale(22),
+    borderRadius: scale(5),
+    borderWidth: 1.5,
+    borderColor: THEME.textSecondary,
+    marginTop: scale(1),
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxOn: {
+    backgroundColor: THEME.brandCtaOrange,
+    borderColor: THEME.brandCtaOrange,
+  },
+  checkboxMark: {
+    color: '#FFFFFF',
+    fontSize: scale(13),
+    fontWeight: '700',
+    lineHeight: scale(16),
+  },
+  checkLabel: {
+    flex: 1,
+    fontSize: scale(14),
+    color: THEME.textPrimary,
+    lineHeight: scale(20),
+  },
+  legalBody: {
+    fontSize: scale(12),
+    color: THEME.textMuted,
+    lineHeight: scale(17),
+    paddingVertical: scale(12),
+  },
+  legalCgvLink: {
+    fontSize: scale(12),
+    color: THEME.brandCtaOrange,
+    fontWeight: '600',
+  },
+
+  inputError: { color: '#B91C1C' },
+  err: {
+    fontSize: scale(13),
+    color: 'rgba(180, 60, 60, 0.9)',
+    marginBottom: scale(8),
+    marginTop: scale(2),
+  },
+  stickyCtaWrap: {
+    paddingHorizontal: scale(20),
+    paddingTop: scale(10),
+    backgroundColor: THEME.bgScreen,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(0,0,0,0.06)',
+  },
+  cta: {
+    marginTop: 0,
+  },
+  ctaText: {
+    fontSize: scale(16),
+  },
   devFillBtn: {
     alignSelf: 'flex-start',
     marginBottom: scale(12),
@@ -998,126 +1583,4 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(37, 99, 235, 0.12)',
   },
   devFillBtnText: { fontSize: scale(13), fontWeight: '600', color: '#1D4ED8' },
-  card: {
-    backgroundColor: THEME.bg,
-    borderRadius: scale(12),
-    padding: scale(16),
-    marginBottom: scale(16),
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.06)',
-  },
-  cardTitle: { fontSize: scale(16), fontWeight: '700', color: THEME.textPrimary, marginBottom: scale(8) },
-  rowMuted: { fontSize: scale(14), color: THEME.textMuted, marginBottom: scale(4) },
-  price: { fontSize: scale(22), fontWeight: '700', color: THEME.textPrimary, marginTop: scale(8) },
-  deliveryIncl: {
-    fontSize: scale(14),
-    fontWeight: '600',
-    color: THEME.textPrimary,
-    marginTop: scale(4),
-  },
-  legalCard: {
-    backgroundColor: THEME.bg,
-    borderRadius: scale(12),
-    padding: scale(16),
-    marginTop: scale(8),
-    marginBottom: scale(12),
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.08)',
-  },
-  legalTitle: {
-    fontSize: scale(16),
-    fontWeight: '700',
-    color: THEME.textPrimary,
-    marginBottom: scale(8),
-  },
-  legalBody: {
-    fontSize: scale(14),
-    color: THEME.textMuted,
-    lineHeight: scale(20),
-    marginBottom: scale(12),
-  },
-  reviewBtn: {
-    alignSelf: 'flex-start',
-    marginBottom: scale(14),
-    paddingVertical: scale(8),
-    paddingHorizontal: scale(12),
-    borderRadius: scale(8),
-    backgroundColor: 'rgba(28, 28, 30, 0.06)',
-  },
-  reviewBtnText: {
-    fontSize: scale(14),
-    fontWeight: '600',
-    color: THEME.accent,
-  },
-  legalNoWithdraw: {
-    fontSize: scale(12),
-    color: THEME.textMuted,
-    lineHeight: scale(17),
-    marginTop: scale(10),
-  },
-  legalCgvLine: {
-    fontSize: scale(12),
-    color: THEME.textMuted,
-    lineHeight: scale(17),
-    marginTop: scale(10),
-  },
-  legalCgvLink: {
-    fontSize: scale(12),
-    color: THEME.accent,
-    fontWeight: '600',
-    textDecorationLine: 'underline',
-  },
-  section: {
-    fontSize: scale(13),
-    fontWeight: '600',
-    color: THEME.textMuted,
-    textTransform: 'uppercase',
-    marginBottom: scale(8),
-    marginTop: scale(4),
-  },
-  sectionLabel: { fontSize: scale(14), color: THEME.textMuted, marginBottom: scale(6) },
-  input: {
-    borderWidth: 1,
-    borderColor: '#C7C7CC',
-    borderRadius: scale(10),
-    paddingHorizontal: scale(12),
-    paddingVertical: scale(10),
-    fontSize: scale(16),
-    marginBottom: scale(6),
-    color: THEME.textPrimary,
-    backgroundColor: THEME.bg,
-  },
-  inputError: { borderColor: 'rgba(180, 60, 60, 0.5)' },
-  err: { fontSize: scale(13), color: 'rgba(180, 60, 60, 0.9)', marginBottom: scale(8) },
-  hintDiscreet: { fontSize: scale(12), color: THEME.textSecondary, marginBottom: scale(14) },
-  row2: { flexDirection: 'row', gap: scale(10) },
-  grow: { flex: 1, minWidth: 0 },
-  grow2: { flex: 2, minWidth: 0 },
-  countryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: scale(8), marginBottom: scale(8) },
-  chip: {
-    borderWidth: 1,
-    borderColor: '#C7C7CC',
-    borderRadius: scale(10),
-    paddingHorizontal: scale(10),
-    paddingVertical: scale(6),
-  },
-  chipOn: { borderColor: THEME.brandCtaOrange, backgroundColor: 'rgba(255, 127, 79, 0.08)' },
-  chipText: { fontSize: scale(13), color: THEME.textPrimary },
-  chipTextOn: { fontWeight: '600' },
-  checkRow: { flexDirection: 'row', alignItems: 'center', gap: scale(10), marginTop: scale(8), marginBottom: scale(12) },
-  checkbox: {
-    width: scale(22),
-    height: scale(22),
-    borderRadius: scale(6),
-    borderWidth: 2,
-    borderColor: THEME.textSecondary,
-  },
-  checkboxOn: { backgroundColor: THEME.brandCtaOrange, borderColor: THEME.brandCtaOrange },
-  checkLabel: { flex: 1, fontSize: scale(14), color: THEME.textPrimary, lineHeight: scale(20) },
-  cta: {
-    marginTop: scale(8),
-  },
-  ctaText: {
-    fontSize: scale(16),
-  },
 });

@@ -36,7 +36,7 @@ export async function persistVideoPosterPrintAtTimeMs(
       : Math.max(0, Math.round(timeMs));
 
   try {
-    const { printPath } = await persistVideoPosterFiles({
+    const { printPath, printPx } = await persistVideoPosterFiles({
       memoryId: id,
       videoUri,
       timeMs: clampedMs,
@@ -45,13 +45,20 @@ export async function persistVideoPosterPrintAtTimeMs(
       quality: VIDEO_POSTER_PRINT_JPEG_QUALITY,
       settleMs: opts?.settleMs ?? 160,
     });
-    if (!printPath) return null;
+    if (!printPath || !printPx) {
+      console.warn('[videoPosterPrint] no printPath after extract', id, clampedMs);
+      return null;
+    }
 
+    // Relecture SQLite : un backfill concurrent peut avoir touché la row pendant l’extract.
+    const latest = getLocalMemoryById(id) ?? cur;
     const now = new Date().toISOString();
     const next: Memory = {
-      ...cur,
+      ...latest,
       local_poster_print_path: printPath,
       poster_print_url: printPath,
+      print_px_w: printPx.w,
+      print_px_h: printPx.h,
       updated_at: now,
     };
     upsertLocalMemory(next);

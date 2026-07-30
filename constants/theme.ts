@@ -3,11 +3,16 @@ import { CAPTURE_SCREEN_ACCENT, CAPTURE_SCREEN_BG } from '@/constants/captureScr
 /** Rosé charte — couleur d’accent / CTA / marque (remplace ardoise + terracotta). */
 const BRAND_PRIMARY = '#FC5757';
 const BRAND_PRIMARY_RGB = '252, 87, 87';
-/** Orange CTA charte — splash natif, adaptive icon, disques Capturer, tab bar. */
+/** Orange CTA charte — disques Capturer, tab bar, CTA in-app. */
 const BRAND_CTA_ORANGE = '#FF7F4F';
 const BRAND_CTA_ORANGE_RGB = '255, 127, 79';
-/** @deprecated — utiliser `BRAND_CTA_ORANGE` (splash + icône alignés sur la charte). */
-const BRAND_SPLASH_BRICK = BRAND_CTA_ORANGE;
+/**
+ * Orange widget / icône store (`widget_petitmo_orange2`) — un cran plus vif.
+ * Splash natif + animation alignés dessus pour le même flash au lancement.
+ */
+const BRAND_WIDGET_ORANGE = '#FC6C39';
+/** @deprecated — alias historique ; le splash utilise désormais l’orange widget. */
+const BRAND_SPLASH_BRICK = BRAND_WIDGET_ORANGE;
 /** Gris — CTA secondaires (paywall, livres, modales, favoris, memory-view…). */
 const BRAND_CTA_GRAY = '#51545E';
 const BRAND_CTA_GRAY_RGB = '81, 84, 94';
@@ -35,8 +40,10 @@ export const THEME = {
 
   /** Couleur de marque — CTA, cœurs favoris, paywall, spinners d’accent… */
   brandPrimary: BRAND_PRIMARY,
-  /** Fond splash (Expo / Android / iOS) — orange charte (`brandCtaOrange`). */
+  /** Fond splash (Expo / Android / iOS / SplashAnimation) — orange widget `#FC6C39`. */
   splashScreenBackground: BRAND_SPLASH_BRICK,
+  /** Orange widget / icône — même teinte que le splash. */
+  brandWidgetOrange: BRAND_WIDGET_ORANGE,
   /** Orange CTA charte — disques Capturer, tab bar active, point âge / cœur titre… */
   brandCtaOrange: BRAND_CTA_ORANGE,
   /** Accents disques Capturer — cœur titre, point pilule âge (orange charte). */

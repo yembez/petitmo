@@ -52,6 +52,55 @@ export default function PetitmoLogoManuscrit({
   );
 }
 
+/**
+ * Variante “tight” : rogne le vide horizontal autour du logo à l'affichage.
+ * Important : le composant original n'est pas modifié, donc aucun autre écran n'est impacté.
+ */
+export function PetitmoLogoManuscritTight({
+  width,
+  height,
+  color = '#1C1C1E',
+  shadow = false,
+}: Props) {
+  // Approximation basée sur le rendu UI : on garde ~83% de la largeur pour supprimer le vide.
+  const TIGHT_WIDTH_RATIO = 0.83;
+  const tightWidth = Math.max(1, Math.round(width * TIGHT_WIDTH_RATIO));
+
+  const xml = useMemo(() => tintSvg(PETITMO_LOGO_MANUSCRIT_XML, color), [color]);
+  const shadowXml = useMemo(() => tintSvg(PETITMO_LOGO_MANUSCRIT_XML, '#000000'), []);
+
+  // Décalage horizontal pour centrer visuellement le tracé dans la zone rognée.
+  const leftOffset = -Math.round(width * 0.09);
+
+  return (
+    <View style={{ width: tightWidth, height, overflow: 'hidden' }}>
+      {shadow ? (
+        <>
+          <View
+            style={[
+              StyleSheet.absoluteFillObject,
+              { opacity: 0.14, transform: [{ translateX: leftOffset }, { translateY: 1 }] },
+            ]}
+          >
+            <SvgXml xml={shadowXml} width={width} height={height} />
+          </View>
+          <View
+            style={[
+              StyleSheet.absoluteFillObject,
+              { opacity: 0.09, transform: [{ translateX: leftOffset }, { translateY: 2 }] },
+            ]}
+          >
+            <SvgXml xml={shadowXml} width={width} height={height} />
+          </View>
+        </>
+      ) : null}
+      <View style={{ marginLeft: leftOffset }}>
+        <SvgXml xml={xml} width={width} height={height} />
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   wrap: {
     alignItems: 'center',

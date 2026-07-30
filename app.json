@@ -17,7 +17,7 @@
     "splash": {
       "image": "./assets/Splash_petitmo_2.png",
       "resizeMode": "contain",
-      "backgroundColor": "#FF7F4F"
+      "backgroundColor": "#FC6C39"
     },
     "locales": {
       "fr": "./locales/fr.json",

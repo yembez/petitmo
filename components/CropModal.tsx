@@ -18,13 +18,10 @@ import Animated, {
 import * as ImageManipulator from 'expo-image-manipulator';
 import { Image } from 'expo-image';
 import Svg, { Defs, Mask, Rect } from 'react-native-svg';
-import { useSafeAreaInsets, useSafeAreaFrame } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { scale as s, verticalScale } from '@/utils/responsive';
 import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
-import {
-  computeCaptureHeroPhotoViewport,
-  insetCropRectForCaptureHeroViewport,
-} from '@/utils/captureHeroMetrics';
+import { insetCropRectForChildProfilePhoto } from '@/utils/captureHeroMetrics';
 
 type CropModalProps = {
   visible: boolean;
@@ -46,7 +43,6 @@ function clamp(v: number, min: number, max: number): number {
 export function CropModal({ visible, imageUri, onCancel, onConfirm, onChangePhoto }: CropModalProps) {
   const { width: screenW, height: screenH } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const frame = useSafeAreaFrame();
   const headerH = 52;
   const footerH = 80;
   const bodyPadV = verticalScale(18);
@@ -56,16 +52,11 @@ export function CropModal({ visible, imageUri, onCancel, onConfirm, onChangePhot
   const stageW = screenW;
   const maxCropH = Math.max(180, Math.round(stageH - bodyPadV * 2));
 
-  /** Même ratio que la zone photo Capturer (~70 % hauteur écran), pas le plein écran. */
-  const captureHeroViewport = useMemo(
-    () => computeCaptureHeroPhotoViewport(frame.height, screenH, screenW, insets.top),
-    [frame.height, insets.top, screenH, screenW],
-  );
-
+  /** Même ratio que la carte photo Capturer (`CHILD_PROFILE_PHOTO_ASPECT`). */
   const cropRect = useMemo(() => {
     const maxW = Math.max(180, Math.round(screenW - 40));
-    return insetCropRectForCaptureHeroViewport(maxW, maxCropH, captureHeroViewport);
-  }, [captureHeroViewport, maxCropH, screenW]);
+    return insetCropRectForChildProfilePhoto(maxW, maxCropH);
+  }, [maxCropH, screenW]);
 
   const cropRectLeft = useMemo(() => (stageW - cropRect.width) / 2, [cropRect.width, stageW]);
   const cropRectTop = useMemo(() => (stageH - cropRect.height) / 2, [cropRect.height, stageH]);

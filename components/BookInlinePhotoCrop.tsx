@@ -273,6 +273,7 @@ export function BookInlinePhotoCrop({
               style={StyleSheet.absoluteFillObject}
               contentFit="cover"
               cachePolicy="memory-disk"
+              recyclingKey={uri}
               transition={0}
             />
           </Animated.View>

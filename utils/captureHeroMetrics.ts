@@ -10,8 +10,16 @@ export const CAPTURE_HERO_IMAGE_CONTENT_POSITION = { top: '32%', left: '50%' } a
 export const CAPTURE_HERO_IMAGE_OBJECT_POSITION = 'center 32%';
 
 /**
- * Viewport d’affichage + recadrage profil = zone photo Capturer (≈ 70 % hauteur écran).
- * Même ratio que `capturePhotoZone` dans `app/(tabs)/index.tsx` et `CropModal`.
+ * Ratio largeur/hauteur de la **carte photo** Capturer et du crop profil (`CropModal`).
+ * Source de vérité unique — ne plus dériver le crop du ratio « 70 % écran ».
+ */
+export const CHILD_PROFILE_PHOTO_ASPECT = 0.93;
+
+/** Variante compacte (écran bas) — affichage Capturer uniquement, pas le crop. */
+export const CHILD_PROFILE_PHOTO_ASPECT_COMPACT = 0.85;
+
+/**
+ * Viewport legacy (zone photo plein largeur) — réservé aux layouts Capturer hors crop.
  */
 export type CaptureHeroViewport = {
   width: number;
@@ -47,7 +55,7 @@ export function computeCapturePhotoGradientHeight(photoZoneHeight: number): numb
 }
 
 /**
- * Ratio largeur/hauteur du crop profil = zone photo Capturer (70 % écran, pleine largeur).
+ * Viewport zone photo Capturer (plein largeur × ~70 % hauteur) — layouts hors crop.
  */
 export function computeCaptureHeroPhotoViewport(
   frameHeight: number,
@@ -67,7 +75,7 @@ export function computeCaptureHeroPhotoViewport(
 
 /**
  * Taille du bloc photo dans une carte avec marges horizontales
- * (même ratio que la zone photo Capturer / `CropModal`).
+ * (même ratio que la zone photo Capturer).
  */
 export function computeCaptureHeroCardInnerPhotoSize(
   viewport: CaptureHeroViewport,
@@ -79,15 +87,17 @@ export function computeCaptureHeroCardInnerPhotoSize(
 }
 
 /**
- * Rectangle de recadrage inscrit dans `maxWidth` × `maxHeight`,
- * avec le même ratio largeur/hauteur que le viewport photo Capturer.
+ * Rectangle de recadrage inscrit dans `maxWidth` × `maxHeight` pour un ratio w/h donné.
  */
-export function insetCropRectForCaptureHeroViewport(
+export function insetCropRectForAspect(
   maxWidth: number,
   maxHeight: number,
-  viewport: CaptureHeroViewport | { width: number; height: number },
+  aspectWidthOverHeight: number,
 ): { width: number; height: number } {
-  const awh = viewport.width / viewport.height;
+  const awh =
+    Number.isFinite(aspectWidthOverHeight) && aspectWidthOverHeight > 0
+      ? aspectWidthOverHeight
+      : CHILD_PROFILE_PHOTO_ASPECT;
   let w = maxWidth;
   let h = Math.round(w / awh);
   if (h > maxHeight) {
@@ -95,4 +105,25 @@ export function insetCropRectForCaptureHeroViewport(
     w = Math.round(h * awh);
   }
   return { width: Math.max(1, w), height: Math.max(1, h) };
+}
+
+/** Crop profil = carte photo Capturer (`CHILD_PROFILE_PHOTO_ASPECT`). */
+export function insetCropRectForChildProfilePhoto(
+  maxWidth: number,
+  maxHeight: number,
+): { width: number; height: number } {
+  return insetCropRectForAspect(maxWidth, maxHeight, CHILD_PROFILE_PHOTO_ASPECT);
+}
+
+/**
+ * @deprecated Préférer `insetCropRectForChildProfilePhoto` (ratio carte 0.93).
+ * Conservé pour appels legacy au viewport plein largeur.
+ */
+export function insetCropRectForCaptureHeroViewport(
+  maxWidth: number,
+  maxHeight: number,
+  viewport: CaptureHeroViewport | { width: number; height: number },
+): { width: number; height: number } {
+  const awh = viewport.width / Math.max(1, viewport.height);
+  return insetCropRectForAspect(maxWidth, maxHeight, awh);
 }

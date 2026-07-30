@@ -28,6 +28,13 @@ import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
 import DatePicker from '@/components/DatePicker';
 import PetitmoLogoManuscrit from '@/components/PetitmoLogoManuscrit';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
+import { CHILD_PROFILE_PHOTO_ASPECT } from '@/utils/captureHeroMetrics';
+
+/** Même ratio que carte Capturer / CropModal (évite 4:5 ≠ 0.93). */
+const CREATE_CHILD_PHOTO_ASPECT: [number, number] = [
+  Math.round(CHILD_PROFILE_PHOTO_ASPECT * 100),
+  100,
+];
 
 export default function CreateChildScreen() {
   const router = useRouter();
@@ -88,7 +95,7 @@ export default function CreateChildScreen() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,
-      aspect: [4, 5],
+      aspect: CREATE_CHILD_PHOTO_ASPECT,
       quality: 0.8,
     });
 

@@ -121,19 +121,48 @@
       "voicesBody": "Tu as déjà utilisé tes {{count}} souvenirs audio du plan gratuit. Pour en ajouter, passe à Petitmo+."
     }
   },
+  "book": {
+    "videoPoster": {
+      "title": "Choisir l'image d'illustration",
+      "useImage": "Utiliser cette image",
+      "saving": "Enregistrement…",
+      "saveFailed": "Impossible d'enregistrer cette image. Réessaie dans un instant.",
+      "closeA11y": "Fermer",
+      "scrubA11y": "Position dans la vidéo"
+    }
+  },
   "bookOrder": {
-    "reviewBook": "Revoir mon livre",
+    "title": "Commander mon livre",
+    "titlePdf": "Commander mon PDF",
+    "subtitle": "{{title}} · {{child}}",
+    "reviewBook": "Revoir l’aperçu de mon livre",
     "backToOrder": "Retour à la commande",
     "backToOrderShort": "Commande",
     "deliveryIncluded": "Livraison incluse",
-    "legalTitle": "Dernière vérification avant impression",
-    "legalBody": "Votre livre sera imprimé tel qu’il apparaît dans l’aperçu. Vérifiez attentivement les textes, les photos, leur cadrage et l’ordre des pages. Après validation du paiement, la commande sera automatiquement transmise en fabrication et ne pourra plus être modifiée.",
-    "legalCheckbox": "J’ai vérifié le contenu et la mise en page de mon livre.",
-    "legalNoWithdraw": "Ce livre étant fabriqué spécialement à partir de vos contenus et de vos choix, il ne bénéficie pas du droit de rétractation. Cette exception ne limite pas vos garanties légales en cas de défaut d’impression, de dommage ou de non-conformité à la commande.",
-    "legalCgvBefore": "En commandant, tu acceptes les ",
+    "pagesQrMeta": "{{pages}} pages · {{qr}} QR audio/vidéo",
+    "pagesQrMetaOne": "{{pages}} pages · {{qr}} QR audio/vidéo",
+    "priceTtc": "{{price}} TTC",
+    "seePriceDetail": "Voir le détail du prix",
+    "hidePriceDetail": "Masquer le détail du prix",
+    "plusSave": "Économise {{savings}} avec Petitmo+",
+    "plusPrice": "Ce livre te revient à {{price}}.",
+    "discoverPlus": "Découvrir Petitmo+",
+    "sectionDelivery": "Livraison",
+    "sectionBeforeOrder": "Avant de commander",
+    "fieldFullName": "Nom complet",
+    "fieldAddress": "Adresse",
+    "fieldAddress2": "Complément d’adresse",
+    "fieldZip": "Code postal",
+    "fieldCity": "Ville",
+    "fieldCountry": "Pays",
+    "fieldEmail": "E-mail de suivi",
+    "emailEdit": "Modifier",
+    "placeholderAddress": "Adresse ligne 1",
+    "placeholderAddress2": "Appartement, bâtiment…",
+    "legalCheckbox": "J’ai vérifié les textes, les photos et l’ordre des pages.",
+    "legalBody": "Après paiement, le livre part en fabrication et ne peut plus être modifié. Produit personnalisé : pas de droit de rétractation. ",
     "legalCgvLink": "Conditions générales de vente",
-    "legalCgvAfter": ".",
-    "ctaPay": "Commander et payer – {{price}}",
+    "ctaPay": "Commander · {{price}}",
     "needVerify": "Coche la case pour confirmer que tu as vérifié ton livre."
   }
 }

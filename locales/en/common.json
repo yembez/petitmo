@@ -121,19 +121,48 @@
       "voicesBody": "You’ve used all {{count}} free-plan audio memories. Upgrade to Petitmo+ to add more."
     }
   },
+  "book": {
+    "videoPoster": {
+      "title": "Choose illustration image",
+      "useImage": "Use this image",
+      "saving": "Saving…",
+      "saveFailed": "Couldn't save this image. Please try again in a moment.",
+      "closeA11y": "Close",
+      "scrubA11y": "Position in the video"
+    }
+  },
   "bookOrder": {
-    "reviewBook": "Review my book",
+    "title": "Order my book",
+    "titlePdf": "Order my PDF",
+    "subtitle": "{{title}} · {{child}}",
+    "reviewBook": "Review my book preview",
     "backToOrder": "Back to order",
     "backToOrderShort": "Order",
     "deliveryIncluded": "Delivery included",
-    "legalTitle": "Final check before printing",
-    "legalBody": "Your book will be printed exactly as shown in the preview. Please carefully check texts, photos, cropping and page order. After payment is confirmed, the order is sent to production and can no longer be changed.",
-    "legalCheckbox": "I have checked the content and layout of my book.",
-    "legalNoWithdraw": "Because this book is made to order from your content and choices, the right of withdrawal does not apply. This does not limit your legal guarantees in case of printing defect, damage, or non-conformity with the order.",
-    "legalCgvBefore": "By ordering, you accept the ",
+    "pagesQrMeta": "{{pages}} pages · {{qr}} audio/video QR codes",
+    "pagesQrMetaOne": "{{pages}} pages · {{qr}} audio/video QR code",
+    "priceTtc": "{{price}} incl. tax",
+    "seePriceDetail": "See price breakdown",
+    "hidePriceDetail": "Hide price breakdown",
+    "plusSave": "Save {{savings}} with Petitmo+",
+    "plusPrice": "This book would cost you {{price}}.",
+    "discoverPlus": "Discover Petitmo+",
+    "sectionDelivery": "Delivery",
+    "sectionBeforeOrder": "Before ordering",
+    "fieldFullName": "Full name",
+    "fieldAddress": "Address",
+    "fieldAddress2": "Address line 2",
+    "fieldZip": "Postcode",
+    "fieldCity": "City",
+    "fieldCountry": "Country",
+    "fieldEmail": "Tracking email",
+    "emailEdit": "Edit",
+    "placeholderAddress": "Address line 1",
+    "placeholderAddress2": "Apartment, building…",
+    "legalCheckbox": "I’ve checked the texts, photos and page order.",
+    "legalBody": "After payment, the book goes to production and can’t be changed. Personalised product: no right of withdrawal. ",
     "legalCgvLink": "Terms of sale",
-    "legalCgvAfter": ".",
-    "ctaPay": "Order and pay – {{price}}",
-    "needVerify": "Tick the box to confirm you have checked your book."
+    "ctaPay": "Order · {{price}}",
+    "needVerify": "Tick the box to confirm you’ve checked your book."
   }
 }

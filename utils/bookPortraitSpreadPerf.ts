@@ -199,6 +199,7 @@ export function diffPortraitRowProps(
     'getPrefetchUri',
     'onOpenEditor',
     'onPrefetchImage',
+    'mediaRevision',
   ];
   const changed: string[] = [];
   for (const k of keys) {
@@ -239,6 +240,7 @@ export function diffBrowseLeafProps(
     'prefetchUri',
     'onOpenEditor',
     'onPrefetchImage',
+    'mediaRevision',
   ];
   const changed: string[] = [];
   for (const k of keys) {

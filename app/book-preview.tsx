@@ -170,7 +170,7 @@ import { isDeviceLocalMediaUri } from '@/utils/memoryPhotos';
 import { bookLineBudgetForMemoryType, bookCharsPerLineForMemoryType } from '@/utils/textLimits';
 
 import type { Child, Memory } from '@/types/local';
-import { mergeMemoriesListPreservingVisualRowRefs } from '@/utils/feedHelpers';
+import { mergeBookMemoriesPreservingMaquetteRefs } from '@/utils/feedHelpers';
 import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 import { canExportBookPdfViaServer } from '@/lib/digitalExportPurchase';
 import { setLastGuestExportEmail } from '@/lib/guestExportPrefs';
@@ -1003,7 +1003,7 @@ export default function BookPreviewScreen() {
             .map(m => getLocalMemoryById(m.id))
             .filter((m): m is Memory => m != null);
           if (refreshed.length > 0) {
-            setBookMemories(prev => mergeMemoriesListPreservingVisualRowRefs(prev, refreshed));
+            setBookMemories(prev => mergeBookMemoriesPreservingMaquetteRefs(prev, refreshed));
           }
           const { data: auth } = await supabase.auth.getUser();
           const userId = auth.user?.id;
@@ -1141,12 +1141,29 @@ export default function BookPreviewScreen() {
           next[idx] = local;
           return next;
         });
-        if (local.type === 'voice' || local.type === 'video') {
-          setCropDpiMetaByKey(prev => {
-            if (!prev[memoryId]) return prev;
-            const { [memoryId]: _drop, ...rest } = prev;
-            return rest;
-          });
+        // Vidéo / vocal : re-seed dpi depuis SQLite (ne pas vider — sinon crop spread ignore pan/zoom).
+        if (local.type === 'video' || local.type === 'voice') {
+          const pw = typeof local.print_px_w === 'number' ? local.print_px_w : 0;
+          const ph = typeof local.print_px_h === 'number' ? local.print_px_h : 0;
+          if (pw > 0 && ph > 0) {
+            const mm = bookPrintFrameMmFor(local.type === 'video' ? 'video' : 'audio');
+            const uri =
+              local.type === 'video'
+                ? peekSyncBookVideoPosterDisplayUri(local).trim()
+                : '';
+            setCropDpiMetaByKey(prev => ({
+              ...prev,
+              [memoryId]: {
+                imgPxW: pw,
+                imgPxH: ph,
+                dpiPxW: pw,
+                dpiPxH: ph,
+                printMmW: mm.w,
+                printMmH: mm.h,
+                sourceUri: uri || prev[memoryId]?.sourceUri,
+              },
+            }));
+          }
         }
       },
     );
@@ -1327,11 +1344,10 @@ export default function BookPreviewScreen() {
       };
 
       if (mem) {
-        // Vidéo : jamais `print_px` / candidats photo — uniquement le poster affiché.
-        if (payload.pageType !== 'video') {
-          const printPx = getBookPhotoPrintPixelSize(mem, photoRefForDpi);
-          if (printPx) considerDpiPx(printPx.w, printPx.h);
-        }
+        // Photo / audio / vidéo : dims print SQLite d’abord (poster vidéo upscalé 3200 px).
+        // Sinon Image.getSize peut renvoyer l’ancienne frame 1080p (~147 DPI) juste après rewrite.
+        const printPx = getBookPhotoPrintPixelSize(mem, photoRefForDpi);
+        if (printPx) considerDpiPx(printPx.w, printPx.h);
       }
 
       if (payload.pageType === 'video') {
@@ -1389,11 +1405,18 @@ export default function BookPreviewScreen() {
         setCropDpiMetaByKey(prev => {
           const cur = prev[payload.storageKey];
           if (cur?.imgPxW > 0 && cur?.sourceUri === payload.uri) {
+            const longSide = Math.max(cur.dpiPxW || 0, cur.dpiPxH || 0, cur.imgPxW || 0);
+            // Poster vidéo : ne pas figer un cache ~1080p (~147 DPI) après rewrite 3200 px.
+            const videoStaleLowRes =
+              payload.pageType === 'video' && longSide > 0 && longSide < 2800;
             const dpiLooksDisplayOnly =
               cur.dpiPxW > 0 &&
               cur.imgPxW > 0 &&
               cur.dpiPxW <= cur.imgPxW;
-            if (!(payload.pageType === 'cover' && dpiLooksDisplayOnly)) {
+            if (
+              !videoStaleLowRes &&
+              !(payload.pageType === 'cover' && dpiLooksDisplayOnly)
+            ) {
               alreadyCached = true;
             }
           }
@@ -1405,7 +1428,9 @@ export default function BookPreviewScreen() {
           const cur = prev[payload.storageKey];
           if (cur?.imgPxW > 0 && cur?.sourceUri === payload.uri) {
             const dpiStale =
-              (payload.pageType === 'cover' || payload.pageType === 'audio') &&
+              (payload.pageType === 'cover' ||
+                payload.pageType === 'audio' ||
+                payload.pageType === 'video') &&
               meta.dpiPxW > 0 &&
               cur.dpiPxW > 0 &&
               meta.dpiPxW > cur.dpiPxW;
@@ -1436,39 +1461,61 @@ export default function BookPreviewScreen() {
 
   const unlockAndBack = useCallback(() => {
     unlockOrientationPortrait();
-    /** Depuis « Revoir mon livre » : resauver le pending (posters vidéo custom, cover…) puis pop. */
-    if (fromOrderReview && child) {
-      void setPendingBookOrderPdfPayload({
-        bookId: bookId ?? `draft-${child.id}`,
-        childId: child.id,
-        child,
-        coverPhotoUrl: coverPhotoPrintUri || bookSnapshot?.coverPhotoUrl?.trim() || null,
-        coverPhotoImgPxW: coverPhotoImgPxForPdf?.w,
-        coverPhotoImgPxH: coverPhotoImgPxForPdf?.h,
-        coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
-        coverYearLabel,
-        chapterTitle: chapterTitleLine ?? 'Notre histoire',
-        pages,
-        rotations,
-        photoCrops,
-        localEdits: EMPTY_MEMORY_EDITS,
-        memoryPhotoRefs: bookSnapshot?.memoryPhotoRefs,
-        cropImgPxByMemoryId: cropImgPxByMemoryIdFromDpiMeta(cropDpiMetaByKey),
-        exportMode: 'print',
-      });
-    }
-    if (router.canGoBack()) {
-      router.back();
-      return;
-    }
-    if (fromOrderReview && bookId) {
-      router.replace({
-        pathname: '/book-order',
-        params: { bookId, exportMode: 'print' },
-      });
-      return;
-    }
-    router.replace('/(tabs)/livres');
+    /** Depuis « Revoir mon livre » : resauver le pending (pages / QR à jour pour le prix) puis pop. */
+    void (async () => {
+      if (fromOrderReview && child) {
+        try {
+          await setPendingBookOrderPdfPayload({
+            bookId: bookId ?? `draft-${child.id}`,
+            childId: child.id,
+            child,
+            coverPhotoUrl: coverPhotoPrintUri || bookSnapshot?.coverPhotoUrl?.trim() || null,
+            coverPhotoImgPxW: coverPhotoImgPxForPdf?.w,
+            coverPhotoImgPxH: coverPhotoImgPxForPdf?.h,
+            coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
+            coverYearLabel,
+            chapterTitle: chapterTitleLine ?? 'Notre histoire',
+            pages,
+            rotations,
+            photoCrops,
+            localEdits: EMPTY_MEMORY_EDITS,
+            memoryPhotoRefs: bookSnapshot?.memoryPhotoRefs,
+            cropImgPxByMemoryId: cropImgPxByMemoryIdFromDpiMeta(cropDpiMetaByKey),
+            exportMode: 'print',
+          });
+        } catch (e) {
+          if (__DEV__) console.warn('[book-preview] setPending before back to order', e);
+        }
+      }
+      if (router.canGoBack()) {
+        router.back();
+        return;
+      }
+      if (fromOrderReview && bookId) {
+        const memoryPageCountForOrder = pages.filter(
+          p =>
+            p.type === 'photo-full' ||
+            p.type === 'photo-note' ||
+            p.type === 'quote' ||
+            p.type === 'audio' ||
+            p.type === 'video',
+        ).length;
+        const avPageCountForOrder = pages.filter(p => p.type === 'audio' || p.type === 'video').length;
+        router.replace({
+          pathname: '/book-order',
+          params: {
+            bookId,
+            childId: child?.id ?? '',
+            memoryPageCount: String(memoryPageCountForOrder),
+            avPageCount: String(avPageCountForOrder),
+            gelatoPageCount: String(gelatoCatalogPageCount(pages)),
+            exportMode: 'print',
+          },
+        });
+        return;
+      }
+      router.replace('/(tabs)/livres');
+    })();
   }, [
     bookId,
     bookSnapshot?.coverPhotoUrl,
@@ -2115,6 +2162,7 @@ export default function BookPreviewScreen() {
           memoryPhotoRefs={bookSnapshot?.memoryPhotoRefs}
           getMemoryForPage={getMemoryForPage}
           onRequestTextEditForPage={onSpreadTextEditForPage}
+          mediaRevision={bookMediaRevision}
         />
       );
     },
@@ -2135,6 +2183,7 @@ export default function BookPreviewScreen() {
       photoCrops,
       rotations,
       screenWidth,
+      bookMediaRevision,
     ],
   );
 
@@ -2230,6 +2279,7 @@ export default function BookPreviewScreen() {
           getPrefetchUri={getPrefetchUriForRow}
           onOpenEditor={onOpenBrowseEditor}
           onPrefetchImage={onPrefetchBrowseImage}
+          mediaRevision={bookMediaRevision}
         />
       );
     },
@@ -2247,6 +2297,7 @@ export default function BookPreviewScreen() {
       bookSnapshot?.memoryPhotoRefs,
       familyChildren,
       getMemoryForPage,
+      bookMediaRevision,
       getPrefetchUriForRow,
       maquetteTypography,
       onOpenBrowseEditor,
@@ -2540,7 +2591,8 @@ export default function BookPreviewScreen() {
           const posterUri = peekSyncBookVideoPosterDisplayUri(m).trim();
           if (!posterUri) continue;
           try {
-            const { w, h } = await getImagePx(posterUri);
+            const printPx = getBookPhotoPrintPixelSize(m);
+            const { w, h } = printPx ?? (await getImagePx(posterUri));
             const cropScale = Math.max(1, photoCrops[m.id]?.scale ?? 1);
             const { w: mmW, h: mmH } = bookPrintFrameMmFor('video');
             const dpi = effectiveBookPhotoPrintDpi({
@@ -2683,36 +2735,61 @@ export default function BookPreviewScreen() {
         p.type === 'video'
     ).length;
     const avPageCountForOrder = pages.filter(p => p.type === 'audio' || p.type === 'video').length;
-    void setPendingBookOrderPdfPayload({
-      bookId: bookId ?? `draft-${child.id}`,
-      childId: child.id,
-      child,
-      coverPhotoUrl: coverPhotoPrintUri || bookSnapshot?.coverPhotoUrl?.trim() || null,
-      coverPhotoImgPxW: coverPhotoImgPxForPdf?.w,
-      coverPhotoImgPxH: coverPhotoImgPxForPdf?.h,
-      coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
-      coverYearLabel,
-      chapterTitle: chapterTitleLine ?? 'Notre histoire',
-      pages,
-      rotations,
-      photoCrops,
-      localEdits: EMPTY_MEMORY_EDITS,
-      memoryPhotoRefs: bookSnapshot?.memoryPhotoRefs,
-      cropImgPxByMemoryId: cropImgPxByMemoryIdFromDpiMeta(cropDpiMetaByKey),
-      exportMode: 'screen',
-    });
-    router.push({
-      pathname: '/book-order',
-      params: {
+    void (async () => {
+      if (bookId) {
+        try {
+          if (saveTimerRef.current) {
+            clearTimeout(saveTimerRef.current);
+            saveTimerRef.current = null;
+          }
+          const b = await getBook(bookId);
+          if (b) {
+            const hasRotations = Object.keys(rotations).some(k => rotations[k] !== 0);
+            const hasCrops = Object.keys(photoCrops).length > 0;
+            await upsertBook({
+              ...b,
+              rotations: hasRotations ? rotations : undefined,
+              photoCrops: hasCrops ? photoCrops : undefined,
+              textEdits: undefined,
+              chapterTitle: chapterTitleLine ?? undefined,
+            });
+          }
+        } catch (e) {
+          console.warn('[book-preview] flush before pdf order', e);
+        }
+      }
+      await setPendingBookOrderPdfPayload({
         bookId: bookId ?? `draft-${child.id}`,
         childId: child.id,
-        memoryPageCount: String(memoryPageCountForOrder),
-        avPageCount: String(avPageCountForOrder),
-        exportMode: 'pdf',
-      },
-    });
+        child,
+        coverPhotoUrl: coverPhotoPrintUri || bookSnapshot?.coverPhotoUrl?.trim() || null,
+        coverPhotoImgPxW: coverPhotoImgPxForPdf?.w,
+        coverPhotoImgPxH: coverPhotoImgPxForPdf?.h,
+        coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
+        coverYearLabel,
+        chapterTitle: chapterTitleLine ?? 'Notre histoire',
+        pages,
+        rotations,
+        photoCrops,
+        localEdits: EMPTY_MEMORY_EDITS,
+        memoryPhotoRefs: bookSnapshot?.memoryPhotoRefs,
+        cropImgPxByMemoryId: cropImgPxByMemoryIdFromDpiMeta(cropDpiMetaByKey),
+        exportMode: 'screen',
+      });
+      router.push({
+        pathname: '/book-order',
+        params: {
+          bookId: bookId ?? `draft-${child.id}`,
+          childId: child.id,
+          memoryPageCount: String(memoryPageCountForOrder),
+          avPageCount: String(avPageCountForOrder),
+          exportMode: 'pdf',
+        },
+      });
+    })();
   }, [
     bookId,
+    bookSnapshot?.coverPhotoUrl,
     bookSnapshot?.memoryPhotoRefs,
     child,
     chapterTitleLine,
@@ -2745,37 +2822,63 @@ export default function BookPreviewScreen() {
         p.type === 'video'
     ).length;
     const avPageCountForOrder = pages.filter(p => p.type === 'audio' || p.type === 'video').length;
-    void setPendingBookOrderPdfPayload({
-      bookId: bookId ?? `draft-${child.id}`,
-      childId: child.id,
-      child,
-      coverPhotoUrl: coverPhotoPrintUri || bookSnapshot?.coverPhotoUrl?.trim() || null,
-      coverPhotoImgPxW: coverPhotoImgPxForPdf?.w,
-      coverPhotoImgPxH: coverPhotoImgPxForPdf?.h,
-      coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
-      coverYearLabel,
-      chapterTitle: chapterTitleLine ?? 'Notre histoire',
-      pages,
-      rotations,
-      photoCrops,
-      localEdits: EMPTY_MEMORY_EDITS,
-      memoryPhotoRefs: bookSnapshot?.memoryPhotoRefs,
-      cropImgPxByMemoryId: cropImgPxByMemoryIdFromDpiMeta(cropDpiMetaByKey),
-      exportMode: 'print',
-    });
-    router.push({
-      pathname: '/book-order',
-      params: {
+    void (async () => {
+      // Flush maquette → AsyncStorage avant pending (crops / rotations = vérité commande).
+      if (bookId) {
+        try {
+          if (saveTimerRef.current) {
+            clearTimeout(saveTimerRef.current);
+            saveTimerRef.current = null;
+          }
+          const b = await getBook(bookId);
+          if (b) {
+            const hasRotations = Object.keys(rotations).some(k => rotations[k] !== 0);
+            const hasCrops = Object.keys(photoCrops).length > 0;
+            await upsertBook({
+              ...b,
+              rotations: hasRotations ? rotations : undefined,
+              photoCrops: hasCrops ? photoCrops : undefined,
+              textEdits: undefined,
+              chapterTitle: chapterTitleLine ?? undefined,
+            });
+          }
+        } catch (e) {
+          console.warn('[book-preview] flush before print order', e);
+        }
+      }
+      await setPendingBookOrderPdfPayload({
         bookId: bookId ?? `draft-${child.id}`,
         childId: child.id,
-        memoryPageCount: String(memoryPageCountForOrder),
-        avPageCount: String(avPageCountForOrder),
-        gelatoPageCount: String(gelatoCatalogPageCount(pages)),
+        child,
+        coverPhotoUrl: coverPhotoPrintUri || bookSnapshot?.coverPhotoUrl?.trim() || null,
+        coverPhotoImgPxW: coverPhotoImgPxForPdf?.w,
+        coverPhotoImgPxH: coverPhotoImgPxForPdf?.h,
+        coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
+        coverYearLabel,
+        chapterTitle: chapterTitleLine ?? 'Notre histoire',
+        pages,
+        rotations,
+        photoCrops,
+        localEdits: EMPTY_MEMORY_EDITS,
+        memoryPhotoRefs: bookSnapshot?.memoryPhotoRefs,
+        cropImgPxByMemoryId: cropImgPxByMemoryIdFromDpiMeta(cropDpiMetaByKey),
         exportMode: 'print',
-      },
-    });
+      });
+      router.push({
+        pathname: '/book-order',
+        params: {
+          bookId: bookId ?? `draft-${child.id}`,
+          childId: child.id,
+          memoryPageCount: String(memoryPageCountForOrder),
+          avPageCount: String(avPageCountForOrder),
+          gelatoPageCount: String(gelatoCatalogPageCount(pages)),
+          exportMode: 'print',
+        },
+      });
+    })();
   }, [
     bookId,
+    bookSnapshot?.coverPhotoUrl,
     bookSnapshot?.memoryPhotoRefs,
     child,
     chapterTitleLine,
@@ -2955,7 +3058,7 @@ export default function BookPreviewScreen() {
           }
         >
           <Text style={[styles.headerBack, dm500 && { fontFamily: dm500 }]}>
-            {fromOrderReview ? `← ${t('bookOrder.backToOrderShort')}` : '← Retour'}
+            {fromOrderReview ? '←' : '← Retour'}
           </Text>
         </Pressable>
         <Text
@@ -3314,6 +3417,38 @@ export default function BookPreviewScreen() {
             onSaved={updated => {
               const fresh = getLocalMemoryById(updated.id) ?? updated;
               setBookMemories(prev => prev.map(x => (x.id === fresh.id ? fresh : x)));
+              const pw = typeof fresh.print_px_w === 'number' ? fresh.print_px_w : 0;
+              const ph = typeof fresh.print_px_h === 'number' ? fresh.print_px_h : 0;
+              if (pw > 0 && ph > 0) {
+                const mm = bookPrintFrameMmFor('video');
+                const uri = peekSyncBookVideoPosterDisplayUri(fresh).trim();
+                setCropDpiMetaByKey(prev => ({
+                  ...prev,
+                  [fresh.id]: {
+                    imgPxW: pw,
+                    imgPxH: ph,
+                    dpiPxW: pw,
+                    dpiPxH: ph,
+                    printMmW: mm.w,
+                    printMmH: mm.h,
+                    sourceUri: uri || undefined,
+                  },
+                }));
+                const printBase = (fresh.local_poster_print_path ?? fresh.poster_print_url ?? '')
+                  .trim()
+                  .split('?')[0];
+                if (printBase) {
+                  setImagePxCache(prev => {
+                    const next = { ...prev };
+                    for (const k of Object.keys(next)) {
+                      if (k === printBase || k.startsWith(`${printBase}?`) || k.includes(printBase)) {
+                        delete next[k];
+                      }
+                    }
+                    return next;
+                  });
+                }
+              }
               setVideoPosterPickerMemory(null);
               DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId: fresh.id });
             }}

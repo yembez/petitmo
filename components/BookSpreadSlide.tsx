@@ -46,6 +46,7 @@ type BookSpreadSlideProps = {
   memoryPhotoRefs?: Record<string, string>;
   getMemoryForPage: (page: BookPage) => Memory | null;
   onRequestTextEditForPage: (pageNum: number) => void;
+  mediaRevision?: string;
 };
 
 function SpreadMaquettePage({
@@ -155,6 +156,7 @@ function BookSpreadSlideInner({
   memoryPhotoRefs,
   getMemoryForPage,
   onRequestTextEditForPage,
+  mediaRevision: _mediaRevision,
 }: BookSpreadSlideProps) {
   const left = item.left;
   const right = item.right;
@@ -233,6 +235,7 @@ function spreadSlidePropsEqual(a: BookSpreadSlideProps, b: BookSpreadSlideProps)
   if (a.memoryPhotoRefs !== b.memoryPhotoRefs) return false;
   if (a.getMemoryForPage !== b.getMemoryForPage) return false;
   if (a.onRequestTextEditForPage !== b.onRequestTextEditForPage) return false;
+  if (a.mediaRevision !== b.mediaRevision) return false;
   return true;
 }
 

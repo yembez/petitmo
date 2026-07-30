@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   PanResponder,
+  Alert,
   type LayoutChangeEvent,
 } from 'react-native';
 import { Video, ResizeMode, type AVPlaybackStatus } from 'expo-av';
@@ -18,6 +19,7 @@ import { formatDuration } from '@/utils/date';
 import { scale } from '@/utils/responsive';
 import { resolveReadableVideoPlaybackUri } from '@/utils/videoMediaUri';
 import { persistVideoPosterPrintAtTimeMs } from '@/services/videoPosterPrint';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
 
 type Props = {
   visible: boolean;
@@ -31,13 +33,20 @@ function seekFraction(locationX: number, trackWidth: number): number {
   return Math.max(0, Math.min(1, locationX / trackWidth));
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 export function BookVideoPosterPickerModal({ visible, memory, onClose, onSaved }: Props) {
+  const { t } = useAppTranslation('common');
   const insets = useSafeAreaInsets();
   const videoRef = useRef<Video>(null);
   const trackWidthRef = useRef(0);
   const scrubbingRef = useRef(false);
   const seekRafRef = useRef<number | null>(null);
   const pendingSeekMsRef = useRef<number | null>(null);
+  const positionMillisRef = useRef(0);
+  const savingRef = useRef(false);
 
   const [videoUri, setVideoUri] = useState('');
   const [positionMillis, setPositionMillis] = useState(0);
@@ -45,6 +54,8 @@ export function BookVideoPosterPickerModal({ visible, memory, onClose, onSaved }
   const [videoReady, setVideoReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [saving, setSaving] = useState(false);
+  /** Démontage du lecteur pendant l’extraction — évite le conflit AVFoundation / VideoThumbnails. */
+  const [playerMounted, setPlayerMounted] = useState(true);
 
   const memoryDurationMs =
     memory && typeof memory.duration === 'number' && Number.isFinite(memory.duration) && memory.duration > 0
@@ -77,9 +88,13 @@ export function BookVideoPosterPickerModal({ visible, memory, onClose, onSaved }
     let alive = true;
     setVideoUri('');
     setPositionMillis(0);
+    positionMillisRef.current = 0;
     setDurationMillis(memoryDurationMs);
     setVideoReady(false);
     setIsPlaying(false);
+    setPlayerMounted(true);
+    savingRef.current = false;
+    setSaving(false);
     void (async () => {
       const resolved = await resolveReadableVideoPlaybackUri(memory);
       if (!alive || !resolved.trim()) return;
@@ -101,6 +116,7 @@ export function BookVideoPosterPickerModal({ visible, memory, onClose, onSaved }
       const dur = effectiveDurationMs;
       if (w <= 0 || dur <= 0) return;
       const ms = Math.round(seekFraction(locationX, w) * dur);
+      positionMillisRef.current = ms;
       setPositionMillis(ms);
       scheduleSeek(ms);
     },
@@ -113,12 +129,14 @@ export function BookVideoPosterPickerModal({ visible, memory, onClose, onSaved }
         onStartShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponder: () => true,
         onPanResponderGrant: e => {
+          if (savingRef.current) return;
           scrubbingRef.current = true;
           setIsPlaying(false);
           void videoRef.current?.pauseAsync().catch(() => {});
           applySeek(e.nativeEvent.locationX);
         },
         onPanResponderMove: e => {
+          if (savingRef.current) return;
           applySeek(e.nativeEvent.locationX);
         },
         onPanResponderRelease: () => {
@@ -139,16 +157,17 @@ export function BookVideoPosterPickerModal({ visible, memory, onClose, onSaved }
       setDurationMillis(status.durationMillis);
     }
     if (!scrubbingRef.current && typeof status.positionMillis === 'number') {
+      positionMillisRef.current = status.positionMillis;
       setPositionMillis(status.positionMillis);
     }
     setIsPlaying(!!status.isPlaying);
-    if (status.isLoaded && !videoReady) {
+    if (status.isLoaded) {
       setVideoReady(true);
     }
-  }, [videoReady]);
+  }, []);
 
   const togglePlay = useCallback(() => {
-    if (!videoReady) return;
+    if (!videoReady || savingRef.current) return;
     if (isPlaying) {
       void videoRef.current?.pauseAsync().catch(() => {});
       setIsPlaying(false);
@@ -158,31 +177,68 @@ export function BookVideoPosterPickerModal({ visible, memory, onClose, onSaved }
     setIsPlaying(true);
   }, [isPlaying, videoReady]);
 
+  const remountPlayer = useCallback(async (uri: string) => {
+    setPlayerMounted(true);
+    setVideoReady(false);
+    setVideoUri(uri);
+    // Petit délai pour laisser React remonter le <Video> avant un éventuel seek.
+    await sleep(60);
+  }, []);
+
   const handleSave = useCallback(async () => {
-    if (!memory || saving || !videoUri.trim()) return;
+    if (!memory || savingRef.current || !videoUri.trim()) return;
+    savingRef.current = true;
     setSaving(true);
+    const uriForExtract = videoUri.trim();
     try {
+      flushPendingSeek();
       await videoRef.current?.pauseAsync().catch(() => {});
       setIsPlaying(false);
-      const status = await videoRef.current?.getStatusAsync();
+
+      const status = await videoRef.current?.getStatusAsync().catch(() => null);
       const exactMs =
         status && status.isLoaded && typeof status.positionMillis === 'number'
           ? status.positionMillis
-          : positionMillis;
+          : positionMillisRef.current;
+
       await videoRef.current?.setPositionAsync(exactMs).catch(() => {});
+      positionMillisRef.current = exactMs;
       setPositionMillis(exactMs);
-      const updated = await persistVideoPosterPrintAtTimeMs(memory.id, exactMs, {
-        videoUri,
-        settleMs: 200,
-      });
+      // Laisse le decodeur se poser sur la frame choisie.
+      await sleep(180);
+
+      // Libère AVPlayer avant expo-video-thumbnails (sinon échecs aléatoires iOS).
+      await videoRef.current?.unloadAsync().catch(() => {});
+      setPlayerMounted(false);
+      setVideoReady(false);
+      await sleep(120);
+
+      let updated: Memory | null = null;
+      for (let attempt = 0; attempt < 3 && !updated; attempt++) {
+        updated = await persistVideoPosterPrintAtTimeMs(memory.id, exactMs, {
+          videoUri: uriForExtract,
+          settleMs: attempt === 0 ? 80 : 220 + attempt * 120,
+        });
+      }
+
       if (updated) {
         onSaved(updated);
         onClose();
+        return;
       }
+
+      Alert.alert(t('error'), t('book.videoPoster.saveFailed'));
+      await remountPlayer(uriForExtract);
+      await videoRef.current?.setPositionAsync(exactMs).catch(() => {});
+    } catch (e) {
+      console.warn('[BookVideoPosterPickerModal] handleSave', e);
+      Alert.alert(t('error'), t('book.videoPoster.saveFailed'));
+      await remountPlayer(uriForExtract);
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
-  }, [memory, onClose, onSaved, positionMillis, saving, videoUri]);
+  }, [flushPendingSeek, memory, onClose, onSaved, remountPlayer, t, videoUri]);
 
   if (!visible || !memory || memory.type !== 'video') return null;
 
@@ -194,6 +250,7 @@ export function BookVideoPosterPickerModal({ visible, memory, onClose, onSaved }
   const thumbRadius = thumbSize / 2;
   const posSec = Math.floor(positionMillis / 1000);
   const durSec = Math.max(0, Math.floor(effectiveDurationMs / 1000));
+  const canSave = !saving && !!videoUri.trim() && videoReady;
 
   return (
     <View
@@ -203,14 +260,20 @@ export function BookVideoPosterPickerModal({ visible, memory, onClose, onSaved }
       ]}
     >
       <View style={styles.header}>
-        <Text style={styles.title}>Choisir l&apos;image d&apos;illustration</Text>
-        <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Fermer">
+        <Text style={styles.title}>{t('book.videoPoster.title')}</Text>
+        <Pressable
+          onPress={onClose}
+          hitSlop={12}
+          disabled={saving}
+          accessibilityRole="button"
+          accessibilityLabel={t('book.videoPoster.closeA11y')}
+        >
           <X size={20} color={THEME.textPrimary} strokeWidth={2.2} />
         </Pressable>
       </View>
 
       <Pressable style={styles.previewWrap} onPress={togglePlay} accessibilityRole="button">
-        {videoUri.trim() ? (
+        {videoUri.trim() && playerMounted ? (
           <Video
             ref={videoRef}
             source={{ uri: videoUri }}
@@ -229,12 +292,17 @@ export function BookVideoPosterPickerModal({ visible, memory, onClose, onSaved }
             <ActivityIndicator color={THEME.textMuted} />
           </View>
         )}
-        {!videoReady && videoUri.trim() ? (
+        {saving ? (
+          <View style={styles.previewLoading}>
+            <ActivityIndicator color="#FFFFFF" />
+            <Text style={styles.savingHint}>{t('book.videoPoster.saving')}</Text>
+          </View>
+        ) : !videoReady && videoUri.trim() && playerMounted ? (
           <View style={styles.previewLoading}>
             <ActivityIndicator color={THEME.textMuted} />
           </View>
         ) : null}
-        {videoReady ? (
+        {videoReady && !saving ? (
           <View style={styles.playFab} pointerEvents="none">
             {isPlaying ? (
               <Pause size={scale(28)} color="#FFFFFF" fill="#FFFFFF" strokeWidth={0} />
@@ -256,7 +324,7 @@ export function BookVideoPosterPickerModal({ visible, memory, onClose, onSaved }
             trackWidthRef.current = e.nativeEvent.layout.width;
           }}
           accessibilityRole="adjustable"
-          accessibilityLabel="Position dans la vidéo"
+          accessibilityLabel={t('book.videoPoster.scrubA11y')}
           {...pan.panHandlers}
         >
           <View style={styles.trackFill} pointerEvents="none">
@@ -278,16 +346,16 @@ export function BookVideoPosterPickerModal({ visible, memory, onClose, onSaved }
       </View>
 
       <TouchableOpacity
-        style={[styles.cta, (saving || !videoUri.trim() || !videoReady) && styles.ctaDisabled]}
+        style={[styles.cta, !canSave && styles.ctaDisabled]}
         onPress={() => void handleSave()}
-        disabled={saving || !videoUri.trim() || !videoReady}
+        disabled={!canSave}
         activeOpacity={0.85}
         accessibilityRole="button"
       >
         {saving ? (
           <ActivityIndicator color="#FFFFFF" />
         ) : (
-          <Text style={styles.ctaText}>Utiliser cette image</Text>
+          <Text style={styles.ctaText}>{t('book.videoPoster.useImage')}</Text>
         )}
       </TouchableOpacity>
     </View>
@@ -336,7 +404,13 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.12)',
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    gap: 10,
+  },
+  savingHint: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
   },
   playFab: {
     position: 'absolute',

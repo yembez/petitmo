@@ -66,6 +66,7 @@ export function useBookVideoPosterDisplayUrl(memory: Memory): string {
         setBookVideoPosterStableCache(memory.id, next);
         setUri(next);
       } else {
+        // Custom print : ne pas retomber sur peekSync feed stale — garder l’URI actuelle / live bustée.
         const sync = peekSyncBookVideoPosterDisplayUri(live).trim();
         if (sync) setUri(sync);
       }

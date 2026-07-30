@@ -37,6 +37,7 @@ export type BookBrowseLeafProps = {
   prefetchUri: string | null;
   onOpenEditor: (pageIndex: number) => void;
   onPrefetchImage: (uri: string | null) => void;
+  mediaRevision?: string;
 };
 
 function BookBrowseLeafInner({
@@ -61,6 +62,7 @@ function BookBrowseLeafInner({
   prefetchUri,
   onOpenEditor,
   onPrefetchImage,
+  mediaRevision: _mediaRevision,
 }: BookBrowseLeafProps) {
   const pageIndex = row.pageNum - 1;
   const showFolio = row.page.type !== 'cover' && row.page.type !== 'back-cover';

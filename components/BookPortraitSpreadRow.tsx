@@ -36,6 +36,8 @@ export type BookPortraitSpreadRowProps = {
   getPrefetchUri: (row: PageRow) => string | null;
   onOpenEditor: (pageIndex: number) => void;
   onPrefetchImage: (uri: string | null) => void;
+  /** Fingerprint médias (posters / updated_at) — force re-render après save poster vidéo. */
+  mediaRevision?: string;
 };
 
 function BookPortraitSpreadRowInner({
@@ -59,6 +61,7 @@ function BookPortraitSpreadRowInner({
   getPrefetchUri,
   onOpenEditor,
   onPrefetchImage,
+  mediaRevision,
 }: BookPortraitSpreadRowProps) {
   const spreadIndex = item.spreadIndex;
   const leftPage = item.left?.pageNum;
@@ -100,6 +103,7 @@ function BookPortraitSpreadRowInner({
         prefetchUri={getPrefetchUri(row)}
         onOpenEditor={onOpenEditor}
         onPrefetchImage={onPrefetchImage}
+        mediaRevision={mediaRevision}
       />
     );
   };

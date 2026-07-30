@@ -199,6 +199,16 @@ Le contenu des pages est **identique** entre digital et print. Seuls changent : 
 | `utils/bookPhotoCropLayout.ts` | `server/src/pdf/bookPhotoCropLayout.ts` |
 | `constants/memoryTextFont.ts` | Classe `.memory-text` dans `htmlBook` |
 
+### Chromium print-to-PDF — crops (non négociable)
+
+Blink ignore souvent `left`/`top`/`width`/`height` en **%** sur un crop custom → image invisible, page date/filet seuls.
+
+- **Toujours** émettre le cadre + crop custom en **mm absolus** via `coverCropFrameHtml` (`fitMode: 'bleed'|'strict'`).
+- **Interdit** : chemin markup `%` pour positionner un crop (supprimé).
+- Couverture / wraparound → `fitMode: 'bleed'` ; photo-full (FP+M) / photo-note / A-V → `'strict'`.
+- `renderPdf.ts` attend `img.crop-img` décodées et **échoue** si `naturalWidth=0` (pas de page blanche silencieuse).
+- Tests : `server` → `npm run test:crop`.
+
 ### Checklist avant de merger (Petits mots)
 
 1. Modifier `MaquetteBookPages.tsx` **et** `htmlBook.ts` dans le même commit.

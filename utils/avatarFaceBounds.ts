@@ -116,7 +116,9 @@ export function resolveAvatarFaceBounds(
 
 /**
  * Taille + offset pour centrer le visage dans le cercle.
- * Applique un zoom supplémentaire seulement si le cadrage naturel serait trop « large ».
+ * Applique un zoom supplémentaire seulement si le cadrage naturel serait trop « large »,
+ * puis scale cover + clamp du pan pour que le cercle soit toujours rempli
+ * (pas de bande blanche haut / bas / côtés).
  */
 export function computeAvatarImageLayout(
   avatarSize: number,
@@ -138,11 +140,37 @@ export function computeAvatarImageLayout(
     imgH = maxImgH;
   }
 
-  const imgW = imgH * bounds.face_img_aspect;
+  let imgW = imgH * bounds.face_img_aspect;
+
+  // Léger overscan anti-bandeau (sous-pixels / AA).
+  const coverTarget = avatarSize * 1.02;
+  const coverScale = Math.max(
+    coverTarget / Math.max(1, imgW),
+    coverTarget / Math.max(1, imgH),
+  );
+  if (coverScale > 1.001) {
+    imgW *= coverScale;
+    imgH *= coverScale;
+  }
+
+  let left = avatarSize / 2 - bounds.face_cx * imgW;
+  let top = avatarSize / 2 - bounds.face_cy * imgH;
+
+  // Après centrage visage, le pan peut découvrir un bord → bande blanche.
+  // Clamp pour que l’image couvre toujours le carré (cercle inscrit).
+  const minLeft = avatarSize - imgW;
+  const minTop = avatarSize - imgH;
+  if (imgW >= avatarSize) {
+    left = Math.max(minLeft, Math.min(0, left));
+  }
+  if (imgH >= avatarSize) {
+    top = Math.max(minTop, Math.min(0, top));
+  }
+
   return {
     width: imgW,
     height: imgH,
-    left: avatarSize / 2 - bounds.face_cx * imgW,
-    top: avatarSize / 2 - bounds.face_cy * imgH,
+    left,
+    top,
   };
 }

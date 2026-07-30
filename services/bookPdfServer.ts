@@ -34,6 +34,7 @@ import {
   collectPhotoLocalUploadUriCandidates,
   collectPhotoSlotUploadUriCandidates,
   collectVideoPosterLocalUploadUriCandidates,
+  collectVideoPosterPrintOnlyUploadUriCandidates,
   collectVoiceCoverLocalUploadUriCandidates,
   getBookPhotoPrintPixelSize,
   getBookPhotoPrintUri,
@@ -321,9 +322,20 @@ async function ensureVideoPostersPersistedForServerPdf(
     if (customPrint) {
       try {
         const readable =
-          (await pickFirstReadableLocalMediaUri(collectVideoPosterLocalUploadUriCandidates(merged))) ??
-          (posterUri && !isHttps(posterUri) && !isBareMediaBucketPath(posterUri) ? posterUri : null);
-        if (!readable) continue;
+          (await pickFirstReadableLocalMediaUri(
+            collectVideoPosterPrintOnlyUploadUriCandidates(merged),
+          )) ??
+          (posterUri &&
+          !isHttps(posterUri) &&
+          !isBareMediaBucketPath(posterUri) &&
+          posterUri.includes('poster_print')
+            ? posterUri
+            : null);
+        if (!readable) {
+          // Custom sans fichier local : ne jamais envoyer un vieux HTTPS (Gelato ≠ maquette).
+          console.warn('[bookPdfServer] ensureVideoPostersPersistedForServerPdf custom: no local print', m.id);
+          throw new Error('VIDEO_PRINT_POSTER_NOT_READABLE');
+        }
         const url = await persistVideoPosterToCloudForPdfExport(m.id, childId, readable, {
           forceUpload: true,
           asPrintPoster: true,
@@ -341,6 +353,7 @@ async function ensureVideoPostersPersistedForServerPdf(
         }
       } catch (e) {
         console.warn('[bookPdfServer] ensureVideoPostersPersistedForServerPdf custom', m.id, e);
+        throw e instanceof Error ? e : new Error('VIDEO_PRINT_POSTER_UPLOAD_FAILED');
       }
       continue;
     }
@@ -538,8 +551,9 @@ function measureLocalJpegPx(uri: string): Promise<{ w: number; h: number } | nul
 }
 
 /**
- * Dims posters vidéo (et seed) pour crop aspect PDF — sans ça Chromium + object-fit
- * sans `coverCropImgInlineStyle` laissait des bandeaux blancs si un transform crop était appliqué.
+ * Dims JPEG pour crop aspect PDF (photo print + posters vidéo).
+ * Toujours re-mesurer le fichier local quand possible : dims figées du pending
+ * peuvent être stale après un nouveau poster_print / print A5.
  */
 async function resolveCropImgPxByMemoryIdForPdf(
   pages: BookPage[],
@@ -550,15 +564,25 @@ async function resolveCropImgPxByMemoryIdForPdf(
   if (Platform.OS === 'web') return out;
   const memories = collectMemoriesFromPagesForPdf(pages, localEdits);
   for (const m of memories) {
-    const existing = out[m.id];
-    if (existing && existing.w > 0 && existing.h > 0) continue;
-    if (m.type !== 'video') continue;
-    const ed = localEdits[m.id];
-    const merged = mergeMemoryWithLocalRowForVideoPoster(ed ? { ...m, ...ed } : m);
     try {
-      const readable = await pickFirstReadableLocalMediaUri(
-        collectVideoPosterLocalUploadUriCandidates(merged),
-      );
+      let candidates: string[] = [];
+      if (m.type === 'video') {
+        const ed = localEdits[m.id];
+        const merged = mergeMemoryWithLocalRowForVideoPoster(ed ? { ...m, ...ed } : m);
+        const customPrint = hasCustomVideoPrintPoster(merged);
+        candidates = customPrint
+          ? collectVideoPosterPrintOnlyUploadUriCandidates(merged)
+          : collectVideoPosterLocalUploadUriCandidates(merged);
+      } else if (m.type === 'photo') {
+        // Re-mesure locale pour photo-full / photo-note (crop custom Chromium mm).
+        candidates = collectPhotoLocalUploadUriCandidates(m);
+      } else if (m.type === 'audio') {
+        const cover = (m.voice_cover_url ?? '').trim();
+        if (cover && !/^https?:\/\//i.test(cover)) candidates = [cover];
+      } else {
+        continue;
+      }
+      const readable = await pickFirstReadableLocalMediaUri(candidates);
       if (!readable) continue;
       const px = await measureLocalJpegPx(readable);
       if (px) out[m.id] = px;
@@ -1582,7 +1606,10 @@ async function generateBookPdfWithExportTicketBody(
       if (m.type === 'video') {
         const mergedVideo = mergeMemoryWithLocalRowForVideoPoster(m);
         const customPrint = hasCustomVideoPrintPoster(mergedVideo);
+        // Payload guest depuis merge SQLite (pas le pending stale t≈0).
+        const g = memoryToGuestPayload(mergedVideo);
         const local = (mergedVideo.local_original_path ?? mergedVideo.local_media_path ?? '').trim();
+        const isPrintExport = input.exportMode === 'print';
 
         let thumbLocal = getVideoPosterUriForBookPreview(mergedVideo).trim();
         if (thumbLocal && isHttps(thumbLocal)) {
@@ -1599,25 +1626,28 @@ async function generateBookPdfWithExportTicketBody(
           }
         }
 
-        // Custom print local : toujours uploader (ne pas réutiliser un poster_url HTTPS t≈0).
-        let thumbPublicUrl: string | null =
-          !customPrint && isHttps(thumbLocal) ? thumbLocal : null;
+        /**
+         * Parité maquette : le poster affiché = fichier local (souvent poster_print.jpg réécrit).
+         * Interdit de réutiliser un poster_print_url HTTPS cloud (souvent stale vs maquette).
+         * Print Gelato + custom → toujours uploader le local print-only.
+         */
+        let thumbPublicUrl: string | null = null;
+        const printCandidates = collectVideoPosterPrintOnlyUploadUriCandidates(mergedVideo);
+        const forceLocalPrintUpload =
+          Platform.OS !== 'web' &&
+          (customPrint || (isPrintExport && printCandidates.length > 0));
+
         try {
-          const mustUploadLocal =
-            Platform.OS !== 'web' &&
-            (customPrint || (Boolean(thumbLocal) && !isHttps(thumbLocal)));
-          if (mustUploadLocal) {
-            const posterCandidates = collectVideoPosterLocalUploadUriCandidates(mergedVideo);
+          if (forceLocalPrintUpload) {
             const readableThumb = await pickFirstReadableLocalMediaUri(
-              posterCandidates.length > 0
-                ? posterCandidates
-                : thumbLocal && !isHttps(thumbLocal)
+              printCandidates.length > 0
+                ? printCandidates
+                : thumbLocal && !isHttps(thumbLocal) && thumbLocal.includes('poster_print')
                   ? [thumbLocal]
                   : [],
             );
             if (!readableThumb) {
-              if (customPrint) throw new Error('VIDEO_PRINT_POSTER_NOT_READABLE');
-              throw new Error('VIDEO_THUMB_NOT_READABLE');
+              throw new Error('VIDEO_PRINT_POSTER_NOT_READABLE');
             }
             const compressed = await compressLocalJpegForGuestUpload(readableThumb);
             const { readUrl } = await guestUploadMediaImageThenReadUrl({
@@ -1627,16 +1657,43 @@ async function generateBookPdfWithExportTicketBody(
               mimeType: 'image/jpeg',
             });
             thumbPublicUrl = readUrl;
+          } else {
+            // Digital / sans print custom : upload local feed si besoin, sinon HTTPS feed OK.
+            if (!customPrint && isHttps(thumbLocal)) {
+              thumbPublicUrl = thumbLocal;
+            }
+            const mustUploadLocal =
+              Platform.OS !== 'web' && Boolean(thumbLocal) && !isHttps(thumbLocal) && !thumbPublicUrl;
+            if (mustUploadLocal) {
+              const readableThumb = await pickFirstReadableLocalMediaUri(
+                collectVideoPosterLocalUploadUriCandidates(mergedVideo).length > 0
+                  ? collectVideoPosterLocalUploadUriCandidates(mergedVideo)
+                  : [thumbLocal],
+              );
+              if (!readableThumb) throw new Error('VIDEO_THUMB_NOT_READABLE');
+              const compressed = await compressLocalJpegForGuestUpload(readableThumb);
+              const { readUrl } = await guestUploadMediaImageThenReadUrl({
+                pdfTicket,
+                asset: { kind: 'video_thumb', memoryId: m.id },
+                localUri: compressed,
+                mimeType: 'image/jpeg',
+              });
+              thumbPublicUrl = readUrl;
+            }
           }
-        } catch {
-          /* ignore — repli HTTPS si dispo */
+        } catch (e) {
+          if (forceLocalPrintUpload || customPrint) {
+            console.warn('[bookPdfServer] guest video print poster upload failed', m.id, e);
+            throw e instanceof Error ? e : new Error('VIDEO_PRINT_POSTER_UPLOAD_FAILED');
+          }
           if (!thumbPublicUrl && isHttps(thumbLocal)) thumbPublicUrl = thumbLocal;
         }
         return {
           ...g,
-          thumbnail_url: thumbPublicUrl ?? g.thumbnail_url ?? null,
-          poster_url: thumbPublicUrl ?? g.poster_url ?? null,
-          poster_print_url: thumbPublicUrl ?? g.poster_print_url ?? null,
+          thumbnail_url: thumbPublicUrl ?? (customPrint || forceLocalPrintUpload ? null : g.thumbnail_url) ?? null,
+          poster_url: thumbPublicUrl ?? (customPrint || forceLocalPrintUpload ? null : g.poster_url) ?? null,
+          poster_print_url:
+            thumbPublicUrl ?? (customPrint || forceLocalPrintUpload ? null : g.poster_print_url) ?? null,
         };
       }
       if (m.type !== 'photo') return g;
