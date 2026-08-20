@@ -22,6 +22,7 @@ import {
 } from '@/utils/captureHeroMetrics';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { computeCaptureMosaicRows } from '@/utils/captureMosaicLayout';
+import { loadedFontStyle } from '@/utils/loadedFontStyle';
 
 const TILE_GAP = scale(6);
 const TILE_RADIUS = scale(20);
@@ -118,14 +119,14 @@ const CaptureMosaicTile = memo(function CaptureMosaicTile({
       />
       <View style={styles.tileMeta} pointerEvents="none">
         <Text
-          style={[styles.tileName, nameFontFamily ? { fontFamily: nameFontFamily } : null]}
+          style={[styles.tileName, loadedFontStyle(nameFontFamily)]}
           numberOfLines={1}
         >
           {givenName}
         </Text>
         {ageLabel ? (
           <Text
-            style={[styles.tileAge, ageFontFamily ? { fontFamily: ageFontFamily } : null]}
+            style={[styles.tileAge, loadedFontStyle(ageFontFamily)]}
             numberOfLines={1}
           >
             {ageLabel}

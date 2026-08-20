@@ -15,7 +15,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useCallback, useMemo, useRef, useEffect, type ReactNode } from 'react';
-import { verticalScale } from '@/utils/responsive';
+import { scale, verticalScale } from '@/utils/responsive';
 import EditTextModal from '@/components/EditTextModal';
 import { feedMemoryTextEditPreviewVariant } from '@/utils/memoryTextEditStyles';
 import { bookLineBudgetForMemoryType, bookCharsPerLineForMemoryType } from '@/utils/textLimits';
@@ -32,6 +32,7 @@ import { THEME } from '@/constants/theme';
 import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
 import { FeedHeader } from '@/components/feed/FeedHeader';
+import SettingsHeaderButton from '@/components/SettingsHeaderButton';
 import type { FeedListItem } from '@/components/feed/FilMemoryRow';
 import { peekSilentInitialFilLoadArmed } from '@/services/feedAfterImportFlags';
 import { setMemoryViewerSession } from '@/services/memoryViewerSession';
@@ -294,6 +295,16 @@ function FilScreen() {
     return (
       <View style={[styles.container, styles.centered]}>
         <StatusBar style="dark" />
+        <View
+          style={{
+            position: 'absolute',
+            top: insets.top + verticalScale(6),
+            right: scale(20),
+            zIndex: 2,
+          }}
+        >
+          <SettingsHeaderButton />
+        </View>
         <Text style={styles.emptyText}>Aucun enfant trouvé</Text>
         <TouchableOpacity
           style={[petitmoCtaStyles.primary, styles.createButton]}

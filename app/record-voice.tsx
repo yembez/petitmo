@@ -26,6 +26,7 @@ import {
   Lock,
   Pencil,
   ImageIcon,
+  FolderOpen,
 } from 'lucide-react-native';
 import { Audio } from 'expo-av';
 import { scale, verticalScale } from '@/utils/responsive';
@@ -41,10 +42,14 @@ import { FREE_TIER_VOICE_MAX_DURATION, PAID_TIER_VOICE_MAX_DURATION, checkMemory
 import { promptFreeTierLimitThenPaywall, promptFreeTierLimitFromError } from '@/utils/freeTierLimitGate';
 import { isAudioTrimAvailable, trimAudioToLocalFile } from '@/services/audioTrim';
 import { AudioTrimEditor } from '@/components/AudioTrimEditor';
+import { isVoiceDocumentPickerAvailable } from '@/services/voiceImport';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
+import { isDeviceStorageFullError } from '@/utils/deviceStorageFull';
 
 export default function RecordVoiceScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { t } = useAppTranslation('common');
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [hasRecording, setHasRecording] = useState(false);
@@ -52,6 +57,9 @@ export default function RecordVoiceScreen() {
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  /** Masqué tant que le binaire natif n’inclut pas ExpoDocumentPicker (rebuild EAS). */
+  const [importAvailable] = useState(() => isVoiceDocumentPickerAvailable());
   /** Photo d’illustration optionnelle (fond derrière le lecteur sur le fil) */
   const [coverUri, setCoverUri] = useState<string | null>(null);
   /** Extrait sélectionné (secondes) */
@@ -115,16 +123,6 @@ export default function RecordVoiceScreen() {
 
   const checkPermissions = async () => {
     const result = await Audio.getPermissionsAsync();
-
-    if (!result.granted && !result.canAskAgain) {
-      router.back();
-      return;
-    }
-
-    if (!result.granted) {
-      setShowPermissionModal(true);
-    }
-
     setHasPermission(result.granted);
   };
 
@@ -133,37 +131,71 @@ export default function RecordVoiceScreen() {
     if (result.granted) {
       setHasPermission(true);
       setShowPermissionModal(false);
+      void startRecording();
     } else {
       setShowPermissionModal(false);
-      router.back();
     }
   };
 
   const handleCancelPermission = () => {
     setShowPermissionModal(false);
-    router.back();
   };
+
+  const ensureVoiceQuotaOk = async (): Promise<string | null> => {
+    const childId = await getOrSelectFirstChild();
+    if (!childId) {
+      Alert.alert('Aucun enfant trouvé', "Crée d'abord un profil d'enfant");
+      router.push('/create-child');
+      return null;
+    }
+    if (tier === 'free') {
+      const memLimit = await checkMemoryLimit(childId, { skipRemotePull: true });
+      if (!memLimit.canCreate) {
+        promptFreeTierLimitThenPaywall({ kind: 'memories', router, returnTo: 'fil' });
+        return null;
+      }
+      const voiceLimit = await checkVoiceLimit(childId, { skipRemotePull: true });
+      if (!voiceLimit.canCreate) {
+        promptFreeTierLimitThenPaywall({ kind: 'voices', router, returnTo: 'fil' });
+        return null;
+      }
+    }
+    return childId;
+  };
+
+  const applyLoadedAudio = useCallback(
+    async (uri: string, durationSec: number) => {
+      if (soundRef.current) {
+        await soundRef.current.unloadAsync().catch(() => {});
+        soundRef.current = null;
+      }
+      setIsExcerptPlaying(false);
+      lastExcerptTrimKeyRef.current = '';
+      recordingFileUriRef.current = uri;
+      setHasRecording(true);
+      setIsRecording(false);
+      setCoverUri(null);
+      const total = Math.max(0, durationSec);
+      setRecordingDuration(total);
+      const maxClip =
+        tier === 'free' ? FREE_TIER_VOICE_MAX_DURATION : PAID_TIER_VOICE_MAX_DURATION;
+      setTrimStartSec(0);
+      setTrimEndSec(Math.max(0, Math.min(total, maxClip)));
+    },
+    [tier],
+  );
 
   const startRecording = async () => {
     try {
-      const childId = await getOrSelectFirstChild();
-      if (!childId) {
-        Alert.alert('Aucun enfant trouvé', 'Crée d\'abord un profil d\'enfant');
-        router.push('/create-child');
+      const perm = await Audio.getPermissionsAsync();
+      if (!perm.granted) {
+        setShowPermissionModal(true);
         return;
       }
-      if (tier === 'free') {
-        const memLimit = await checkMemoryLimit(childId, { skipRemotePull: true });
-        if (!memLimit.canCreate) {
-          promptFreeTierLimitThenPaywall({ kind: 'memories', router, returnTo: 'fil' });
-          return;
-        }
-        const voiceLimit = await checkVoiceLimit(childId, { skipRemotePull: true });
-        if (!voiceLimit.canCreate) {
-          promptFreeTierLimitThenPaywall({ kind: 'voices', router, returnTo: 'fil' });
-          return;
-        }
-      }
+      setHasPermission(true);
+
+      const childId = await ensureVoiceQuotaOk();
+      if (!childId) return;
 
       if (soundRef.current) {
         await soundRef.current.unloadAsync();
@@ -195,6 +227,45 @@ export default function RecordVoiceScreen() {
       console.error('Failed to start recording:', error);
       Alert.alert('Erreur', "Impossible de démarrer l'enregistrement");
     }
+  };
+
+  const importAudio = async () => {
+    if (isRecording || isImporting || isSaving) return;
+    if (!importAvailable) {
+      Alert.alert(t('error'), t('recordVoice.importNeedsRebuild'));
+      return;
+    }
+    try {
+      const childId = await ensureVoiceQuotaOk();
+      if (!childId) return;
+
+      setIsImporting(true);
+      const { pickVoiceAudioFromFiles } = await import('@/services/voiceImport');
+      const picked = await pickVoiceAudioFromFiles();
+      if (!picked) return;
+      await applyLoadedAudio(picked.uri, picked.durationSec);
+    } catch (e) {
+      if (e instanceof Error && e.message === 'DOCUMENT_PICKER_UNAVAILABLE') {
+        Alert.alert(t('error'), t('recordVoice.importNeedsRebuild'));
+        return;
+      }
+      if (isDeviceStorageFullError(e)) {
+        Alert.alert(t('error'), t('bookOrder.storageFull'));
+        return;
+      }
+      if (e instanceof Error && e.message === 'AUDIO_TOO_SHORT') {
+        Alert.alert(t('error'), t('recordVoice.importTooShort'));
+        return;
+      }
+      console.error('importAudio', e);
+      Alert.alert(t('error'), t('recordVoice.importFailed'));
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const onPressImport = () => {
+    void importAudio();
   };
 
   const stopRecording = async () => {
@@ -567,24 +638,17 @@ export default function RecordVoiceScreen() {
     return <View style={styles.container} />;
   }
 
-  if (!hasPermission) {
-    return (
-      <>
-        <View style={styles.container} />
-        <PermissionModal
-          visible={showPermissionModal}
-          type="microphone"
-          onRequestPermission={handleRequestPermission}
-          onCancel={handleCancelPermission}
-        />
-      </>
-    );
-  }
-
   const showPostRecordFooter = hasRecording && !isRecording;
 
   return (
     <View style={styles.container}>
+      <PermissionModal
+        visible={showPermissionModal}
+        type="microphone"
+        onRequestPermission={() => void handleRequestPermission()}
+        onCancel={handleCancelPermission}
+      />
+
       <View style={[styles.header, showPostRecordFooter && styles.headerTight]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <ChevronLeft size={ICON_SIZES.lg} color="#3F4A5A" strokeWidth={2} />
@@ -603,8 +667,8 @@ export default function RecordVoiceScreen() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.postRecordHead}>
-            <Text style={styles.titlePostRecord}>Capture des sons</Text>
-            <Text style={styles.subtitlePostRecord}>Enregistrement terminé</Text>
+            <Text style={styles.titlePostRecord}>{t('recordVoice.title')}</Text>
+            <Text style={styles.subtitlePostRecord}>{t('recordVoice.subtitleDone')}</Text>
           </View>
 
           <View style={styles.editSurfaceCard}>
@@ -627,9 +691,9 @@ export default function RecordVoiceScreen() {
                 <Play size={scale(22)} color="#FFFFFF" strokeWidth={2} fill="#FFFFFF" />
               )}
             </TouchableOpacity>
-            <TouchableOpacity style={styles.rerecordInCard} onPress={startRecording} activeOpacity={0.8}>
+            <TouchableOpacity style={styles.rerecordInCard} onPress={() => void startRecording()} activeOpacity={0.8}>
               <Mic size={scale(18)} color={THEME.textPrimary} strokeWidth={2} />
-              <Text style={styles.rerecordInCardText}>Réenregistrer</Text>
+              <Text style={styles.rerecordInCardText}>{t('recordVoice.rerecord')}</Text>
             </TouchableOpacity>
           </View>
 
@@ -696,7 +760,7 @@ export default function RecordVoiceScreen() {
               <>
                 <Save size={scale(22)} color={THEME.captureScreenCtaForeground} strokeWidth={2} />
                 <Text style={[petitmoCtaStyles.primaryText, styles.saveButtonMaquetteText]}>
-                  Sauvegarder
+                  {t('recordVoice.save')}
                 </Text>
               </>
             )}
@@ -710,11 +774,11 @@ export default function RecordVoiceScreen() {
       ) : (
         <View style={styles.preRecordBody}>
           <View style={styles.titleSection}>
-            <Text style={styles.title}>Capture des sons</Text>
+            <Text style={styles.title}>{t('recordVoice.title')}</Text>
             <Text style={styles.subtitle}>
               {isRecording
-                ? 'Enregistrement en cours...'
-                : 'Sa voix, un chant, un message pour plus tard...'}
+                ? t('recordVoice.subtitleRecording')
+                : t('recordVoice.subtitleIdle')}
             </Text>
           </View>
 
@@ -735,17 +799,46 @@ export default function RecordVoiceScreen() {
           </View>
 
           <View style={styles.controls}>
-            {!isRecording && (
-              <TouchableOpacity style={styles.recordButton} onPress={startRecording}>
-                <Mic size={scale(40)} color="#FFFFFF" strokeWidth={2} />
-              </TouchableOpacity>
-            )}
-
-            {isRecording && (
-              <TouchableOpacity style={styles.stopButton} onPress={stopRecording}>
+            {!isRecording ? (
+              <View style={styles.preRecordActions}>
+                <View style={styles.preRecordActionCol}>
+                  <TouchableOpacity
+                    style={styles.recordButton}
+                    onPress={() => void startRecording()}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('recordVoice.mic')}
+                  >
+                    <Mic size={scale(40)} color="#FFFFFF" strokeWidth={2} />
+                  </TouchableOpacity>
+                  <Text style={styles.preRecordActionLabel}>{t('recordVoice.mic')}</Text>
+                </View>
+                {importAvailable ? (
+                  <View style={styles.preRecordActionCol}>
+                    <TouchableOpacity
+                      style={[styles.importButton, isImporting && styles.importButtonDisabled]}
+                      onPress={onPressImport}
+                      disabled={isImporting}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('recordVoice.importA11y')}
+                    >
+                      {isImporting ? (
+                        <ActivityIndicator color={THEME.brandCtaOrange} />
+                      ) : (
+                        <FolderOpen size={scale(32)} color={THEME.brandCtaOrange} strokeWidth={2} />
+                      )}
+                    </TouchableOpacity>
+                    <Text style={styles.preRecordActionLabel}>{t('recordVoice.import')}</Text>
+                  </View>
+                ) : null}
+              </View>
+            ) : (
+              <TouchableOpacity style={styles.stopButton} onPress={() => void stopRecording()}>
                 <Square size={ICON_SIZES.xl} color="#FFFFFF" strokeWidth={2} fill="#FFFFFF" />
               </TouchableOpacity>
             )}
+            {!isRecording && importAvailable ? (
+              <Text style={styles.importHint}>{t('recordVoice.importHintBody')}</Text>
+            ) : null}
           </View>
         </View>
       )}
@@ -1004,6 +1097,23 @@ const styles = StyleSheet.create({
   controls: {
     alignItems: 'center',
   },
+  preRecordActions: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    gap: scale(36),
+  },
+  preRecordActionCol: {
+    alignItems: 'center',
+    width: scale(110),
+  },
+  preRecordActionLabel: {
+    marginTop: SPACING.sm,
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '600',
+    color: THEME.textPrimary,
+    textAlign: 'center',
+  },
   recordButton: {
     width: scale(100),
     height: scale(100),
@@ -1016,6 +1126,33 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: scale(12),
     elevation: 8,
+  },
+  importButton: {
+    width: scale(100),
+    height: scale(100),
+    borderRadius: scale(50),
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: THEME.brandCtaOrange,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: scale(2) },
+    shadowOpacity: 0.08,
+    shadowRadius: scale(8),
+    elevation: 3,
+  },
+  importButtonDisabled: {
+    opacity: 0.65,
+  },
+  importHint: {
+    marginTop: verticalScale(20),
+    paddingHorizontal: SPACING.md,
+    fontSize: FONT_SIZES.xs,
+    lineHeight: scale(18),
+    color: THEME.textMuted,
+    textAlign: 'center',
+    maxWidth: scale(320),
   },
   stopButton: {
     width: scale(100),

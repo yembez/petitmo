@@ -362,6 +362,7 @@ type ExportRow = {
   status: string;
   book_id: string;
   subscription_tier: string;
+  payment_status?: string | null;
 };
 
 async function handleTicketPdf(
@@ -594,7 +595,7 @@ async function handleTicketPrintPdf(
 
   const { data: erow, error: exErr } = await supabase
     .from('export_requests')
-    .select('id, crm_contact_id, type, export_mode, status, book_id, subscription_tier')
+    .select('id, crm_contact_id, type, export_mode, status, book_id, subscription_tier, payment_status')
     .eq('id', ticket.export_request_id)
     .maybeSingle();
 
@@ -617,6 +618,11 @@ async function handleTicketPrintPdf(
 
   if (row.export_mode !== 'print') {
     res.status(400).json({ error: 'export_mode does not match export request' });
+    return;
+  }
+
+  if (row.payment_status !== 'paid') {
+    res.status(402).json({ error: 'Payment required', code: 'PAYMENT_REQUIRED' });
     return;
   }
 

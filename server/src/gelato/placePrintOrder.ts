@@ -46,7 +46,7 @@ export async function submitGelatoPrintOrder(
   const { data: row, error } = await supabase
     .from('export_requests')
     .select(
-      'id, type, status, book_id, crm_contact_id, shipping_name, shipping_address_json, printer_order_id',
+      'id, type, status, payment_status, book_id, crm_contact_id, shipping_name, shipping_address_json, printer_order_id',
     )
     .eq('id', params.exportRequestId)
     .maybeSingle();
@@ -59,6 +59,16 @@ export async function submitGelatoPrintOrder(
   }
   if (typeof row.printer_order_id === 'string' && row.printer_order_id.trim()) {
     return { ok: true, skipped: true, reason: 'ALREADY_SUBMITTED' };
+  }
+
+  const paymentStatus = typeof row.payment_status === 'string' ? row.payment_status : 'unpaid';
+  if (paymentStatus !== 'paid') {
+    const msg = 'gelato skip: payment_status is not paid';
+    await supabase
+      .from('export_requests')
+      .update({ last_error: msg })
+      .eq('id', params.exportRequestId);
+    return { ok: true, skipped: true, reason: 'PAYMENT_REQUIRED' };
   }
 
   const shipName = typeof row.shipping_name === 'string' ? row.shipping_name.trim() : '';

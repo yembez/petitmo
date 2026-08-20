@@ -92,12 +92,26 @@
   },
   "parent": {
     "report": {
-      "cta": "Signaler un problème",
-      "openedTitle": "Merci",
-      "openedBody": "Un e-mail est prêt avec les infos techniques. Décris ce qui s’est passé puis envoie.",
-      "fallbackTitle": "Infos techniques prêtes",
-      "fallbackBody": "Impossible d’ouvrir Mail. Envoie un message à contact@petitmo.app avec le bloc technique partagé.",
-      "failed": "Impossible de préparer le signalement. Réessaie ou écris à contact@petitmo.app."
+      "cta": "Signaler un problème"
+    },
+    "support": {
+      "contactCta": "Nous contacter",
+      "contactTitle": "Nous contacter",
+      "reportTitle": "Signaler un problème",
+      "subtitle": "Ton message arrive à l’équipe Petitmo. L’e-mail de ton compte est déjà indiqué — tu peux le changer si besoin.",
+      "emailLabel": "Ton e-mail",
+      "emailPlaceholder": "toi@email.com",
+      "messageLabel": "Message",
+      "messagePlaceholder": "Comment peut-on t’aider ?",
+      "reportPlaceholder": "Décris ce que tu faisais et ce qui s’est passé.",
+      "techNote": "La version de l’app et le type d’appareil sont joints automatiquement — rien à copier.",
+      "send": "Envoyer",
+      "successTitle": "Message envoyé",
+      "successBody": "Merci. On te répondra à {{email}}.",
+      "errorEmail": "Indique un e-mail valide.",
+      "errorMessage": "Écris quelques mots pour qu’on puisse t’aider.",
+      "errorSend": "Impossible d’envoyer le message. Vérifie ta connexion et réessaie.",
+      "errorRateLimit": "Tu viens d’envoyer un message. Réessaie dans un instant."
     },
     "account": {
       "sectionTitle": "Mon compte",
@@ -110,6 +124,22 @@
       "deleteConfirmBody": "Cette action est définitive. Ton compte et l’accès cloud associés seront supprimés. Les données locales de cet appareil seront aussi effacées.",
       "deleteFailed": "Impossible de supprimer le compte pour le moment."
     },
+    "orders": {
+      "sectionTitle": "Mes commandes",
+      "empty": "Aucune commande pour le moment.",
+      "hint": "Les livres payés avec l’e-mail de ton compte s’affichent ici.",
+      "untitledBook": "Livre",
+      "journalOf": "Journal de {{name}}",
+      "statusPaid": "En préparation",
+      "statusPrinting": "En préparation",
+      "statusShipped": "Expédiée",
+      "statusInTransit": "En cours d’acheminement",
+      "statusDelivered": "Livrée",
+      "statusFailed": "À vérifier",
+      "statusRefunded": "Remboursée",
+      "statusReturned": "Retournée",
+      "statusUpdating": "Mise à jour du suivi"
+    },
     "freeTierLimit": {
       "later": "Plus tard",
       "ctaPlus": "Passer à Petitmo+",
@@ -121,7 +151,18 @@
       "voicesBody": "Tu as déjà utilisé tes {{count}} souvenirs audio du plan gratuit. Pour en ajouter, passe à Petitmo+."
     }
   },
+  "tabs": {
+    "capture": "Capturer",
+    "journal": "Journal",
+    "favorites": "Favoris",
+    "books": "Livres",
+    "settings": "Paramètres"
+  },
   "book": {
+    "createTile": {
+      "title": "Créer un nouveau livre",
+      "a11y": "Créer un nouveau livre"
+    },
     "videoPoster": {
       "title": "Choisir l'image d'illustration",
       "useImage": "Utiliser cette image",
@@ -163,6 +204,26 @@
     "legalBody": "Après paiement, le livre part en fabrication et ne peut plus être modifié. Produit personnalisé : pas de droit de rétractation. ",
     "legalCgvLink": "Conditions générales de vente",
     "ctaPay": "Commander · {{price}}",
-    "needVerify": "Coche la case pour confirmer que tu as vérifié ton livre."
+    "needVerify": "Coche la case pour confirmer que tu as vérifié ton livre.",
+    "payUnconfigured": "Paiement non configuré pour le moment. Réessaie plus tard.",
+    "payOpenFailed": "Impossible d’ouvrir le paiement. Réessaie.",
+    "payNotConfirmed": "Le paiement n’est pas encore confirmé. Réessaie dans un instant.",
+    "payTicketExpired": "La session de commande a expiré. Réessaie Commander.",
+    "storageFull": "Plus assez d’espace sur l’appareil. Libère de la place (Réglages → Général → Stockage iPhone), puis réessaie."
+  },
+  "recordVoice": {
+    "title": "Capture des sons",
+    "subtitleIdle": "Sa voix, un chant, un message pour plus tard...",
+    "subtitleRecording": "Enregistrement en cours...",
+    "subtitleDone": "Enregistrement terminé",
+    "mic": "Micro",
+    "import": "Importer",
+    "importA11y": "Importer un fichier audio depuis Fichiers",
+    "importHintBody": "Le Dictaphone iPhone n’est pas accessible directement. Partage ton enregistrement vers Fichiers, puis choisis-le ici.",
+    "importFailed": "Impossible d’importer ce fichier audio.",
+    "importTooShort": "Ce fichier audio est trop court.",
+    "importNeedsRebuild": "L’import audio nécessite une mise à jour de l’app (module Fichiers). Tu peux toujours enregistrer avec le micro.",
+    "rerecord": "Réenregistrer",
+    "save": "Sauvegarder"
   }
 }

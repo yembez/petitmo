@@ -1,6 +1,6 @@
 import '@/lib/i18n';
 import { useEffect, useLayoutEffect, useState } from 'react';
-import { Stack, usePathname } from 'expo-router';
+import { SplashScreen, Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import {
@@ -42,14 +42,16 @@ import {
   hydrateTabScreensFromSqliteSync,
 } from '@/services/tabScreensHydrate';
 import { flushPendingCloudUploadsOnce } from '@/services/pendingCloudFlush';
-import { FEED_META_FONT_SOURCES } from '@/constants/feedMetaFont';
+import { APP_BOOT_FONT_SOURCES } from '@/constants/appBootFonts';
 import { enrichSentryUserContext, initPetitmoSentry, Sentry } from '@/lib/sentry';
 
 initPetitmoSentry();
+void SplashScreen.preventAutoHideAsync();
 
 function RootLayout() {
   useFrameworkReady();
-  useFonts(FEED_META_FONT_SOURCES);
+  const [bootFontsLoaded, bootFontsError] = useFonts(APP_BOOT_FONT_SOURCES);
+  const bootFontsReady = bootFontsLoaded || !!bootFontsError;
   const [isAuthReady, setIsAuthReady] = useState(false);
   const pathname = usePathname();
 
@@ -218,7 +220,12 @@ function RootLayout() {
     })();
   }, [isAuthReady]);
 
-  if (!isAuthReady) {
+  useEffect(() => {
+    if (!isAuthReady || !bootFontsReady) return;
+    void SplashScreen.hideAsync();
+  }, [bootFontsReady, isAuthReady]);
+
+  if (!isAuthReady || !bootFontsReady) {
     return <View style={styles.bootShell} />;
   }
 
@@ -287,6 +294,7 @@ function RootLayout() {
           }}
         />
         <Stack.Screen name="book-order" />
+        <Stack.Screen name="book-order-return" options={{ headerShown: false }} />
         <Stack.Screen name="book-finalize-media" />
         <Stack.Screen name="book-order-confirmation" />
         <Stack.Screen name="capture-wheel-mock" />

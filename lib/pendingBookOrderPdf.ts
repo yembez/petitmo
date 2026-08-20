@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { GenerateBookPdfServerInput } from '@/services/bookPdfServer';
+import { rethrowIfDeviceStorageFull } from '@/utils/deviceStorageFull';
 
 const KEY = 'petitmo_pending_book_order_pdf_v1';
 
@@ -8,12 +9,7 @@ export async function setPendingBookOrderPdfPayload(input: GenerateBookPdfServer
   try {
     await AsyncStorage.setItem(KEY, json);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (/No space left|saturé|ENOSPC|Code=28|Code=640/i.test(msg)) {
-      throw new Error(
-        'Stockage iPhone saturé : impossible d’enregistrer la commande. Libère de l’espace (Réglages → Général → Stockage iPhone), puis réessaie.',
-      );
-    }
+    rethrowIfDeviceStorageFull(e);
     throw e;
   }
 }

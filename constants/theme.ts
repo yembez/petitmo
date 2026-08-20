@@ -61,8 +61,8 @@ export const THEME = {
   /** @deprecated — `brandPrimarySoft` */
   captureCtaSoftTerracotta: '#F4A0A0',
 
-  /** Fond CTA rond « Importer » — dérivé clair de l’orange charte. */
-  captureImportCtaBackground: '#FBD1C1',
+  /** Fond CTA rond « Importer » — rose bonbon maquette Capturer. */
+  captureImportCtaBackground: '#FEA5A1',
   /** Fond CTA rond « Enregistrer » — écran Capturer (maquette V3). */
   captureRecordCtaBackground: '#FFFFFF',
   /** Liseré disque « Enregistrer » — écran Capturer (orange charte). */

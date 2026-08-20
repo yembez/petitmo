@@ -82,6 +82,10 @@ const styles = StyleSheet.create({
     minWidth: 0,
     gap: scale(12),
   },
+  headerRight: {
+    marginLeft: scale(12),
+    flexShrink: 0,
+  },
   headerAvatarRing: {
     padding: HEADER_AVATAR_RING_PADDING,
     borderRadius:
@@ -383,7 +387,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     gap: scale(8),
   },
-  /** Barre overlay : date + âge à gauche, lieu à droite. */
+  /** Barre overlay : date à gauche, lieu à droite (haut du média). */
   feedMetaPillBar: {
     position: 'absolute',
     top: scale(12),
@@ -405,6 +409,21 @@ const styles = StyleSheet.create({
     paddingTop: scale(12),
     paddingBottom: scale(4),
     width: '100%',
+  },
+  /** Âge famille — bas gauche du média (remplace l’ancienne pastille date doublon). */
+  feedAgePillBar: {
+    position: 'absolute',
+    left: scale(12),
+    bottom: scale(12),
+    zIndex: 6,
+    maxWidth: '72%',
+  },
+  feedAgePillBarInline: {
+    paddingHorizontal: scale(12),
+    paddingBottom: scale(10),
+    paddingTop: scale(2),
+    alignSelf: 'flex-start',
+    maxWidth: '72%',
   },
   feedMetaPillWrapLeft: {
     flexShrink: 1,

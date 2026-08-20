@@ -21,17 +21,18 @@ export const BOOK_PDF_GENERATING_TITLE = 'Ton livre prend vie ❤️';
 export const BOOK_PDF_GENERATING_SUBTITLE =
   'Merci de garder Petitmo ouvert pendant la préparation.';
 
-type Props = {
-  visible: boolean;
+type ViewProps = {
+  active?: boolean;
 };
 
-export function BookPdfGeneratingOverlay({ visible }: Props) {
+/** Écran cœur (plein écran) — retour Stripe / génération PDF. */
+export function BookPdfGeneratingView({ active = true }: ViewProps) {
   const insets = useSafeAreaInsets();
   const pulse = useSharedValue(1);
   const breathe = useSharedValue(0.35);
 
   useEffect(() => {
-    if (!visible) {
+    if (!active) {
       pulse.value = withTiming(1, { duration: 200 });
       breathe.value = withTiming(0.35, { duration: 200 });
       return;
@@ -52,7 +53,7 @@ export function BookPdfGeneratingOverlay({ visible }: Props) {
       -1,
       false
     );
-  }, [visible, pulse, breathe]);
+  }, [active, pulse, breathe]);
 
   const iconStyle = useAnimatedStyle(() => ({
     transform: [{ scale: pulse.value }],
@@ -64,30 +65,40 @@ export function BookPdfGeneratingOverlay({ visible }: Props) {
   }));
 
   return (
-    <Modal visible={visible} transparent animationType="fade" statusBarTranslucent>
-      <View
-        style={[
-          styles.root,
-          {
-            paddingTop: insets.top + scale(28),
-            paddingBottom: insets.bottom + scale(28),
-          },
-        ]}
-      >
-        <View style={styles.visualBlock}>
-          <Animated.View style={[styles.halo, haloStyle]} />
-          <Animated.View style={[styles.iconRing, iconStyle]}>
-            <Heart
-              size={scale(46)}
-              color={THEME.brandPrimary}
-              fill={THEME.brandPrimary}
-              strokeWidth={1.8}
-            />
-          </Animated.View>
-        </View>
-        <Text style={styles.title}>{BOOK_PDF_GENERATING_TITLE}</Text>
-        <Text style={styles.subtitle}>{BOOK_PDF_GENERATING_SUBTITLE}</Text>
+    <View
+      style={[
+        styles.root,
+        {
+          paddingTop: insets.top + scale(28),
+          paddingBottom: insets.bottom + scale(28),
+        },
+      ]}
+    >
+      <View style={styles.visualBlock}>
+        <Animated.View style={[styles.halo, haloStyle]} />
+        <Animated.View style={[styles.iconRing, iconStyle]}>
+          <Heart
+            size={scale(46)}
+            color={THEME.brandPrimary}
+            fill={THEME.brandPrimary}
+            strokeWidth={1.8}
+          />
+        </Animated.View>
       </View>
+      <Text style={styles.title}>{BOOK_PDF_GENERATING_TITLE}</Text>
+      <Text style={styles.subtitle}>{BOOK_PDF_GENERATING_SUBTITLE}</Text>
+    </View>
+  );
+}
+
+type Props = {
+  visible: boolean;
+};
+
+export function BookPdfGeneratingOverlay({ visible }: Props) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" statusBarTranslucent>
+      <BookPdfGeneratingView active={visible} />
     </Modal>
   );
 }

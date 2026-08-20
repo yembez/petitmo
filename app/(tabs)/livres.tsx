@@ -18,13 +18,15 @@ import {
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { BookOpen, Plus } from 'lucide-react-native';
+import { Plus } from 'lucide-react-native';
 import { useFonts, EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
 import { Inter_500Medium, Inter_700Bold } from '@expo-google-fonts/inter';
 import { RectButton, Swipeable, TouchableOpacity as GestureTouchableOpacity } from 'react-native-gesture-handler';
 import { scale, verticalScale } from '@/utils/responsive';
 import { THEME } from '@/constants/theme';
 import BookCoverThumbnail from '@/components/BookCoverThumbnail';
+import SettingsHeaderButton from '@/components/SettingsHeaderButton';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { bookCoverPeriodLabelForBook } from '@/utils/bookCoverPeriodLabel';
 import {
   bookPageEntries,
@@ -41,6 +43,11 @@ import { feedBooksHydrationSnapshot, setFeedBooksHydrationSnapshot } from '@/ser
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { normalizeMemoryMediaUriForDisplay } from '@/utils/memoryPhotos';
 import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
+import {
+  BOOK_COVER_THEME_WARM,
+  BOOK_COVER_THUMB_HEIGHT,
+  BOOK_COVER_THUMB_WIDTH,
+} from '@/constants/bookCoverThumbnail';
 import TabSceneTransition from '@/components/TabSceneTransition';
 import {
   setFavorisAddToBookSession,
@@ -199,6 +206,40 @@ const BookListRow = memo(function BookListRow({
     </Swipeable>
   );
 }, bookListRowPropsEqual);
+
+function CreateBookListTile({
+  titleFontFamily,
+  onPress,
+}: {
+  titleFontFamily?: string;
+  onPress: () => void;
+}) {
+  const { t } = useAppTranslation('common');
+  return (
+    <TouchableOpacity
+      style={styles.row}
+      activeOpacity={0.92}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={t('book.createTile.a11y')}
+    >
+      <View style={styles.createCover}>
+        <Plus size={scale(28)} color={THEME.brandCtaOrange} strokeWidth={2.2} />
+      </View>
+      <View style={styles.rowText}>
+        <Text
+          style={[
+            styles.rowTitle,
+            titleFontFamily ? { fontFamily: titleFontFamily } : { fontWeight: '700' },
+          ]}
+          numberOfLines={2}
+        >
+          {t('book.createTile.title')}
+        </Text>
+      </View>
+    </TouchableOpacity>
+  );
+}
 
 function LivresScreen() {
   const router = useRouter();
@@ -386,16 +427,7 @@ function LivresScreen() {
         >
           Livres
         </Text>
-        <TouchableOpacity
-          style={styles.headerCta}
-          onPress={openCreateFlow}
-          activeOpacity={0.9}
-          accessibilityRole="button"
-          accessibilityLabel="Créer un livre"
-        >
-          <Plus size={scale(20)} color="#FFFFFF" strokeWidth={2.4} />
-          <Text style={styles.headerCtaText}>Nouveau</Text>
-        </TouchableOpacity>
+        <SettingsHeaderButton />
       </View>
 
       <FlatList
@@ -407,25 +439,15 @@ function LivresScreen() {
         ItemSeparatorComponent={() => <View style={styles.rowSep} />}
         contentContainerStyle={[
           styles.listContent,
-          books.length === 0 && styles.listContentEmpty,
           { paddingBottom: verticalScale(24) + tabBarFloatingOverlapPad(insets.bottom) },
         ]}
-        ListEmptyComponent={
-          <View style={styles.emptyWrap}>
-            <View style={styles.emptyIcon}>
-              <BookOpen size={scale(36)} color={THEME.textMuted} strokeWidth={2} />
-            </View>
-            <Text style={styles.emptyTitle}>Aucun livre pour l’instant</Text>
-            <Text style={styles.emptySub}>Crée un livre pour rassembler vos souvenirs.</Text>
-            <TouchableOpacity
-              style={styles.emptyCta}
+        ListHeaderComponent={
+          <View>
+            <CreateBookListTile
+              titleFontFamily={listTitleFontFamily}
               onPress={openCreateFlow}
-              activeOpacity={0.9}
-              accessibilityRole="button"
-              accessibilityLabel="Créer un livre"
-            >
-              <Text style={styles.emptyCtaText}>Créer un livre</Text>
-            </TouchableOpacity>
+            />
+            {books.length > 0 ? <View style={styles.rowSep} /> : null}
           </View>
         }
         renderItem={renderBookRow}
@@ -576,26 +598,9 @@ const styles = StyleSheet.create({
     color: THEME.textPrimary,
     letterSpacing: scale(-0.4),
   },
-  headerCta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: scale(6),
-    backgroundColor: THEME.brandArdoise,
-    paddingVertical: verticalScale(10),
-    paddingHorizontal: scale(16),
-    borderRadius: scale(999),
-  },
-  headerCtaText: {
-    color: '#FFFFFF',
-    fontSize: scale(14),
-    fontWeight: '800',
-  },
   listContent: {
     paddingTop: verticalScale(16),
     paddingHorizontal: scale(20),
-  },
-  listContentEmpty: {
-    flexGrow: 1,
   },
   rowSep: {
     height: verticalScale(10),
@@ -648,37 +653,23 @@ const styles = StyleSheet.create({
     color: THEME.textMuted,
     fontWeight: '700',
   },
-  emptyWrap: {
+  createCover: {
+    width: BOOK_COVER_THUMB_WIDTH,
+    height: BOOK_COVER_THUMB_HEIGHT,
     alignItems: 'center',
-    paddingVertical: verticalScale(48),
-    paddingHorizontal: scale(24),
-  },
-  emptyIcon: {
-    marginBottom: verticalScale(16),
-  },
-  emptyTitle: {
-    fontSize: scale(18),
-    fontWeight: '800',
-    color: THEME.textPrimary,
-    textAlign: 'center',
-  },
-  emptySub: {
-    marginTop: verticalScale(8),
-    fontSize: scale(14),
-    color: THEME.textMuted,
-    textAlign: 'center',
-    lineHeight: scale(20),
-  },
-  emptyCta: {
-    marginTop: verticalScale(24),
-    backgroundColor: THEME.brandArdoise,
-    paddingVertical: verticalScale(14),
-    paddingHorizontal: scale(28),
-    borderRadius: scale(999),
-  },
-  emptyCtaText: {
-    color: '#FFFFFF',
-    fontSize: scale(15),
-    fontWeight: '800',
+    justifyContent: 'center',
+    backgroundColor: BOOK_COVER_THEME_WARM.paper,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: BOOK_COVER_THEME_WARM.line,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000000',
+        shadowOffset: { width: 0, height: verticalScale(4) },
+        shadowOpacity: 0.14,
+        shadowRadius: scale(10),
+      },
+      android: { elevation: 6 },
+      default: {},
+    }),
   },
 });

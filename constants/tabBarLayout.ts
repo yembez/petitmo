@@ -7,7 +7,7 @@ import { THEME } from '@/constants/theme';
  */
 export const TAB_BAR_CONTENT_HEIGHT = verticalScale(28 + 3 + 12);
 
-/** Padding au-dessus des onglets — laisse respirer l’encoche + CTA flottant. */
+/** Padding au-dessus des onglets. */
 export const TAB_BAR_PADDING_TOP = verticalScale(6);
 
 /** Espace sous les libellés dans la zone onglets (au-dessus du bandeau safe). */

@@ -175,6 +175,7 @@ import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 import { canExportBookPdfViaServer } from '@/lib/digitalExportPurchase';
 import { setLastGuestExportEmail } from '@/lib/guestExportPrefs';
 import { setPendingBookOrderPdfPayload } from '@/lib/pendingBookOrderPdf';
+import { isDeviceStorageFullError } from '@/utils/deviceStorageFull';
 import { THEME } from '@/constants/theme';
 
 const HEADER_H = 44;
@@ -2758,7 +2759,8 @@ export default function BookPreviewScreen() {
           console.warn('[book-preview] flush before pdf order', e);
         }
       }
-      await setPendingBookOrderPdfPayload({
+      try {
+        await setPendingBookOrderPdfPayload({
         bookId: bookId ?? `draft-${child.id}`,
         childId: child.id,
         child,
@@ -2776,6 +2778,10 @@ export default function BookPreviewScreen() {
         cropImgPxByMemoryId: cropImgPxByMemoryIdFromDpiMeta(cropDpiMetaByKey),
         exportMode: 'screen',
       });
+      } catch (e) {
+        Alert.alert('Petitmo', isDeviceStorageFullError(e) ? t('bookOrder.storageFull') : (e instanceof Error ? e.message : 'Impossible de préparer la commande.'));
+        return;
+      }
       router.push({
         pathname: '/book-order',
         params: {
@@ -2804,6 +2810,7 @@ export default function BookPreviewScreen() {
     photoCrops,
     rotations,
     router,
+    t,
   ]);
 
   const goToBookOrderPrint = useCallback(() => {
@@ -2846,7 +2853,8 @@ export default function BookPreviewScreen() {
           console.warn('[book-preview] flush before print order', e);
         }
       }
-      await setPendingBookOrderPdfPayload({
+      try {
+        await setPendingBookOrderPdfPayload({
         bookId: bookId ?? `draft-${child.id}`,
         childId: child.id,
         child,
@@ -2864,6 +2872,10 @@ export default function BookPreviewScreen() {
         cropImgPxByMemoryId: cropImgPxByMemoryIdFromDpiMeta(cropDpiMetaByKey),
         exportMode: 'print',
       });
+      } catch (e) {
+        Alert.alert('Petitmo', isDeviceStorageFullError(e) ? t('bookOrder.storageFull') : (e instanceof Error ? e.message : 'Impossible de préparer la commande.'));
+        return;
+      }
       router.push({
         pathname: '/book-order',
         params: {
@@ -2893,6 +2905,7 @@ export default function BookPreviewScreen() {
     photoCrops,
     rotations,
     router,
+    t,
   ]);
 
   const handleExportBook = useCallback(() => {

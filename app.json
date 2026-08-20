@@ -88,6 +88,7 @@
           "photosPermission": "Petitmo a besoin d'accéder à vos photos pour importer des souvenirs existants."
         }
       ],
+      "expo-document-picker",
       [
         "expo-media-library",
         {

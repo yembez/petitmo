@@ -2,12 +2,13 @@ import { memo } from 'react';
 import { View, Text, TouchableOpacity, Platform, StyleSheet } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { calculateAge } from '@/utils/date';
-import { scale, verticalScale } from '@/utils/responsive';
+import { scale } from '@/utils/responsive';
 import type { Child } from '@/utils/feedHelpers';
 import { styles } from '@/components/feed/feedStyles';
 import { THEME } from '@/constants/theme';
 import { childDisplayGivenName } from '@/utils/childDisplayName';
 import { ChildAvatar } from '@/components/ChildAvatar';
+import SettingsHeaderButton from '@/components/SettingsHeaderButton';
 import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 
 export type FeedHeaderProps = {
@@ -16,10 +17,6 @@ export type FeedHeaderProps = {
   /** Ouvre l’éditeur de profil de l’enfant dont l’avatar est tapé. */
   onPressChild: (child: Child) => void;
 };
-
-/** Aligné sur `styles.headerRow` + `styles.headerContent` (avatar agrandi + paddingBottom + bordure). */
-const HEADER_INNER_RESERVE_H =
-  verticalScale(68) + verticalScale(10) + StyleSheet.hairlineWidth;
 
 const HEADER_AVATAR_PX = scale(68);
 const AVATAR_STACK_OVERLAP = scale(22);
@@ -99,14 +96,14 @@ export const FeedHeader = memo(function FeedHeader({
 
   if (sorted.length === 0) {
     return (
-      <View
-        pointerEvents="none"
-        style={{
-          paddingTop,
-          minHeight: paddingTop + HEADER_INNER_RESERVE_H,
-          backgroundColor: THEME.familyFlowScreenBg,
-        }}
-      />
+      <View style={[styles.headerContent, styles.headerAndroid, { paddingTop }]}>
+        <View style={styles.headerRow}>
+          <View style={styles.headerLeft} />
+          <View style={styles.headerRight}>
+            <SettingsHeaderButton />
+          </View>
+        </View>
+      </View>
     );
   }
 
@@ -134,6 +131,9 @@ export const FeedHeader = memo(function FeedHeader({
             </Text>
           </View>
         )}
+      </View>
+      <View style={styles.headerRight}>
+        <SettingsHeaderButton />
       </View>
     </View>
   );

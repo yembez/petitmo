@@ -9,7 +9,6 @@ import {
   Linking,
   Alert,
   ActivityIndicator,
-  Share,
 } from 'react-native';
 import { usePathname, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -30,6 +29,7 @@ import {
   signOutRealAccount,
 } from '@/lib/authAccount';
 import {
+  getLocalChild,
   getLocalMemoriesPendingCloudSync,
   listLocalChildren,
   listLocalChildrenForUser,
@@ -38,17 +38,22 @@ import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
 import { ChildAvatar } from '@/components/ChildAvatar';
 import {
-  buildBugReportMailto,
   collectBugReportContext,
   formatAppVersionLabel,
-  formatBugReportTechBlock,
 } from '@/lib/bugReportContext';
-import { captureUserBugReport, isSentryEnabled } from '@/lib/sentry';
+import { isSentryEnabled } from '@/lib/sentry';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
+import { useAppLanguage } from '@/hooks/useAppLanguage';
+import { formatAppCurrency, formatAppDate } from '@/utils/appLocale';
+import { fetchPrintOrdersForAccount, hydratePrintOrderTitles } from '@/services/printOrders';
+import { getCachedPrintOrders, peekCachedPrintOrders } from '@/lib/printOrdersCache';
+import type { PrintOrderStatus, PrintOrderSummary } from '@/lib/printOrderSummary';
+import { isGenericPrintBookTitle } from '@/lib/printOrderSummary';
 import { safeRouterBack } from '@/utils/safeRouterBack';
 import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
+import SupportContactModal from '@/components/SupportContactModal';
+import type { SupportMessageKind } from '@/services/supportContact';
 
-const CONTACT_EMAIL = 'contact@petitmo.app';
 const URL_PRIVACY = 'https://petitmo.app/privacy';
 const URL_TERMS = 'https://petitmo.app/terms';
 const URL_LEGAL = 'https://petitmo.app/legal';
@@ -76,7 +81,8 @@ export default function ParentSpaceScreen() {
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
   const { t } = useAppTranslation('common');
-  const { loaded: fontsLoaded, dm500, dm600, dm700 } = useDmSansFamilyFlowFonts();
+  const lang = useAppLanguage();
+  const { dm500, dm600, dm700 } = useDmSansFamilyFlowFonts();
   /** Local-first : 1er paint complet (pas de pop différé « Mon compte »). */
   const [children, setChildrenState] = useState<Child[]>(() => readLocalChildrenForSettings());
   const [tier, setTierState] = useState<UserTier>(() => peekUserTier());
@@ -88,42 +94,66 @@ export default function ParentSpaceScreen() {
     return pending > 0 ? `Synchronisation (${pending})` : 'À jour';
   });
   const [versionLabel, setVersionLabel] = useState('—');
-  const [reportBusy, setReportBusy] = useState(false);
+  const [supportKind, setSupportKind] = useState<SupportMessageKind | null>(null);
   const [signOutBusy, setSignOutBusy] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [orders, setOrders] = useState<PrintOrderSummary[]>(() =>
+    peekHasRealAuthAccount() ? hydratePrintOrderTitles(peekCachedPrintOrders()) : [],
+  );
+  const [ordersStatusRefreshing, setOrdersStatusRefreshing] = useState(false);
 
-  const load = useCallback(async () => {
+  const refreshOrderTracking = useCallback(() => {
+    setOrdersStatusRefreshing(true);
+    void fetchPrintOrdersForAccount()
+      .then(setOrders)
+      .finally(() => setOrdersStatusRefreshing(false));
+  }, []);
+
+  const load = useCallback(() => {
     setChildrenState(readLocalChildrenForSettings());
 
-    const tTier = await getUserTier();
-    setTierState(tTier);
-
-    const ctx = await collectBugReportContext({
-      pathname,
-      sentryEnabled: isSentryEnabled(),
-    });
-    setVersionLabel(formatAppVersionLabel(ctx));
-
-    const realUser = await getRealAuthUser();
-    setHasRealAccount(!!realUser);
-    if (realUser) {
-      const rawEmail =
-        realUser.email ??
-        (typeof realUser.user_metadata?.email === 'string' ? realUser.user_metadata.email : '') ??
-        '';
-      setAccountEmail(rawEmail.trim() || '—');
-      const pending = getLocalMemoriesPendingCloudSync().length;
-      setBackupStatus(pending > 0 ? `Synchronisation (${pending})` : 'À jour');
-    } else {
-      setAccountEmail('');
-      setBackupStatus('');
+    const showLocalOrders = peekHasRealAuthAccount();
+    if (showLocalOrders) {
+      setOrders(hydratePrintOrderTitles(peekCachedPrintOrders()));
+      void getCachedPrintOrders().then((cached) => {
+        setOrders(hydratePrintOrderTitles(cached));
+      });
+      refreshOrderTracking();
     }
 
-    // Enrichit enfants depuis getChildren (réseau en fond) sans masquer le local déjà peint.
-    void getChildren().then(list => {
+    void getUserTier().then(setTierState);
+    void collectBugReportContext({
+      pathname,
+      sentryEnabled: isSentryEnabled(),
+    }).then((ctx) => setVersionLabel(formatAppVersionLabel(ctx)));
+
+    void getRealAuthUser().then((realUser) => {
+      setHasRealAccount(!!realUser);
+      if (realUser) {
+        const rawEmail =
+          realUser.email ??
+          (typeof realUser.user_metadata?.email === 'string' ? realUser.user_metadata.email : '') ??
+          '';
+        setAccountEmail(rawEmail.trim() || '—');
+        const pending = getLocalMemoriesPendingCloudSync().length;
+        setBackupStatus(pending > 0 ? `Synchronisation (${pending})` : 'À jour');
+        if (!showLocalOrders) {
+          void getCachedPrintOrders().then((cached) => {
+            setOrders(hydratePrintOrderTitles(cached));
+          });
+          refreshOrderTracking();
+        }
+      } else {
+        setAccountEmail('');
+        setBackupStatus('');
+        setOrders([]);
+      }
+    });
+
+    void getChildren().then((list) => {
       setChildrenState(list);
     });
-  }, [pathname]);
+  }, [pathname, refreshOrderTracking]);
 
   useFocusEffect(
     useCallback(() => {
@@ -184,50 +214,8 @@ export default function ParentSpaceScreen() {
       },
     ]);
   }, [deleteBusy, performDeleteAccount, signOutBusy, t]);
-  const handleReportProblem = useCallback(async () => {
-    if (reportBusy) return;
-    setReportBusy(true);
-    try {
-      const ctx = await collectBugReportContext({
-        pathname,
-        sentryEnabled: isSentryEnabled(),
-      });
-      const eventId = captureUserBugReport('Signalement utilisateur (bêta)', { ...ctx });
-      const { url, body } = buildBugReportMailto({
-        email: CONTACT_EMAIL,
-        ctx,
-        sentryEventId: eventId,
-      });
-      const opened = await Linking.canOpenURL(url);
-      if (opened) {
-        await Linking.openURL(url);
-        Alert.alert(t('parent.report.openedTitle'), t('parent.report.openedBody'));
-      } else {
-        try {
-          await Share.share({ message: body });
-        } catch {
-          Alert.alert(
-            t('parent.report.fallbackTitle'),
-            `${t('parent.report.fallbackBody')}\n\n${formatBugReportTechBlock(ctx, eventId)}`,
-          );
-        }
-      }
-    } catch {
-      Alert.alert(t('error'), t('parent.report.failed'));
-    } finally {
-      setReportBusy(false);
-    }
-  }, [pathname, reportBusy, t]);
 
   const paid = tier === 'paid';
-
-  if (!fontsLoaded) {
-    return (
-      <View style={[styles.container, styles.fontsGate, { paddingTop: insets.top }]}>
-        <ActivityIndicator color={THEME.brandCtaOrange} size="large" />
-      </View>
-    );
-  }
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -248,6 +236,39 @@ export default function ParentSpaceScreen() {
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + verticalScale(24) }]}
         showsVerticalScrollIndicator={false}
       >
+        <Section title="Mes enfants" titleFontFamily={dm700}>
+          {children.length === 0 ? (
+            <Text style={[styles.emptyText, dm500 ? { fontFamily: dm500 } : null]}>
+              Aucun enfant pour le moment.
+            </Text>
+          ) : (
+            children.map((c) => (
+              <Row
+                key={c.id}
+                icon={<ChildAvatar child={c} size={scale(34)} />}
+                label={c.name ?? 'Sans nom'}
+                labelFontFamily={dm500}
+                value={c.birthdate ? calculateAge(c.birthdate) : ''}
+                onPress={async () => {
+                  await setSelectedChild(c.id);
+                  router.push(`/edit-child?childId=${c.id}`);
+                }}
+              />
+            ))
+          )}
+
+          <TouchableOpacity
+            style={styles.addChildRow}
+            onPress={() => router.push('/create-child')}
+            activeOpacity={0.9}
+          >
+            <View style={styles.addChildIcon}>
+              <Plus size={ICON_SIZES.md} color="#FFFFFF" strokeWidth={2.5} />
+            </View>
+            <Text style={[styles.addChildText, dm600 ? { fontFamily: dm600 } : null]}>Ajouter un enfant</Text>
+          </TouchableOpacity>
+        </Section>
+
         <Section title="Mon abonnement" titleFontFamily={dm700}>
           {paid ? (
             <>
@@ -291,45 +312,46 @@ export default function ParentSpaceScreen() {
           )}
         </Section>
 
-        <Section title="Mes enfants" titleFontFamily={dm700}>
-          {children.length === 0 ? (
-            <Text style={[styles.emptyText, dm500 ? { fontFamily: dm500 } : null]}>
-              Aucun enfant pour le moment.
-            </Text>
-          ) : (
-            children.map((c) => (
-              <Row
-                key={c.id}
-                icon={<ChildAvatar child={c} size={scale(34)} />}
-                label={c.name ?? 'Sans nom'}
-                labelFontFamily={dm500}
-                value={c.birthdate ? calculateAge(c.birthdate) : ''}
-                onPress={async () => {
-                  await setSelectedChild(c.id);
-                  router.push(`/edit-child?childId=${c.id}`);
-                }}
-              />
-            ))
-          )}
-
-          <TouchableOpacity
-            style={styles.addChildRow}
-            onPress={() => router.push('/create-child')}
-            activeOpacity={0.9}
-          >
-            <View style={styles.addChildIcon}>
-              <Plus size={ICON_SIZES.md} color="#FFFFFF" strokeWidth={2.5} />
-            </View>
-            <Text style={[styles.addChildText, dm600 ? { fontFamily: dm600 } : null]}>Ajouter un enfant</Text>
-          </TouchableOpacity>
-        </Section>
+        {hasRealAccount ? (
+          <Section title={t('parent.orders.sectionTitle')} titleFontFamily={dm700}>
+            {orders.length === 0 ? (
+              <>
+                <Text style={[styles.emptyText, dm500 ? { fontFamily: dm500 } : null]}>
+                  {t('parent.orders.empty')}
+                </Text>
+                <Text style={[styles.emptyText, dm500 ? { fontFamily: dm500 } : null]}>
+                  {t('parent.orders.hint')}
+                </Text>
+              </>
+            ) : (
+              orders.map((o, i) => {
+                const when = o.createdAt
+                  ? formatAppDate(new Date(o.createdAt), { day: 'numeric', month: 'short', year: 'numeric' }, lang)
+                  : '';
+                const price = formatAppCurrency(o.priceCents / 100, lang);
+                const meta = [when, price].filter(Boolean).join(' · ');
+                return (
+                  <StaticRow
+                    key={o.id}
+                    label={orderBookTitle(o, t)}
+                    detail={meta || undefined}
+                    value={printOrderStatusLabel(o.status, t)}
+                    valueRefreshing={ordersStatusRefreshing}
+                    refreshingAccessibilityLabel={t('parent.orders.statusUpdating')}
+                    labelFontFamily={dm500}
+                    bordered={i > 0}
+                  />
+                );
+              })
+            )}
+          </Section>
+        ) : null}
 
         <Section title="Aide" titleFontFamily={dm700}>
           <TouchableOpacity
             style={styles.row}
-            onPress={() => void handleReportProblem()}
+            onPress={() => setSupportKind('report')}
             activeOpacity={0.85}
-            disabled={reportBusy}
             accessibilityRole="button"
             accessibilityLabel={t('parent.report.cta')}
           >
@@ -339,20 +361,22 @@ export default function ParentSpaceScreen() {
                 {t('parent.report.cta')}
               </Text>
             </View>
-            <Text style={styles.rowValue}>{reportBusy ? '…' : '›'}</Text>
+            <Text style={styles.rowValue}>›</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.row, styles.rowBorderTop]}
-            onPress={() => void openUrl(`mailto:${CONTACT_EMAIL}`)}
+            onPress={() => setSupportKind('contact')}
             activeOpacity={0.85}
-            accessibilityRole="link"
-            accessibilityLabel="Nous contacter"
+            accessibilityRole="button"
+            accessibilityLabel={t('parent.support.contactCta')}
           >
             <View style={styles.rowIconPlaceholder} />
             <View style={styles.rowText}>
-              <Text style={[styles.rowLabel, dm500 ? { fontFamily: dm500 } : null]}>Nous contacter</Text>
+              <Text style={[styles.rowLabel, dm500 ? { fontFamily: dm500 } : null]}>
+                {t('parent.support.contactCta')}
+              </Text>
             </View>
-            <Text style={styles.rowValue}>{CONTACT_EMAIL}</Text>
+            <Text style={styles.rowValue}>›</Text>
           </TouchableOpacity>
         </Section>
 
@@ -447,8 +471,52 @@ export default function ParentSpaceScreen() {
           </Section>
         ) : null}
       </ScrollView>
+
+      <SupportContactModal
+        visible={supportKind != null}
+        kind={supportKind ?? 'contact'}
+        defaultEmail={accountEmail}
+        onClose={() => setSupportKind(null)}
+      />
     </View>
   );
+}
+
+function orderBookTitle(
+  order: PrintOrderSummary,
+  t: (key: string, opts?: Record<string, string>) => string,
+): string {
+  const titled = order.bookTitle.trim();
+  if (titled && !isGenericPrintBookTitle(titled)) return titled;
+  const childName = order.childId.trim()
+    ? (getLocalChild(order.childId)?.name ?? '').trim()
+    : '';
+  if (childName) return t('parent.orders.journalOf', { name: childName });
+  return t('parent.orders.untitledBook');
+}
+
+function printOrderStatusLabel(
+  status: PrintOrderStatus,
+  t: (key: string) => string,
+): string {
+  switch (status) {
+    case 'printing':
+      return t('parent.orders.statusPrinting');
+    case 'shipped':
+      return t('parent.orders.statusShipped');
+    case 'in_transit':
+      return t('parent.orders.statusInTransit');
+    case 'delivered':
+      return t('parent.orders.statusDelivered');
+    case 'failed':
+      return t('parent.orders.statusFailed');
+    case 'refunded':
+      return t('parent.orders.statusRefunded');
+    case 'returned':
+      return t('parent.orders.statusReturned');
+    default:
+      return t('parent.orders.statusPaid');
+  }
 }
 
 function Section({
@@ -472,26 +540,67 @@ function Section({
 
 function StaticRow({
   label,
+  detail,
   value,
+  valueRefreshing,
+  refreshingAccessibilityLabel,
   labelFontFamily,
+  bordered,
 }: {
   label: string;
+  detail?: string;
   value?: string;
+  valueRefreshing?: boolean;
+  refreshingAccessibilityLabel?: string;
   labelFontFamily?: string;
+  bordered?: boolean;
 }) {
   return (
-    <View style={styles.row} accessibilityRole="text">
+    <View
+      style={[styles.row, bordered && styles.rowBorderTop]}
+      accessibilityRole="text"
+      accessibilityLabel={
+        valueRefreshing && refreshingAccessibilityLabel
+          ? [label, detail, refreshingAccessibilityLabel].filter(Boolean).join(', ')
+          : undefined
+      }
+    >
       <View style={styles.rowIconPlaceholder} />
       <View style={styles.rowText}>
         <Text
           style={[styles.rowLabel, labelFontFamily ? { fontFamily: labelFontFamily } : null]}
-          numberOfLines={3}
+          numberOfLines={2}
           ellipsizeMode="tail"
         >
           {label}
         </Text>
+        {detail ? (
+          <Text style={styles.rowDetail} numberOfLines={1} ellipsizeMode="tail">
+            {detail}
+          </Text>
+        ) : null}
       </View>
-      {value ? <Text style={styles.rowValue}>{value}</Text> : <View style={styles.rowValuePlaceholder} />}
+      {valueRefreshing ? (
+        <View style={styles.statusRefreshWrap}>
+          {value ? (
+            <Text style={styles.statusLabel} numberOfLines={2}>
+              {value}
+            </Text>
+          ) : null}
+          <ActivityIndicator
+            color={THEME.brandCtaOrange}
+            size="small"
+            style={styles.statusSpinner}
+            accessibilityLabel={refreshingAccessibilityLabel}
+          />
+        </View>
+      ) : value ? (
+        <Text style={styles.rowValue} numberOfLines={2}>
+          {value}
+        </Text>
+      ) : (
+        <View style={styles.rowValuePlaceholder} />
+      )}
     </View>
   );
 }
@@ -537,10 +646,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: THEME.bg,
-  },
-  fontsGate: {
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   header: {
     flexDirection: 'row',
@@ -625,6 +730,11 @@ const styles = StyleSheet.create({
     color: THEME.textPrimary,
     fontWeight: '500',
   },
+  rowDetail: {
+    fontSize: FONT_SIZES.sm,
+    color: THEME.textMuted,
+    marginTop: 2,
+  },
   rowLabelAccent: {
     color: THEME.brandCtaOrange,
     fontWeight: '600',
@@ -640,6 +750,21 @@ const styles = StyleSheet.create({
     marginLeft: SPACING.sm,
     flexShrink: 0,
     maxWidth: '46%',
+  },
+  statusRefreshWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: SPACING.sm,
+    flexShrink: 0,
+    maxWidth: '50%',
+  },
+  statusLabel: {
+    fontSize: FONT_SIZES.sm,
+    color: THEME.textMuted,
+    flexShrink: 1,
+  },
+  statusSpinner: {
+    marginLeft: 8,
   },
   rowValuePlaceholder: {
     width: scale(18),

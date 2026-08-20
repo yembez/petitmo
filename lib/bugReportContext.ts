@@ -4,7 +4,7 @@ import * as Updates from 'expo-updates';
 import { getUserTier } from '@/lib/userTier';
 import { getUserMode } from '@/lib/userMode';
 
-/** Bloc technique collé dans les signalements bêta (mail + Sentry). */
+/** Bloc technique joint aux messages support (version, appareil, écran). */
 export type BugReportContext = {
   appVersion: string;
   buildNumber: string;
@@ -111,20 +111,4 @@ export function formatBugReportTechBlock(ctx: BugReportContext, sentryEventId?: 
   }
   lines.push('---------------------------------------');
   return lines.join('\n');
-}
-
-export function buildBugReportMailto(opts: {
-  email: string;
-  ctx: BugReportContext;
-  sentryEventId?: string | null;
-}): { url: string; subject: string; body: string } {
-  const subject = `[Petitmo bêta] Problème ${opts.ctx.appVersion} (${opts.ctx.buildNumber})`;
-  const body = [
-    'Décris le problème ici (ce que tu faisais, ce que tu voyais) :',
-    '',
-    '',
-    formatBugReportTechBlock(opts.ctx, opts.sentryEventId),
-  ].join('\n');
-  const url = `mailto:${opts.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-  return { url, subject, body };
 }

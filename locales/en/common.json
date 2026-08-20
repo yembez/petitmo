@@ -92,12 +92,26 @@
   },
   "parent": {
     "report": {
-      "cta": "Report a problem",
-      "openedTitle": "Thank you",
-      "openedBody": "An email draft includes technical details. Describe what happened, then send.",
-      "fallbackTitle": "Technical details ready",
-      "fallbackBody": "Could not open Mail. Email contact@petitmo.app with the shared technical block.",
-      "failed": "Could not prepare the report. Try again or email contact@petitmo.app."
+      "cta": "Report a problem"
+    },
+    "support": {
+      "contactCta": "Contact us",
+      "contactTitle": "Contact us",
+      "reportTitle": "Report a problem",
+      "subtitle": "Your message goes to the Petitmo team. Your account email is filled in — you can change it if needed.",
+      "emailLabel": "Your email",
+      "emailPlaceholder": "you@email.com",
+      "messageLabel": "Message",
+      "messagePlaceholder": "How can we help?",
+      "reportPlaceholder": "Describe what you were doing and what happened.",
+      "techNote": "App version and device type are attached automatically — nothing to copy.",
+      "send": "Send",
+      "successTitle": "Message sent",
+      "successBody": "Thanks. We’ll reply at {{email}}.",
+      "errorEmail": "Enter a valid email address.",
+      "errorMessage": "Write a few words so we can help.",
+      "errorSend": "Couldn’t send the message. Check your connection and try again.",
+      "errorRateLimit": "You just sent a message. Please try again in a moment."
     },
     "account": {
       "sectionTitle": "My account",
@@ -110,6 +124,22 @@
       "deleteConfirmBody": "This cannot be undone. Your account and associated cloud access will be removed. Local data on this device will also be erased.",
       "deleteFailed": "Could not delete the account right now."
     },
+    "orders": {
+      "sectionTitle": "My orders",
+      "empty": "No orders yet.",
+      "hint": "Books paid with your account email appear here.",
+      "untitledBook": "Book",
+      "journalOf": "{{name}}’s journal",
+      "statusPaid": "In preparation",
+      "statusPrinting": "In preparation",
+      "statusShipped": "Shipped",
+      "statusInTransit": "In transit",
+      "statusDelivered": "Delivered",
+      "statusFailed": "Needs attention",
+      "statusRefunded": "Refunded",
+      "statusReturned": "Returned",
+      "statusUpdating": "Updating tracking"
+    },
     "freeTierLimit": {
       "later": "Later",
       "ctaPlus": "Go Petitmo+",
@@ -121,7 +151,18 @@
       "voicesBody": "You’ve used all {{count}} free-plan audio memories. Upgrade to Petitmo+ to add more."
     }
   },
+  "tabs": {
+    "capture": "Capture",
+    "journal": "Journal",
+    "favorites": "Favorites",
+    "books": "Books",
+    "settings": "Settings"
+  },
   "book": {
+    "createTile": {
+      "title": "Create a new book",
+      "a11y": "Create a new book"
+    },
     "videoPoster": {
       "title": "Choose illustration image",
       "useImage": "Use this image",
@@ -163,6 +204,26 @@
     "legalBody": "After payment, the book goes to production and can’t be changed. Personalised product: no right of withdrawal. ",
     "legalCgvLink": "Terms of sale",
     "ctaPay": "Order · {{price}}",
-    "needVerify": "Tick the box to confirm you’ve checked your book."
+    "needVerify": "Tick the box to confirm you’ve checked your book.",
+    "payUnconfigured": "Payment isn’t set up yet. Try again later.",
+    "payOpenFailed": "Couldn’t open payment. Try again.",
+    "payNotConfirmed": "Payment isn’t confirmed yet. Try again in a moment.",
+    "payTicketExpired": "This order session expired. Tap Order again.",
+    "storageFull": "Not enough storage on this device. Free some space (Settings → General → iPhone Storage), then try again."
+  },
+  "recordVoice": {
+    "title": "Capture sound",
+    "subtitleIdle": "Their voice, a song, a message for later...",
+    "subtitleRecording": "Recording…",
+    "subtitleDone": "Recording finished",
+    "mic": "Mic",
+    "import": "Import",
+    "importA11y": "Import an audio file from Files",
+    "importHintBody": "iPhone Voice Memos isn’t available directly. Share your recording to Files, then pick it here.",
+    "importFailed": "Couldn’t import this audio file.",
+    "importTooShort": "This audio file is too short.",
+    "importNeedsRebuild": "Audio import needs an app update (Files module). You can still record with the mic.",
+    "rerecord": "Record again",
+    "save": "Save"
   }
 }

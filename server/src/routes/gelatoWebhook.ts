@@ -115,6 +115,7 @@ export function registerGelatoWebhookRoute(app: Express, supabase: SupabaseClien
           : {}),
         lastWebhook: body,
         lastWebhookAt: new Date().toISOString(),
+        ...(fulfillmentStatus ? { gelatoFulfillmentStatus: fulfillmentStatus } : {}),
         ...(tracking.code ? { trackingCode: tracking.code } : {}),
         ...(tracking.url ? { trackingUrl: tracking.url } : {}),
       },

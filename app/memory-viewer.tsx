@@ -34,7 +34,6 @@ import {
   getAlbumCanonicalFavoriteUrls,
   isPhotoUrlFavoritedWithVariants,
   parseFavoritePhotoUrls,
-  pickPhotoUriForOverlayPalette,
 } from '@/utils/memoryPhotos';
 import { toggleFavoritePhotoUrl } from '@/services/media';
 import { extractMediaBucketPath } from '@/lib/mediaSignedUrl';
@@ -54,15 +53,11 @@ import { bookLineBudgetForMemoryType, bookCharsPerLineForMemoryType } from '@/ut
 import { updateMemoryContent } from '@/services/media';
 import { useToggleFavorite } from '@/hooks/useToggleFavorite';
 import {
-  CapturedAtOverlay,
+  FeedAgeOverlay,
   FeedPhotoFavoriteOverlay,
 } from '@/components/feed/FeedMediaOverlays';
 import { ScrollableTextBlock } from '@/components/ScrollableTextBlock';
 import { IMMERSIVE_CAPTION_SCROLL_MAX_H } from '@/constants/feedLayout';
-import {
-  capturedMediaDateLabel,
-  shouldShowCapturedMediaDateOverlay,
-} from '@/utils/feedCaptureOverlay';
 import { THEME } from '@/constants/theme';
 import {
   MemoryTextFontProvider,
@@ -93,7 +88,7 @@ const EM_QUAD = '\u2003';
 /** Marges latérales « page de livre » — zone de swipe entre posts texte. */
 const TEXT_IMMERSIVE_MARGIN_W = scale(48);
 const TEXT_MARGIN_SWIPE_DY = verticalScale(40);
-/** Relevé bas des pastilles date / cœur dans le viewer immersif (safe area + marge). */
+/** Relevé bas des pastilles âge / cœur dans le viewer immersif (safe area + marge). */
 function immersiveOverlayBottomInset(safeBottom: number): number {
   return safeBottom + verticalScale(10);
 }
@@ -601,10 +596,6 @@ function ImmersivePage({
     ? memory.location.replace(/\s*\([^)]*\)\s*$/, '').trim()
     : '';
 
-  const showCapturedOnMedia =
-    (memory.type === 'photo' || memory.type === 'video') &&
-    shouldShowCapturedMediaDateOverlay(memory);
-  const capturedLabelOnMedia = showCapturedOnMedia ? capturedMediaDateLabel(memory) : '';
   const mediaChrome = isImmersiveMediaType(memory.type);
   const topChromePadTop = insets.top + verticalScale(8);
   const topFadeHeight = useMemo(() => immersiveTopFadeHeight(height), [height]);
@@ -638,17 +629,17 @@ function ImmersivePage({
         {postDateLabel}
         {loc ? ` · ${loc}` : ''}
       </Text>
-      {!!ageAt && (
+      {!mediaChrome && !!ageAt ? (
         <Text
           style={[
-            mediaChrome ? styles.metaAgeOnMedia : styles.metaAgeOnText,
+            styles.metaAgeOnText,
             feedAgeFontFamily ? { fontFamily: feedAgeFontFamily } : styles.metaAgeSystem,
           ]}
           numberOfLines={2}
         >
           {ageAt}
         </Text>
-      )}
+      ) : null}
     </View>
   );
 
@@ -660,8 +651,6 @@ function ImmersivePage({
             <ImmersivePhoto
               memory={memory}
               albumPhotoSlot={albumPhotoSlot}
-              showCapturedOverlay={showCapturedOnMedia}
-              capturedOverlayLabel={capturedLabelOnMedia}
               onToggleMemoryFavorite={toggleFavorite}
               onFavoritePhotoUrlsUpdated={onFavoritePhotoUrlsUpdated}
               overlayBottomInset={overlayBottomInset}
@@ -672,8 +661,6 @@ function ImmersivePage({
               memory={memory}
               isActive={isActive}
               soundOn={videoSoundOn}
-              showCapturedOverlay={showCapturedOnMedia}
-              capturedOverlayLabel={capturedLabelOnMedia}
               onToggleFavorite={toggleFavorite}
               overlayBottomInset={overlayBottomInset}
             />
@@ -741,6 +728,16 @@ function ImmersivePage({
                 </Text>
               </View>
             ) : null}
+            {!!ageAt && (memory.type === 'photo' || memory.type === 'video' || memory.type === 'voice') ? (
+              <FeedAgeOverlay
+                ageLabel={ageAt}
+                feedAgeFontFamily={feedAgeFontFamily}
+                bottomInset={
+                  overlayBottomInset +
+                  (memory.type === 'video' && isActive ? IMMERSIVE_VIDEO_SCRUBBER_RESERVE : 0)
+                }
+              />
+            ) : null}
           </>
         ) : (
           <View style={[styles.topTextMeta, { paddingTop: topChromePadTop }]} pointerEvents="none">
@@ -772,19 +769,9 @@ function ImmersivePage({
 function ImmersivePhotoSlide({
   uri,
   memoryId,
-  paletteUri,
-  showCapturedOverlay,
-  capturedOverlayLabel,
-  inkOverride,
-  overlayBottomInset,
 }: {
   uri: string;
   memoryId: string;
-  paletteUri: string;
-  showCapturedOverlay: boolean;
-  capturedOverlayLabel: string;
-  inkOverride: Memory['captured_overlay_ink'];
-  overlayBottomInset: number;
 }) {
   const raw = uri.trim();
   const isDeviceLocal =
@@ -803,40 +790,26 @@ function ImmersivePhotoSlide({
   }
 
   return (
-    <>
-      <Image
-        source={{ uri: displayUri }}
-        style={styles.fullBleed}
-        contentFit="cover"
-        cachePolicy="memory-disk"
-        priority="high"
-        recyclingKey={`${memoryId}-${raw}`}
-      />
-      {showCapturedOverlay ? (
-        <CapturedAtOverlay
-          uriForAnalysis={paletteUri || displayUri}
-          label={capturedOverlayLabel}
-          inkOverride={inkOverride}
-          bottomInset={overlayBottomInset}
-        />
-      ) : null}
-    </>
+    <Image
+      source={{ uri: displayUri }}
+      style={styles.fullBleed}
+      contentFit="cover"
+      cachePolicy="memory-disk"
+      priority="high"
+      recyclingKey={`${memoryId}-${raw}`}
+    />
   );
 }
 
 function ImmersivePhoto({
   memory,
   albumPhotoSlot,
-  showCapturedOverlay,
-  capturedOverlayLabel,
   onToggleMemoryFavorite,
   onFavoritePhotoUrlsUpdated,
   overlayBottomInset,
 }: {
   memory: Memory;
   albumPhotoSlot?: AlbumPhotoSlot;
-  showCapturedOverlay: boolean;
-  capturedOverlayLabel: string;
   onToggleMemoryFavorite: (id: string) => void | Promise<void>;
   onFavoritePhotoUrlsUpdated: (urls: string[]) => void;
   overlayBottomInset: number;
@@ -846,7 +819,6 @@ function ImmersivePhoto({
   const raw = albumPhotoSlot
     ? albumPhotoSlot.uri.trim()
     : (getPrimaryPhotoUriForImmersiveViewer(memory)?.trim() ?? '');
-  const paletteUri = pickPhotoUriForOverlayPalette(memory) || raw;
 
   const handleTogglePhotoFavorite = useCallback(
     async (url: string) => {
@@ -875,15 +847,7 @@ function ImmersivePhoto({
 
   return (
     <View style={styles.photoImmersiveWrap}>
-      <ImmersivePhotoSlide
-        uri={raw}
-        memoryId={memory.id}
-        paletteUri={paletteUri}
-        showCapturedOverlay={showCapturedOverlay && (!albumPhotoSlot || albumPhotoSlot.index === 0)}
-        capturedOverlayLabel={capturedOverlayLabel}
-        inkOverride={memory.captured_overlay_ink}
-        overlayBottomInset={overlayBottomInset}
-      />
+      <ImmersivePhotoSlide uri={raw} memoryId={memory.id} />
       <FeedPhotoFavoriteOverlay
         isFavorite={photoFavorited}
         inkOverride={memory.captured_overlay_ink}
@@ -902,16 +866,12 @@ function ImmersiveVideo({
   memory,
   isActive,
   soundOn,
-  showCapturedOverlay,
-  capturedOverlayLabel,
   onToggleFavorite,
   overlayBottomInset,
 }: {
   memory: Memory;
   isActive: boolean;
   soundOn: boolean;
-  showCapturedOverlay: boolean;
-  capturedOverlayLabel: string;
   onToggleFavorite: (id: string) => void | Promise<void>;
   overlayBottomInset: number;
 }) {
@@ -1037,7 +997,6 @@ function ImmersiveVideo({
     dimensions && dimensions.h > dimensions.w ? ResizeMode.COVER : ResizeMode.CONTAIN;
   const posterFit = resizeMode === ResizeMode.CONTAIN ? ('contain' as const) : ('cover' as const);
 
-  const videoUriForOverlay = posterUri.trim();
   const showSeekBar = isActive && !!trimmedUri && durationMillis > 0;
   const favoriteBottomInset = overlayBottomInset + (showSeekBar ? IMMERSIVE_VIDEO_SCRUBBER_RESERVE : 0);
 
@@ -1050,22 +1009,7 @@ function ImmersiveVideo({
     />
   );
 
-  const captureOverlay =
-    showCapturedOverlay && videoUriForOverlay ? (
-      <CapturedAtOverlay
-        uriForAnalysis={videoUriForOverlay}
-        label={capturedOverlayLabel}
-        inkOverride={memory.captured_overlay_ink}
-        bottomInset={favoriteBottomInset}
-      />
-    ) : null;
-
-  const mediaOverlays = (
-    <>
-      {favoriteOverlay}
-      {captureOverlay}
-    </>
-  );
+  const mediaOverlays = <>{favoriteOverlay}</>;
 
   if (!trimmedUri && !posterUri) {
     return (

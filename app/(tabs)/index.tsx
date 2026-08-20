@@ -33,6 +33,8 @@ import { useFonts } from 'expo-font';
 import { Manrope_400Regular, Manrope_700Bold } from '@expo-google-fonts/manrope';
 import { DMSans_500Medium } from '@expo-google-fonts/dm-sans';
 import TabSceneTransition from '@/components/TabSceneTransition';
+import SettingsHeaderButton from '@/components/SettingsHeaderButton';
+import { loadedFontStyle } from '@/utils/loadedFontStyle';
 
 /** Tailles maquette capture (px logiques). */
 const CAPTURE_TITLE_FONT_SIZE = 18;
@@ -40,7 +42,7 @@ const CAPTURE_TITLE_LINE_HEIGHT = 24;
 const CAPTURE_TITLE_HEART_SIZE = scale(16);
 const CAPTURE_HEADER_DATE_FONT_SIZE = 15;
 const CAPTURE_HEADER_DATE_LINE_HEIGHT = 20;
-/** Hauteur de la ligne date / logo / menu (alignés sur le bouton burger). */
+/** Hauteur de la ligne date / logo / paramètres (alignés sur le bouton). */
 const CAPTURE_HEADER_ROW_H = scale(40);
 
 import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
@@ -73,6 +75,7 @@ import { childDisplayGivenName, childDisplayInitial } from '@/utils/childDisplay
 import { formatCaptureChildAge, formatCaptureHeaderDate } from '@/utils/date';
 import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 import { CaptureFamilyMosaic } from '@/components/CaptureFamilyMosaic';
+import PetitmoLogoManuscrit from '@/components/PetitmoLogoManuscrit';
 import {
   CAPTURE_HERO_IMAGE_CONTENT_POSITION,
   CAPTURE_HERO_IMAGE_OBJECT_POSITION,
@@ -172,7 +175,7 @@ function CapturePhotoGlassPill({
           styles.capturePhotoPillText,
           emphasized && styles.capturePhotoPillTextEmphasized,
           align === 'right' && styles.capturePhotoPillTextRight,
-          labelFontFamily ? { fontFamily: labelFontFamily } : emphasized ? { fontWeight: '700' } : null,
+          loadedFontStyle(labelFontFamily) ?? (emphasized ? { fontWeight: '700' } : null),
         ]}
         numberOfLines={1}
       >
@@ -278,7 +281,7 @@ function CaptureDiscCta({
         style={[
           styles.captureCtaLabel,
           compact && styles.captureCtaLabelCompact,
-          labelFontFamily ? { fontFamily: labelFontFamily } : null,
+          loadedFontStyle(labelFontFamily),
         ]}
         numberOfLines={1}
       >
@@ -623,26 +626,28 @@ function CapturerScreen() {
                 <Text
                   style={[
                     styles.captureHeaderDate,
-                    captureTitleFont ? { fontFamily: captureTitleFont } : { fontWeight: '500' },
+                    loadedFontStyle(captureTitleFont) ?? { fontWeight: '500' },
                   ]}
                   accessibilityRole="header"
                 >
                   {captureHeaderDate}
                 </Text>
               </View>
-              <View style={styles.captureHeaderTrailingSpacer} />
-              <View style={styles.captureHeaderLogoAbsolute} pointerEvents="none">
-                <Text
-                  style={[
-                    styles.captureHeaderTitle,
-                    captureTitleBoldFont
-                      ? { fontFamily: captureTitleBoldFont }
-                      : { fontWeight: '700' },
-                  ]}
-                  accessibilityRole="header"
-                >
-                  Capture
-                </Text>
+              <View style={styles.captureHeaderTrailing}>
+                <SettingsHeaderButton size={CAPTURE_HEADER_ROW_H} />
+              </View>
+              <View
+                style={styles.captureHeaderLogoAbsolute}
+                pointerEvents="none"
+                accessible
+                accessibilityRole="header"
+                accessibilityLabel="Petitmo"
+              >
+                <PetitmoLogoManuscrit
+                  width={scale(100)}
+                  height={scale(30)}
+                  color={THEME.textTertiary}
+                />
               </View>
             </View>
           </View>
@@ -719,9 +724,10 @@ function CapturerScreen() {
                   <Text
                     style={[
                       styles.capturePhotoTaglineText,
-                      captureTaglineFont
-                        ? { fontFamily: captureTaglineFont }
-                        : { fontWeight: '300', fontStyle: 'italic' },
+                      loadedFontStyle(captureTaglineFont) ?? {
+                        fontWeight: '300',
+                        fontStyle: 'italic',
+                      },
                     ]}
                     numberOfLines={1}
                     adjustsFontSizeToFit
@@ -746,7 +752,7 @@ function CapturerScreen() {
                 <Text
                   style={[
                     styles.captureTitle,
-                    captureTitleFont ? { fontFamily: captureTitleFont } : { fontWeight: '500' },
+                    loadedFontStyle(captureTitleFont) ?? { fontWeight: '500' },
                   ]}
                 >
                   Quel souvenir pour{' '}
@@ -762,9 +768,7 @@ function CapturerScreen() {
                   style={[
                     styles.captureTitle,
                     styles.captureTitleBold,
-                    captureTitleBoldFont
-                      ? { fontFamily: captureTitleBoldFont }
-                      : { fontWeight: '700' },
+                    loadedFontStyle(captureTitleBoldFont) ?? { fontWeight: '700' },
                   ]}
                 >
                   aujourd&apos;hui ?
@@ -773,7 +777,7 @@ function CapturerScreen() {
               <Text
                 style={[
                   styles.captureSubtitle,
-                  captureSubtitleFont ? { fontFamily: captureSubtitleFont } : null,
+                  loadedFontStyle(captureSubtitleFont),
                 ]}
               >
                 Écris, enregistre ou importe photos et vidéos
@@ -817,8 +821,8 @@ function CapturerScreen() {
               label="Importer"
               labelFontFamily={captureCtaLabelFont}
               accessibilityLabel="Importer des photos ou vidéos"
-              discColor={CAPTURE_SCREEN_ACCENT}
-              haloColor={CAPTURE_SCREEN_ACCENT}
+              discColor={THEME.captureImportCtaBackground}
+              haloColor={THEME.captureImportCtaBackground}
               icon={
                 <ImageImportIcon
                   size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
@@ -892,17 +896,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  captureHeaderTitle: {
-    fontSize: scale(26),
-    lineHeight: scale(30),
-    color: THEME.textPrimary,
-    letterSpacing: -0.3,
-    ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
-  },
-  captureHeaderTrailingSpacer: {
+  captureHeaderTrailing: {
     width: CAPTURE_HEADER_ROW_H,
     height: CAPTURE_HEADER_ROW_H,
     zIndex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   capturePhotoBleed: {
     width: SCREEN_W,

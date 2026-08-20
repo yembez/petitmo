@@ -467,6 +467,7 @@ Deno.serve(async (req: Request) => {
         printer_name: printerName,
         content_verified_at: contentVerifiedAt.toISOString(),
         cgv_version: cgvVersion,
+        payment_status: 'unpaid',
       })
       .select('id')
       .single();

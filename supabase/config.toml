@@ -24,3 +24,15 @@ verify_jwt = false
 
 [functions.delete-account]
 verify_jwt = false
+
+[functions.support-contact]
+verify_jwt = false
+
+[functions.print-payment]
+verify_jwt = false
+
+[functions.stripe-webhook]
+verify_jwt = false
+
+[functions.print-orders]
+verify_jwt = false

@@ -60,7 +60,7 @@ import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { Video, ResizeMode, type AVPlaybackStatus } from 'expo-av';
 import { Swipeable, RectButton } from "react-native-gesture-handler";
 import {
-  CapturedAtOverlay,
+  FeedAgeOverlay,
   FeedPostMetaOverlay,
   FeedVideoDurationSoundBar,
 } from '@/components/feed/FeedMediaOverlays';
@@ -70,10 +70,6 @@ import {
   formatDateLong,
 } from '@/utils/date';
 import { formatFamilyAgesLine } from '@/utils/childrenAge';
-import {
-  capturedMediaDateLabel,
-  shouldShowCapturedMediaDateOverlay,
-} from '@/utils/feedCaptureOverlay';
 import AudioPlayer from "@/components/AudioPlayer";
 import {
   filChildLiteKey,
@@ -89,6 +85,7 @@ import {
 } from '@/contexts/MemoryTextFontContext';
 import { ensurePlaybackAudioForListening } from '@/lib/playbackAudioMode';
 import { useIsFeedVideoAutoplay } from '@/lib/feedAutoplayStore';
+import { loadedFontStyle } from '@/utils/loadedFontStyle';
 
 /** Icônes d’action (hors favori couleur charte) */
 const ACTION_ICON_INK = '#0A0A0A';
@@ -283,9 +280,6 @@ function FilMemoryRow({
   const locationLabelRaw = memory.location?.trim() || '';
   const locationCore = locationLabelRaw.replace(/\s*\([^)]*\)\s*$/, '').trim();
   const locationLabel = locationCore ? `à ${locationCore}` : '';
-  const showCapturedOverlay = shouldShowCapturedMediaDateOverlay(memory);
-  const capturedOverlayLabel = showCapturedOverlay ? capturedMediaDateLabel(memory) : '';
-  const videoUriForOverlay = videoPosterUri.trim();
   const canAutoplayVideoInline =
     isFeedVideoAutoplay && memory.type === 'video' && !!videoPlaybackUri.trim();
 
@@ -403,20 +397,27 @@ function FilMemoryRow({
 
   const mediaMetaOverlayProps = {
     dateLabel: addedAtLabel,
-    ageLabel: ageAtMemory || undefined,
     locationLabel: locationLabel || undefined,
     onEditLocation: () => handleEditLocation(memory),
     showLocationEdit: !isOptimisticFeedPending,
     feedDateFontFamily,
-    feedAgeFontFamily,
     feedLocationFilledFontFamily,
     feedLocationPlaceholderFontFamily,
+  };
+
+  const ageOverlayProps = {
+    ageLabel: ageAtMemory || undefined,
+    feedAgeFontFamily,
   };
 
   const voiceMetaInline = memory.type === 'voice' && !hasVoiceCover;
 
   const mediaMetaOverlay = isMediaPost && !voiceMetaInline ? (
     <FeedPostMetaOverlay {...mediaMetaOverlayProps} />
+  ) : null;
+
+  const mediaAgeOverlay = isMediaPost && !voiceMetaInline ? (
+    <FeedAgeOverlay {...ageOverlayProps} />
   ) : null;
 
   const postCard = (
@@ -427,14 +428,14 @@ function FilMemoryRow({
         <View style={styles.dayHeaderRow}>
           <View style={styles.dayHeaderLeft}>
             <Text
-              style={[styles.daySepDate, feedDateFontFamily ? { fontFamily: feedDateFontFamily } : null]}
+              style={[styles.daySepDate, loadedFontStyle(feedDateFontFamily)]}
               numberOfLines={1}
             >
               {addedAtLabel}
             </Text>
             {!!ageAtMemory && (
               <Text
-                style={[styles.daySepAge, feedAgeFontFamily ? { fontFamily: feedAgeFontFamily } : null]}
+                style={[styles.daySepAge, loadedFontStyle(feedAgeFontFamily)]}
                 numberOfLines={1}
               >
                 {ageAtMemory}
@@ -457,9 +458,7 @@ function FilMemoryRow({
                     style={[
                       styles.daySepLocation,
                       styles.daySepLocationFilled,
-                      feedLocationFilledFontFamily
-                        ? { fontFamily: feedLocationFilledFontFamily }
-                        : null,
+                      loadedFontStyle(feedLocationFilledFontFamily),
                     ]}
                     numberOfLines={1}
                   >
@@ -470,9 +469,7 @@ function FilMemoryRow({
                     style={[
                       styles.daySepLocation,
                       styles.daySepLocationPlaceholder,
-                      feedLocationPlaceholderFontFamily
-                        ? { fontFamily: feedLocationPlaceholderFontFamily }
-                        : null,
+                      loadedFontStyle(feedLocationPlaceholderFontFamily),
                     ]}
                     numberOfLines={1}
                   >
@@ -519,13 +516,7 @@ function FilMemoryRow({
                   label={pendingPrepLabel?.trim() || t('mediaPrep.addingPhoto')}
                 />
               ) : null}
-              {showCapturedOverlay ? (
-                <CapturedAtOverlay
-                  uriForAnalysis={photoUrls[0]}
-                  label={capturedOverlayLabel}
-                  inkOverride={memory.captured_overlay_ink}
-                />
-              ) : null}
+              {mediaAgeOverlay}
             </View>
           )}
           {memory.type === 'photo' && photoUrls.length === 0 && (
@@ -540,6 +531,7 @@ function FilMemoryRow({
                   label={pendingPrepLabel?.trim() || t('mediaPrep.addingPhoto')}
                 />
               ) : null}
+              {mediaAgeOverlay}
             </View>
           )}
 
@@ -679,13 +671,7 @@ function FilMemoryRow({
                 soundOn={feedInlineVideoSoundOn}
                 onToggleSound={() => void toggleFeedInlineVideoSound()}
               />
-              {showCapturedOverlay && videoUriForOverlay ? (
-                <CapturedAtOverlay
-                  uriForAnalysis={videoUriForOverlay}
-                  label={capturedOverlayLabel}
-                  inkOverride={memory.captured_overlay_ink}
-                />
-              ) : null}
+              {mediaAgeOverlay}
             </View>
           )}
 
@@ -705,7 +691,10 @@ function FilMemoryRow({
               ]}
             >
               {!hasVoiceCover ? (
-                <FeedPostMetaOverlay {...mediaMetaOverlayProps} layout="inline" />
+                <>
+                  <FeedPostMetaOverlay {...mediaMetaOverlayProps} layout="inline" />
+                  <FeedAgeOverlay {...ageOverlayProps} layout="inline" />
+                </>
               ) : null}
               {hasVoiceCover && (
                 <>
@@ -746,6 +735,7 @@ function FilMemoryRow({
               </View>
             </View>
             </Pressable>
+            {hasVoiceCover ? mediaAgeOverlay : null}
             </View>
           )}
 

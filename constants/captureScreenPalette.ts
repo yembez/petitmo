@@ -7,5 +7,5 @@ export const CAPTURE_SCREEN_BG_RGB = { r: 254, g: 251, b: 247 } as const;
 export const CAPTURE_SCREEN_ACCENT = '#FF7F4F';
 /** Contour + icône disque « Enregistrer » — écran Capturer. */
 export const CAPTURE_SCREEN_RECORD_ACCENT = '#FF7F4F';
-/** Fond disque « Importer » — pêche clair charte (`THEME.captureImportCtaBackground`). */
-export const CAPTURE_SCREEN_IMPORT_DISC = '#FBD1C1';
+/** Fond disque « Importer » — rose bonbon maquette (`THEME.captureImportCtaBackground`). */
+export const CAPTURE_SCREEN_IMPORT_DISC = '#FEA5A1';

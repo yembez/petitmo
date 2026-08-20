@@ -12,6 +12,7 @@ import { Heart, MapPin, Volume2, VolumeX } from 'lucide-react-native';
 import { THEME } from '@/constants/theme';
 import { scale } from '@/utils/responsive';
 import { styles } from '@/components/feed/feedStyles';
+import { loadedFontStyle } from '@/utils/loadedFontStyle';
 
 /** Même logique que l’étiquette date (patch bas-droite) : blanc par défaut, noir si le serveur l’indique. */
 export function feedPhotoOverlayInk(inkOverride?: string | null): '#FFFFFF' | '#0A0A0A' {
@@ -121,26 +122,22 @@ export function FeedVideoDurationSoundBar({
   );
 }
 
-/** Date + âge (gauche) et lieu (droite) — pilules verre avec contraste fort. */
+/** Date (gauche) et lieu (droite) — pilules verre en haut du média. L’âge est en bas (`FeedAgeOverlay`). */
 export function FeedPostMetaOverlay({
   dateLabel,
-  ageLabel,
   locationLabel,
   onEditLocation,
   showLocationEdit = true,
   feedDateFontFamily,
-  feedAgeFontFamily,
   feedLocationFilledFontFamily,
   feedLocationPlaceholderFontFamily,
   layout = 'overlay',
 }: {
   dateLabel: string;
-  ageLabel?: string;
   locationLabel?: string;
   onEditLocation?: () => void;
   showLocationEdit?: boolean;
   feedDateFontFamily?: string;
-  feedAgeFontFamily?: string;
   feedLocationFilledFontFamily?: string;
   feedLocationPlaceholderFontFamily?: string;
   /** `inline` : dans le flux (audio fil sans vignette) ; `overlay` : absolu sur la média. */
@@ -154,22 +151,12 @@ export function FeedPostMetaOverlay({
   return (
     <View style={barStyle} pointerEvents="box-none">
       <FeedMetaGlassPill align="left">
-        <View style={styles.feedMetaPillInnerColumn}>
-          <Text
-            style={[styles.feedMetaPillDate, feedDateFontFamily ? { fontFamily: feedDateFontFamily } : null]}
-            numberOfLines={1}
-          >
-            {dateLabel}
-          </Text>
-          {!!ageLabel?.trim() ? (
-            <Text
-              style={[styles.feedMetaPillAge, feedAgeFontFamily ? { fontFamily: feedAgeFontFamily } : null]}
-              numberOfLines={1}
-            >
-              {ageLabel}
-            </Text>
-          ) : null}
-        </View>
+        <Text
+          style={[styles.feedMetaPillDate, loadedFontStyle(feedDateFontFamily)]}
+          numberOfLines={1}
+        >
+          {dateLabel}
+        </Text>
       </FeedMetaGlassPill>
 
       {showLocationPill ? (
@@ -183,7 +170,7 @@ export function FeedPostMetaOverlay({
               <Text
                 style={[
                   styles.feedMetaPillLocationText,
-                  feedLocationFilledFontFamily ? { fontFamily: feedLocationFilledFontFamily } : null,
+                  loadedFontStyle(feedLocationFilledFontFamily),
                 ]}
                 numberOfLines={2}
               >
@@ -194,9 +181,7 @@ export function FeedPostMetaOverlay({
                 style={[
                   styles.feedMetaPillLocationText,
                   styles.feedMetaPillLocationPlaceholder,
-                  feedLocationPlaceholderFontFamily
-                    ? { fontFamily: feedLocationPlaceholderFontFamily }
-                    : null,
+                  loadedFontStyle(feedLocationPlaceholderFontFamily),
                 ]}
                 numberOfLines={1}
               >
@@ -213,7 +198,59 @@ export function FeedPostMetaOverlay({
   );
 }
 
-/** Pastille bas-gauche : date de prise (ou import vs prise selon règle fil). */
+/** Âge famille en bas à gauche du média (pilule verre) — date reste en haut. */
+export function FeedAgeOverlay({
+  ageLabel,
+  feedAgeFontFamily,
+  bottomInset = 0,
+  layout = 'overlay',
+}: {
+  ageLabel?: string;
+  feedAgeFontFamily?: string;
+  /** Relevé supplémentaire au-dessus du bas (ex. viewer immersif + safe area). */
+  bottomInset?: number;
+  /** `inline` : audio fil sans vignette. */
+  layout?: 'overlay' | 'inline';
+}) {
+  const label = (ageLabel ?? '').trim();
+  if (!label) return null;
+
+  if (layout === 'inline') {
+    return (
+      <View style={styles.feedAgePillBarInline} pointerEvents="none">
+        <FeedMetaGlassPill align="left" bare>
+          <Text
+            style={[styles.feedMetaPillAge, loadedFontStyle(feedAgeFontFamily)]}
+            numberOfLines={2}
+          >
+            {label}
+          </Text>
+        </FeedMetaGlassPill>
+      </View>
+    );
+  }
+
+  return (
+    <View
+      style={[styles.feedAgePillBar, { bottom: FEED_MEDIA_OVERLAY_BOTTOM + bottomInset }]}
+      pointerEvents="none"
+    >
+      <FeedMetaGlassPill align="left" bare>
+        <Text
+          style={[styles.feedMetaPillAge, loadedFontStyle(feedAgeFontFamily)]}
+          numberOfLines={2}
+        >
+          {label}
+        </Text>
+      </FeedMetaGlassPill>
+    </View>
+  );
+}
+
+/**
+ * @deprecated Doublon de la date du haut (même `created_at`). Remplacé par `FeedAgeOverlay`.
+ * Conservé pour compat éventuelle.
+ */
 export function CapturedAtOverlay({
   uriForAnalysis: _uriForAnalysis,
   label,
@@ -234,13 +271,13 @@ export function CapturedAtOverlay({
     <View
       style={[
         styles.capturedOverlay,
-        { maxWidth: '78%', alignSelf: 'flex-end', bottom: FEED_MEDIA_OVERLAY_BOTTOM + bottomInset },
+        { maxWidth: '78%', alignSelf: 'flex-start', bottom: FEED_MEDIA_OVERLAY_BOTTOM + bottomInset },
       ]}
       pointerEvents="none"
     >
       <View style={styles.overlayBadge}>
         <Text
-          style={[styles.capturedOverlayText, { color: ink, textAlign: 'right' as const }]}
+          style={[styles.capturedOverlayText, { color: ink, textAlign: 'left' as const }]}
           numberOfLines={2}
         >
           {label}

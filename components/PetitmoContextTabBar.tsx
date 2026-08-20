@@ -1,12 +1,10 @@
 import type { ComponentProps } from 'react';
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { View, Text, StyleSheet, Platform, Animated, Easing } from 'react-native';
+import { useSyncExternalStore } from 'react';
+import { View, Text, StyleSheet, Platform } from 'react-native';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { PlatformPressable } from '@react-navigation/elements';
-import { useRouter } from 'expo-router';
 import type { LucideIcon } from 'lucide-react-native';
-import { BookOpenText, ChevronDown, ChevronUp, Heart, List, Plus, Settings } from 'lucide-react-native';
-import { CAPTURE_SCREEN_ACCENT } from '@/constants/captureScreenPalette';
+import { BookOpenText, Heart, List, Plus } from 'lucide-react-native';
 import {
   FIXED_TAB_BAR_SLOTS,
   normalizeMainTabRoute,
@@ -14,54 +12,35 @@ import {
 } from '@/constants/contextualTabBar';
 import { THEME } from '@/constants/theme';
 import {
+  TAB_BAR_BACKGROUND,
+  TAB_BAR_BORDER_WIDTH,
+  TAB_BAR_CONTAINER_BORDER,
   TAB_BAR_PADDING_TOP,
   getTabBarTotalHeight,
   tabBarContentPaddingBottom,
   tabBarFloatBottomPosition,
 } from '@/constants/tabBarLayout';
-import TabBarBackgroundShape, {
-  captureTabNotchRadius,
-} from '@/components/TabBarBackgroundShape';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { scale, verticalScale } from '@/utils/responsive';
+import { loadedFontStyle } from '@/utils/loadedFontStyle';
 import {
   peekFavorisAddToBookSession,
   subscribeFavorisAddToBookSession,
 } from '@/services/favorisBookAddFlow';
-import {
-  getCaptureTabBarRevealed,
-  resetCaptureTabBarReveal,
-  subscribeCaptureTabBarReveal,
-  toggleCaptureTabBarRevealed,
-} from '@/lib/captureTabBarRevealStore';
-
-const CAPTURE_TAB_BAR_SLIDE_MS = 280;
 
 const TAB_ICON_SIZE = scale(24);
-const TAB_ICON_SIZE_FOCUSED = scale(24);
-/** Hauteur commune des icônes latérales — centrées verticalement dans le bandeau. */
 const TAB_ICON_ROW_H = scale(28);
-/** CTA « + » — disque centré sur la ligne des icônes (même axe que Journal / Favoris / Livres). */
-const CAPTURE_TAB_DISC_SIZE = scale(48);
-const CAPTURE_TAB_DISC_ICON_SIZE = scale(22);
-/** Marge horizontale entre le disque et la courbe de l’encoche. */
-const CAPTURE_TAB_NOTCH_GAP = scale(34);
-/** Profondeur du fond de l’encoche (< rayon horizontal → bas remonté). */
-const CAPTURE_TAB_NOTCH_DEPTH = verticalScale(40);
-
-function captureTabNotchR(): number {
-  return captureTabNotchRadius(CAPTURE_TAB_DISC_SIZE / 2, CAPTURE_TAB_NOTCH_GAP);
-}
 const TAB_LABEL_LINE_H = scale(12);
 const TAB_ICON_LABEL_GAP = verticalScale(3);
 
 const TAB_META: Record<
   MainTabRoute,
-  { title: string; Icon: LucideIcon; fillWhenFocused: boolean }
+  { titleKey: 'tabs.capture' | 'tabs.journal' | 'tabs.favorites' | 'tabs.books'; Icon: LucideIcon }
 > = {
-  livres: { title: 'Livres', Icon: BookOpenText, fillWhenFocused: false },
-  index: { title: 'Capturer', Icon: Plus, fillWhenFocused: false },
-  favoris: { title: 'Favoris', Icon: Heart, fillWhenFocused: false },
-  fil: { title: 'Journal', Icon: List, fillWhenFocused: false },
+  index: { titleKey: 'tabs.capture', Icon: Plus },
+  fil: { titleKey: 'tabs.journal', Icon: List },
+  favoris: { titleKey: 'tabs.favorites', Icon: Heart },
+  livres: { titleKey: 'tabs.books', Icon: BookOpenText },
 };
 
 type Props = BottomTabBarProps & {
@@ -72,71 +51,26 @@ type Props = BottomTabBarProps & {
 function TabBarGlyph({
   Icon,
   focused,
-  fillWhenFocused = true,
   color,
 }: {
   Icon: LucideIcon;
   focused: boolean;
-  fillWhenFocused?: boolean;
   color: string;
 }) {
-  const size = focused ? TAB_ICON_SIZE_FOCUSED : TAB_ICON_SIZE;
   return (
     <View style={styles.iconWrap}>
-      <Icon
-        size={size}
-        color={color}
-        fill={focused && fillWhenFocused ? color : 'none'}
-        strokeWidth={focused ? 2.25 : 2}
-      />
+      <Icon size={TAB_ICON_SIZE} color={color} fill="none" strokeWidth={focused ? 2.25 : 2} />
     </View>
   );
 }
 
-function CaptureTabDisc() {
-  return (
-    <View style={styles.captureTabIconSlot}>
-      <View
-        style={[
-          styles.captureTabDisc,
-          {
-            width: CAPTURE_TAB_DISC_SIZE,
-            height: CAPTURE_TAB_DISC_SIZE,
-            borderRadius: CAPTURE_TAB_DISC_SIZE / 2,
-          },
-        ]}
-      >
-        <Plus
-          size={CAPTURE_TAB_DISC_ICON_SIZE}
-          color={THEME.brandCtaOrange}
-          strokeWidth={2.4}
-        />
-      </View>
-    </View>
-  );
-}
-
-/** Réserve la hauteur libellé sous le « + » (alignement avec les voisins). */
-function CaptureLabelSpacer() {
-  return <View style={styles.captureLabelSpacer} />;
-}
-
-function PetitmoTabBarButton({
-  children,
-  captureOverflow = false,
-  ...props
-}: ComponentProps<typeof PlatformPressable> & { captureOverflow?: boolean }) {
+function PetitmoTabBarButton({ children, ...props }: ComponentProps<typeof PlatformPressable>) {
   const { style, 'aria-selected': isActive, ...rest } = props;
   const flatStyle = StyleSheet.flatten(style) ?? {};
   const { backgroundColor: _navBg, ...navStyle } = flatStyle;
 
   return (
-    <View
-      style={[
-        styles.tabBarButtonSlot,
-        captureOverflow ? styles.tabBarButtonSlotCapture : null,
-      ]}
-    >
+    <View style={styles.tabBarButtonSlot}>
       <PlatformPressable
         {...rest}
         aria-selected={isActive}
@@ -156,9 +90,8 @@ export default function PetitmoContextTabBar({
   tabLabelFontRegular,
   tabLabelFontMedium,
 }: Props) {
-  const router = useRouter();
+  const { t } = useAppTranslation('common');
   const activeRoute = normalizeMainTabRoute(state.routes[state.index]?.name);
-  const isCaptureTabActive = activeRoute === 'index';
   const favorisAddToBookSessionId = useSyncExternalStore(
     subscribeFavorisAddToBookSession,
     peekFavorisAddToBookSession,
@@ -166,119 +99,29 @@ export default function PetitmoContextTabBar({
   );
   const hideTabBarForBookAddFlow =
     activeRoute === 'favoris' && favorisAddToBookSessionId != null;
-  const tabBarBottom = tabBarFloatBottomPosition(insets.bottom);
-  const tabBarPaddingBottom = tabBarContentPaddingBottom(insets.bottom);
-  const tabBarTotalHeight = getTabBarTotalHeight(insets.bottom);
-  const captureTabBarRevealed = useSyncExternalStore(
-    subscribeCaptureTabBarReveal,
-    getCaptureTabBarRevealed,
-    () => false,
-  );
-  const tabBarSlideY = useRef(new Animated.Value(0)).current;
-  const [barWidth, setBarWidth] = useState(0);
-
-  useEffect(() => {
-    if (!isCaptureTabActive) {
-      resetCaptureTabBarReveal();
-      tabBarSlideY.setValue(0);
-      return;
-    }
-    tabBarSlideY.setValue(tabBarTotalHeight);
-  }, [isCaptureTabActive, tabBarSlideY, tabBarTotalHeight]);
-
-  useEffect(() => {
-    if (!isCaptureTabActive) return;
-    Animated.timing(tabBarSlideY, {
-      toValue: captureTabBarRevealed ? 0 : tabBarTotalHeight,
-      duration: CAPTURE_TAB_BAR_SLIDE_MS,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-  }, [captureTabBarRevealed, isCaptureTabActive, tabBarSlideY, tabBarTotalHeight]);
 
   if (hideTabBarForBookAddFlow) {
     return null;
   }
 
-  const captureTabBarHidden = isCaptureTabActive && !captureTabBarRevealed;
-  const peekHandleBottom = tabBarBottom + verticalScale(32);
+  const tabBarBottom = tabBarFloatBottomPosition(insets.bottom);
+  const tabBarPaddingBottom = tabBarContentPaddingBottom(insets.bottom);
+  const tabBarTotalHeight = getTabBarTotalHeight(insets.bottom);
 
   return (
-    <>
-      {isCaptureTabActive ? (
-        <View
-          pointerEvents="box-none"
-          style={[styles.captureTabBarPeekHost, { bottom: peekHandleBottom }]}
-        >
-          <PlatformPressable
-            accessibilityRole="button"
-            accessibilityLabel={
-              captureTabBarRevealed ? 'Masquer la navigation' : 'Afficher la navigation'
-            }
-            onPress={toggleCaptureTabBarRevealed}
-            style={styles.captureTabBarPeekButton}
-          >
-            {captureTabBarRevealed ? (
-              <ChevronDown size={scale(20)} color={THEME.tabBarInactiveTint} strokeWidth={2.25} />
-            ) : (
-              <ChevronUp size={scale(20)} color={THEME.tabBarInactiveTint} strokeWidth={2.25} />
-            )}
-          </PlatformPressable>
-        </View>
-      ) : null}
-      <Animated.View
-        pointerEvents={captureTabBarHidden ? 'none' : 'auto'}
-        onLayout={event => setBarWidth(event.nativeEvent.layout.width)}
-        style={[
-          styles.tabBarShell,
-          {
-            bottom: tabBarBottom,
-            height: tabBarTotalHeight,
-            paddingTop: TAB_BAR_PADDING_TOP,
-            paddingBottom: tabBarPaddingBottom,
-            overflow: 'visible',
-            transform: [
-              {
-                translateY: isCaptureTabActive ? tabBarSlideY : 0,
-              },
-            ],
-          },
-        ]}
-      >
-      <TabBarBackgroundShape
-        width={barWidth}
-        height={tabBarTotalHeight}
-        showCenterDip
-        notchRadius={captureTabNotchR()}
-        notchDepth={CAPTURE_TAB_NOTCH_DEPTH}
-      />
+    <View
+      style={[
+        styles.tabBarShell,
+        {
+          bottom: tabBarBottom,
+          height: tabBarTotalHeight,
+          paddingTop: TAB_BAR_PADDING_TOP,
+          paddingBottom: tabBarPaddingBottom,
+        },
+      ]}
+    >
       <View style={styles.tabBarRow}>
-        {FIXED_TAB_BAR_SLOTS.map(slot => {
-          if (slot.kind === 'settings') {
-            const tint = THEME.tabBarInactiveTint;
-            return (
-              <PetitmoTabBarButton
-                key="settings"
-                accessibilityRole="button"
-                accessibilityLabel="Paramètres"
-                onPress={() => router.push('/parent-space')}
-              >
-                <TabBarGlyph Icon={Settings} focused={false} fillWhenFocused={false} color={tint} />
-                <Text
-                  style={[
-                    styles.tabLabel,
-                    tabLabelFontRegular ? { fontFamily: tabLabelFontRegular } : null,
-                    { color: tint },
-                  ]}
-                  numberOfLines={1}
-                >
-                  Paramètres
-                </Text>
-              </PetitmoTabBarButton>
-            );
-          }
-
-          const routeName = slot.route;
+        {FIXED_TAB_BAR_SLOTS.map(routeName => {
           const routeIndex = state.routes.findIndex(r => r.name === routeName);
           if (routeIndex < 0) return null;
 
@@ -286,9 +129,8 @@ export default function PetitmoContextTabBar({
           const { options } = descriptors[route.key];
           const isFocused = state.index === routeIndex;
           const meta = TAB_META[routeName];
-          const tint = isFocused ? CAPTURE_SCREEN_ACCENT : THEME.tabBarInactiveTint;
-          const isCapture = routeName === 'index';
-          const showLabel = !isCapture;
+          const tint = isFocused ? THEME.tabBarActiveTint : THEME.tabBarInactiveTint;
+          const label = t(meta.titleKey);
 
           const onPress = () => {
             const event = navigation.emit({
@@ -313,109 +155,49 @@ export default function PetitmoContextTabBar({
               key={route.key}
               accessibilityRole="button"
               accessibilityState={isFocused ? { selected: true } : {}}
-              accessibilityLabel={options.tabBarAccessibilityLabel ?? meta.title}
+              accessibilityLabel={options.tabBarAccessibilityLabel ?? label}
               onPress={onPress}
               onLongPress={onLongPress}
-              captureOverflow={isCapture && !isFocused}
             >
-              {isCapture ? (
-                isCaptureTabActive ? (
-                  <CaptureLabelSpacer />
-                ) : (
-                  <CaptureTabDisc />
-                )
-              ) : (
-                <TabBarGlyph
-                  Icon={meta.Icon}
-                  focused={isFocused}
-                  fillWhenFocused={meta.fillWhenFocused}
-                  color={tint}
-                />
-              )}
-              {showLabel ? (
-                <Text
-                  style={[
-                    styles.tabLabel,
-                    tabLabelFontRegular ? { fontFamily: tabLabelFontRegular } : null,
-                    isFocused && tabLabelFontMedium ? { fontFamily: tabLabelFontMedium } : null,
-                    { color: tint },
-                  ]}
-                  numberOfLines={1}
-                >
-                  {options.title ?? meta.title}
-                </Text>
-              ) : (
-                <CaptureLabelSpacer />
-              )}
+              <TabBarGlyph Icon={meta.Icon} focused={isFocused} color={tint} />
+              <Text
+                style={[
+                  styles.tabLabel,
+                  loadedFontStyle(tabLabelFontRegular),
+                  isFocused ? loadedFontStyle(tabLabelFontMedium) : null,
+                  { color: tint },
+                ]}
+                numberOfLines={1}
+              >
+                {label}
+              </Text>
             </PetitmoTabBarButton>
           );
         })}
       </View>
-      </Animated.View>
-    </>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  captureTabBarPeekHost: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    zIndex: 25,
-  },
-  captureTabBarPeekButton: {
-    width: scale(48),
-    height: scale(30),
-    borderRadius: scale(15),
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.88)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(60, 49, 38, 0.12)',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#3C3126',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.12,
-        shadowRadius: 4,
-      },
-      android: { elevation: 3 },
-      default: {},
-    }),
-  },
   tabBarShell: {
     position: 'absolute',
     left: 0,
     right: 0,
-    backgroundColor: 'transparent',
+    backgroundColor: TAB_BAR_BACKGROUND,
+    borderTopWidth: TAB_BAR_BORDER_WIDTH,
+    borderTopColor: TAB_BAR_CONTAINER_BORDER,
     zIndex: 20,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#3C3126',
-        shadowOffset: { width: 0, height: -1 },
-        shadowOpacity: 0.06,
-        shadowRadius: 4,
-      },
-      android: { elevation: 4 },
-      default: {},
-    }),
   },
   tabBarRow: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    zIndex: 2,
   },
   tabBarButtonSlot: {
     flex: 1,
     minWidth: 0,
     alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tabBarButtonSlotCapture: {
-    overflow: 'visible',
-    zIndex: 3,
     justifyContent: 'center',
   },
   tabBarPressableBase: {
@@ -428,33 +210,6 @@ const styles = StyleSheet.create({
     height: TAB_ICON_ROW_H,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  captureTabIconSlot: {
-    height: TAB_ICON_ROW_H,
-    width: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'visible',
-  },
-  captureTabDisc: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1.5,
-    borderColor: THEME.brandCtaOrange,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#3C3126',
-        shadowOffset: { width: 0, height: 0 },
-        shadowOpacity: 0.14,
-        shadowRadius: scale(8),
-      },
-      android: { elevation: 4 },
-      default: {},
-    }),
-  },
-  captureLabelSpacer: {
-    height: TAB_LABEL_LINE_H,
   },
   tabLabel: {
     marginTop: TAB_ICON_LABEL_GAP,
