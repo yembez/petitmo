@@ -13,7 +13,7 @@ import {
   diffBrowseLeafProps,
 } from '@/utils/bookPortraitSpreadPerf';
 
-type PageRow = { page: BookPage; pageNum: number };
+type PageRow = { page: BookPage; pageNum: number; folio: number | null };
 
 export type BookBrowseLeafProps = {
   row: PageRow;
@@ -65,12 +65,14 @@ function BookBrowseLeafInner({
   mediaRevision: _mediaRevision,
 }: BookBrowseLeafProps) {
   const pageIndex = row.pageNum - 1;
-  const showFolio = row.page.type !== 'cover' && row.page.type !== 'back-cover';
+  const showFolio = row.folio != null && row.folio > 0;
+  const folioLabel = showFolio ? String(row.folio) : ' ';
   const needsQr = row.page.type === 'audio' || row.page.type === 'video';
   const qrUrl = useBookQrUrl(needsQr ? memory?.id : undefined);
 
   bookPortraitPerfRender('BookBrowseLeaf', {
     pageNum: row.pageNum,
+    folio: row.folio,
     pageType: row.page.type,
     memoryId: memory?.id?.slice(0, 8),
     hasQr: Boolean(qrUrl),
@@ -90,11 +92,11 @@ function BookBrowseLeafInner({
           onPress={handlePress}
           style={[styles.browseLeafCard, { width: pageW, height: pageH }]}
           accessibilityRole="button"
-          accessibilityLabel={`Modifier la page ${row.pageNum}`}
+          accessibilityLabel={showFolio ? `modifier la page ${row.folio}` : 'modifier la page'}
         >
           <MaquetteBookPages
             page={row.page}
-            pageNum={row.pageNum}
+            pageNum={row.folio ?? 0}
             width={pageW}
             height={pageH}
             child={child}
@@ -132,7 +134,7 @@ function BookBrowseLeafInner({
         </Pressable>
       </View>
       <Text style={[styles.browseFolio, folioFont ? { fontFamily: folioFont } : null]}>
-        {showFolio ? String(row.pageNum) : ' '}
+        {folioLabel}
       </Text>
     </View>
   );

@@ -93,6 +93,30 @@ function parseShippingAddress(raw: unknown): { ok: true; value: Record<string, s
   return { ok: true, value };
 }
 
+/** Compte produit authentifié (pas device-user) — pour rattacher `export_requests.user_id`. */
+async function resolveAuthUserId(req: Request): Promise<string | null> {
+  const url = Deno.env.get('SUPABASE_URL');
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
+  if (!url || !anonKey) return null;
+  const authHeader = req.headers.get('Authorization') ?? '';
+  const jwt = authHeader.replace(/^Bearer\s+/i, '').trim();
+  if (!jwt || jwt === anonKey) return null;
+  try {
+    const authClient = createClient(url, anonKey, {
+      global: { headers: { Authorization: `Bearer ${jwt}` } },
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    const { data } = await authClient.auth.getUser(jwt);
+    const user = data.user;
+    if (!user?.id) return null;
+    const email = (user.email ?? '').trim().toLowerCase();
+    if (email.endsWith('@petitmo.local')) return null;
+    return user.id;
+  } catch {
+    return null;
+  }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
@@ -114,6 +138,8 @@ Deno.serve(async (req: Request) => {
   } catch {
     return jsonRes({ error: 'Invalid JSON' }, 400);
   }
+
+  const authUserId = await resolveAuthUserId(req);
 
   const requestType = body.type;
 
@@ -449,7 +475,7 @@ Deno.serve(async (req: Request) => {
       .from('export_requests')
       .insert({
         crm_contact_id: crmContactId,
-        user_id: null,
+        user_id: authUserId,
         type: 'print_order',
         export_mode: 'print',
         status: 'created',
@@ -513,7 +539,7 @@ Deno.serve(async (req: Request) => {
     .from('export_requests')
     .insert({
       crm_contact_id: crmContactId,
-      user_id: null,
+      user_id: authUserId,
       type: 'pdf_export',
       export_mode: exportMode,
       status: 'created',

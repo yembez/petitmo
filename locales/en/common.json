@@ -170,7 +170,10 @@
       "saveFailed": "Couldn't save this image. Please try again in a moment.",
       "closeA11y": "Close",
       "scrubA11y": "Position in the video"
-    }
+    },
+    "toolbarWrite": "Write",
+    "toolbarWriteA11y": "Write the page text",
+    "listNoPages": "No pages"
   },
   "bookOrder": {
     "title": "Order my book",
@@ -219,11 +222,16 @@
     "mic": "Mic",
     "import": "Import",
     "importA11y": "Import an audio file from Files",
-    "importHintBody": "iPhone Voice Memos isn’t available directly. Share your recording to Files, then pick it here.",
+    "importHintBody": "From Voice Memos: Share → Petitmo. Or save to Files, then Import here.",
     "importFailed": "Couldn’t import this audio file.",
     "importTooShort": "This audio file is too short.",
     "importNeedsRebuild": "Audio import needs an app update (Files module). You can still record with the mic.",
     "rerecord": "Record again",
     "save": "Save"
+  },
+  "shareIntent": {
+    "failed": "Couldn’t open this share in Petitmo.",
+    "unsupported": "Petitmo accepts photos, videos, and audio files.",
+    "needsRebuild": "Sharing into Petitmo needs an app update. Run npm run dev:ios:build, then try again."
   }
 }

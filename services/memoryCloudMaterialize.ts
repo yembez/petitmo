@@ -37,12 +37,20 @@ function memorySandboxDir(memoryId: string): string | null {
   return `${documentDirectory}petitmo_memories/${id}/`;
 }
 
+/**
+ * Les colonnes `*_url` stockent des URLs **signées 7 jours** (`getSignedUrlAfterMediaUpload`).
+ * Passé ce délai elles renvoient 400 : toujours re-signer depuis le chemin bucket,
+ * sinon toute materialisation d’un souvenir de plus d’une semaine échoue en silence.
+ */
 async function resolveCloudRefToHttps(raw: string): Promise<string | null> {
   const t = raw.trim();
   if (!t) return null;
-  if (/^https?:\/\//i.test(t)) return t;
   const bucketPath = extractMediaBucketPath(t);
-  if (bucketPath) return getSignedMediaDisplayUrl(bucketPath);
+  if (bucketPath) {
+    const signed = (await getSignedMediaDisplayUrl(bucketPath)).trim();
+    if (signed && /^https?:\/\//i.test(signed)) return signed;
+  }
+  if (/^https?:\/\//i.test(t)) return t;
   return null;
 }
 
@@ -89,13 +97,10 @@ export async function downloadCloudOriginalToSandbox(
     for (const u of [row.media_url, row.edited_media_url]) {
       const t = (u ?? '').trim();
       if (!t) continue;
-      if (/^https?:\/\//i.test(t)) {
-        httpsUrl = t;
-        break;
-      }
-      const bucketPath = extractMediaBucketPath(t);
-      if (bucketPath) {
-        httpsUrl = await getSignedMediaDisplayUrl(bucketPath);
+      // Re-signer d’abord : l’URL en base expire au bout de 7 jours.
+      const resolved = await resolveCloudRefToHttps(t);
+      if (resolved) {
+        httpsUrl = resolved;
         break;
       }
     }
@@ -194,6 +199,33 @@ async function hasReadableVoiceCover(memory: Memory): Promise<boolean> {
   return !!(await pickFirstReadableLocalMediaUri(collectVoiceCoverLocalUploadUriCandidates(memory)));
 }
 
+async function hasReadablePhotoPrint(memory: Memory): Promise<boolean> {
+  const printPath = (memory.local_print_path ?? '').trim();
+  if (!printPath) return false;
+  return isLocalMediaUriReadable(printPath);
+}
+
+/** Ref cloud du JPEG print livre (jamais un chemin sandbox). */
+function remotePhotoPrintRef(memory: Memory): string | null {
+  const t = (memory.print_url ?? '').trim();
+  if (!t || isDeviceLocalMediaUri(t)) return null;
+  if (/^https?:\/\//i.test(t) || isCloudMediaReference(t) || !!extractMediaBucketPath(t)) {
+    return t;
+  }
+  return null;
+}
+
+async function measureSandboxImagePx(uri: string): Promise<{ w: number; h: number } | null> {
+  const { Image } = await import('react-native');
+  return await new Promise(resolve => {
+    Image.getSize(
+      uri,
+      (w, h) => resolve(w > 0 && h > 0 ? { w, h } : null),
+      () => resolve(null),
+    );
+  });
+}
+
 /** True si le souvenir a des refs cloud mais pas encore de fichiers sandbox lisibles pour l’affichage. */
 export async function memoryNeedsCloudMaterialization(memory: Memory): Promise<boolean> {
   if (Platform.OS === 'web') return false;
@@ -201,7 +233,12 @@ export async function memoryNeedsCloudMaterialization(memory: Memory): Promise<b
   if (memory.type === 'text') return false;
 
   if (memory.type === 'photo') {
-    if (await hasReadablePhotoForFeed(memory)) return false;
+    const feedOk = await hasReadablePhotoForFeed(memory);
+    const printOk = await hasReadablePhotoPrint(memory);
+    const needsCloudPrint = !printOk && !!remotePhotoPrintRef(memory);
+    // Feed OK mais print manquant (réinstall) → encore besoin de matérialiser le print livre.
+    if (feedOk && !needsCloudPrint) return false;
+    if (needsCloudPrint) return true;
     return (
       hasCloudOriginalRef(memory) ||
       isCloudMediaReference((memory.thumb_url ?? '').trim()) ||
@@ -235,87 +272,121 @@ export async function memoryNeedsCloudMaterialization(memory: Memory): Promise<b
 
 async function materializePhotoMemory(row: Memory): Promise<boolean> {
   let memory = getLocalMemoryById(row.id) ?? row;
-  if (await hasReadablePhotoForFeed(memory)) {
-    const printPath = (memory.local_print_path ?? '').trim();
-    const hasPrint = printPath ? await isLocalMediaUriReadable(printPath) : false;
-    if (hasPrint) return false;
-    const orig = await pickFirstReadableLocalMediaUri(collectPhotoLocalUploadUriCandidates(memory));
-    if (!orig) return false;
-    const d = await ensureLocalPhotoDerivatives({ memoryId: memory.id, localOriginalUri: orig });
-    if (!d.localThumbUri && !d.localDisplayUri && !d.localPrintUri) return false;
-    upsertLocalMemory({
-      ...memory,
-      local_thumb_path: d.localThumbUri ?? memory.local_thumb_path,
-      local_display_path: d.localDisplayUri ?? memory.local_display_path,
-      local_print_path: d.localPrintUri ?? memory.local_print_path,
-      original_px_w: d.originalPx?.w ?? memory.original_px_w,
-      original_px_h: d.originalPx?.h ?? memory.original_px_h,
-      print_px_w: d.printPx?.w ?? memory.print_px_w,
-      print_px_h: d.printPx?.h ?? memory.print_px_h,
-      updated_at: new Date().toISOString(),
-    });
-    return true;
-  }
-
   let changed = false;
 
-  const thumbPath = (memory.local_thumb_path ?? '').trim();
-  if (!thumbPath || !(await isLocalMediaUriReadable(thumbPath))) {
-    const remote = (memory.thumb_url ?? '').trim();
-    if (remote && !isDeviceLocalMediaUri(remote)) {
-      const local = await downloadCloudFileToSandbox(memory.id, remote, 'thumb.jpg');
-      if (local) {
-        memory = {
-          ...memory,
-          local_thumb_path: local,
+  // 1) Thumb / display fil (local-first UX).
+  if (!(await hasReadablePhotoForFeed(memory))) {
+    const thumbPath = (memory.local_thumb_path ?? '').trim();
+    if (!thumbPath || !(await isLocalMediaUriReadable(thumbPath))) {
+      const remote = (memory.thumb_url ?? '').trim();
+      if (remote && !isDeviceLocalMediaUri(remote)) {
+        const local = await downloadCloudFileToSandbox(memory.id, remote, 'thumb.jpg');
+        if (local) {
+          memory = {
+            ...memory,
+            local_thumb_path: local,
+            updated_at: new Date().toISOString(),
+          };
+          upsertLocalMemory(memory);
+          changed = true;
+        }
+      }
+    }
+
+    memory = getLocalMemoryById(row.id) ?? memory;
+
+    const displayPath = (memory.local_display_path ?? '').trim();
+    if (!displayPath || !(await isLocalMediaUriReadable(displayPath))) {
+      const remote = (memory.display_url ?? '').trim();
+      if (remote && !isDeviceLocalMediaUri(remote)) {
+        const local = await downloadCloudFileToSandbox(memory.id, remote, 'display.jpg');
+        if (local) {
+          memory = {
+            ...memory,
+            local_display_path: local,
+            updated_at: new Date().toISOString(),
+          };
+          upsertLocalMemory(memory);
+          changed = true;
+        }
+      }
+    }
+
+    memory = getLocalMemoryById(row.id) ?? memory;
+
+    // Original cloud (Petitmo+ / si présent) → régénère aussi print local.
+    if (!(await hasReadablePhotoForFeed(memory))) {
+      const localOriginal = await downloadCloudOriginalToSandbox(memory, 'photo');
+      if (localOriginal) {
+        const d = await ensureLocalPhotoDerivatives({
+          memoryId: memory.id,
+          localOriginalUri: localOriginal,
+        });
+        upsertLocalMemory({
+          ...(getLocalMemoryById(row.id) ?? memory),
+          local_original_path: localOriginal,
+          local_media_path: localOriginal,
+          local_thumb_path: d.localThumbUri ?? memory.local_thumb_path,
+          local_display_path: d.localDisplayUri ?? memory.local_display_path,
+          local_print_path: d.localPrintUri ?? memory.local_print_path,
+          original_px_w: d.originalPx?.w ?? memory.original_px_w,
+          original_px_h: d.originalPx?.h ?? memory.original_px_h,
+          print_px_w: d.printPx?.w ?? memory.print_px_w,
+          print_px_h: d.printPx?.h ?? memory.print_px_h,
           updated_at: new Date().toISOString(),
-        };
-        upsertLocalMemory(memory);
+        });
+        changed = true;
+        memory = getLocalMemoryById(row.id) ?? memory;
+      }
+    }
+  } else {
+    // Feed OK : si original local lisible, (re)génère print manquant sans cloud.
+    const printPath = (memory.local_print_path ?? '').trim();
+    const hasPrint = printPath ? await isLocalMediaUriReadable(printPath) : false;
+    if (!hasPrint) {
+      const orig = await pickFirstReadableLocalMediaUri(collectPhotoLocalUploadUriCandidates(memory));
+      if (orig) {
+        const d = await ensureLocalPhotoDerivatives({ memoryId: memory.id, localOriginalUri: orig });
+        if (d.localPrintUri || d.localDisplayUri || d.localThumbUri) {
+          upsertLocalMemory({
+            ...memory,
+            local_thumb_path: d.localThumbUri ?? memory.local_thumb_path,
+            local_display_path: d.localDisplayUri ?? memory.local_display_path,
+            local_print_path: d.localPrintUri ?? memory.local_print_path,
+            original_px_w: d.originalPx?.w ?? memory.original_px_w,
+            original_px_h: d.originalPx?.h ?? memory.original_px_h,
+            print_px_w: d.printPx?.w ?? memory.print_px_w,
+            print_px_h: d.printPx?.h ?? memory.print_px_h,
+            updated_at: new Date().toISOString(),
+          });
+          changed = true;
+          memory = getLocalMemoryById(row.id) ?? memory;
+        }
+      }
+    }
+  }
+
+  // 2) Print livre : télécharger `print_url` cloud → sandbox (réinstall / autre téléphone).
+  memory = getLocalMemoryById(row.id) ?? memory;
+  if (!(await hasReadablePhotoPrint(memory))) {
+    const remotePrint = remotePhotoPrintRef(memory);
+    if (remotePrint) {
+      const localPrint = await downloadCloudFileToSandbox(memory.id, remotePrint, 'print.jpg');
+      if (localPrint) {
+        const printPx = await measureSandboxImagePx(localPrint);
+        upsertLocalMemory({
+          ...(getLocalMemoryById(row.id) ?? memory),
+          local_print_path: localPrint,
+          print_px_w: printPx?.w ?? memory.print_px_w,
+          print_px_h: printPx?.h ?? memory.print_px_h,
+          updated_at: new Date().toISOString(),
+        });
         changed = true;
       }
     }
   }
 
-  memory = getLocalMemoryById(row.id) ?? memory;
-
-  const displayPath = (memory.local_display_path ?? '').trim();
-  if (!displayPath || !(await isLocalMediaUriReadable(displayPath))) {
-    const remote = (memory.display_url ?? '').trim();
-    if (remote && !isDeviceLocalMediaUri(remote)) {
-      const local = await downloadCloudFileToSandbox(memory.id, remote, 'display.jpg');
-      if (local) {
-        memory = {
-          ...memory,
-          local_display_path: local,
-          updated_at: new Date().toISOString(),
-        };
-        upsertLocalMemory(memory);
-        changed = true;
-      }
-    }
-  }
-
-  if (await hasReadablePhotoForFeed(getLocalMemoryById(row.id) ?? memory)) return changed;
-
-  memory = getLocalMemoryById(row.id) ?? memory;
-  const localOriginal = await downloadCloudOriginalToSandbox(memory, 'photo');
-  if (!localOriginal) return changed;
-
-  const d = await ensureLocalPhotoDerivatives({ memoryId: memory.id, localOriginalUri: localOriginal });
-  upsertLocalMemory({
-    ...getLocalMemoryById(row.id) ?? memory,
-    local_original_path: localOriginal,
-    local_media_path: localOriginal,
-    local_thumb_path: d.localThumbUri ?? memory.local_thumb_path,
-    local_display_path: d.localDisplayUri ?? memory.local_display_path,
-    local_print_path: d.localPrintUri ?? memory.local_print_path,
-    original_px_w: d.originalPx?.w ?? memory.original_px_w,
-    original_px_h: d.originalPx?.h ?? memory.original_px_h,
-    print_px_w: d.printPx?.w ?? memory.print_px_w,
-    print_px_h: d.printPx?.h ?? memory.print_px_h,
-    updated_at: new Date().toISOString(),
-  });
-  return true;
+  return changed;
 }
 
 async function materializeVideoMemory(row: Memory): Promise<boolean> {

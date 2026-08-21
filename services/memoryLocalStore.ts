@@ -36,13 +36,58 @@ async function ensureDir(dir: string): Promise<void> {
 }
 
 async function getImagePx(uri: string): Promise<{ w: number; h: number }> {
-  return await new Promise((resolve, reject) => {
-    Image.getSize(
-      uri,
-      (w, h) => resolve({ w, h }),
-      err => reject(err),
-    );
+  const key = uri.trim();
+  if (!key) throw new Error('URI vide');
+
+  const fromRn = await new Promise<{ w: number; h: number } | null>(resolve => {
+    let settled = false;
+    const done = (v: { w: number; h: number } | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(v);
+    };
+    const timer = setTimeout(() => done(null), 4000);
+    try {
+      Image.getSize(
+        key,
+        (w, h) => {
+          clearTimeout(timer);
+          done(w > 0 && h > 0 ? { w, h } : null);
+        },
+        () => {
+          clearTimeout(timer);
+          done(null);
+        },
+      );
+    } catch {
+      clearTimeout(timer);
+      done(null);
+    }
   });
+  if (fromRn) return fromRn;
+
+  try {
+    const { Image: ExpoImage } = await import('expo-image');
+    const loaded = await Promise.race([
+      ExpoImage.loadAsync(key),
+      new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000)),
+    ]);
+    const scale = typeof loaded.scale === 'number' && loaded.scale > 0 ? loaded.scale : 1;
+    const w = Math.round(loaded.width * scale);
+    const h = Math.round(loaded.height * scale);
+    if (w > 0 && h > 0) return { w, h };
+  } catch {
+    /* manipulateur */
+  }
+
+  const decoded = await ImageManipulator.manipulateAsync(key, [], {
+    compress: 1,
+    format: ImageManipulator.SaveFormat.JPEG,
+  });
+  if (!(decoded.width > 0 && decoded.height > 0)) {
+    throw new Error('Dimensions image introuvables');
+  }
+  return { w: decoded.width, h: decoded.height };
 }
 
 export async function persistOriginalToSandbox(params: {
@@ -213,8 +258,7 @@ export function scheduleLocalPhotoHeavyDerivatives(memoryId: string, localOrigin
         ...cur,
         local_display_path: display ?? cur.local_display_path,
         local_print_path: print ?? cur.local_print_path,
-        display_url: display ?? cur.display_url ?? cur.thumb_url,
-        print_url: print ?? cur.print_url,
+        // Ne pas écraser print_url / display_url cloud par des chemins sandbox.
         print_px_w: heavy.printPx?.w ?? cur.print_px_w,
         print_px_h: heavy.printPx?.h ?? cur.print_px_h,
         updated_at: new Date().toISOString(),
@@ -243,37 +287,19 @@ export function scheduleLocalPhotoHeavyDerivatives(memoryId: string, localOrigin
 }
 
 /**
- * Génère display + print **de façon synchrone** (couverture livre, export) et met à jour SQLite.
- * À utiliser quand le badge DPI / `book_covers/` ne doit pas attendre le job arrière-plan.
+ * Génère ou télécharge le JPEG print livre + `print_px_*` (DPI).
+ * Après réinstall : `print_url` cloud → sandbox, sans exiger l’original HD.
  */
 export async function awaitPhotoPrintDerivativesForMemory(memoryId: string): Promise<Memory | null> {
   const id = memoryId.trim();
-  const cur = getLocalMemoryById(id);
-  if (!cur || cur.type !== 'photo') return cur;
-  const orig = cur.local_original_path?.trim();
-  if (!orig || Platform.OS === 'web') return cur;
+  let cur = getLocalMemoryById(id);
+  if (!cur || cur.type !== 'photo' || Platform.OS === 'web') return cur;
 
-  try {
-    const heavy = await ensureLocalPhotoDisplayPrintDerivatives({
-      memoryId: id,
-      localOriginalUri: orig,
-    });
-    const display = heavy.localDisplayUri?.trim() || null;
-    const print = heavy.localPrintUri?.trim() || null;
-    if (!display && !print) return cur;
+  const { isLocalMediaUriReadable } = await import('@/utils/localMediaReadable');
+  const { isDeviceLocalMediaUri } = await import('@/utils/memoryPhotos');
 
-    const next: Memory = {
-      ...cur,
-      local_display_path: display ?? cur.local_display_path,
-      local_print_path: print ?? cur.local_print_path,
-      display_url: display ?? cur.display_url ?? cur.thumb_url,
-      print_url: print ?? cur.print_url,
-      print_px_w: heavy.printPx?.w ?? cur.print_px_w,
-      print_px_h: heavy.printPx?.h ?? cur.print_px_h,
-      updated_at: new Date().toISOString(),
-    };
+  const finish = (next: Memory): Memory => {
     upsertLocalMemory(next);
-
     const snapIdx = feedMemoriesHydrationSnapshot.findIndex(m => m.id === id);
     if (snapIdx >= 0) {
       const snapMemories = [...feedMemoriesHydrationSnapshot];
@@ -284,13 +310,90 @@ export async function awaitPhotoPrintDerivativesForMemory(memoryId: string): Pro
         feedBooksHydrationSnapshot,
       );
     }
-
     DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId: id });
     return next;
-  } catch (e) {
-    console.warn('[memoryLocalStore] awaitPhotoPrintDerivativesForMemory', id, e);
-    return cur;
+  };
+
+  // Déjà OK en local.
+  const existingPrint = (cur.local_print_path ?? '').trim();
+  if (existingPrint && (await isLocalMediaUriReadable(existingPrint))) {
+    let pw = typeof cur.print_px_w === 'number' ? cur.print_px_w : 0;
+    let ph = typeof cur.print_px_h === 'number' ? cur.print_px_h : 0;
+    if (!(pw > 0 && ph > 0)) {
+      const measured = await getImagePx(existingPrint).catch(() => null);
+      pw = measured?.w ?? 0;
+      ph = measured?.h ?? 0;
+      if (pw > 0 && ph > 0) {
+        return finish({
+          ...cur,
+          print_px_w: pw,
+          print_px_h: ph,
+          updated_at: new Date().toISOString(),
+        });
+      }
+    } else {
+      return cur;
+    }
   }
+
+  // 1) Original local → dérivés display/print (ne jamais écraser print_url cloud).
+  const orig = (cur.local_original_path ?? '').trim();
+  if (orig && (await isLocalMediaUriReadable(orig))) {
+    try {
+      const heavy = await ensureLocalPhotoDisplayPrintDerivatives({
+        memoryId: id,
+        localOriginalUri: orig,
+      });
+      const display = heavy.localDisplayUri?.trim() || null;
+      const print = heavy.localPrintUri?.trim() || null;
+      if (print || display) {
+        return finish({
+          ...cur,
+          local_display_path: display ?? cur.local_display_path,
+          local_print_path: print ?? cur.local_print_path,
+          // Garder l’URL cloud pour les futurs restores — ne pas y écrire le chemin sandbox.
+          print_px_w: heavy.printPx?.w ?? cur.print_px_w,
+          print_px_h: heavy.printPx?.h ?? cur.print_px_h,
+          updated_at: new Date().toISOString(),
+        });
+      }
+    } catch (e) {
+      console.warn('[memoryLocalStore] awaitPhotoPrintDerivativesForMemory local', id, e);
+    }
+    cur = getLocalMemoryById(id) ?? cur;
+  }
+
+  // 2) Télécharger print cloud (display/media ensuite — jamais thumb 480 → faux ~68 DPI).
+  const { downloadCloudFileToSandbox } = await import('@/services/memoryCloudMaterialize');
+  const cloudCandidates = [cur.print_url, cur.display_url, cur.media_url]
+    .map(u => (u ?? '').trim())
+    .filter(u => u && !isDeviceLocalMediaUri(u));
+
+  for (const remote of cloudCandidates) {
+    const isCanonicalPrint = remote === (cur.print_url ?? '').trim();
+    const destName = isCanonicalPrint ? 'print.jpg' : 'print_from_cloud.jpg';
+    try {
+      const local = await downloadCloudFileToSandbox(id, remote, destName);
+      if (!local) continue;
+      const printPx = await getImagePx(local).catch(() => null);
+      return finish({
+        ...cur,
+        local_print_path: local,
+        print_px_w: printPx?.w ?? cur.print_px_w,
+        print_px_h: printPx?.h ?? cur.print_px_h,
+        updated_at: new Date().toISOString(),
+      });
+    } catch (e) {
+      console.warn(
+        '[memoryLocalStore] awaitPhotoPrintDerivativesForMemory cloud',
+        id,
+        remote.slice(0, 48),
+        e,
+      );
+    }
+  }
+
+  return getLocalMemoryById(id) ?? cur;
 }
 
 /** Dérivé print cover vocal (`voice_cover_print.jpg`) — parité `print.jpg` photo. */

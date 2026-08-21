@@ -55,6 +55,8 @@ import {
 import type { Child, Memory } from '@/types/local';
 import { peekSelectedChildIdLastKnown } from '@/services/children';
 import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
+import { buildBookPages, type BookPageMemorySpec } from '@/src/book/BookEngine';
+import { formatGelatoPrintPageCountLabel } from '@/utils/bookGelatoInnerPages';
 
 /** Chemin local SQLite souvent invalide après sync cloud / autre appareil — ne pas l’afficher tel quel. */
 function looksLikeStaleLocalCoverRef(ref: string): boolean {
@@ -261,8 +263,29 @@ const STORAGE_KEY = '@petitmo_books_v1';
 /** Supprime côté cloud en attente (hors-ligne / échec réseau) : `restore` ignore ces ids. */
 const PENDING_BOOK_DELETE_IDS_KEY = '@petitmo_pending_book_delete_ids';
 
+function isDeviceUserEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  return email.toLowerCase().endsWith('@petitmo.local');
+}
+
 function booksTable(): ReturnType<typeof supabase.from> {
   return (supabase as unknown as { from: (t: string) => ReturnType<typeof supabase.from> }).from('books');
+}
+
+/** Sync cloud des livres = compte produit (gratuit ou Petitmo+), pas device-user. */
+async function getRealAuthUserIdForBookCloudSync(): Promise<string | null> {
+  const { data: u } = await supabase.auth.getUser();
+  const user = u.user;
+  if (!user?.id) return null;
+  if (isDeviceUserEmail(user.email)) return null;
+  return user.id;
+}
+
+/** UI livres / onglets : peindre SQLite après restore / backup sans attendre un focus. */
+export const PETITMO_BOOKS_UPDATED_EVENT = 'petitmo:books-updated' as const;
+
+export function notifyBooksUpdated(): void {
+  DeviceEventEmitter.emit(PETITMO_BOOKS_UPDATED_EVENT);
 }
 
 async function getPendingBookDeleteIds(): Promise<Set<string>> {
@@ -295,30 +318,25 @@ async function removePendingBookDeleteIds(ids: string[]): Promise<void> {
 /**
  * Tente de supprimer sur Supabase les livres marqués « supprimés localement » mais pas encore retirés du cloud.
  * À appeler avant `restoreBooksFromSupabaseIfPremium` au démarrage.
+ * Compte produit uniquement (gratuit inclus — V2).
  */
 export async function flushPendingBookDeletesToSupabase(): Promise<void> {
-  const tier = await getUserTier();
-  if (tier !== 'paid') return;
-  const { data: u } = await supabase.auth.getUser();
-  const user = u.user;
-  if (!user) return;
+  const userId = await getRealAuthUserIdForBookCloudSync();
+  if (!userId) return;
   const pending = [...(await getPendingBookDeleteIds())];
   if (pending.length === 0) return;
   const removed: string[] = [];
   for (const id of pending) {
-    const { error } = await booksTable().delete().eq('id', id).eq('user_id', user.id);
+    const { error } = await booksTable().delete().eq('id', id).eq('user_id', userId);
     if (!error) removed.push(id);
   }
   await removePendingBookDeleteIds(removed);
 }
 
 async function deleteRemoteBookIfPremium(bookId: string): Promise<void> {
-  const tier = await getUserTier();
-  if (tier !== 'paid') return;
-  const { data: u } = await supabase.auth.getUser();
-  const user = u.user;
-  if (!user) return;
-  const { error } = await booksTable().delete().eq('id', bookId).eq('user_id', user.id);
+  const userId = await getRealAuthUserIdForBookCloudSync();
+  if (!userId) return;
+  const { error } = await booksTable().delete().eq('id', bookId).eq('user_id', userId);
   if (error) throw error;
 }
 
@@ -657,16 +675,26 @@ export function findVisualCoverMemoryByRef(
 
 export function findBookCoverMemory(book: Book): Memory | null {
   const direct = (book.coverPhotoUrl ?? '').trim();
-  if (direct) {
+  // Ref cloud / URL utile : match strict sur le souvenir.
+  if (direct && !looksLikeStaleLocalCoverRef(direct)) {
     for (const memoryId of book.memoryIds) {
       const m = getLocalMemoryById(memoryId);
       if (m && m.type === 'photo' && bookCoverMatchesMemory(m, direct)) return m;
     }
   }
+
+  // Ref vide ou fichier sandbox mort (réinstall) : 1re page photo, sinon 1er souvenir photo.
+  for (const e of bookPageEntries(book)) {
+    const m = getLocalMemoryById(e.memoryId);
+    if (m?.type === 'photo') return m;
+  }
   const photoMemories = book.memoryIds
     .map(id => getLocalMemoryById(id))
     .filter((m): m is Memory => m?.type === 'photo');
   if (photoMemories.length === 1) return photoMemories[0]!;
+  if (!direct || looksLikeStaleLocalCoverRef(direct)) {
+    if (photoMemories.length > 0) return photoMemories[0]!;
+  }
   return null;
 }
 
@@ -965,17 +993,13 @@ export async function applyBookCoverFromUri(params: {
 async function healBookMemoryIdsFromRemoteIfEmpty(book: Book): Promise<Book> {
   if ((book.memoryIds ?? []).length > 0) return book;
 
-  const tier = await getUserTier();
-  if (tier !== 'paid') return book;
-
-  const { data: u } = await supabase.auth.getUser();
-  const user = u.user;
-  if (!user) return book;
+  const userId = await getRealAuthUserIdForBookCloudSync();
+  if (!userId) return book;
 
   const { data, error } = await booksTable()
     .select('memory_ids')
     .eq('id', book.id)
-    .eq('user_id', user.id)
+    .eq('user_id', userId)
     .maybeSingle();
 
   if (error || !data) return book;
@@ -1006,17 +1030,13 @@ export async function healBookMemoryIdsIfStale(book: Book): Promise<Book> {
   const localResolved = countResolvableBookMemoryIds(ids);
   if (localResolved === ids.length) return b;
 
-  const tier = await getUserTier();
-  if (tier !== 'paid') return b;
-
-  const { data: u } = await supabase.auth.getUser();
-  const user = u.user;
-  if (!user) return b;
+  const userId = await getRealAuthUserIdForBookCloudSync();
+  if (!userId) return b;
 
   const { data, error } = await booksTable()
     .select('memory_ids')
     .eq('id', b.id)
-    .eq('user_id', user.id)
+    .eq('user_id', userId)
     .maybeSingle();
 
   if (error || !data) return b;
@@ -1096,6 +1116,15 @@ function healStaleLocalCoverPhotoRef(book: Book): Book {
     if (cloud && isCloudMediaReference(cloud)) {
       return { ...book, coverPhotoUrl: cloud };
     }
+    const fromMemory = firstNonEmptyUri(
+      coverMem.display_url,
+      coverMem.thumb_url,
+      coverMem.print_url,
+      coverMem.media_url,
+    );
+    if (fromMemory && isCloudMediaReference(fromMemory)) {
+      return { ...book, coverPhotoUrl: fromMemory };
+    }
   }
 
   return book;
@@ -1162,10 +1191,12 @@ export async function healBookCoverIfNeeded(book: Book): Promise<Book> {
   }
 
   const ref = direct;
+  /** Ref sandbox morte ne matche aucun souvenir — ne pas la passer au filtre cloud. */
+  const refForCloudMatch = looksLikeStaleLocalCoverRef(ref) ? '' : ref;
 
   const coverMem = findBookCoverMemory(current);
   if (coverMem) {
-    const freshPrint = getBookPhotoPrintUri(coverMem, ref).trim();
+    const freshPrint = getBookPhotoPrintUri(coverMem, refForCloudMatch || ref).trim();
     if (freshPrint && (await isLocalMediaUriReadable(freshPrint))) {
       await persistBookCoverUri(current.id, freshPrint);
       return persistHealedBookCoverIfChanged(before, current);
@@ -1173,7 +1204,7 @@ export async function healBookCoverIfNeeded(book: Book): Promise<Book> {
   }
 
   for (const variant of ['list', 'print', 'editor'] as const) {
-    const cloud = resolveBookCoverCloudFallbackUri(current, ref, variant);
+    const cloud = resolveBookCoverCloudFallbackUri(current, refForCloudMatch, variant);
     if (!cloud) continue;
     const persisted = await persistBookCoverUri(current.id, cloud);
     if (persisted && (await isLocalMediaUriReadable(persisted))) {
@@ -1218,7 +1249,11 @@ export async function healAllBookCovers(books: readonly Book[]): Promise<Book[]>
 
 /** URI couverture pour la liste Livres (recadrage = même fichier que l’éditeur). */
 export function resolveBookListRowCoverUri(book: Book): string {
-  if (book.photoCrops?.cover) return resolveBookCoverEditorUri(book) ?? '';
+  if (book.photoCrops?.cover) {
+    const editor = resolveBookCoverEditorUri(book) ?? '';
+    // Après réinstall : crop OK mais fichier éditeur mort → ne pas renvoyer '' (cover invisible).
+    if (editor.trim()) return editor;
+  }
   return resolveBookListCoverDisplayUri(book) ?? '';
 }
 
@@ -1458,6 +1493,39 @@ export function bookPageEntries(book: Book): BookPageEntry[] {
   );
 }
 
+/**
+ * Compteur catalogue Gelato pour la liste Livres — même chiffre que spread / éditeur
+ * (`formatGelatoPrintPageCountLabel`), pas le nombre de souvenirs.
+ */
+export function formatBookListGelatoPageCountLabel(book: Book): string {
+  const entries = bookPageEntries(book);
+  if (entries.length === 0) {
+    return formatGelatoPrintPageCountLabel([]);
+  }
+
+  const specs: BookPageMemorySpec[] = [];
+  for (const e of entries) {
+    const m = getLocalMemoryById(e.memoryId.trim());
+    if (!m) continue;
+    const photoRef = e.photoRef?.trim();
+    specs.push(photoRef ? { memory: m, photoRef } : { memory: m });
+  }
+  if (specs.length === 0) {
+    return formatGelatoPrintPageCountLabel([]);
+  }
+
+  const child = listLocalChildren()[0];
+  if (!child) {
+    // Sans profil : contenu seul (pas de chapitres), pad pair Gelato.
+    const n = specs.length;
+    return formatGelatoPrintPageCountLabel(
+      Array.from({ length: n }, () => ({ type: 'photo-full' as const })),
+    );
+  }
+
+  return formatGelatoPrintPageCountLabel(buildBookPages(child, specs));
+}
+
 /** True si le souvenir (memoryId) a au moins une page. */
 export function bookHasMemoryPage(book: Book, memoryId: string): boolean {
   const id = memoryId.trim();
@@ -1651,28 +1719,57 @@ export async function migrateBooksFromAsyncStorageToSqliteOnce(): Promise<void> 
 }
 
 /**
- * Backup cloud — uniquement premium (tier `paid` côté app).
- * On sauvegarde l’état complet (liste) dans une table Supabase.
+ * Backup cloud — compte produit (gratuit ou Petitmo+). Noms historiques `IfPremium` conservés.
+ * On upsert l’état local vers Supabase.
+ *
+ * Ne jamais « mirroir-supprimer » le cloud quand le local est vide (nouveau device / avant restore) :
+ * sinon un login TestFlight efface tous les livres distants.
+ * Les suppressions cloud passent uniquement par `flushPendingBookDeletesToSupabase`.
  */
-export async function backupBooksToSupabaseIfPremium(): Promise<void> {
-  const tier = await getUserTier();
-  if (tier !== 'paid') return;
+/** Ref couverture durable pour le cloud (jamais un `file://` / book_covers sandbox). */
+function coverPhotoUrlForCloudBackup(b: LocalBookRow): string | null {
+  const book = normalizeBook({
+    id: b.id,
+    title: b.title,
+    createdAt: b.createdAt,
+    memoryIds: b.memoryIds ?? [],
+    pageEntries: b.pageEntries,
+    memoryPhotoRefs: b.memoryPhotoRefs,
+    coverPhotoUrl: b.coverPhotoUrl,
+    rotations: b.rotations,
+    photoCrops: b.photoCrops,
+    textEdits: b.textEdits,
+    chapterTitle: b.chapterTitle,
+  });
+  if (!book) {
+    const raw = (b.coverPhotoUrl ?? '').trim();
+    return raw && isCloudMediaReference(raw) && !looksLikeStaleLocalCoverRef(raw) ? raw : null;
+  }
+  const healed = healStaleLocalCoverPhotoRef(book);
+  const url = (healed.coverPhotoUrl ?? '').trim();
+  if (url && isCloudMediaReference(url) && !looksLikeStaleLocalCoverRef(url)) return url;
+  const cloud = resolveBookCoverCloudFallbackUri(healed, '', 'list');
+  if (cloud && isCloudMediaReference(cloud)) return cloud;
+  return null;
+}
 
-  const { data: u } = await supabase.auth.getUser();
-  const user = u.user;
-  if (!user) return;
+export async function backupBooksToSupabaseIfPremium(): Promise<void> {
+  const userId = await getRealAuthUserIdForBookCloudSync();
+  if (!userId) return;
 
   const books = listLocalBooks();
+  if (books.length === 0) return;
+
   const payload = books.map((b: LocalBookRow) => ({
     id: b.id,
-    user_id: user.id,
+    user_id: userId,
     title: b.title,
     created_at: b.createdAt,
     updated_at: b.updatedAt,
     memory_ids: b.memoryIds,
     page_entries: b.pageEntries ?? null,
     memory_photo_refs: b.memoryPhotoRefs ?? null,
-    cover_photo_url: b.coverPhotoUrl ?? null,
+    cover_photo_url: coverPhotoUrlForCloudBackup(b),
     rotations: b.rotations ?? null,
     photo_crops: b.photoCrops ?? null,
     text_edits: b.textEdits ?? null,
@@ -1685,16 +1782,6 @@ export async function backupBooksToSupabaseIfPremium(): Promise<void> {
     // Migration page_entries pas encore appliquée en prod → fallback sans colonnes nouvelles.
     const legacy = payload.map(({ page_entries: _pe, memory_photo_refs: _mr, ...rest }) => rest);
     await booksTable().upsert(legacy, { onConflict: 'id' });
-  }
-
-  const localIds = new Set(books.map((b: LocalBookRow) => b.id));
-  const { data: remoteRows, error: listErr } = await booksTable().select('id').eq('user_id', user.id);
-  if (!listErr && Array.isArray(remoteRows)) {
-    for (const r of remoteRows as { id?: unknown }[]) {
-      const rid = typeof r.id === 'string' ? r.id : '';
-      if (!rid || localIds.has(rid)) continue;
-      await booksTable().delete().eq('id', rid).eq('user_id', user.id);
-    }
   }
 }
 
@@ -1773,22 +1860,18 @@ function safePageEntries(x: unknown): BookPageEntry[] {
 }
 
 /**
- * Restauration cloud → SQLite (premium uniquement).
+ * Restauration cloud → SQLite (compte produit : gratuit ou Petitmo+).
  * Règle de merge “safe” : on garde la version la plus récente (local.updatedAt vs remote.updated_at).
  */
 export async function restoreBooksFromSupabaseIfPremium(): Promise<void> {
-  const tier = await getUserTier();
-  if (tier !== 'paid') return;
-
-  const { data: u } = await supabase.auth.getUser();
-  const user = u.user;
-  if (!user) return;
+  const userId = await getRealAuthUserIdForBookCloudSync();
+  if (!userId) return;
 
   let { data, error } = await booksTable()
     .select(
       'id, user_id, title, created_at, updated_at, memory_ids, page_entries, memory_photo_refs, cover_photo_url, rotations, photo_crops, text_edits, chapter_title'
     )
-    .eq('user_id', user.id)
+    .eq('user_id', userId)
     .order('updated_at', { ascending: false });
 
   if (error) {
@@ -1796,7 +1879,7 @@ export async function restoreBooksFromSupabaseIfPremium(): Promise<void> {
       .select(
         'id, user_id, title, created_at, updated_at, memory_ids, cover_photo_url, rotations, photo_crops, text_edits, chapter_title'
       )
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .order('updated_at', { ascending: false }));
   }
 
@@ -1878,5 +1961,6 @@ export async function restoreBooksFromSupabaseIfPremium(): Promise<void> {
   }
 
   await healAllBookCovers(listBooksFromSqliteSync());
+  notifyBooksUpdated();
 }
 

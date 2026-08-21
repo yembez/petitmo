@@ -63,6 +63,7 @@ import {
   FeedAgeOverlay,
   FeedPostMetaOverlay,
   FeedVideoDurationSoundBar,
+  FEED_AGE_PILL_STACK_RESERVE,
 } from '@/components/feed/FeedMediaOverlays';
 import type { PendingUpload } from "@/contexts/PendingMediaUploadsContext";
 import {
@@ -508,14 +509,6 @@ function FilMemoryRow({
                 }
                 memoryForFavoriteVariants={memory}
               />
-              {isOptimisticFeedPending ? (
-                <FeedMediaPrepOverlay
-                  compact
-                  prominent
-                  blockTouches
-                  label={pendingPrepLabel?.trim() || t('mediaPrep.addingPhoto')}
-                />
-              ) : null}
               {mediaAgeOverlay}
             </View>
           )}
@@ -619,13 +612,15 @@ function FilMemoryRow({
                           />
                         )
                       ) : null}
-                      {/** Roue uniquement sur carte d’upload vidéo (pending) — jamais au scroll autoplay. */}
-                      {isOptimisticFeedPending ? (
+                      {/** Roue seulement si aucun visuel local (pas de poster / preview). */}
+                      {isOptimisticFeedPending &&
+                      !videoPosterUri.trim() &&
+                      !videoPlaybackUri.trim() ? (
                         <FeedMediaPrepOverlay
                           compact
                           prominent
                           blockTouches
-                          label={videoPosterUri.trim() ? '' : t('mediaPrep.preparing')}
+                          label={t('mediaPrep.preparing')}
                         />
                       ) : null}
                     </View>
@@ -638,9 +633,6 @@ function FilMemoryRow({
                         cachePolicy="memory-disk"
                         recyclingKey={`poster-${memory.id}`}
                       />
-                      {isOptimisticFeedPending ? (
-                        <FeedMediaPrepOverlay compact prominent blockTouches label="" />
-                      ) : null}
                     </View>
                   ) : (
                     <View style={[styles.photoImage, { backgroundColor: '#000000' }]}>
@@ -670,6 +662,7 @@ function FilMemoryRow({
                 showSoundToggle={canAutoplayVideoInline}
                 soundOn={feedInlineVideoSoundOn}
                 onToggleSound={() => void toggleFeedInlineVideoSound()}
+                bottomInset={ageAtMemory ? FEED_AGE_PILL_STACK_RESERVE : 0}
               />
               {mediaAgeOverlay}
             </View>

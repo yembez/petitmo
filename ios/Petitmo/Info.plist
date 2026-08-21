@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
   <dict>
+    <key>AppGroupIdentifier</key>
+    <string>group.com.petitmo.app</string>
     <key>CADisableMinimumFrameDurationOnPhone</key>
     <true/>
     <key>CFBundleAllowMixedLocalizations</key>
@@ -40,8 +42,6 @@
         </array>
       </dict>
       <dict>
-        <key>CFBundleURLName</key>
-        <string>GoogleSignIn</string>
         <key>CFBundleURLSchemes</key>
         <array>
           <string>com.googleusercontent.apps.267645460430-h8or3fe0qnm6f4gd72g3nije4qg196se</string>
@@ -67,6 +67,8 @@
     <string>Petitmo a besoin d'accéder à ta caméra pour capturer des photos et vidéos de vos moments précieux.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Petitmo a besoin d'accéder à ton microphone pour enregistrer la voix de ton enfant.</string>
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>Allow $(PRODUCT_NAME) to save photos</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>Petitmo a besoin d'accéder à vos photos pour importer des souvenirs existants.</string>
     <key>NSUserActivityTypes</key>

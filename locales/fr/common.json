@@ -170,7 +170,10 @@
       "saveFailed": "Impossible d'enregistrer cette image. Réessaie dans un instant.",
       "closeA11y": "Fermer",
       "scrubA11y": "Position dans la vidéo"
-    }
+    },
+    "toolbarWrite": "Écrire",
+    "toolbarWriteA11y": "Écrire le texte de la page",
+    "listNoPages": "Aucune page"
   },
   "bookOrder": {
     "title": "Commander mon livre",
@@ -219,11 +222,16 @@
     "mic": "Micro",
     "import": "Importer",
     "importA11y": "Importer un fichier audio depuis Fichiers",
-    "importHintBody": "Le Dictaphone iPhone n’est pas accessible directement. Partage ton enregistrement vers Fichiers, puis choisis-le ici.",
+    "importHintBody": "Depuis le Dictaphone : Partager → Petitmo. Ou enregistre dans Fichiers, puis Importer ici.",
     "importFailed": "Impossible d’importer ce fichier audio.",
     "importTooShort": "Ce fichier audio est trop court.",
     "importNeedsRebuild": "L’import audio nécessite une mise à jour de l’app (module Fichiers). Tu peux toujours enregistrer avec le micro.",
     "rerecord": "Réenregistrer",
     "save": "Sauvegarder"
+  },
+  "shareIntent": {
+    "failed": "Impossible d’ouvrir ce partage dans Petitmo.",
+    "unsupported": "Petitmo accepte les photos, vidéos et fichiers audio.",
+    "needsRebuild": "Le partage vers Petitmo nécessite une mise à jour de l’app. Relance npm run dev:ios:build, puis réessaie."
   }
 }

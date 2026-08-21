@@ -7,6 +7,7 @@
  *
  * - Catalogue Gelato = souvenirs + « Notre histoire », hors cover/back-cover, **pair** (≥ 30).
  * - Facturation V1 = **même compteur catalogue Gelato** (+ QR A/V au checkout) — `lib/pricingV1.ts`.
+ * - Folio imprimé / spread / éditeur = **numéro intérieur Gelato** (hors cover/4e), jamais `index + 1`.
  *
  * Ex. maquette interne 31 feuillets = cover + 29 intérieures + back → affichage client **30**.
  */
@@ -22,6 +23,24 @@ export function gelatoInnerPageCount(pages: ReadonlyArray<{ type: string }>): nu
 export function gelatoCatalogPageCount(pages: ReadonlyArray<{ type: string }>): number {
   const n = gelatoInnerPageCount(pages);
   return n + (n % 2);
+}
+
+/**
+ * Folio / libellé « Page N » : numéro intérieur Gelato (1…catalogue).
+ * `null` pour couverture / 4e (pas de folio).
+ */
+export function gelatoInnerPageNumber(
+  pages: ReadonlyArray<{ type: string }>,
+  pageIndex: number,
+): number | null {
+  const page = pages[pageIndex];
+  if (!page || page.type === 'cover' || page.type === 'back-cover') return null;
+  let innerNum = 0;
+  for (let i = 0; i <= pageIndex && i < pages.length; i += 1) {
+    const p = pages[i];
+    if (p && p.type !== 'cover' && p.type !== 'back-cover') innerNum += 1;
+  }
+  return innerNum > 0 ? innerNum : null;
 }
 
 /** Header / totaux : toujours le compteur Gelato. */
@@ -46,13 +65,8 @@ export function formatBookEditorPageLabel(
   if (!page) return `${total} pages`;
   if (page.type === 'cover') return `Couverture · ${total} pages`;
   if (page.type === 'back-cover') return `4e de couverture · ${total} pages`;
-
-  let innerNum = 0;
-  for (let i = 0; i <= pageIndex && i < pages.length; i += 1) {
-    const p = pages[i];
-    if (p && p.type !== 'cover' && p.type !== 'back-cover') innerNum += 1;
-  }
-  return `Page ${innerNum} · ${total} pages`;
+  const innerNum = gelatoInnerPageNumber(pages, pageIndex);
+  return `Page ${innerNum ?? 0} · ${total} pages`;
 }
 
 /** Fraction type « 3 / 30 » (hors cover/4e → libellé court). */
@@ -64,12 +78,8 @@ export function formatBookEditorPageFraction(
   const page = pages[pageIndex];
   if (!page || page.type === 'cover') return `Couverture`;
   if (page.type === 'back-cover') return `4e`;
-  let innerNum = 0;
-  for (let i = 0; i <= pageIndex && i < pages.length; i += 1) {
-    const p = pages[i];
-    if (p && p.type !== 'cover' && p.type !== 'back-cover') innerNum += 1;
-  }
-  return `${innerNum} / ${total}`;
+  const innerNum = gelatoInnerPageNumber(pages, pageIndex);
+  return `${innerNum ?? 0} / ${total}`;
 }
 
 export function gelatoMinInnerPagesAlertMessage(innerCount: number): string {

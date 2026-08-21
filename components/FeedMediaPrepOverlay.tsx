@@ -3,8 +3,9 @@ import { THEME } from '@/constants/theme';
 import { scale, verticalScale } from '@/utils/responsive';
 
 /**
- * Voyant d’attente pour une opération **média utilisateur** (trim, copie, poster, placement fil).
- * Pas pour la sync cloud (local-first UX).
+ * Voyant d’attente pour une opération **média utilisateur** sans visuel local encore
+ * (copie / poster / trim). Pas pour la sync cloud, et **pas** si la photo/vidéo
+ * est déjà peinte (local-first UX).
  */
 export function FeedMediaPrepOverlay({
   label,

@@ -111,6 +111,37 @@ export async function activateCloudSyncAfterRealAuth(user: User): Promise<void> 
   } catch (e) {
     console.warn('[auth] flushPendingCloudUploadsOnce', e);
   }
+
+  // Livres + commandes : restore cloud en fond après login (pas seulement au cold start).
+  void (async () => {
+    try {
+      const {
+        flushPendingBookDeletesToSupabase,
+        restoreBooksFromSupabaseIfPremium,
+        backupBooksToSupabaseIfPremium,
+        pruneOrphanEmptyBookDuplicates,
+      } = await import('@/services/books');
+      const { hydrateTabScreensFromSqliteSync } = await import('@/services/tabScreensHydrate');
+      await flushPendingBookDeletesToSupabase();
+      await restoreBooksFromSupabaseIfPremium();
+      if (pruneOrphanEmptyBookDuplicates() > 0) {
+        hydrateTabScreensFromSqliteSync();
+      }
+      await backupBooksToSupabaseIfPremium();
+      hydrateTabScreensFromSqliteSync();
+    } catch (e) {
+      console.warn('[auth] restoreBooksAfterRealAuth', e);
+    }
+  })();
+
+  void (async () => {
+    try {
+      const { fetchPrintOrdersForAccount } = await import('@/services/printOrders');
+      await fetchPrintOrdersForAccount();
+    } catch (e) {
+      console.warn('[auth] fetchPrintOrdersAfterRealAuth', e);
+    }
+  })();
 }
 
 /**

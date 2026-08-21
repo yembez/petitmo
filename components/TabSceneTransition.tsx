@@ -10,7 +10,7 @@ import Reanimated, {
 import {
   TAB_TRANSITION_DURATION_MS,
   TAB_TRANSITION_FADE_BG,
-  TAB_TRANSITION_SLIDE_Y_PX,
+  TAB_TRANSITION_OPACITY_FROM,
 } from '@/constants/tabTransition';
 
 type Props = {
@@ -19,16 +19,17 @@ type Props = {
   backgroundColor?: string;
 };
 
+const TAB_ENTER_EASING = Easing.out(Easing.quad);
+
 /**
- * Montée verticale légère à l’entrée sur un onglet — une seule piste d’animation
- * (pas de voile blanc par-dessus) pour garder le slide et le fondu synchrones.
+ * Entrée d’onglet : cross-fade court uniquement (pas de slide — pattern tab bar classique).
  */
 export default function TabSceneTransition({
   children,
   backgroundColor = TAB_TRANSITION_FADE_BG,
 }: Props) {
   const isFocused = useIsFocused();
-  const translateY = useSharedValue(0);
+  const opacity = useSharedValue(1);
   const hasEnteredOnceRef = useRef(false);
 
   useEffect(() => {
@@ -36,19 +37,19 @@ export default function TabSceneTransition({
 
     if (!hasEnteredOnceRef.current) {
       hasEnteredOnceRef.current = true;
-      translateY.value = 0;
+      opacity.value = 1;
       return;
     }
 
-    translateY.value = TAB_TRANSITION_SLIDE_Y_PX;
-    translateY.value = withTiming(0, {
+    opacity.value = TAB_TRANSITION_OPACITY_FROM;
+    opacity.value = withTiming(1, {
       duration: TAB_TRANSITION_DURATION_MS,
-      easing: Easing.out(Easing.cubic),
+      easing: TAB_ENTER_EASING,
     });
-  }, [isFocused, translateY]);
+  }, [isFocused, opacity]);
 
   const sceneStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: translateY.value }],
+    opacity: opacity.value,
   }));
 
   return (

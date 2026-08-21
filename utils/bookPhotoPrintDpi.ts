@@ -80,6 +80,6 @@ export function bookPhotoDpiStatusLabel(status: BookPhotoDpiStatus): string {
     case 'block':
       return 'Très faible < 200';
     default:
-      return '—';
+      return 'En attente du fichier print…';
   }
 }

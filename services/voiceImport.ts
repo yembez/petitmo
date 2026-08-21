@@ -90,6 +90,27 @@ async function loadGetDocumentAsync(): Promise<GetDocumentAsync> {
   return fn;
 }
 
+/** Charge un audio déjà accessible (import Fichiers ou Share Extension). */
+export async function loadVoiceAudioFromUri(
+  sourceUri: string,
+  fileName?: string | null,
+): Promise<PickedVoiceFile> {
+  const uri = await persistImportedAudio(sourceUri, fileName);
+  await Audio.setAudioModeAsync({
+    allowsRecordingIOS: false,
+    playsInSilentModeIOS: true,
+  });
+  const durationSec = await measureAudioDurationSec(uri);
+  if (!(durationSec > 0.05)) {
+    throw new Error('AUDIO_TOO_SHORT');
+  }
+  return {
+    uri,
+    durationSec,
+    fileName: typeof fileName === 'string' ? fileName : null,
+  };
+}
+
 /**
  * Ouvre le sélecteur système (Fichiers). Pas d’accès direct à la lib Dictaphone iOS.
  * Nécessite un build natif qui inclut `expo-document-picker`.
@@ -104,18 +125,5 @@ export async function pickVoiceAudioFromFiles(): Promise<PickedVoiceFile | null>
   if (result.canceled || !result.assets?.[0]?.uri) return null;
 
   const asset = result.assets[0];
-  const uri = await persistImportedAudio(asset.uri, asset.name);
-  await Audio.setAudioModeAsync({
-    allowsRecordingIOS: false,
-    playsInSilentModeIOS: true,
-  });
-  const durationSec = await measureAudioDurationSec(uri);
-  if (!(durationSec > 0.05)) {
-    throw new Error('AUDIO_TOO_SHORT');
-  }
-  return {
-    uri,
-    durationSec,
-    fileName: typeof asset.name === 'string' ? asset.name : null,
-  };
+  return loadVoiceAudioFromUri(asset.uri, asset.name);
 }

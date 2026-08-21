@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   Linking,
   Alert,
   ActivityIndicator,
+  DeviceEventEmitter,
 } from 'react-native';
 import { usePathname, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -45,7 +46,7 @@ import { isSentryEnabled } from '@/lib/sentry';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { useAppLanguage } from '@/hooks/useAppLanguage';
 import { formatAppCurrency, formatAppDate } from '@/utils/appLocale';
-import { fetchPrintOrdersForAccount, hydratePrintOrderTitles } from '@/services/printOrders';
+import { fetchPrintOrdersForAccount, hydratePrintOrderTitles, PETITMO_PRINT_ORDERS_UPDATED_EVENT } from '@/services/printOrders';
 import { getCachedPrintOrders, peekCachedPrintOrders } from '@/lib/printOrdersCache';
 import type { PrintOrderStatus, PrintOrderSummary } from '@/lib/printOrderSummary';
 import { isGenericPrintBookTitle } from '@/lib/printOrderSummary';
@@ -160,6 +161,13 @@ export default function ParentSpaceScreen() {
       void load();
     }, [load])
   );
+
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener(PETITMO_PRINT_ORDERS_UPDATED_EVENT, () => {
+      setOrders(hydratePrintOrderTitles(peekCachedPrintOrders()));
+    });
+    return () => sub.remove();
+  }, []);
 
   const performSignOut = useCallback(async () => {
     if (signOutBusy || deleteBusy) return;

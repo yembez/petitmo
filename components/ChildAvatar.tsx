@@ -4,11 +4,12 @@
  *
  * 1. Bounds ML persistées (`face_*` en SQLite) si dispo (dev build).
  * 2. Sinon heuristique avatar (`heuristicFaceBoundsForAvatar`) + ratio mesuré.
+ *
+ * URI : `useChildProfileDisplayUri` (local sandbox s’il existe, sinon URL signée).
  */
 import { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Image as RNImage } from 'react-native';
 import type { Child } from '@/types/local';
-import { resolveChildProfileImageDisplayUri } from '@/utils/childPhotoUri';
 import { childDisplayInitial } from '@/utils/childDisplayName';
 import {
   computeAvatarImageLayout,
@@ -17,6 +18,7 @@ import {
   isValidFaceBounds,
   resolveAvatarFaceBounds,
 } from '@/utils/avatarFaceBounds';
+import { useChildProfileDisplayUri } from '@/hooks/useChildProfileDisplayUri';
 import { THEME } from '@/constants/theme';
 
 const DEFAULT_ASPECT = 9 / 16;
@@ -32,12 +34,7 @@ function stripUriQuery(uri: string): string {
 }
 
 export function ChildAvatar({ child, size }: Props) {
-  const photoUri =
-    resolveChildProfileImageDisplayUri(
-      child.local_photo_path,
-      child.photo_url,
-      child.updated_at,
-    ) ?? '';
+  const photoUri = useChildProfileDisplayUri(child);
 
   const uriForMeasure = photoUri ? stripUriQuery(photoUri) : null;
   const [imageAspect, setImageAspect] = useState<number | null>(null);
@@ -79,7 +76,7 @@ export function ChildAvatar({ child, size }: Props) {
     [size, bounds],
   );
 
-  const imageKey = `${child.id}-${child.updated_at ?? '0'}`;
+  const imageKey = `${child.id}-${child.updated_at ?? '0'}-${photoUri.slice(0, 64)}`;
 
   const containerStyle = {
     width: size,

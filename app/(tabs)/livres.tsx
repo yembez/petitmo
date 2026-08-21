@@ -32,10 +32,12 @@ import {
   bookPageEntries,
   booksListVisualSignature,
   deleteBook,
+  formatBookListGelatoPageCountLabel,
   healAllBookCovers,
   healAllBookMemoryIdsIfWiped,
   listBooks,
   listBooksFromSqliteSync,
+  PETITMO_BOOKS_UPDATED_EVENT,
   resolveBookListRowCoverUri,
   type Book,
 } from '@/services/books';
@@ -108,6 +110,7 @@ const BookListRow = memo(function BookListRow({
   onOpen,
   onDelete,
 }: BookListRowProps) {
+  const { t } = useAppTranslation('common');
   const swipeRef = useRef<Swipeable>(null);
   const suppressRowPressRef = useRef(false);
 
@@ -119,6 +122,7 @@ const BookListRow = memo(function BookListRow({
     ? `${coverCrop.xPct}-${coverCrop.yPct}-${coverCrop.scale}`
     : '';
   const count = bookPageEntries(book).length;
+  const pageCountLabel = formatBookListGelatoPageCountLabel(book);
   const dateLabel = bookCoverPeriodLabelForBook(book);
 
   const handleRowPress = () => {
@@ -194,11 +198,7 @@ const BookListRow = memo(function BookListRow({
                 : { fontWeight: '500' },
             ]}
           >
-            {count === 0
-              ? 'Aucun souvenir'
-              : count === 1
-                ? '1 souvenir'
-                : `${count} souvenirs`}
+            {count === 0 ? t('book.listNoPages') : pageCountLabel}
           </Text>
         </View>
         <Text style={styles.chevron}>→</Text>
@@ -325,8 +325,15 @@ function LivresScreen() {
     const sub = DeviceEventEmitter.addListener('petitmo:memories-invalidate', () => {
       void load();
     });
-    return () => sub.remove();
-  }, [load]);
+    const subBooks = DeviceEventEmitter.addListener(PETITMO_BOOKS_UPDATED_EVENT, () => {
+      applyBooksList(listBooksFromSqliteSync());
+      void load();
+    });
+    return () => {
+      sub.remove();
+      subBooks.remove();
+    };
+  }, [load, applyBooksList]);
 
   const onRefresh = useCallback(() => {
     void load({ pull: true, force: true });

@@ -118,6 +118,7 @@ export function BookInlinePhotoCrop({
   coverMode = false,
   onZoomActiveChange,
 }: Props) {
+  // Badge DPI = pixels **print** uniquement. Jamais imgPx display/thumb (~480px → faux ~68 DPI).
   const badgePxW = dpiPxW && dpiPxW > 0 ? dpiPxW : 0;
   const badgePxH = dpiPxH && dpiPxH > 0 ? dpiPxH : 0;
 

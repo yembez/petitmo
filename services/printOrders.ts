@@ -6,6 +6,9 @@ import {
   type PrintOrderSummary,
 } from '@/lib/printOrderSummary';
 import { getCachedPrintOrders, peekCachedPrintOrders, setCachedPrintOrders } from '@/lib/printOrdersCache';
+import { DeviceEventEmitter } from 'react-native';
+
+export const PETITMO_PRINT_ORDERS_UPDATED_EVENT = 'petitmo:print-orders-updated' as const;
 
 function printOrdersUrl(): string {
   const base = (supabaseUrl ?? '').replace(/\/$/, '');
@@ -118,5 +121,6 @@ async function fetchPrintOrdersForAccountOnce(): Promise<PrintOrderSummary[]> {
     server.length === 0 && cached.length > 0 ? cached : mergePrintOrders(cached, server),
   );
   await setCachedPrintOrders(merged);
+  DeviceEventEmitter.emit(PETITMO_PRINT_ORDERS_UPDATED_EVENT);
   return merged;
 }

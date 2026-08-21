@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { Image as RNImage, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { BookInlinePhotoCrop } from '@/components/BookInlinePhotoCrop';
@@ -138,39 +138,59 @@ function BookPagePhotoFrame({
 
   const dpiMeta = inlineCrop?.dpiMeta;
   const [measuredPx, setMeasuredPx] = useState<{ w: number; h: number } | null>(null);
+  /** Une fois les dims connues, ne plus réafficher « Calcul… » (URI signée qui arrive après, etc.). */
+  const dimsLatchedRef = useRef(false);
+
+  const propW = imgPxW ?? 0;
+  const propH = imgPxH ?? 0;
+  const metaW = dpiMeta?.imgPxW ?? 0;
+  const metaH = dpiMeta?.imgPxH ?? 0;
+  const knownFromParent =
+    (propW > 0 && propH > 0) || (metaW > 0 && metaH > 0);
 
   useEffect(() => {
+    // Changement d’URI (local → signed) : ne pas jeter les dims déjà connues côté parent.
+    if (knownFromParent) return;
     setMeasuredPx(null);
-  }, [displayUri]);
+  }, [displayUri, knownFromParent]);
 
   useEffect(() => {
-    const propW = imgPxW ?? dpiMeta?.imgPxW ?? 0;
-    const propH = imgPxH ?? dpiMeta?.imgPxH ?? 0;
-    if (propW > 0 && propH > 0) return;
+    if (knownFromParent) return;
     if (!displayUri) return;
     let cancelled = false;
+    const timer = setTimeout(() => {
+      /* abandon silencieux — pastille gérée via latch / parent */
+    }, 4000);
     RNImage.getSize(
       displayUri,
       (w, h) => {
-        if (cancelled || !(w > 0 && h > 0)) return;
-        setMeasuredPx({ w, h });
+        if (cancelled) return;
+        clearTimeout(timer);
+        if (w > 0 && h > 0) setMeasuredPx({ w, h });
       },
       () => {
-        /* ignore — rester en cover plein cadre */
+        clearTimeout(timer);
       },
     );
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
-  }, [displayUri, dpiMeta?.imgPxH, dpiMeta?.imgPxW, imgPxH, imgPxW]);
+  }, [displayUri, knownFromParent]);
 
-  const cropPxW = imgPxW ?? dpiMeta?.imgPxW ?? measuredPx?.w ?? 0;
-  const cropPxH = imgPxH ?? dpiMeta?.imgPxH ?? measuredPx?.h ?? 0;
+  const cropPxW = (propW > 0 ? propW : 0) || (metaW > 0 ? metaW : 0) || measuredPx?.w || 0;
+  const cropPxH = (propH > 0 ? propH : 0) || (metaH > 0 ? metaH : 0) || measuredPx?.h || 0;
   const hasCropDims = cropPxW > 0 && cropPxH > 0;
-  const hasDpiMeta = !!(dpiMeta?.printMmW && dpiMeta?.printMmH);
-  const isInteractive = !!inlineCrop && hasCropDims && hasDpiMeta;
-  const isLoadingMeta = !!inlineCrop && !isInteractive && !(coverMode && hasCropDims);
-  /** Aspect crop : cover explicite, ou toute page dès que dims connues. */
+  if (hasCropDims) dimsLatchedRef.current = true;
+
+  /** Fallback mm si meta async absente mais dims fichier connues. */
+  const printMmW = dpiMeta?.printMmW && dpiMeta.printMmW > 0 ? dpiMeta.printMmW : hasCropDims ? 190 : 0;
+  const printMmH = dpiMeta?.printMmH && dpiMeta.printMmH > 0 ? dpiMeta.printMmH : hasCropDims ? 140 : 0;
+  const hasPrintMm = printMmW > 0 && printMmH > 0;
+  const isInteractive = !!inlineCrop && hasCropDims && hasPrintMm;
+  // Jamais réafficher « Calcul… » une fois qu’on a eu des dims (évite le flash badge → Calcul).
+  const isLoadingMeta =
+    !!inlineCrop && !isInteractive && !dimsLatchedRef.current && !hasCropDims;
   const useAspectCrop = coverMode || hasCropDims;
 
   return (
@@ -184,10 +204,10 @@ function BookPagePhotoFrame({
             crop={crop}
             imgPxW={cropPxW}
             imgPxH={cropPxH}
-            dpiPxW={dpiMeta?.dpiPxW}
-            dpiPxH={dpiMeta?.dpiPxH}
-            printMmW={dpiMeta.printMmW}
-            printMmH={dpiMeta.printMmH}
+            dpiPxW={dpiMeta?.dpiPxW && dpiMeta.dpiPxW > 0 ? dpiMeta.dpiPxW : undefined}
+            dpiPxH={dpiMeta?.dpiPxH && dpiMeta.dpiPxH > 0 ? dpiMeta.dpiPxH : undefined}
+            printMmW={printMmW}
+            printMmH={printMmH}
             onChange={next => inlineCrop.onChange(inlineCrop.storageKey, next)}
             coverMode={useAspectCrop}
             onZoomActiveChange={inlineCrop.onZoomActiveChange}

@@ -13,7 +13,7 @@ import {
   diffPortraitRowProps,
 } from '@/utils/bookPortraitSpreadPerf';
 
-type PageRow = { page: BookPage; pageNum: number };
+type PageRow = { page: BookPage; pageNum: number; folio: number | null };
 
 export type BookPortraitSpreadRowProps = {
   item: BookSpreadRow;

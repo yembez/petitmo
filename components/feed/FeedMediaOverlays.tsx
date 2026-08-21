@@ -81,23 +81,35 @@ function FeedMetaGlassPill({
   return <View style={wrapStyle}>{pill}</View>;
 }
 
+/** Hauteur approx. pilule âge + gap — relève son/durée au-dessus de l’âge (bas-droite). */
+export const FEED_AGE_PILL_STACK_RESERVE = scale(40);
+
 /** Vidéo fil : son + durée en bas à droite, mêmes pilules verre que date / âge / lieu. */
 export function FeedVideoDurationSoundBar({
   durationLabel,
   showSoundToggle,
   soundOn,
   onToggleSound,
+  bottomInset = 0,
 }: {
   durationLabel?: string;
   showSoundToggle: boolean;
   soundOn: boolean;
   onToggleSound: () => void;
+  /** Relevé au-dessus de la pilule âge (même coin bas-droite). */
+  bottomInset?: number;
 }) {
   const hasDuration = !!durationLabel?.trim();
   if (!showSoundToggle && !hasDuration) return null;
 
   return (
-    <View style={styles.videoBottomControlsBar} pointerEvents="box-none">
+    <View
+      style={[
+        styles.videoBottomControlsBar,
+        bottomInset > 0 ? { bottom: FEED_MEDIA_OVERLAY_BOTTOM + bottomInset } : null,
+      ]}
+      pointerEvents="box-none"
+    >
       {showSoundToggle ? (
         <FeedMetaGlassPill
           bare
@@ -122,7 +134,7 @@ export function FeedVideoDurationSoundBar({
   );
 }
 
-/** Date (gauche) et lieu (droite) — pilules verre en haut du média. L’âge est en bas (`FeedAgeOverlay`). */
+/** Date (gauche) et lieu (droite) — pilules verre en haut du média. L’âge est en bas à droite (`FeedAgeOverlay`). */
 export function FeedPostMetaOverlay({
   dateLabel,
   locationLabel,
@@ -198,7 +210,7 @@ export function FeedPostMetaOverlay({
   );
 }
 
-/** Âge famille en bas à gauche du média (pilule verre) — date reste en haut. */
+/** Âge / prénom famille en bas à droite du média (pilule verre) — date reste en haut. */
 export function FeedAgeOverlay({
   ageLabel,
   feedAgeFontFamily,
@@ -218,7 +230,7 @@ export function FeedAgeOverlay({
   if (layout === 'inline') {
     return (
       <View style={styles.feedAgePillBarInline} pointerEvents="none">
-        <FeedMetaGlassPill align="left" bare>
+        <FeedMetaGlassPill align="right" bare>
           <Text
             style={[styles.feedMetaPillAge, loadedFontStyle(feedAgeFontFamily)]}
             numberOfLines={2}
@@ -235,7 +247,7 @@ export function FeedAgeOverlay({
       style={[styles.feedAgePillBar, { bottom: FEED_MEDIA_OVERLAY_BOTTOM + bottomInset }]}
       pointerEvents="none"
     >
-      <FeedMetaGlassPill align="left" bare>
+      <FeedMetaGlassPill align="right" bare>
         <Text
           style={[styles.feedMetaPillAge, loadedFontStyle(feedAgeFontFamily)]}
           numberOfLines={2}

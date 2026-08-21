@@ -127,6 +127,15 @@ export async function ensureChildFaceBounds(
   const shouldNotify = opts?.notify !== false;
   const row = getLocalChild(child.id) ?? child;
   let current = await sanitizeChildLocalAvatarIfMissing(row);
+
+  // Toujours matérialiser la photo cloud si le local est absent/mort (même si face_* déjà OK).
+  // Sinon Capturer/avatar restent sans image après TestFlight / nouveau device.
+  const lp0 = (current.local_photo_path ?? '').trim();
+  const remote0 = (current.photo_url ?? '').trim();
+  if (remote0 && !lp0) {
+    current = await cacheRemoteChildProfilePhotoLocally(current);
+  }
+
   if (!childNeedsFaceBoundsBackfill(current)) return current;
 
   const lp = (current.local_photo_path ?? '').trim();
@@ -175,8 +184,8 @@ export async function ensureChildFaceBounds(
 function scheduleChildFaceBoundsBackfill(children: LocalChild[]): void {
   void (async () => {
     for (const c of children) {
-      if (!childNeedsFaceBoundsBackfill(c)) continue;
       try {
+        // Sanitize + cache photo même si bounds déjà valides (réinstall / TF).
         await ensureChildFaceBounds(c, { notify: false });
       } catch {
         /* ignore */
@@ -374,6 +383,9 @@ export async function cacheRemoteChildProfilePhotoLocally(child: LocalChild): Pr
       ...faceToSave,
     };
     upsertLocalChild(next);
+    // Affichage changé (remote → sandbox) : fil / parent-space / edit doivent peindre le local,
+    // même si l’appelant a passé `notify: false` pour un backfill de bounds seul.
+    notifyChildProfileUpdated(row.id, next);
 
     // Si on vient de détecter des bounds manquantes → les pousser vers Supabase silencieusement.
     if (!hasBounds && detectedFace) {

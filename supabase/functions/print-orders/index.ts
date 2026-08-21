@@ -1,6 +1,8 @@
 /**
  * Liste des commandes livre (espace parent). Auth JWT requise.
- * Filtre : print_order payées, e-mail du compte = crm_contacts.email.
+ * Filtre : print_order payées liées au compte —
+ * 1) `export_requests.user_id` = auth uid
+ * 2) sinon e-mail compte (= crm_contacts.email) — commandes legacy sans user_id
  */
 import { createClient } from 'npm:@supabase/supabase-js@2.58.0';
 
@@ -69,6 +71,36 @@ function orderStatusLabel(row: {
   return 'paid';
 }
 
+function authEmailFromUser(user: {
+  email?: string | null;
+  user_metadata?: Record<string, unknown> | null;
+}): string {
+  const direct = (user.email ?? '').trim().toLowerCase();
+  if (direct) return direct;
+  const meta = user.user_metadata ?? {};
+  for (const key of ['email', 'preferred_email']) {
+    const v = meta[key];
+    if (typeof v === 'string' && v.trim()) return v.trim().toLowerCase();
+  }
+  return '';
+}
+
+type ExportOrderRow = {
+  id: string;
+  created_at: string;
+  paid_at: string | null;
+  price_cents: number | null;
+  payment_status: string | null;
+  status: string | null;
+  printer_order_id: string | null;
+  shipped_at: string | null;
+  delivered_at: string | null;
+  shipping_name: string | null;
+  book_id: string | null;
+  child_local_id: string | null;
+  printer_order_json: unknown;
+};
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders });
@@ -95,46 +127,78 @@ Deno.serve(async (req: Request) => {
     auth: { autoRefreshToken: false, persistSession: false },
   });
   const { data: userData, error: userErr } = await authClient.auth.getUser(jwt);
-  const email = (userData.user?.email ?? '').trim().toLowerCase();
-  if (userErr || !email) {
+  const user = userData.user;
+  if (userErr || !user?.id) {
     return jsonRes({ error: 'Unauthorized' }, 401);
   }
 
+  const userId = user.id;
+  const email = authEmailFromUser(user);
   const supabase = createClient(url, serviceKey);
-  const { data: contact, error: cErr } = await supabase
-    .from('crm_contacts')
-    .select('id')
-    .ilike('email', email)
-    .maybeSingle();
 
-  if (cErr) {
-    console.error('[print-orders] crm', cErr.message);
-    return jsonRes({ error: 'Database error' }, 500);
-  }
+  const selectCols =
+    'id, created_at, paid_at, price_cents, payment_status, status, printer_order_id, shipped_at, delivered_at, shipping_name, book_id, child_local_id, printer_order_json';
 
-  if (!contact?.id) {
-    return jsonRes({ orders: [] }, 200);
-  }
+  const byId = new Map<string, ExportOrderRow>();
 
-  const { data: rows, error: qErr } = await supabase
+  const { data: byUserRows, error: byUserErr } = await supabase
     .from('export_requests')
-    .select(
-      'id, created_at, paid_at, price_cents, payment_status, status, printer_order_id, shipped_at, delivered_at, shipping_name, book_id, child_local_id, printer_order_json',
-    )
-    .eq('crm_contact_id', contact.id)
+    .select(selectCols)
+    .eq('user_id', userId)
     .eq('type', 'print_order')
     .in('payment_status', ['paid', 'refunded'])
     .order('created_at', { ascending: false })
     .limit(40);
 
-  if (qErr) {
-    console.error('[print-orders] select', qErr.message);
+  if (byUserErr) {
+    console.error('[print-orders] by user_id', byUserErr.message);
     return jsonRes({ error: 'Database error' }, 500);
   }
+  for (const row of (byUserRows ?? []) as ExportOrderRow[]) {
+    byId.set(row.id, row);
+  }
+
+  if (email) {
+    const { data: contact, error: cErr } = await supabase
+      .from('crm_contacts')
+      .select('id')
+      .ilike('email', email)
+      .maybeSingle();
+
+    if (cErr) {
+      console.error('[print-orders] crm', cErr.message);
+      return jsonRes({ error: 'Database error' }, 500);
+    }
+
+    if (contact?.id) {
+      const { data: byCrmRows, error: qErr } = await supabase
+        .from('export_requests')
+        .select(selectCols)
+        .eq('crm_contact_id', contact.id)
+        .eq('type', 'print_order')
+        .in('payment_status', ['paid', 'refunded'])
+        .order('created_at', { ascending: false })
+        .limit(40);
+
+      if (qErr) {
+        console.error('[print-orders] by crm', qErr.message);
+        return jsonRes({ error: 'Database error' }, 500);
+      }
+      for (const row of (byCrmRows ?? []) as ExportOrderRow[]) {
+        byId.set(row.id, row);
+      }
+    }
+  }
+
+  const rows = [...byId.values()].sort((a, b) => {
+    const ta = Date.parse(a.paid_at || a.created_at) || 0;
+    const tb = Date.parse(b.paid_at || b.created_at) || 0;
+    return tb - ta;
+  }).slice(0, 40);
 
   const bookIds = [
     ...new Set(
-      (rows ?? [])
+      rows
         .map((row) => (typeof row.book_id === 'string' ? row.book_id.trim() : ''))
         .filter(Boolean),
     ),
@@ -156,7 +220,7 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  const orders = (rows ?? []).map((row) => {
+  const orders = rows.map((row) => {
     const bookId = typeof row.book_id === 'string' ? row.book_id.trim() : '';
     const childId = typeof row.child_local_id === 'string' ? row.child_local_id.trim() : '';
     return {

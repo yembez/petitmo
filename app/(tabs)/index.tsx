@@ -54,6 +54,7 @@ import {
 } from '@/constants/captureScreenPalette';
 import { THEME } from '@/constants/theme';
 import {
+  ensureChildFaceBounds,
   getOrSelectFirstChild,
   getCaptureTabChildSnapshot,
   PETITMO_CHILD_PROFILE_UPDATED_EVENT,
@@ -66,11 +67,7 @@ import { checkMemoryLimit } from '@/lib/limits';
 import { promptFreeTierLimitThenPaywall } from '@/utils/freeTierLimitGate';
 import { getLocalChild, listLocalChildren, listLocalChildrenForUser } from '@/lib/localDb';
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
-import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
-import {
-  resolveChildProfileImageDisplayUri,
-  resolveChildProfileImageUri,
-} from '@/utils/childPhotoUri';
+import { useChildProfileDisplayUri } from '@/hooks/useChildProfileDisplayUri';
 import { childDisplayGivenName, childDisplayInitial } from '@/utils/childDisplayName';
 import { formatCaptureChildAge, formatCaptureHeaderDate } from '@/utils/date';
 import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
@@ -332,31 +329,8 @@ function CapturerScreen() {
   const captureScrollYRef = useRef(0);
   const captureScrollMaxYRef = useRef(0);
 
-  const heroDisplayUri = child
-    ? // Cache-buster local sur `updated_at` (même path sandbox écrasé).
-      // Ne touche pas les URL https (signatures) — `resolveChildProfileImageDisplayUri`.
-      resolveChildProfileImageDisplayUri(
-        child.local_photo_path,
-        child.photo_url,
-        child.updated_at,
-      )
-    : null;
-  const heroIsLocalAsset =
-    !!heroDisplayUri &&
-    (heroDisplayUri.startsWith('file:') ||
-      heroDisplayUri.startsWith('content:') ||
-      heroDisplayUri.startsWith('ph://') ||
-      (!heroDisplayUri.startsWith('http://') && !heroDisplayUri.startsWith('https://')));
-  const heroRemoteBase =
-    child && !heroIsLocalAsset
-      ? resolveChildProfileImageUri(null, child.photo_url)
-      : null;
-  const heroSignedRemote = useSignedMediaUrl(heroRemoteBase);
-  const photoUri = heroDisplayUri
-    ? heroIsLocalAsset
-      ? heroDisplayUri
-      : heroSignedRemote ?? heroDisplayUri
-    : '';
+  const heroDisplayUri = useChildProfileDisplayUri(child);
+  const photoUri = heroDisplayUri ?? '';
   const heroPhotoCacheKey = child ? captureHeroPhotoRevision(child) : '';
 
   useEffect(() => {
@@ -520,6 +494,16 @@ function CapturerScreen() {
                 setCaptureTabChildSnapshot(row);
                 return row;
               });
+              // Fond : sanitize path mort + cache photo cloud (sans bloquer le paint).
+              void ensureChildFaceBounds(row).then(refreshed => {
+                if (cancelled || !refreshed) return;
+                setChild(prev => {
+                  if (captureChildDisplayEqual(prev, refreshed)) return prev;
+                  setCaptureTabChildSnapshot(refreshed);
+                  return refreshed;
+                });
+                setFamilyChildren(sortChildrenByBirthdateAsc(listCaptureScopedChildren()));
+              });
             }
             return;
           }
@@ -534,6 +518,15 @@ function CapturerScreen() {
             if (!cancelled) {
               setCaptureTabChildSnapshot(selected);
               setChild(prev => (captureChildDisplayEqual(prev, selected) ? prev : selected));
+              void ensureChildFaceBounds(selected).then(refreshed => {
+                if (cancelled || !refreshed) return;
+                setChild(prev => {
+                  if (captureChildDisplayEqual(prev, refreshed)) return prev;
+                  setCaptureTabChildSnapshot(refreshed);
+                  return refreshed;
+                });
+                setFamilyChildren(sortChildrenByBirthdateAsc(listCaptureScopedChildren()));
+              });
             }
           } else if (allChildren.length === 0) {
             setChild(null);
@@ -542,6 +535,15 @@ function CapturerScreen() {
           } else if (!cancelled) {
             setCaptureTabChildSnapshot(allChildren[0]);
             setChild(prev => (captureChildDisplayEqual(prev, allChildren[0]) ? prev : allChildren[0]));
+            void ensureChildFaceBounds(allChildren[0]).then(refreshed => {
+              if (cancelled || !refreshed) return;
+              setChild(prev => {
+                if (captureChildDisplayEqual(prev, refreshed)) return prev;
+                setCaptureTabChildSnapshot(refreshed);
+                return refreshed;
+              });
+              setFamilyChildren(sortChildrenByBirthdateAsc(listCaptureScopedChildren()));
+            });
           }
         } catch (error) {
           console.error('Error loading child:', error);

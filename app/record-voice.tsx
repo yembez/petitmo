@@ -43,6 +43,7 @@ import { promptFreeTierLimitThenPaywall, promptFreeTierLimitFromError } from '@/
 import { isAudioTrimAvailable, trimAudioToLocalFile } from '@/services/audioTrim';
 import { AudioTrimEditor } from '@/components/AudioTrimEditor';
 import { isVoiceDocumentPickerAvailable } from '@/services/voiceImport';
+import { takePendingSharedVoice } from '@/lib/pendingShareMedia';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { isDeviceStorageFullError } from '@/utils/deviceStorageFull';
 
@@ -87,6 +88,7 @@ export default function RecordVoiceScreen() {
   const isExcerptPlayingRef = useRef(false);
   const soundRef = useRef<Audio.Sound | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const sharedVoiceConsumedRef = useRef(false);
 
   useEffect(() => {
     void (async () => {
@@ -184,6 +186,31 @@ export default function RecordVoiceScreen() {
     },
     [tier],
   );
+
+  /** Partager → Petitmo (Dictaphone) : audio déjà en sandbox. */
+  useEffect(() => {
+    if (sharedVoiceConsumedRef.current) return;
+    const pending = takePendingSharedVoice();
+    if (!pending) return;
+    sharedVoiceConsumedRef.current = true;
+    void (async () => {
+      try {
+        setIsImporting(true);
+        const childId = await ensureVoiceQuotaOk();
+        if (!childId) return;
+        await applyLoadedAudio(pending.uri, pending.durationSec);
+      } catch (e) {
+        if (isDeviceStorageFullError(e)) {
+          Alert.alert(t('error'), t('bookOrder.storageFull'));
+        } else {
+          console.error('[record-voice] shared voice', e);
+          Alert.alert(t('error'), t('recordVoice.importFailed'));
+        }
+      } finally {
+        setIsImporting(false);
+      }
+    })();
+  }, [applyLoadedAudio, t]);
 
   const startRecording = async () => {
     try {

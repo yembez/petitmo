@@ -31,7 +31,8 @@
         "EXPO_PUBLIC_PDF_SERVER_URL": "https://petitmo-production.up.railway.app",
         "EXPO_PUBLIC_PUBLIC_MEDIA_BASE_URL": "https://petitmo-production.up.railway.app/m",
         "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "267645460430-fe5f6kiae4r9ulf4s5b9t4eq4cgatj1j.apps.googleusercontent.com",
-        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "267645460430-h8or3fe0qnm6f4gd72g3nije4qg196se.apps.googleusercontent.com"
+        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "267645460430-h8or3fe0qnm6f4gd72g3nije4qg196se.apps.googleusercontent.com",
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
       }
     },
     "production": {
@@ -46,7 +47,8 @@
         "EXPO_PUBLIC_PDF_SERVER_URL": "https://petitmo-production.up.railway.app",
         "EXPO_PUBLIC_PUBLIC_MEDIA_BASE_URL": "https://petitmo-production.up.railway.app/m",
         "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "267645460430-fe5f6kiae4r9ulf4s5b9t4eq4cgatj1j.apps.googleusercontent.com",
-        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "267645460430-h8or3fe0qnm6f4gd72g3nije4qg196se.apps.googleusercontent.com"
+        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "267645460430-h8or3fe0qnm6f4gd72g3nije4qg196se.apps.googleusercontent.com",
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
       }
     }
   },

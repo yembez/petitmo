@@ -90,6 +90,19 @@
       ],
       "expo-document-picker",
       [
+        "expo-share-intent",
+        {
+          "iosActivationRules": {
+            "NSExtensionActivationSupportsImageWithMaxCount": 10,
+            "NSExtensionActivationSupportsMovieWithMaxCount": 1,
+            "NSExtensionActivationSupportsFileWithMaxCount": 1
+          },
+          "iosShareExtensionName": "PetitmoShare",
+          "androidIntentFilters": ["image/*", "video/*", "audio/*"],
+          "androidMultiIntentFilters": ["image/*", "video/*", "audio/*"]
+        }
+      ],
+      [
         "expo-media-library",
         {
           "photosPermission": "Petitmo a besoin d'accéder à vos photos pour importer des souvenirs existants."

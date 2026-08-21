@@ -17,7 +17,7 @@ import {
 import type { BookPageServer } from '../types/contracts';
 import type { ChildRow, MemoryRow } from './memoryRow';
 import type { GelatoCoverLayout } from '../gelato/coverDimensions';
-import { gelatoInnerPages } from '../gelato/photobookLayout';
+import { gelatoInnerPages, gelatoInnerPageNumber } from '../gelato/photobookLayout';
 import { memoryBookDisplayDateIso } from './memoryBookDisplayDate';
 import { clampMediaBookCaption } from './mediaBookCaption';
 import { coverCropFrameHtml } from './bookPhotoCropLayout';
@@ -539,14 +539,13 @@ function pageVideo(
   return pageMediaQr('video', m, qrUrl, pageNum, rot, crop, birthdate, cropImgPxW, cropImgPxH, printBleed);
 }
 
-function pageBackCover(pageNum: number): string {
+function pageBackCover(): string {
   return `<div class="page back-cover">
   <div class="back-inner">
     <div class="subtitle" style="color:#AEAEB2;">Chaque moment compte.</div>
     <div class="label" style="margin-top:8pt;">petitmo · vos souvenirs pour toujours</div>
     <div class="chapter-rule" style="margin-top:12pt;"></div>
   </div>
-  <div class="folio">${pageNum}</div>
 </div>`;
 }
 
@@ -716,7 +715,7 @@ function renderPage(page: BookPageServer, input: BuildBookHtmlInput, pageNum: nu
       }
     }
     case 'back-cover':
-      return pageBackCover(pageNum);
+      return pageBackCover();
     default:
       return '';
   }
@@ -1334,7 +1333,9 @@ export function buildBookHtml(input: BuildBookHtmlInput): string {
   const pageWmm = isPrint ? PRINT_PAGE_WIDTH_MM : DIGITAL_PAGE_WIDTH_MM;
   const pageHmm = isPrint ? PRINT_PAGE_HEIGHT_MM : DIGITAL_PAGE_HEIGHT_MM;
 
-  const pagesHtml = input.pages.map((p, i) => renderPage(p, input, i + 1, pageWmm)).join('');
+  const pagesHtml = input.pages
+    .map((p, i) => renderPage(p, input, gelatoInnerPageNumber(input.pages, i) ?? 0, pageWmm))
+    .join('');
 
   return buildHtmlDocument(input.coverTitle, pagesHtml, pageWmm, pageHmm, isPrint);
 }

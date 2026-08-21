@@ -30,6 +30,8 @@ import {
 
 const TAB_ICON_SIZE = scale(24);
 const TAB_ICON_ROW_H = scale(28);
+/** Disque Capturer hors écran : un peu plus grand que la ligne d’icônes. */
+const TAB_CAPTURE_PLUS_DISC = scale(34);
 const TAB_LABEL_LINE_H = scale(12);
 const TAB_ICON_LABEL_GAP = verticalScale(3);
 
@@ -52,11 +54,29 @@ function TabBarGlyph({
   Icon,
   focused,
   color,
+  captureHighlight = false,
 }: {
   Icon: LucideIcon;
   focused: boolean;
   color: string;
+  /** Rond orange charte autour du « + » hors écran Capturer. */
+  captureHighlight?: boolean;
 }) {
+  if (captureHighlight) {
+    return (
+      <View style={[styles.iconWrap, styles.iconWrapCaptureHighlight]}>
+        <View style={styles.capturePlusDisc} accessibilityElementsHidden>
+          <Plus
+            size={TAB_ICON_SIZE}
+            color="#FFFFFF"
+            fill="none"
+            strokeWidth={focused ? 2.25 : 2}
+          />
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.iconWrap}>
       <Icon size={TAB_ICON_SIZE} color={color} fill="none" strokeWidth={focused ? 2.25 : 2} />
@@ -150,6 +170,9 @@ export default function PetitmoContextTabBar({
             });
           };
 
+          const isCaptureTab = routeName === 'index';
+          const showCapturePlusHighlight = isCaptureTab && activeRoute !== 'index';
+
           return (
             <PetitmoTabBarButton
               key={route.key}
@@ -159,7 +182,12 @@ export default function PetitmoContextTabBar({
               onPress={onPress}
               onLongPress={onLongPress}
             >
-              <TabBarGlyph Icon={meta.Icon} focused={isFocused} color={tint} />
+              <TabBarGlyph
+                Icon={meta.Icon}
+                focused={isFocused}
+                color={tint}
+                captureHighlight={showCapturePlusHighlight}
+              />
               <Text
                 style={[
                   styles.tabLabel,
@@ -208,6 +236,17 @@ const styles = StyleSheet.create({
   },
   iconWrap: {
     height: TAB_ICON_ROW_H,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconWrapCaptureHighlight: {
+    height: TAB_CAPTURE_PLUS_DISC,
+  },
+  capturePlusDisc: {
+    width: TAB_CAPTURE_PLUS_DISC,
+    height: TAB_CAPTURE_PLUS_DISC,
+    borderRadius: TAB_CAPTURE_PLUS_DISC / 2,
+    backgroundColor: '#3C3C43',
     alignItems: 'center',
     justifyContent: 'center',
   },

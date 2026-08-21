@@ -123,7 +123,14 @@ export async function clearLocalAccountWorkspace(reason: string): Promise<void> 
 
   await clearSelectedChildAndCaptureSnapshot();
   setFeedHydrationSnapshots(null, [], []);
+  try {
+    const { setCachedPrintOrders } = await import('@/lib/printOrdersCache');
+    await setCachedPrintOrders([]);
+  } catch {
+    /* */
+  }
   DeviceEventEmitter.emit('petitmo:memories-invalidate');
+  DeviceEventEmitter.emit('petitmo:books-updated');
 }
 
 /**

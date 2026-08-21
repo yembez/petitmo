@@ -2,7 +2,16 @@ import { StyleSheet } from 'react-native';
 import { BOOK_PAGE_H_MM, BOOK_PAGE_W_MM } from '@/utils/bookPhotoPrintDpi';
 import type { BookPage } from '@/src/book/BookEngine';
 
-export type BookSpreadPageRow = { page: BookPage; pageNum: number };
+export type BookSpreadPageRow = {
+  page: BookPage;
+  /**
+   * Index absolu 1-based dans `pages` (couverture = 1).
+   * Navigation éditeur : `pageNum - 1`.
+   */
+  pageNum: number;
+  /** Folio Gelato intérieur (null cover / 4e) — affichage maquette / spread. */
+  folio: number | null;
+};
 
 export type BookSpreadRow = {
   kind: 'spread';

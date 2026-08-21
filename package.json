@@ -14,7 +14,8 @@
     "ios": "expo run:ios",
     "tf:ios": "eas build --platform ios --profile production --auto-submit",
     "dev:ios:build": "eas build --platform ios --profile dev-ios-device --clear-cache",
-    "ota:production": "eas update --channel production --environment production"
+    "ota:production": "eas update --channel production --environment production",
+    "postinstall": "patch-package"
   },
   "expo": {
     "autolinking": {
@@ -73,6 +74,7 @@
     "expo-print": "~15.0.8",
     "expo-router": "~6.0.23",
     "expo-screen-orientation": "~9.0.8",
+    "expo-share-intent": "^5.1.1",
     "expo-sharing": "~14.0.8",
     "expo-splash-screen": "~31.0.13",
     "expo-sqlite": "~16.0.10",
@@ -108,6 +110,7 @@
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@types/react": "~19.1.10",
+    "patch-package": "^8.0.1",
     "typescript": "~5.9.2",
     "vitest": "^3.2.6"
   }

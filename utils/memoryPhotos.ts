@@ -361,9 +361,14 @@ function primarySlotPrintPathRaw(memory: Memory): string {
   );
 }
 
-/** True si l’URI pointe vers un dérivé display (pas le fichier d’impression). */
+/** True si l’URI pointe vers un dérivé display/thumb (pas le fichier d’impression). */
 export function isBookDisplayDerivativeUri(uri: string): boolean {
-  return /\/display\.(jpe?g|webp|png)(\?|#|$)/i.test((uri ?? '').trim());
+  const t = (uri ?? '').trim();
+  if (!t) return false;
+  if (/\/display\.(jpe?g|webp|png)(\?|#|$)/i.test(t)) return true;
+  if (/\/thumb\.(jpe?g|webp|png)(\?|#|$)/i.test(t)) return true;
+  if (/\/(feed_)?thumb[_/]/i.test(t)) return true;
+  return false;
 }
 
 /** URIs **print uniquement** pour le badge / contrôle DPI (jamais display / thumb). */
@@ -399,8 +404,10 @@ export function collectBookPhotoDpiUriCandidates(args: {
       add(inferLocalPrintPathFromDisplay(memory.local_display_path));
     }
     add(memory.print_url);
+    add(memory.local_original_path);
+    add(memory.media_url);
   }
-  // Jamais `displayUri` lui-même — seulement le frère `print.jpg` s’il existe.
+  // Jamais `displayUri` / thumb pour le DPI — seulement le frère `print.jpg` s’il existe.
   if (displayUri) add(inferLocalPrintPathFromDisplay(displayUri));
   add(bookPrintUri ?? undefined);
   return out;
@@ -408,14 +415,22 @@ export function collectBookPhotoDpiUriCandidates(args: {
 
 /**
  * Pixels du fichier **print** (colonne SQLite) — pas original, pas display.
+ * Slot album > 0 : pas de `print_px_*` par case → `null` (mesurer l’URI du slot).
  * Sinon `null` : il faut mesurer l’URI print via `collectBookPhotoDpiUriCandidates`.
  */
 export function getBookPhotoPrintPixelSize(
   memory: Memory,
-  _photoRef?: string,
+  photoRef?: string | null,
 ): { w: number; h: number } | null {
   if (memory.type !== 'photo' && memory.type !== 'voice' && memory.type !== 'video') {
     return null;
+  }
+  if (memory.type === 'photo') {
+    const ref = photoRef?.trim() ?? '';
+    let slotIndex = ref ? indexOfPhotoUrlInFeed(memory, ref) : 0;
+    if (slotIndex < 0) slotIndex = 0;
+    // `print_px_*` = photo principale uniquement.
+    if (slotIndex > 0) return null;
   }
   const pw = memory.print_px_w;
   const ph = memory.print_px_h;

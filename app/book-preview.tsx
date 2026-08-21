@@ -26,6 +26,7 @@ import {
   Platform,
   type ListRenderItem,
 } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { useFonts, DMSans_400Regular, DMSans_400Regular_Italic, DMSans_500Medium, DMSans_600SemiBold, DMSans_700Bold } from '@expo-google-fonts/dm-sans';
 import { EBGaramond_400Regular, EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
 import { MEMORY_TEXT_FONT_SOURCES } from '@/constants/memoryTextFont';
@@ -68,7 +69,6 @@ import Reanimated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Image as ExpoImage } from 'expo-image';
 import { buildBookPages, type BookPage, type PhotoFullVariant } from '@/src/book/BookEngine';
 import { useBookQrTokenUrls } from '@/hooks/useBookQrTokenUrls';
 import { qrPreviewUrlForMemory, resolveBookQrTokensForPreview } from '@/services/bookQrPreview';
@@ -86,6 +86,7 @@ import {
   formatGelatoPrintPageCountLabel,
   gelatoCatalogPageCount,
   gelatoInnerPageCount,
+  gelatoInnerPageNumber,
   gelatoMinInnerPagesAlertMessage,
   GELATO_MIN_INNER_PAGES,
 } from '@/utils/bookGelatoInnerPages';
@@ -101,7 +102,7 @@ import {
   listLocalChildren,
   updateLocalMemoryContent,
 } from '@/lib/localDb';
-import { awaitVideoPosterForBookMemory, awaitVoiceCoverPrintDerivativeForMemory } from '@/services/memoryLocalStore';
+import { awaitVideoPosterForBookMemory, awaitVoiceCoverPrintDerivativeForMemory, awaitPhotoPrintDerivativesForMemory } from '@/services/memoryLocalStore';
 import { loadBookSelectionKeys, memoryIdFromBookSelectionKey } from '@/services/bookSelection';
 import {
   clearFavorisAddToBookSession,
@@ -193,8 +194,9 @@ const MAX_BOOK_SELECTION_KEYS = 80;
 
 /**
  * Spread paysage : deux pages → même gabarit Gelato 21×28 (voir `utils/bookSpreadLayout.ts`).
+ * `pageNum` = index absolu 1-based (nav) ; `folio` = numéro intérieur Gelato (affichage).
  */
-type PageRow = { page: BookPage; pageNum: number };
+type PageRow = { page: BookPage; pageNum: number; folio: number | null };
 
 type SpreadRow = {
   kind: 'spread';
@@ -532,7 +534,12 @@ export default function BookPreviewScreen() {
   }, [child, pages]);
 
   const pageRows = useMemo(
-    () => pages.map((page, i) => ({ page, pageNum: i + 1 })),
+    () =>
+      pages.map((page, i) => ({
+        page,
+        pageNum: i + 1,
+        folio: gelatoInnerPageNumber(pages, i),
+      })),
     [pages]
   );
 
@@ -1076,6 +1083,57 @@ export default function BookPreviewScreen() {
     }
   }, [bookMemories]);
 
+  const photoPrintBackfillRef = useRef(new Set<string>());
+  /** Photos sans print local : télécharge/génère puis seed DPI (réinstall cloud). */
+  useEffect(() => {
+    for (const m of bookMemories) {
+      if (m.type !== 'photo') continue;
+      if ((m.local_print_path ?? '').trim() && m.print_px_w && m.print_px_h) continue;
+      const hasLocalOrig = !!(m.local_original_path ?? '').trim();
+      const hasCloud =
+        !!(m.print_url ?? '').trim() ||
+        !!(m.display_url ?? '').trim() ||
+        !!(m.media_url ?? '').trim();
+      if (!hasLocalOrig && !hasCloud) continue;
+      if (photoPrintBackfillRef.current.has(m.id)) continue;
+      photoPrintBackfillRef.current.add(m.id);
+      void (async () => {
+        try {
+          const { materializeCloudMediaToSandboxForMemory } = await import(
+            '@/services/memoryCloudMaterialize'
+          );
+          await materializeCloudMediaToSandboxForMemory(m.id);
+          const updated = await awaitPhotoPrintDerivativesForMemory(m.id);
+          const pw = typeof updated?.print_px_w === 'number' ? updated.print_px_w : 0;
+          const ph = typeof updated?.print_px_h === 'number' ? updated.print_px_h : 0;
+          if (!(pw > 0 && ph > 0)) {
+            // Échec temporaire (réseau / URL pas encore pull) → réessayer plus tard.
+            photoPrintBackfillRef.current.delete(m.id);
+            return;
+          }
+          if (updated) {
+            setBookMemories(prev => prev.map(x => (x.id === updated.id ? updated : x)));
+          }
+          const mm = bookPrintFrameMmFor('photo-note');
+          setCropDpiMetaByKey(prev => ({
+            ...prev,
+            [m.id]: {
+              imgPxW: pw,
+              imgPxH: ph,
+              dpiPxW: pw,
+              dpiPxH: ph,
+              printMmW: mm.w,
+              printMmH: mm.h,
+              sourceUri: (updated?.local_print_path ?? prev[m.id]?.sourceUri ?? '').trim(),
+            },
+          }));
+        } catch {
+          photoPrintBackfillRef.current.delete(m.id);
+        }
+      })();
+    }
+  }, [bookMemories]);
+
   const videoPosterBackfillRef = useRef(new Set<string>());
   /**
    * Souvenirs vidéo du livre : `poster_print.jpg` à 3200 px (sinon badge ~147 DPI sur frame 1080p).
@@ -1142,16 +1200,18 @@ export default function BookPreviewScreen() {
           next[idx] = local;
           return next;
         });
-        // Vidéo / vocal : re-seed dpi depuis SQLite (ne pas vider — sinon crop spread ignore pan/zoom).
-        if (local.type === 'video' || local.type === 'voice') {
+        // Photo / vidéo / vocal : re-seed dpi dès que print_px arrive (réinstall → materialize).
+        if (local.type === 'photo' || local.type === 'video' || local.type === 'voice') {
           const pw = typeof local.print_px_w === 'number' ? local.print_px_w : 0;
           const ph = typeof local.print_px_h === 'number' ? local.print_px_h : 0;
           if (pw > 0 && ph > 0) {
-            const mm = bookPrintFrameMmFor(local.type === 'video' ? 'video' : 'audio');
+            const mm = bookPrintFrameMmFor(
+              local.type === 'video' ? 'video' : local.type === 'voice' ? 'audio' : 'photo-note',
+            );
             const uri =
               local.type === 'video'
                 ? peekSyncBookVideoPosterDisplayUri(local).trim()
-                : '';
+                : (local.local_print_path ?? '').trim();
             setCropDpiMetaByKey(prev => ({
               ...prev,
               [memoryId]: {
@@ -1209,8 +1269,16 @@ export default function BookPreviewScreen() {
       if (!raw) throw new Error('URI image vide');
       // Chemins Storage nus / Bundle leak → signer avant Image.getSize (sinon WARN Petitmo.app/…).
       let key = raw;
-      if (isBareMediaBucketPath(raw) || isAppBundleMediaLeakUri(raw)) {
-        const signed = (await getSignedMediaDisplayUrl(raw)).trim();
+      // URL Storage (même en https) : re-signer — les `*_url` en base expirent après 7 jours.
+      if (extractMediaBucketPath(raw)) {
+        const signed = (
+          await Promise.race([
+            getSignedMediaDisplayUrl(raw),
+            new Promise<string>((_, rej) =>
+              setTimeout(() => rej(new Error('sign timeout')), 5000),
+            ),
+          ])
+        ).trim();
         if (!signed || isBareMediaBucketPath(signed) || isAppBundleMediaLeakUri(signed)) {
           throw new Error('URI image non signable');
         }
@@ -1226,30 +1294,72 @@ export default function BookPreviewScreen() {
       const cached = imagePxCache[key] ?? imagePxCache[raw];
       if (cached && cached.w > 0 && cached.h > 0) return cached;
 
+      // Image.getSize ne callback parfois jamais (URL morte / HEIC / sandbox) → timeout obligatoire.
+      const GET_SIZE_MS = 3500;
       const fromRn = await new Promise<{ w: number; h: number } | null>(resolve => {
-        Image.getSize(
-          key,
-          (w, h) => {
-            if (w > 0 && h > 0) resolve({ w, h });
-            else resolve(null);
-          },
-          () => resolve(null)
-        );
+        let settled = false;
+        const done = (v: { w: number; h: number } | null) => {
+          if (settled) return;
+          settled = true;
+          resolve(v);
+        };
+        const timer = setTimeout(() => done(null), GET_SIZE_MS);
+        try {
+          Image.getSize(
+            key,
+            (w, h) => {
+              clearTimeout(timer);
+              if (w > 0 && h > 0) done({ w, h });
+              else done(null);
+            },
+            () => {
+              clearTimeout(timer);
+              done(null);
+            },
+          );
+        } catch {
+          clearTimeout(timer);
+          done(null);
+        }
       });
       if (fromRn) {
         setImagePxCache(prev => ({ ...prev, [key]: fromRn, [raw]: fromRn }));
         return fromRn;
       }
 
-      // `Image.getSize` échoue souvent sur certaines URL signées / chemins sandbox — expo-image-manipulator décode et expose les pixels.
-      // Ne pas appeler manipulateAsync sur du HTTPS distant (souvent « not readable »).
+      // RN Image.getSize échoue souvent sur URL signées / HEIC — ExpoImage décode mieux (y compris HTTPS).
+      try {
+        const loaded = await Promise.race([
+          ExpoImage.loadAsync(key),
+          new Promise<never>((_, rej) =>
+            setTimeout(() => rej(new Error('expo load timeout')), 8000),
+          ),
+        ]);
+        const scale = typeof loaded.scale === 'number' && loaded.scale > 0 ? loaded.scale : 1;
+        const w = Math.round(loaded.width * scale);
+        const h = Math.round(loaded.height * scale);
+        if (w > 0 && h > 0) {
+          const size = { w, h };
+          setImagePxCache(prev => ({ ...prev, [key]: size, [raw]: size }));
+          return size;
+        }
+      } catch {
+        /* essai manipulateur local ci-dessous */
+      }
+
+      // Dernier recours local : manipulateur (HTTPS souvent « not readable »).
       if (/^https?:\/\//i.test(key)) {
         throw new Error('Dimensions image introuvables');
       }
-      const decoded = await ImageManipulator.manipulateAsync(key, [], {
-        compress: 1,
-        format: ImageManipulator.SaveFormat.JPEG,
-      });
+      const decoded = await Promise.race([
+        ImageManipulator.manipulateAsync(key, [], {
+          compress: 1,
+          format: ImageManipulator.SaveFormat.JPEG,
+        }),
+        new Promise<never>((_, rej) =>
+          setTimeout(() => rej(new Error('manipulate timeout')), 8000),
+        ),
+      ]);
       const w = decoded.width;
       const h = decoded.height;
       if (!(w > 0 && h > 0)) throw new Error('Dimensions image introuvables');
@@ -1266,6 +1376,7 @@ export default function BookPreviewScreen() {
       uri: string;
       pageType: BookPhotoPageType;
       photoFullVariant?: PhotoFullVariant;
+      photoRef?: string;
       }): Promise<{
       imgPxW: number;
       imgPxH: number;
@@ -1302,10 +1413,13 @@ export default function BookPreviewScreen() {
           ? (bookSnapshot.coverPhotoUrl ?? '').trim()
           : undefined;
       const pagePhotoRef =
-        payload.pageType !== 'cover' && payload.storageKey.trim()
-          ? bookSnapshot?.memoryPhotoRefs?.[payload.storageKey.trim()]
+        payload.pageType !== 'cover'
+          ? (payload.photoRef ?? '').trim() ||
+            (payload.storageKey.trim()
+              ? bookSnapshot?.memoryPhotoRefs?.[payload.storageKey.trim()]
+              : undefined)
           : undefined;
-      const photoRefForDpi = coverRef ?? pagePhotoRef;
+      const photoRefForDpi = coverRef || pagePhotoRef;
       const mem = memoryForPayload();
 
       const bookPrintUri =
@@ -1336,6 +1450,8 @@ export default function BookPreviewScreen() {
       let bestDpiArea = 0;
       const considerDpiPx = (w: number, h: number) => {
         if (!(w > 0 && h > 0)) return;
+        // Vignettes fil (~480) / petits display : jamais pour le badge print (faux ~68 DPI).
+        if (Math.max(w, h) < 700) return;
         const area = w * h;
         if (area > bestDpiArea) {
           dpiW = w;
@@ -1348,14 +1464,20 @@ export default function BookPreviewScreen() {
         // Photo / audio / vidéo : dims print SQLite d’abord (poster vidéo upscalé 3200 px).
         // Sinon Image.getSize peut renvoyer l’ancienne frame 1080p (~147 DPI) juste après rewrite.
         const printPx = getBookPhotoPrintPixelSize(mem, photoRefForDpi);
-        if (printPx) considerDpiPx(printPx.w, printPx.h);
+        if (printPx) {
+          // Court-circuit : ne pas sonder N URI (Image.getSize peut ne jamais callback → badge bloqué).
+          return finish(
+            { w: printPx.w, h: printPx.h },
+            { w: printPx.w, h: printPx.h },
+          );
+        }
       }
 
       if (payload.pageType === 'video') {
         const posterCandidates = [payload.uri, bookPrintUri].filter(
           (u): u is string => typeof u === 'string' && u.trim().length > 0,
         );
-        for (const printUri of posterCandidates) {
+        for (const printUri of posterCandidates.slice(0, 2)) {
           try {
             const px = await getImagePx(printUri);
             considerDpiPx(px.w, px.h);
@@ -1364,10 +1486,12 @@ export default function BookPreviewScreen() {
           }
         }
       } else {
-        for (const printUri of dpiUriCandidates) {
+        // Max 3 candidats : évite une file d’attente de getSize sur URLs mortes après réinstall.
+        for (const printUri of dpiUriCandidates.slice(0, 3)) {
           try {
             const px = await getImagePx(printUri);
             considerDpiPx(px.w, px.h);
+            if (dpiW > 0 && dpiH > 0) break;
           } catch {
             /* essai suivant */
           }
@@ -1389,6 +1513,8 @@ export default function BookPreviewScreen() {
         }
       }
 
+      // Si seuls les pixels « display » sont connus → crop OK, mais DPI reste 0
+      // (sinon badge ~60–80 DPI sur vignette 480px = faux « rouge » massif).
       return finish({ w: displayW, h: displayH }, { w: dpiW, h: dpiH });
     },
     [bookMemories, bookSnapshot, getImagePx]
@@ -1400,12 +1526,17 @@ export default function BookPreviewScreen() {
       uri: string;
       pageType: BookPhotoPageType;
       photoFullVariant?: PhotoFullVariant;
+      photoRef?: string;
     }) => {
       void (async () => {
         let alreadyCached = false;
         setCropDpiMetaByKey(prev => {
           const cur = prev[payload.storageKey];
-          if (cur?.imgPxW > 0 && cur?.sourceUri === payload.uri) {
+          if (
+            cur?.imgPxW > 0 &&
+            (cur.dpiPxW ?? 0) > 0 &&
+            cur?.sourceUri === payload.uri
+          ) {
             const longSide = Math.max(cur.dpiPxW || 0, cur.dpiPxH || 0, cur.imgPxW || 0);
             // Poster vidéo : ne pas figer un cache ~1080p (~147 DPI) après rewrite 3200 px.
             const videoStaleLowRes =
@@ -1427,14 +1558,32 @@ export default function BookPreviewScreen() {
         const meta = await resolveCropDpiMeta(payload);
         setCropDpiMetaByKey(prev => {
           const cur = prev[payload.storageKey];
-          if (cur?.imgPxW > 0 && cur?.sourceUri === payload.uri) {
+          const curImgArea = Math.max(0, cur?.imgPxW ?? 0) * Math.max(0, cur?.imgPxH ?? 0);
+          const curDpiArea = Math.max(0, cur?.dpiPxW ?? 0) * Math.max(0, cur?.dpiPxH ?? 0);
+          const nextImgArea = Math.max(0, meta.imgPxW) * Math.max(0, meta.imgPxH);
+          const nextDpiArea = Math.max(0, meta.dpiPxW) * Math.max(0, meta.dpiPxH);
+          // Ne jamais écraser une meta utilisable par des zéros.
+          if (curImgArea > 0 && nextImgArea <= 0) return prev;
+          if (curDpiArea > 0 && nextDpiArea <= 0) {
+            // Garder les dpiPx existants, éventuellement enrichir img/mm.
+            return {
+              ...prev,
+              [payload.storageKey]: {
+                ...cur!,
+                imgPxW: meta.imgPxW > 0 ? meta.imgPxW : cur!.imgPxW,
+                imgPxH: meta.imgPxH > 0 ? meta.imgPxH : cur!.imgPxH,
+                printMmW: meta.printMmW > 0 ? meta.printMmW : cur!.printMmW,
+                printMmH: meta.printMmH > 0 ? meta.printMmH : cur!.printMmH,
+                sourceUri: payload.uri,
+              },
+            };
+          }
+          if (curImgArea > 0 && nextDpiArea > 0 && nextDpiArea < curDpiArea && curDpiArea > 0) {
             const dpiStale =
               (payload.pageType === 'cover' ||
                 payload.pageType === 'audio' ||
                 payload.pageType === 'video') &&
-              meta.dpiPxW > 0 &&
-              cur.dpiPxW > 0 &&
-              meta.dpiPxW > cur.dpiPxW;
+              meta.dpiPxW > (cur?.dpiPxW ?? 0);
             if (!dpiStale) return prev;
           }
           return { ...prev, [payload.storageKey]: meta };
@@ -1867,23 +2016,37 @@ export default function BookPreviewScreen() {
       if (!mFromPage) return null;
       const m = bookMemories.find(x => x.id === mFromPage.id) ?? mFromPage;
       if (page.type === 'photo-full' || page.type === 'photo-note') {
-        const photoRef = bookSnapshot?.memoryPhotoRefs?.[m.id];
-        const uri = getBookPhotoPrintUri(m, photoRef).trim();
+        const photoRef = photoRefFromBookPage(page, m.id, bookSnapshot?.memoryPhotoRefs);
+        // Print d’abord ; sinon display/cloud — sinon prefetch jamais lancé → pastille bloquée.
+        const uri =
+          getBookPhotoPrintUri(m, photoRef).trim() ||
+          getPhotoUriForBookMaquetteDisplay(m, photoRef).trim() ||
+          (m.local_display_path ?? '').trim() ||
+          (m.display_url ?? '').trim() ||
+          (m.print_url ?? '').trim() ||
+          (m.media_url ?? '').trim() ||
+          (m.thumb_url ?? '').trim();
         if (!uri) return null;
         return {
           storageKey: m.id,
           uri,
           pageType: page.type,
+          ...(photoRef ? { photoRef } : {}),
           ...(page.type === 'photo-full' ? { photoFullVariant: page.variant } : {}),
         };
       }
       if (page.type === 'audio') {
-        const uri = getVoiceCoverUriForBookEditorDisplay(m).trim();
+        const uri =
+          getVoiceCoverUriForBookEditorDisplay(m).trim() ||
+          (m.local_print_path ?? '').trim() ||
+          (m.voice_cover_path ?? '').trim();
         if (!uri) return null;
         return { storageKey: m.id, uri, pageType: 'audio' as const };
       }
       if (page.type === 'video') {
-        const uri = peekSyncBookVideoPosterDisplayUri(m).trim();
+        const uri =
+          peekSyncBookVideoPosterDisplayUri(m).trim() ||
+          (m.thumb_url ?? '').trim();
         if (!uri) return null;
         return { storageKey: m.id, uri, pageType: 'video' as const };
       }
@@ -1897,8 +2060,77 @@ export default function BookPreviewScreen() {
     const row = pageRows[editorPageIndex];
     if (!row) return;
     const payload = cropDpiPayloadForPageRow(row);
-    if (payload) prefetchCropDpiMeta(payload);
-  }, [cropDpiPayloadForPageRow, editorOpen, editorPageIndex, pageRows, prefetchCropDpiMeta]);
+    // Seed synchrone depuis SQLite (print_px) — ne pas attendre Image.getSize.
+    if (payload) {
+      const mm = bookPrintFrameMmFor(
+        payload.pageType,
+        'photoFullVariant' in payload ? payload.photoFullVariant : undefined,
+      );
+      const mem =
+        payload.storageKey === 'cover'
+          ? bookSnapshot
+            ? findBookCoverMemory(bookSnapshot)
+            : null
+          : bookMemories.find(m => m.id === payload.storageKey) ?? null;
+      const photoRef =
+        payload.storageKey === 'cover'
+          ? undefined
+          : ('photoRef' in payload ? payload.photoRef : undefined) ||
+            bookSnapshot?.memoryPhotoRefs?.[payload.storageKey];
+      const printPx = mem ? getBookPhotoPrintPixelSize(mem, photoRef) : null;
+      if (printPx && printPx.w > 0 && printPx.h > 0) {
+        setCropDpiMetaByKey(prev => {
+          const cur = prev[payload.storageKey];
+          if (cur?.imgPxW > 0 && cur?.dpiPxW > 0 && cur.printMmW > 0) return prev;
+          return {
+            ...prev,
+            [payload.storageKey]: {
+              imgPxW: printPx.w,
+              imgPxH: printPx.h,
+              dpiPxW: printPx.w,
+              dpiPxH: printPx.h,
+              printMmW: mm.w,
+              printMmH: mm.h,
+              sourceUri: payload.uri,
+            },
+          };
+        });
+      } else if (
+        mem?.type === 'photo' &&
+        payload.storageKey !== 'cover' &&
+        (!(mem.print_px_w && mem.print_px_h) || !(mem.local_print_path ?? '').trim())
+      ) {
+        // Page ouverte sans print local : forcer download immédiat (pas seulement le backfill batch).
+        void awaitPhotoPrintDerivativesForMemory(mem.id).then(updated => {
+          const pw = typeof updated?.print_px_w === 'number' ? updated.print_px_w : 0;
+          const ph = typeof updated?.print_px_h === 'number' ? updated.print_px_h : 0;
+          if (!(pw > 0 && ph > 0)) return;
+          setBookMemories(prev => prev.map(x => (x.id === updated!.id ? updated! : x)));
+          setCropDpiMetaByKey(prev => ({
+            ...prev,
+            [payload.storageKey]: {
+              imgPxW: pw,
+              imgPxH: ph,
+              dpiPxW: pw,
+              dpiPxH: ph,
+              printMmW: mm.w,
+              printMmH: mm.h,
+              sourceUri: (updated?.local_print_path ?? payload.uri).trim(),
+            },
+          }));
+        });
+      }
+      prefetchCropDpiMeta(payload);
+    }
+  }, [
+    bookMemories,
+    bookSnapshot,
+    cropDpiPayloadForPageRow,
+    editorOpen,
+    editorPageIndex,
+    pageRows,
+    prefetchCropDpiMeta,
+  ]);
 
   /** Spread browse : mesurer les posters A/V pour appliquer crop sans bandeau gris. */
   useEffect(() => {
@@ -1912,7 +2144,7 @@ export default function BookPreviewScreen() {
 
   const renderMaquettePage = useCallback(
     (row: PageRow): ReactElement => {
-      const { page, pageNum } = row;
+      const { page, folio } = row;
       const m = memoryForMaquette(page, merge);
       const rot = m ? rotations[m.id] ?? 0 : 0;
       const qrUrl = qrPreviewUrlForMemory(m?.id, qrTokensByMemoryId);
@@ -1922,7 +2154,7 @@ export default function BookPreviewScreen() {
       return (
         <MaquetteBookPages
           page={page}
-          pageNum={pageNum}
+          pageNum={folio ?? 0}
           width={editorPage.w}
           height={editorPage.h}
           child={child!}
@@ -3355,10 +3587,13 @@ export default function BookPreviewScreen() {
                   disabled={!editOk}
                   activeOpacity={0.75}
                   accessibilityRole="button"
+                  accessibilityLabel={t('book.toolbarWriteA11y')}
                 >
                   <View style={styles.pillInner}>
                     <Pencil size={14} color={THEME.textSecondary} strokeWidth={2} />
-                    <Text style={[styles.pillText, dm400 && { fontFamily: dm400 }]}>Modifier</Text>
+                    <Text style={[styles.pillText, dm400 && { fontFamily: dm400 }]}>
+                      {t('book.toolbarWrite')}
+                    </Text>
                   </View>
                 </TouchableOpacity>
               </View>

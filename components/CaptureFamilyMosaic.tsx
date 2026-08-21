@@ -13,14 +13,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { scale, verticalScale } from '@/utils/responsive';
 import { THEME } from '@/constants/theme';
 import type { Child } from '@/types/local';
-import { resolveChildProfileImageDisplayUri } from '@/utils/childPhotoUri';
 import { childDisplayGivenName, childDisplayInitial } from '@/utils/childDisplayName';
 import { formatCaptureChildAge } from '@/utils/date';
 import {
   CAPTURE_HERO_IMAGE_CONTENT_POSITION,
   CAPTURE_HERO_IMAGE_OBJECT_POSITION,
 } from '@/utils/captureHeroMetrics';
-import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
+import { useChildProfileDisplayUri } from '@/hooks/useChildProfileDisplayUri';
 import { computeCaptureMosaicRows } from '@/utils/captureMosaicLayout';
 import { loadedFontStyle } from '@/utils/loadedFontStyle';
 
@@ -51,27 +50,7 @@ const CaptureMosaicTile = memo(function CaptureMosaicTile({
   nameFontFamily?: string;
   ageFontFamily?: string;
 }) {
-  const displayUri = resolveChildProfileImageDisplayUri(
-    child.local_photo_path,
-    child.photo_url,
-    child.updated_at,
-  );
-  const isLocal =
-    !!displayUri &&
-    (displayUri.startsWith('file:') ||
-      displayUri.startsWith('content:') ||
-      displayUri.startsWith('ph://') ||
-      (!displayUri.startsWith('http://') && !displayUri.startsWith('https://')));
-  const remoteBase =
-    child && !isLocal
-      ? resolveChildProfileImageDisplayUri(null, child.photo_url, child.updated_at)
-      : null;
-  const signedRemote = useSignedMediaUrl(remoteBase);
-  const photoUri = displayUri
-    ? isLocal
-      ? displayUri
-      : signedRemote ?? displayUri
-    : '';
+  const photoUri = useChildProfileDisplayUri(child);
   const givenName = childDisplayGivenName(child.name) || 'Enfant';
   const ageLabel = child.birthdate ? formatCaptureChildAge(child.birthdate) : '';
 

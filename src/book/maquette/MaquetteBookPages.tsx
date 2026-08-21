@@ -611,6 +611,16 @@ function buildInlineCropProps(config: InlineCropConfig | undefined, storageKey: 
   };
 }
 
+/** Ignore `0` (meta async ratée) pour ne pas masquer print_px SQLite. */
+function positiveImgPx(
+  primary?: number | null,
+  fallback?: number | null,
+): number | undefined {
+  if (typeof primary === 'number' && primary > 0) return primary;
+  if (typeof fallback === 'number' && fallback > 0) return fallback;
+  return undefined;
+}
+
 /** Bandeau visuel à pleine largeur de page, avec marge blanche autour de l'image (cadre inséré). */
 function VisualBand({
   width,
@@ -683,6 +693,7 @@ function Folio({
   pageWidthPx: number;
   pageHeightPx: number;
 }) {
+  if (!(n > 0)) return null;
   const folio = pdfFolioStyle(pageWidthPx, pageHeightPx);
   return (
     <Text
@@ -1031,8 +1042,8 @@ function MaquetteCover({
 
   const canPickCover = !!onPressCoverPhoto;
   const coverInline = buildInlineCropProps(inlineCropConfig, 'cover');
-  const coverImgPxW = coverPhotoImgPxW ?? coverInline?.dpiMeta?.imgPxW;
-  const coverImgPxH = coverPhotoImgPxH ?? coverInline?.dpiMeta?.imgPxH;
+  const coverImgPxW = positiveImgPx(coverPhotoImgPxW, coverInline?.dpiMeta?.imgPxW);
+  const coverImgPxH = positiveImgPx(coverPhotoImgPxH, coverInline?.dpiMeta?.imgPxH);
 
   const coverHasDims = (coverImgPxW ?? 0) > 0 && (coverImgPxH ?? 0) > 0;
   const coverUseInlineCrop = !!coverInline && coverHasDims;
@@ -1175,8 +1186,8 @@ function MaquettePhotoSimple({
   const bookLoc = bookMaquetteLocationLabel(memory);
   const photoInline = buildInlineCropProps(inlineCropConfig, memory.id);
   const printPx = getBookPhotoPrintPixelSize(memory, memoryPhotoRef);
-  const frameImgPxW = photoInline?.dpiMeta?.imgPxW ?? printPx?.w;
-  const frameImgPxH = photoInline?.dpiMeta?.imgPxH ?? printPx?.h;
+  const frameImgPxW = positiveImgPx(photoInline?.dpiMeta?.imgPxW, printPx?.w);
+  const frameImgPxH = positiveImgPx(photoInline?.dpiMeta?.imgPxH, printPx?.h);
 
   const imageBand = isFp ? (
     <FullBleedBand width={width} bandH={imgH}>
@@ -1323,8 +1334,8 @@ function MaquettePhotoNote({
   const bookLoc = bookMaquetteLocationLabel(memory);
   const photoInline = buildInlineCropProps(inlineCropConfig, memory.id);
   const printPx = getBookPhotoPrintPixelSize(memory, memoryPhotoRef);
-  const frameImgPxW = photoInline?.dpiMeta?.imgPxW ?? printPx?.w;
-  const frameImgPxH = photoInline?.dpiMeta?.imgPxH ?? printPx?.h;
+  const frameImgPxW = positiveImgPx(photoInline?.dpiMeta?.imgPxW, printPx?.w);
+  const frameImgPxH = positiveImgPx(photoInline?.dpiMeta?.imgPxH, printPx?.h);
 
   return (
     <View style={[styles.paper, { width, height }]}>
@@ -1797,10 +1808,14 @@ function MaquetteMediaQr({
       : undefined;
   const voicePrintPx = kind === 'audio' ? getBookPhotoPrintPixelSize(memory) : null;
   /** Vidéo : dims poster uniquement (dpiMeta / mesure), jamais `print_px` vidéo. */
-  const voiceImgPxW =
-    photoInline?.dpiMeta?.imgPxW ?? photoImgPxW ?? voicePrintPx?.w;
-  const voiceImgPxH =
-    photoInline?.dpiMeta?.imgPxH ?? photoImgPxH ?? voicePrintPx?.h;
+  const voiceImgPxW = positiveImgPx(
+    photoInline?.dpiMeta?.imgPxW,
+    photoImgPxW ?? voicePrintPx?.w,
+  );
+  const voiceImgPxH = positiveImgPx(
+    photoInline?.dpiMeta?.imgPxH,
+    photoImgPxH ?? voicePrintPx?.h,
+  );
   const voiceVisualUri =
     kind === 'audio'
       ? getVoiceCoverUriForBookEditorDisplay(memory) || getVoiceCoverUriForBookPreview(memory)

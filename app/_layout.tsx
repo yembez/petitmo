@@ -12,6 +12,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as ScreenOrientation from 'expo-screen-orientation';
+import { ShareIntentProvider } from 'expo-share-intent';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { THEME } from '@/constants/theme';
 import { ensurePlaybackAudioForListening } from '@/lib/playbackAudioMode';
@@ -48,11 +49,12 @@ import { enrichSentryUserContext, initPetitmoSentry, Sentry } from '@/lib/sentry
 initPetitmoSentry();
 void SplashScreen.preventAutoHideAsync();
 
-function RootLayout() {
+function RootLayoutNav() {
   useFrameworkReady();
   const [bootFontsLoaded, bootFontsError] = useFonts(APP_BOOT_FONT_SOURCES);
   const bootFontsReady = bootFontsLoaded || !!bootFontsError;
   const [isAuthReady, setIsAuthReady] = useState(false);
+  const [forceBootPastSplash, setForceBootPastSplash] = useState(false);
   const pathname = usePathname();
 
   /** Portrait partout sauf prévisualisation livre (paysage au pivot). */
@@ -191,11 +193,11 @@ function RootLayout() {
     };
   }, [isAuthReady]);
 
-  // Backup cloud (premium uniquement) : déclenché après auth ready.
+  // Backup / restore livres (compte produit gratuit ou paid) : après auth ready.
   useEffect(() => {
     if (!isAuthReady) return;
     // Ordre important:
-    // 1) restauration cloud → SQLite (si premium)
+    // 1) restauration cloud → SQLite
     // 2) puis backup (merge “le plus récent gagne”, donc sans perte)
     void (async () => {
       await flushPendingBookDeletesToSupabase();
@@ -225,7 +227,17 @@ function RootLayout() {
     void SplashScreen.hideAsync();
   }, [bootFontsReady, isAuthReady]);
 
-  if (!isAuthReady || !bootFontsReady) {
+  /** Filet anti-blocage splash (fonts / auth / OTA incompatible) — local-first. */
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setForceBootPastSplash(true);
+      setIsAuthReady(true);
+      void SplashScreen.hideAsync();
+    }, 6000);
+    return () => clearTimeout(t);
+  }, []);
+
+  if ((!isAuthReady || !bootFontsReady) && !forceBootPastSplash) {
     return <View style={styles.bootShell} />;
   }
 
@@ -263,6 +275,13 @@ function RootLayout() {
         <Stack.Screen name="camera" />
         <Stack.Screen name="record-voice" />
         <Stack.Screen name="import-media" />
+        <Stack.Screen
+          name="shareintent"
+          options={{
+            animation: 'none',
+            contentStyle: { flex: 1, backgroundColor: THEME.bgScreen },
+          }}
+        />
         <Stack.Screen name="edit-photo" />
         <Stack.Screen
           name="memory-viewer"
@@ -314,5 +333,19 @@ const styles = StyleSheet.create({
     backgroundColor: THEME.bgScreen,
   },
 });
+
+function RootLayout() {
+  return (
+    <ShareIntentProvider
+      options={{
+        /** Logs natifs uniquement en Metro — évite du bruit / effets de bord en TestFlight. */
+        debug: false,
+        resetOnBackground: true,
+      }}
+    >
+      <RootLayoutNav />
+    </ShareIntentProvider>
+  );
+}
 
 export default Sentry.wrap(RootLayout);

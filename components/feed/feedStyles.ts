@@ -411,18 +411,20 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   /** Âge famille — bas gauche du média (remplace l’ancienne pastille date doublon). */
+  /** Prénom + âge : bas-droite (évite de masquer le play audio à gauche). */
   feedAgePillBar: {
     position: 'absolute',
-    left: scale(12),
+    right: scale(12),
     bottom: scale(12),
     zIndex: 6,
     maxWidth: '72%',
+    alignItems: 'flex-end',
   },
   feedAgePillBarInline: {
     paddingHorizontal: scale(12),
     paddingBottom: scale(10),
     paddingTop: scale(2),
-    alignSelf: 'flex-start',
+    alignSelf: 'flex-end',
     maxWidth: '72%',
   },
   feedMetaPillWrapLeft: {

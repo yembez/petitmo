@@ -9,7 +9,7 @@ import MaquetteBookPages from '@/src/book/maquette/MaquetteBookPages';
 import { BookPreviewZoomWrap } from '@/components/BookPreviewZoomWrap';
 import { computeLandscapeSpreadLayout, type BookSpreadRow } from '@/utils/bookSpreadLayout';
 
-type PageRow = { page: BookPage; pageNum: number };
+type PageRow = { page: BookPage; pageNum: number; folio: number | null };
 
 function memoryForMaquette(page: BookPage, memory: Memory | null): Memory | null {
   switch (page.type) {
@@ -93,7 +93,7 @@ function SpreadMaquettePage({
     <View style={[styles.spreadPageCenter, { width: dims.width, height: dims.height }]}>
       <MaquetteBookPages
         page={row.page}
-        pageNum={row.pageNum}
+        pageNum={row.folio ?? 0}
         width={dims.width}
         height={dims.height}
         child={child}
