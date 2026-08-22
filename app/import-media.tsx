@@ -16,6 +16,7 @@ import { scale, verticalScale } from '@/utils/responsive';
 import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
 import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
+import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import PermissionModal from '@/components/PermissionModal';
 import ImportBatchLayoutModal from '@/components/ImportBatchLayoutModal';
 import { FeedMediaPrepOverlay } from '@/components/FeedMediaPrepOverlay';
@@ -31,10 +32,8 @@ import { mediaDurationToSeconds } from '@/utils/mediaDuration';
 import { promptFreeTierLimitThenPaywall } from '@/utils/freeTierLimitGate';
 import { IMPORT_DUPLICATE_ASSET } from '@/lib/importDuplicate';
 import { buildAlbumImportFingerprint, dedupePickerAssetsByLibraryId } from '@/utils/importLibraryDedupe';
-import {
-  openVideoTrimEditorOnUri,
-  VideoTrimNativeMissingError,
-} from '@/services/videoTrimEditor';
+import { VideoTrimModal } from '@/components/VideoTrimModal';
+import { isVideoTrimNativeAvailable } from '@/services/videoTrimNative';
 import { takePendingSharedImport } from '@/lib/pendingShareMedia';
 
 type ImportStickerPreview = {
@@ -161,6 +160,11 @@ export default function ImportMediaScreen() {
   const [batchChoice, setBatchChoice] = useState<{
     assets: ImagePicker.ImagePickerAsset[];
     preview: ImportStickerPreview;
+  } | null>(null);
+  const [videoTrimRequest, setVideoTrimRequest] = useState<{
+    asset: ImagePicker.ImagePickerAsset;
+    maxDurationSec: number;
+    resolve: (asset: ImagePicker.ImagePickerAsset | null) => void;
   } | null>(null);
   const autoGalleryLaunchedRef = useRef(false);
   /** 0 = pas de plafond picker (gratuit : on gère le message 20 s après sélection). */
@@ -551,107 +555,33 @@ export default function ImportMediaScreen() {
 
           /** +1 s de marge : métadonnées galerie souvent arrondies. */
           if (durationSec > maxVideoSec + 1) {
+            if (!isVideoTrimNativeAvailable()) {
+              Alert.alert(
+                t('videoTrim.needsRebuildTitle'),
+                t('videoTrim.needsRebuildBody'),
+                [{ text: 'OK', onPress: () => router.replace('/(tabs)/fil') }],
+              );
+              return 'left';
+            }
+
             const trimmedAsset = await new Promise<ImagePicker.ImagePickerAsset | null>(resolve => {
-              const runTrimLoop = () => {
-                const body = isFreeTierRef.current
-                  ? `En mode gratuit, la vidéo ne peut pas dépasser ${FREE_TIER_VIDEO_MAX_DURATION} secondes pour des raisons de coût de stockage.`
-                  : `Pour garder vos souvenirs légers et fiables, la vidéo ne peut pas dépasser 3 minutes.`;
-                const buttons: {
-                  text: string;
-                  style?: 'cancel' | 'default' | 'destructive';
-                  onPress: () => void;
-                }[] = [
-                  {
-                    text: 'Annuler',
-                    style: 'cancel',
-                    onPress: () => resolve(null),
-                  },
-                ];
-                if (isFreeTierRef.current) {
-                  buttons.push({
-                    text: 'Passer à Petitmo+',
-                    onPress: () => {
-                      router.replace({
-                        pathname: '/paywall',
-                        params: { context: 'GENERAL', returnTo: 'fil' },
-                      });
-                      resolve(null);
-                    },
-                  });
-                }
-                buttons.push({
-                  text: 'Raccourcir la vidéo',
-                  onPress: () => {
-                    void (async () => {
-                      try {
-                        const trimmed = await openVideoTrimEditorOnUri(v.uri, {
-                          maxDurationSec: maxVideoSec,
-                        });
-                        if (!trimmed?.uri) {
-                          runTrimLoop();
-                          return;
-                        }
-                        const outSec =
-                          trimmed.durationSec > 0 ? trimmed.durationSec : maxVideoSec;
-                        if (outSec > maxVideoSec + 1) {
-                          Alert.alert(
-                            'Encore trop longue',
-                            isFreeTierRef.current
-                              ? `Garde un extrait d’au plus ${FREE_TIER_VIDEO_MAX_DURATION} secondes.`
-                              : 'Garde un extrait d’au plus 3 minutes.',
-                            [
-                              { text: 'Réessayer', onPress: () => runTrimLoop() },
-                              {
-                                text: 'Annuler',
-                                style: 'cancel',
-                                onPress: () => resolve(null),
-                              },
-                            ],
-                          );
-                          return;
-                        }
-                        resolve({
-                          ...v,
-                          uri: trimmed.uri,
-                          duration: outSec * 1000,
-                          type: 'video',
-                          fileName: v.fileName ?? `trim-${Date.now()}.mp4`,
-                          mimeType: v.mimeType ?? 'video/mp4',
-                        });
-                      } catch (e) {
-                        if (e instanceof VideoTrimNativeMissingError) {
-                          Alert.alert(
-                            'Mise à jour requise',
-                            'Le coupe-vidéo nécessite un nouveau build de l’app (dev ou TestFlight). Relance npm run dev:ios:build ou npm run tf:ios, puis réessaie.',
-                            [{ text: 'OK', onPress: () => resolve(null) }],
-                          );
-                          return;
-                        }
-                        console.warn('[import-media] trim', e);
-                        Alert.alert(
-                          'Impossible de raccourcir',
-                          isFreeTierRef.current
-                            ? 'Réessaie ou passe à Petitmo+.'
-                            : 'Réessaie avec un extrait plus court.',
-                          [
-                            { text: 'Réessayer', onPress: () => runTrimLoop() },
-                            {
-                              text: 'Annuler',
-                              style: 'cancel',
-                              onPress: () => resolve(null),
-                            },
-                          ],
-                        );
-                      }
-                    })();
-                  },
-                });
-                Alert.alert('Vidéo trop longue', body, buttons);
-              };
-              runTrimLoop();
+              setVideoTrimRequest({
+                asset: v,
+                maxDurationSec: maxVideoSec,
+                resolve,
+              });
             });
             if (!trimmedAsset) {
               router.replace('/(tabs)/fil');
+              return 'left';
+            }
+            const outSec = mediaDurationToSeconds(trimmedAsset.duration);
+            if (outSec > maxVideoSec + 1) {
+              Alert.alert(
+                t('videoTrim.stillTooLongTitle'),
+                t('videoTrim.stillTooLongBody', { max: maxVideoSec }),
+                [{ text: 'OK', onPress: () => router.replace('/(tabs)/fil') }],
+              );
               return 'left';
             }
             const metaTrim = await buildImportMetadataFromPickerAsset(trimmedAsset, { isVideo: true });
@@ -703,7 +633,7 @@ export default function ImportMediaScreen() {
         return 'not_committed';
       }
     },
-    [commitSelection, setBatchChoice, router],
+    [commitSelection, setBatchChoice, router, t],
   );
 
   const pickFromLibrary = useCallback(async (): Promise<PickResult> => {
@@ -810,10 +740,56 @@ export default function ImportMediaScreen() {
     />
   );
 
+  const videoTrimModalEl = (
+    <VideoTrimModal
+      visible={videoTrimRequest != null}
+      videoUri={videoTrimRequest?.asset.uri ?? ''}
+      durationSec={
+        videoTrimRequest?.asset.duration != null
+          ? mediaDurationToSeconds(videoTrimRequest.asset.duration)
+          : 0
+      }
+      maxDurationSec={videoTrimRequest?.maxDurationSec ?? FREE_TIER_VIDEO_MAX_DURATION}
+      isFreeTier={isFreeTierRef.current}
+      onCancel={() => {
+        const req = videoTrimRequest;
+        setVideoTrimRequest(null);
+        req?.resolve(null);
+      }}
+      onConfirm={result => {
+        const req = videoTrimRequest;
+        if (!req) return;
+        setVideoTrimRequest(null);
+        req.resolve({
+          ...req.asset,
+          uri: result.uri,
+          duration: result.durationSec * 1000,
+          type: 'video',
+          fileName: req.asset.fileName ?? `trim-${Date.now()}.mp4`,
+          mimeType: req.asset.mimeType ?? 'video/mp4',
+        });
+      }}
+      onUpgrade={
+        isFreeTierRef.current
+          ? () => {
+              const req = videoTrimRequest;
+              setVideoTrimRequest(null);
+              req?.resolve(null);
+              router.replace({
+                pathname: '/paywall',
+                params: { context: 'GENERAL', returnTo: 'fil' },
+              });
+            }
+          : undefined
+      }
+    />
+  );
+
   if (hasPermission === null) {
     return (
       <>
         {batchLayoutModalEl}
+        {videoTrimModalEl}
         <View style={styles.container} />
       </>
     );
@@ -823,6 +799,7 @@ export default function ImportMediaScreen() {
     return (
       <>
         {batchLayoutModalEl}
+        {videoTrimModalEl}
         <View style={styles.container} />
         <PermissionModal
           visible={showPermissionModal}
@@ -838,6 +815,7 @@ export default function ImportMediaScreen() {
     return (
       <>
         {batchLayoutModalEl}
+        {videoTrimModalEl}
         <View style={styles.container}>
           <FeedMediaPrepOverlay label={t('mediaPrep.addingToFeed')} />
         </View>
@@ -850,6 +828,7 @@ export default function ImportMediaScreen() {
     return (
       <>
         {batchLayoutModalEl}
+        {videoTrimModalEl}
         <View style={styles.container}>
           <View style={styles.galleryOpeningWrap}>
             <ActivityIndicator size="large" color={THEME.accent} />
@@ -859,9 +838,21 @@ export default function ImportMediaScreen() {
     );
   }
 
+  /** Pendant l’éditeur de coupe vidéo : modal plein écran uniquement. */
+  if (videoTrimRequest != null) {
+    return (
+      <>
+        {batchLayoutModalEl}
+        {videoTrimModalEl}
+        <View style={styles.container} />
+      </>
+    );
+  }
+
   return (
     <>
       {batchLayoutModalEl}
+      {videoTrimModalEl}
       <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
@@ -879,14 +870,14 @@ export default function ImportMediaScreen() {
             <Text style={styles.subtitle}>
               Aucun média sélectionné. Rouvre la bibliothèque pour choisir des photos ou une vidéo.
             </Text>
-            <TouchableOpacity
-              style={[petitmoCtaStyles.primary, styles.fallbackPrimaryBtn]}
+            <PetitmoPrimaryPressable
+              style={styles.fallbackPrimaryBtn}
               onPress={() => void pickFromLibrary()}
             >
               <Text style={[petitmoCtaStyles.primaryText, styles.fallbackPrimaryText]}>
                 Ouvrir photos et vidéos
               </Text>
-            </TouchableOpacity>
+            </PetitmoPrimaryPressable>
           </View>
         )}
       </View>

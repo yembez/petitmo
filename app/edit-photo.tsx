@@ -19,6 +19,7 @@ import { scale as scaleUtil, verticalScale } from '@/utils/responsive';
 import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
 import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
+import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system';
 import { supabase } from '@/lib/supabase';
@@ -562,12 +563,12 @@ export default function EditPhotoScreen() {
     return (
       <View style={[styles.container, styles.centered]}>
         <Text style={styles.errorText}>Aucune image à éditer</Text>
-        <TouchableOpacity
+        <PetitmoPrimaryPressable
           onPress={() => router.back()}
-          style={[petitmoCtaStyles.primary, styles.errorButton]}
+          style={styles.errorButton}
         >
           <Text style={[petitmoCtaStyles.primaryText, styles.errorButtonText]}>Retour</Text>
-        </TouchableOpacity>
+        </PetitmoPrimaryPressable>
       </View>
     );
   }

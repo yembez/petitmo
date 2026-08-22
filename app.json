@@ -10,14 +10,14 @@
       "checkAutomatically": "ON_LOAD"
     },
     "orientation": "default",
-    "icon": "./assets/Logo_icon_heart_petitmo_squared.png",
+    "icon": "./assets/images/widget_petitmo_gradient.png",
     "scheme": "petitmo",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/Splash_petitmo_2.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#FC6C39"
+      "image": "./assets/Splash_petitmo_gradient.png",
+      "resizeMode": "cover",
+      "backgroundColor": "#FD6F9F"
     },
     "locales": {
       "fr": "./locales/fr.json",
@@ -48,8 +48,8 @@
     "android": {
       "package": "com.petitmo.app",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/Logo_icon_1_transp_2.png",
-        "backgroundColor": "#FC6C39"
+        "foregroundImage": "./assets/images/widget_petitmo_gradient.png",
+        "backgroundColor": "#FD6F9F"
       },
       "permissions": [
         "android.permission.CAMERA",
@@ -112,7 +112,7 @@
         "expo-notifications",
         {
           "icon": "./assets/Logo_icon_1_transp_2.png",
-          "color": "#FF7F4F",
+          "color": "#FD7764",
           "sounds": []
         }
       ]

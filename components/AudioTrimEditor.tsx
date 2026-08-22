@@ -7,7 +7,7 @@ import { scale } from '@/utils/responsive';
 const THUMB_R_DEFAULT = scale(12);
 const WAVE_BARS_EDITOR = 46;
 /** Orange vif type maquette (ondes actives / poignées) */
-const TRIM_ORANGE = '#FF6B35';
+const TRIM_ACCENT = THEME.brandCtaOrange;
 const BAR_GREY_OUT = '#E5E7EB';
 
 function fmt(seconds: number): string {
@@ -263,7 +263,7 @@ export const AudioTrimEditor = memo(function AudioTrimEditor(props: {
     return (
       <View style={styles.editorRoot}>
         <View style={styles.editorTitleRow}>
-          <Scissors size={scale(22)} color={TRIM_ORANGE} strokeWidth={2.2} />
+          <Scissors size={scale(22)} color={TRIM_ACCENT} strokeWidth={2.2} />
           <Text style={styles.editorTitle}>Choisir le meilleur moment</Text>
         </View>
         <Text style={styles.editorSub}>
@@ -291,7 +291,7 @@ export const AudioTrimEditor = memo(function AudioTrimEditor(props: {
                         styles.editorBar,
                         {
                           height: Math.max(scale(4), h),
-                          backgroundColor: active ? TRIM_ORANGE : BAR_GREY_OUT,
+                          backgroundColor: active ? TRIM_ACCENT : BAR_GREY_OUT,
                         },
                       ]}
                     />
@@ -455,7 +455,7 @@ const styles = StyleSheet.create({
     top: scale(16),
     bottom: scale(46),
     width: scale(2),
-    backgroundColor: TRIM_ORANGE,
+    backgroundColor: TRIM_ACCENT,
     borderRadius: scale(1),
   },
   editorKnobRow: {

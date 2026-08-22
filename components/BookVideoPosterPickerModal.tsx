@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   Pressable,
-  TouchableOpacity,
   ActivityIndicator,
   PanResponder,
   Alert,
@@ -15,6 +14,7 @@ import { X, Play, Pause } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Memory } from '@/types/local';
 import { THEME } from '@/constants/theme';
+import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import { formatDuration } from '@/utils/date';
 import { scale } from '@/utils/responsive';
 import { resolveReadableVideoPlaybackUri } from '@/utils/videoMediaUri';
@@ -345,8 +345,8 @@ export function BookVideoPosterPickerModal({ visible, memory, onClose, onSaved }
         </View>
       </View>
 
-      <TouchableOpacity
-        style={[styles.cta, !canSave && styles.ctaDisabled]}
+      <PetitmoPrimaryPressable
+        style={styles.cta}
         onPress={() => void handleSave()}
         disabled={!canSave}
         activeOpacity={0.85}
@@ -357,7 +357,7 @@ export function BookVideoPosterPickerModal({ visible, memory, onClose, onSaved }
         ) : (
           <Text style={styles.ctaText}>{t('book.videoPoster.useImage')}</Text>
         )}
-      </TouchableOpacity>
+      </PetitmoPrimaryPressable>
     </View>
   );
 }
@@ -463,18 +463,14 @@ const styles = StyleSheet.create({
     borderColor: '#FFFFFF',
   },
   cta: {
-    backgroundColor: THEME.brandCtaOrange,
     borderRadius: 12,
     paddingVertical: 15,
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 50,
   },
-  ctaDisabled: {
-    opacity: 0.55,
-  },
   ctaText: {
-    color: '#FFFFFF',
+    color: THEME.captureScreenCtaForeground,
     fontSize: 15,
     fontWeight: '700',
   },

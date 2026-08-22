@@ -20,6 +20,7 @@ import { ChevronLeft } from 'lucide-react-native';
 import { THEME } from '@/constants/theme';
 import { FONT_SIZES, ICON_SIZES, SPACING } from '@/constants/sizes';
 import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
+import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import { scale, verticalScale } from '@/utils/responsive';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
@@ -202,13 +203,8 @@ export default function AuthVerifyOtpScreen() {
             accessibilityLabel={t('auth.otpTitle')}
           />
 
-          <TouchableOpacity
-            style={[
-              petitmoCtaStyles.primary,
-              petitmoCtaStyles.primaryFullWidth,
-              styles.cta,
-              (busy || code.length !== OTP_LENGTH) && petitmoCtaStyles.primaryDisabled,
-            ]}
+          <PetitmoPrimaryPressable
+            style={[petitmoCtaStyles.primaryFullWidth, styles.cta]}
             disabled={busy || code.length !== OTP_LENGTH}
             onPress={() => void onVerify(code)}
             activeOpacity={0.9}
@@ -220,7 +216,7 @@ export default function AuthVerifyOtpScreen() {
                 {t('auth.otpVerifyCta')}
               </Text>
             )}
-          </TouchableOpacity>
+          </PetitmoPrimaryPressable>
 
           <TouchableOpacity
             onPress={onResend}

@@ -16,7 +16,8 @@
 
 import React, { useEffect } from 'react'
 import { StyleSheet } from 'react-native'
-import { THEME } from '@/constants/theme'
+import { LinearGradient } from 'expo-linear-gradient'
+import { BRAND_ACTION_GRADIENT } from '@/constants/captureScreenPalette'
 import Svg, { Path, G, Defs, ClipPath, Rect } from 'react-native-svg'
 import Animated, {
   useSharedValue,
@@ -52,7 +53,6 @@ const HEART_CX = 197
 const HEART_CY = 27
 
 // Couleurs
-const BG_COLOR   = '#fc5757'
 const LOGO_FILL  = '#FEFBFD'
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -127,6 +127,12 @@ export default function SplashAnimation({ onFinished }: Props) {
 
   return (
     <Animated.View style={[styles.container, containerStyle]}>
+      <LinearGradient
+        colors={[...BRAND_ACTION_GRADIENT]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFillObject}
+      />
       <Svg
         width="85%"
         height={undefined}
@@ -165,7 +171,6 @@ export default function SplashAnimation({ onFinished }: Props) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: THEME.splashScreenBackground,
     alignItems: 'center',
     justifyContent: 'center',
   },

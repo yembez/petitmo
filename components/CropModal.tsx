@@ -21,6 +21,7 @@ import Svg, { Defs, Mask, Rect } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { scale as s, verticalScale } from '@/utils/responsive';
 import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
+import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import { insetCropRectForChildProfilePhoto } from '@/utils/captureHeroMetrics';
 
 type CropModalProps = {
@@ -329,12 +330,8 @@ export function CropModal({ visible, imageUri, onCancel, onConfirm, onChangePhot
               <Text style={styles.changeBtnText}>Changer</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[
-                petitmoCtaStyles.primary,
-                styles.validateBtn,
-                (!imgSize || busy) && petitmoCtaStyles.primaryDisabled,
-              ]}
+            <PetitmoPrimaryPressable
+              style={styles.validateBtn}
               activeOpacity={0.85}
               disabled={!imgSize || busy}
               onPress={() => void confirmCrop()}
@@ -342,7 +339,7 @@ export function CropModal({ visible, imageUri, onCancel, onConfirm, onChangePhot
               accessibilityLabel="Valider"
             >
               <Text style={[petitmoCtaStyles.primaryText, styles.validateBtnText]}>Valider</Text>
-            </TouchableOpacity>
+            </PetitmoPrimaryPressable>
           </View>
         </View>
       </View>

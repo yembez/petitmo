@@ -18,6 +18,7 @@ import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { THEME } from '@/constants/theme';
 import { FONT_SIZES } from '@/constants/sizes';
 import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
+import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import { scale, verticalScale } from '@/utils/responsive';
 import {
   collectBugReportContext,
@@ -149,8 +150,8 @@ export default function SupportContactModal({ visible, kind, defaultEmail, onClo
               >
                 <Text style={styles.btnGhostText}>{t('cancel')}</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[petitmoCtaStyles.primary, styles.btnCta, sending && petitmoCtaStyles.primaryDisabled]}
+              <PetitmoPrimaryPressable
+                style={styles.btnCta}
                 onPress={() => void handleSend()}
                 disabled={sending}
                 activeOpacity={0.9}
@@ -162,7 +163,7 @@ export default function SupportContactModal({ visible, kind, defaultEmail, onClo
                 ) : (
                   <Text style={petitmoCtaStyles.primaryText}>{t('parent.support.send')}</Text>
                 )}
-              </TouchableOpacity>
+              </PetitmoPrimaryPressable>
             </View>
           </Pressable>
         </Pressable>

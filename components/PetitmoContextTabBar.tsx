@@ -11,6 +11,7 @@ import {
   type MainTabRoute,
 } from '@/constants/contextualTabBar';
 import { THEME } from '@/constants/theme';
+import { PETITMO_CTA_BORDER_WIDTH } from '@/constants/petitmoCtaStyles';
 import {
   TAB_BAR_BACKGROUND,
   TAB_BAR_BORDER_WIDTH,
@@ -59,7 +60,7 @@ function TabBarGlyph({
   Icon: LucideIcon;
   focused: boolean;
   color: string;
-  /** Rond orange charte autour du « + » hors écran Capturer. */
+  /** Cercle contour noir + « + » hors écran Capturer. */
   captureHighlight?: boolean;
 }) {
   if (captureHighlight) {
@@ -68,7 +69,7 @@ function TabBarGlyph({
         <View style={styles.capturePlusDisc} accessibilityElementsHidden>
           <Plus
             size={TAB_ICON_SIZE}
-            color="#FFFFFF"
+            color={THEME.captureCtaBorderColor}
             fill="none"
             strokeWidth={focused ? 2.25 : 2}
           />
@@ -246,7 +247,9 @@ const styles = StyleSheet.create({
     width: TAB_CAPTURE_PLUS_DISC,
     height: TAB_CAPTURE_PLUS_DISC,
     borderRadius: TAB_CAPTURE_PLUS_DISC / 2,
-    backgroundColor: '#3C3C43',
+    backgroundColor: 'transparent',
+    borderWidth: PETITMO_CTA_BORDER_WIDTH,
+    borderColor: THEME.captureCtaBorderColor,
     alignItems: 'center',
     justifyContent: 'center',
   },

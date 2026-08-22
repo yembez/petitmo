@@ -33,6 +33,7 @@ import { scale, verticalScale } from '@/utils/responsive';
 import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
 import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
+import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import PermissionModal from '@/components/PermissionModal';
 import { uploadMedia } from '@/services/media';
 import { getOrSelectFirstChild } from '@/services/children';
@@ -770,13 +771,8 @@ export default function RecordVoiceScreen() {
             )}
           </View>
 
-          <TouchableOpacity
-            style={[
-              petitmoCtaStyles.primary,
-              petitmoCtaStyles.primaryFullWidth,
-              styles.saveButtonMaquette,
-              isSaving && petitmoCtaStyles.primaryDisabled,
-            ]}
+          <PetitmoPrimaryPressable
+            style={[petitmoCtaStyles.primaryFullWidth, styles.saveButtonMaquette]}
             onPress={() => void saveRecording()}
             disabled={isSaving}
             activeOpacity={0.88}
@@ -791,7 +787,7 @@ export default function RecordVoiceScreen() {
                 </Text>
               </>
             )}
-          </TouchableOpacity>
+          </PetitmoPrimaryPressable>
 
           <View style={styles.privacyRow}>
             <Lock size={scale(14)} color={THEME.textMuted} strokeWidth={2} />

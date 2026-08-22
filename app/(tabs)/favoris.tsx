@@ -39,6 +39,7 @@ import { scale, verticalScale } from '@/utils/responsive';
 import TabSceneTransition from '@/components/TabSceneTransition';
 import { THEME } from '@/constants/theme';
 import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
+import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import {
   tabBarFloatingBottomInset,
   tabBarFloatingOverlapPad,
@@ -603,7 +604,7 @@ function FavorisFixedTopChrome({
                 accessibilityLabel="Mode sélection"
               >
                 <View style={styles.topChromeSelectCtaContent}>
-                  <BookOpen size={scale(18)} color={THEME.captureScreenCtaForeground} strokeWidth={2.2} />
+                  <BookOpen size={scale(18)} color="#FFFFFF" strokeWidth={2.2} />
                   <Text style={styles.topChromeSelectCtaText}>Sélectionner</Text>
                 </View>
               </Pressable>
@@ -1826,13 +1827,13 @@ export const FavorisScreen = memo(function FavorisScreen({
           <Text style={styles.noChildSub}>
             Crée un profil pour enregistrer des souvenirs et des favoris.
           </Text>
-          <TouchableOpacity
-            style={[petitmoCtaStyles.primary, styles.noChildCta]}
+          <PetitmoPrimaryPressable
+            style={styles.noChildCta}
             onPress={() => router.push('/create-child')}
             activeOpacity={0.85}
           >
             <Text style={[petitmoCtaStyles.primaryText, styles.noChildCtaText]}>Créer un profil</Text>
-          </TouchableOpacity>
+          </PetitmoPrimaryPressable>
         </View>
       ) : (
         <View
@@ -2191,7 +2192,7 @@ const styles = StyleSheet.create({
     gap: scale(7),
   },
   topChromeSelectCtaText: {
-    color: THEME.captureScreenCtaForeground,
+    color: '#FFFFFF',
     fontSize: scale(16),
     fontWeight: '600',
   },

@@ -1,18 +1,27 @@
-import { CAPTURE_SCREEN_ACCENT, CAPTURE_SCREEN_BG } from '@/constants/captureScreenPalette';
+import {
+  BRAND_ACTION_ACCENT,
+  BRAND_ACTION_ACCENT_RGB,
+  BRAND_ACTION_GRADIENT,
+  CAPTURE_SCREEN_BG,
+  CAPTURE_CTA_BORDER,
+  CAPTURE_CTA_IMPORT,
+  CAPTURE_CTA_WRITE,
+  CAPTURE_TAB_ACTIVE,
+} from '@/constants/captureScreenPalette';
 
-/** Rosé charte — couleur d’accent / CTA / marque (remplace ardoise + terracotta). */
+/** Rosé charte — cœurs favoris, paywall hero neutre, marque douce. */
 const BRAND_PRIMARY = '#FC5757';
 const BRAND_PRIMARY_RGB = '252, 87, 87';
-/** Orange CTA charte — disques Capturer, tab bar, CTA in-app. */
-const BRAND_CTA_ORANGE = '#FF7F4F';
-const BRAND_CTA_ORANGE_RGB = '255, 127, 79';
+/** Accent CTA charte — corail `#FD7764` (spinners / tab / splash). */
+const BRAND_CTA_ACCENT = BRAND_ACTION_ACCENT;
+const BRAND_CTA_ACCENT_RGB = BRAND_ACTION_ACCENT_RGB;
 /**
- * Orange widget / icône store (`widget_petitmo_orange2`) — un cran plus vif.
- * Splash natif + animation alignés dessus pour le même flash au lancement.
+ * Dégradé widget / icône store (`widget_petitmo_gradient.png`).
+ * @deprecated orange historique — `#FC6C39` (`widget_petitmo_orange2`).
  */
 const BRAND_WIDGET_ORANGE = '#FC6C39';
-/** @deprecated — alias historique ; le splash utilise désormais l’orange widget. */
-const BRAND_SPLASH_BRICK = BRAND_WIDGET_ORANGE;
+/** Fond splash natif (letterbox) — départ du dégradé `#FD6F9F` → `#FD7D4D`. */
+const BRAND_SPLASH = BRAND_ACTION_GRADIENT[0];
 /** Gris — CTA secondaires (paywall, livres, modales, favoris, memory-view…). */
 const BRAND_CTA_GRAY = '#51545E';
 const BRAND_CTA_GRAY_RGB = '81, 84, 94';
@@ -40,14 +49,14 @@ export const THEME = {
 
   /** Couleur de marque — CTA, cœurs favoris, paywall, spinners d’accent… */
   brandPrimary: BRAND_PRIMARY,
-  /** Fond splash (Expo / Android / iOS / SplashAnimation) — orange widget `#FC6C39`. */
-  splashScreenBackground: BRAND_SPLASH_BRICK,
-  /** Orange widget / icône — même teinte que le splash. */
+  /** Fond splash letterbox natif — départ dégradé `#FD6F9F` (image = dégradé complet). */
+  splashScreenBackground: BRAND_SPLASH,
+  /** @deprecated orange historique — icône store = `widget_petitmo_gradient.png`. */
   brandWidgetOrange: BRAND_WIDGET_ORANGE,
-  /** Orange CTA charte — disques Capturer, tab bar active, point âge / cœur titre… */
-  brandCtaOrange: BRAND_CTA_ORANGE,
-  /** Accents disques Capturer — cœur titre, point pilule âge (orange charte). */
-  captureDiscCtaBackground: BRAND_CTA_ORANGE,
+  /** Accent unie — spinners / tab / icônes — `#FD7764` (nom historique `brandCtaOrange`). */
+  brandCtaOrange: BRAND_CTA_ACCENT,
+  /** @deprecated alias — `brandCtaOrange` */
+  captureDiscCtaBackground: BRAND_CTA_ACCENT,
   /** @deprecated — `brandPrimary` */
   brandTerracotta: BRAND_PRIMARY,
   /** Vignette onboarding / hero photo (dérivé du rosé). */
@@ -61,14 +70,14 @@ export const THEME = {
   /** @deprecated — `brandPrimarySoft` */
   captureCtaSoftTerracotta: '#F4A0A0',
 
-  /** Fond CTA rond « Importer » — rose bonbon maquette Capturer. */
-  captureImportCtaBackground: '#FEA5A1',
+  /** Fond CTA rond « Importer » — rose maquette Capturer. */
+  captureImportCtaBackground: CAPTURE_CTA_IMPORT,
   /** Fond CTA rond « Enregistrer » — écran Capturer (maquette V3). */
   captureRecordCtaBackground: '#FFFFFF',
-  /** Liseré disque « Enregistrer » — écran Capturer (orange charte). */
-  captureRecordCtaBorderColor: BRAND_CTA_ORANGE,
-  /** Fond CTA rond « Écrire » — écran Capturer (orange charte). */
-  captureWriteCtaBackground: BRAND_CTA_ORANGE,
+  /** Liseré disque « Enregistrer » — écran Capturer. */
+  captureRecordCtaBorderColor: CAPTURE_CTA_BORDER,
+  /** Fond CTA rond « Écrire » — écran Capturer. */
+  captureWriteCtaBackground: CAPTURE_CTA_WRITE,
   /** Icônes dans les disques CTA Capturer — marron fondu bas hero. */
   captureCtaIconColor: '#3C3126',
   /** @deprecated alias — `bg` (bandeau bas Capturer, dégradé hero). */
@@ -87,15 +96,15 @@ export const THEME = {
   accentSoft: '#8E8E93',
 
   /** @deprecated — `captureScreenCtaBackground` */
-  captureCoralCtaBackground: BRAND_CTA_ORANGE,
+  captureCoralCtaBackground: BRAND_CTA_ACCENT,
   /** @deprecated — `captureScreenCtaBackground` */
-  captureAccentYellow: BRAND_CTA_ORANGE,
-  /** Fond CTA primaire app — `petitmoCtaStyles`, modales, onboarding, livres… */
-  captureScreenCtaBackground: BRAND_CTA_ORANGE,
-  /** Libellé + icône sur fond CTA primaire orange. */
+  captureAccentYellow: BRAND_CTA_ACCENT,
+  /** Fond CTA primaire app (fallback solid) — préfère `BRAND_ACTION_GRADIENT`. */
+  captureScreenCtaBackground: BRAND_CTA_ACCENT,
+  /** Libellé + icône sur fond CTA primaire (dégradé rose→corail). */
   captureScreenCtaForeground: '#FFFFFF',
   /** @deprecated — `captureScreenCtaBackground` */
-  captureWriteCtaRose: BRAND_CTA_ORANGE,
+  captureWriteCtaRose: BRAND_CTA_ACCENT,
   /** Gris `#51545E` — CTA paywall, livres, modales, favoris « Ajouter au livre », memory-view… */
   brandArdoise: BRAND_CTA_GRAY,
   /** Fond doux badges / sélection plan paywall. */
@@ -107,17 +116,17 @@ export const THEME = {
   feedPencilCtaBackground: `rgba(${FEED_PENCIL_SLATE_RGB}, 0.20)`,
   feedPencilCtaBorderColor: `rgba(${FEED_PENCIL_SLATE_RGB}, 0.36)`,
   feedPencilCtaForeground: FEED_PENCIL_SLATE,
-  /** CTA « Sélectionner » — héros favoris (orange à 80 %). */
-  favorisSelectCtaBackground: `rgba(${BRAND_CTA_ORANGE_RGB}, 0.8)`,
+  /** CTA « Sélectionner » — héros favoris (accent à 80 %). */
+  favorisSelectCtaBackground: `rgba(${BRAND_CTA_ACCENT_RGB}, 0.8)`,
   /**
    * Contour CTA primaire — `PETITMO_CTA_BORDER_WIDTH`.
-   * Liseré orange discret sur fond `captureScreenCtaBackground`.
+   * Liseré noir (legacy) — les CTA dégradés n’en utilisent plus.
    */
-  captureCtaBorderColor: `rgba(${BRAND_CTA_ORANGE_RGB}, 0.32)`,
+  captureCtaBorderColor: CAPTURE_CTA_BORDER,
   /** @deprecated violet maquette initiale — conservé si besoin legacy. */
   captureMaquetteViolet: '#5B47D6',
-  /** Icône + libellé onglet actif tab bar — orange charte (aligné écran Capturer). */
-  tabBarActiveTint: CAPTURE_SCREEN_ACCENT,
+  /** Icône + libellé onglet actif tab bar — accent Capturer. */
+  tabBarActiveTint: CAPTURE_TAB_ACTIVE,
   /** Icône + libellé onglets inactifs (assombris vs `textSecondary`). */
   tabBarInactiveTint: '#636366',
   /** Fond tab bar — beige écran Capturer (`#FEFBF7`). */
@@ -127,7 +136,7 @@ export const THEME = {
   /** Surfaces élevées (cartes souvenir, CTA disque blanc, pages livre à l’écran). */
   surfaceCard: '#FFFFFF',
   /** @deprecated pastille onglet actif supprimée — teinte via `tabBarActiveTint` uniquement. */
-  tabBarActivePill: `rgba(${BRAND_CTA_ORANGE_RGB}, 0.14)`,
+  tabBarActivePill: `rgba(${BRAND_CTA_ACCENT_RGB}, 0.14)`,
   /** @deprecated anneau lavande (tab bar violette) — non utilisé sur le bandeau blanc actuel. */
   tabBarOuterRing: '#D5CEEB',
 } as const;

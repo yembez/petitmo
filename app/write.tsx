@@ -17,6 +17,7 @@ import { scale, verticalScale } from '@/utils/responsive';
 import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
 import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
+import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import { supabase } from '@/lib/supabase';
 import { getCachedUserMode } from '@/lib/userMode';
 import { checkMemoryLimit, invalidateMemoryLimitCache } from '@/lib/limits';
@@ -301,9 +302,9 @@ export default function WriteScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <ChevronLeft size={ICON_SIZES.lg} color="#3F4A5A" strokeWidth={2} />
         </TouchableOpacity>
-        <TouchableOpacity
+        <PetitmoPrimaryPressable
           onPress={handleSave}
-          style={[petitmoCtaStyles.primary, styles.saveButton, isSaving && petitmoCtaStyles.primaryDisabled]}
+          style={styles.saveButton}
           disabled={isSaving}
         >
           {isSaving ? (
@@ -311,7 +312,7 @@ export default function WriteScreen() {
           ) : (
             <Text style={petitmoCtaStyles.primaryText}>Enregistrer</Text>
           )}
-        </TouchableOpacity>
+        </PetitmoPrimaryPressable>
       </View>
 
       <View style={styles.inputContainer}>

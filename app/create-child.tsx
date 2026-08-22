@@ -21,6 +21,7 @@ import { scale, verticalScale } from '@/utils/responsive';
 import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
 import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
+import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import { createChild, setSelectedChild } from '@/services/children';
 import { signOutRealAccount } from '@/lib/authAccount';
 import { listLocalChildrenForUser } from '@/lib/localDb';
@@ -222,12 +223,8 @@ export default function CreateChildScreen() {
           </View>
         </View>
 
-        <TouchableOpacity
-          style={[
-            petitmoCtaStyles.primary,
-            petitmoCtaStyles.primaryFullWidth,
-            (!canContinue || isCreating) && petitmoCtaStyles.primaryDisabled,
-          ]}
+        <PetitmoPrimaryPressable
+          style={petitmoCtaStyles.primaryFullWidth}
           onPress={handleContinue}
           disabled={!canContinue || isCreating}
           activeOpacity={0.9}
@@ -239,7 +236,7 @@ export default function CreateChildScreen() {
               Continuer
             </Text>
           )}
-        </TouchableOpacity>
+        </PetitmoPrimaryPressable>
       </ScrollView>
     </KeyboardAvoidingView>
   );

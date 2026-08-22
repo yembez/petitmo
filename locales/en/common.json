@@ -233,5 +233,26 @@
     "failed": "Couldn’t open this share in Petitmo.",
     "unsupported": "Petitmo accepts photos, videos, and audio files.",
     "needsRebuild": "Sharing into Petitmo needs an app update. Run npm run dev:ios:build, then try again."
+  },
+  "videoTrim": {
+    "title": "Shorten video",
+    "editorTitle": "Pick the best moment",
+    "subtitleFree": "Drag the selection to choose your clip (max {{max}} s).",
+    "subtitlePaid": "Drag the selection to keep what matters (max {{max}} s).",
+    "cancel": "Cancel",
+    "confirm": "Use clip",
+    "playA11y": "Play clip",
+    "pauseA11y": "Pause",
+    "handleStartA11y": "Clip start",
+    "handleEndA11y": "Clip end",
+    "handleRangeA11y": "Move clip",
+    "needsRebuildTitle": "Update required",
+    "needsRebuildBody": "Video trimming needs a new app build (dev or TestFlight). Run npm run dev:ios:build or npm run tf:ios, then try again.",
+    "tooShortTitle": "Clip too short",
+    "tooShortBody": "Choose at least one second of video.",
+    "stillTooLongTitle": "Still too long",
+    "stillTooLongBody": "Keep a clip of at most {{max}} seconds.",
+    "exportFailedTitle": "Couldn’t shorten",
+    "exportFailedBody": "Try again in a moment."
   }
 }

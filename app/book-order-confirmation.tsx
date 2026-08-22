@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFonts, DMSans_400Regular, DMSans_500Medium } from '@expo-google-fonts/dm-sans';
 import { EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
 import { THEME } from '@/constants/theme';
+import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import { scale } from '@/utils/responsive';
 import { setCrmMarketingOptInForEmail } from '@/services/crmEdge';
 import {
@@ -128,7 +129,7 @@ export default function BookOrderConfirmationScreen() {
       <Text style={[styles.sub, dm400 && { fontFamily: dm400 }]}>{subtitle}</Text>
 
       {resultPdfUri ? (
-        <Pressable
+        <PetitmoPrimaryPressable
           style={styles.terracottaCta}
           onPress={onSharePdf}
           disabled={!resultPdfUri}
@@ -136,7 +137,7 @@ export default function BookOrderConfirmationScreen() {
           <Text style={[styles.terracottaCtaText, dm500 && { fontFamily: dm500 }]}>
             {exportMode === 'print' ? 'Ouvrir le PDF impression' : 'Partager le PDF'}
           </Text>
-        </Pressable>
+        </PetitmoPrimaryPressable>
       ) : null}
 
       <View style={styles.recap}>
@@ -163,8 +164,8 @@ export default function BookOrderConfirmationScreen() {
           <Text style={[styles.marketingQuestion, dm400 && { fontFamily: dm400 }]}>
             Tu veux recevoir nos conseils pour capturer encore plus de souvenirs ?
           </Text>
-          <Pressable
-            style={[styles.terracottaCta, optInLoading && styles.ctaDisabled]}
+          <PetitmoPrimaryPressable
+            style={styles.terracottaCta}
             onPress={() => void onConfirmMarketing()}
             disabled={optInLoading}
           >
@@ -175,7 +176,7 @@ export default function BookOrderConfirmationScreen() {
                 Oui, j'adorerais
               </Text>
             )}
-          </Pressable>
+          </PetitmoPrimaryPressable>
           <Pressable onPress={onNoMarketing} hitSlop={12} style={styles.mutedLinkWrap}>
             <Text style={[styles.mutedLink, dm400 && { fontFamily: dm400 }]}>Non merci</Text>
           </Pressable>
@@ -233,13 +234,11 @@ const styles = StyleSheet.create({
     color: THEME.textPrimary,
   },
   terracottaCta: {
-    backgroundColor: THEME.brandCtaOrange,
     paddingVertical: scale(14),
     borderRadius: scale(12),
     alignItems: 'center',
   },
-  terracottaCtaText: { color: '#fff', fontSize: scale(16) },
-  ctaDisabled: { opacity: 0.55 },
+  terracottaCtaText: { color: THEME.captureScreenCtaForeground, fontSize: scale(16) },
   mutedLinkWrap: { alignSelf: 'center', paddingVertical: scale(4) },
   mutedLink: { fontSize: scale(15), color: THEME.textSecondary },
   secondaryCta: {

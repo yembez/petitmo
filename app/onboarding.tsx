@@ -14,6 +14,7 @@ import { scale, verticalScale } from '@/utils/responsive';
 import PetitmoLogoManuscrit from '@/components/PetitmoLogoManuscrit';
 import { SPACING, FONT_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
+import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import { LinearGradient } from 'expo-linear-gradient';
 import { getChildren, refreshChildrenFromCloudInBackground } from '@/services/children';
 import { hasRealAuthAccount } from '@/lib/authAccount';
@@ -117,7 +118,7 @@ export default function OnboardingScreen() {
             Capture, garde et retrouve{'\n'}les moments avec ton enfant.
           </Text>
 
-          <TouchableOpacity
+          <PetitmoPrimaryPressable
             style={styles.ctaButton}
             onPress={() => router.push({ pathname: '/auth', params: { mode: 'signup' } })}
             activeOpacity={0.9}
@@ -125,7 +126,7 @@ export default function OnboardingScreen() {
             accessibilityLabel="Commencer — créer un compte Petitmo"
           >
             <Text style={styles.ctaButtonText}>Commencer</Text>
-          </TouchableOpacity>
+          </PetitmoPrimaryPressable>
 
           <TouchableOpacity
             style={styles.ctaButtonSecondary}
@@ -247,23 +248,15 @@ const styles = StyleSheet.create({
   ctaButton: {
     width: '100%',
     maxWidth: scale(320),
-    backgroundColor: THEME.brandCtaOrange,
     borderRadius: scale(100),
-    borderWidth: 0,
-    borderColor: 'transparent',
     paddingVertical: verticalScale(16),
     paddingHorizontal: SPACING.lg,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
   },
   ctaButtonText: {
     fontSize: FONT_SIZES.md,
     fontWeight: '600',
-    color: '#FFFFFF',
+    color: THEME.captureScreenCtaForeground,
   },
   ctaButtonSecondary: {
     marginTop: verticalScale(12),

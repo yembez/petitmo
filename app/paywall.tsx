@@ -843,7 +843,7 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
   planDiscountPill: {
-    backgroundColor: 'rgba(255, 127, 79, 0.16)',
+    backgroundColor: 'rgba(253, 119, 100, 0.16)',
     paddingHorizontal: 6,
     paddingVertical: 1,
     borderRadius: 999,
@@ -903,6 +903,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 20,
+    borderWidth: 1,
+    borderColor: THEME.captureCtaBorderColor,
   },
   primaryCtaInner: {
     flexDirection: 'row',
@@ -911,7 +913,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   primaryCtaText: {
-    color: '#FFFFFF',
+    color: THEME.captureScreenCtaForeground,
     fontSize: 16,
     fontWeight: '700',
   },

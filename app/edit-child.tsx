@@ -14,13 +14,15 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { LinearGradient } from 'expo-linear-gradient';
 import { ArrowLeft, Camera, Menu, Trash2 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { scale, verticalScale } from '@/utils/responsive';
 import { SPACING, FONT_SIZES, PROFILE_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
-import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
+import { CAPTURE_CTA_IMPORT_GRADIENT } from '@/constants/captureScreenPalette';
+import { PETITMO_CTA_BORDER_RADIUS, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import { getLocalChild, listLocalChildren } from '@/lib/localDb';
 import {
   deleteChild,
@@ -383,9 +385,14 @@ export default function EditChildScreen() {
                 <ActivityIndicator size="small" color="#FFFFFF" />
               </View>
             ) : (
-              <View style={styles.photoIconContainer}>
+              <LinearGradient
+                colors={[...CAPTURE_CTA_IMPORT_GRADIENT]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.photoIconContainer}
+              >
                 <Camera size={20} color="#FFFFFF" strokeWidth={2} />
-              </View>
+              </LinearGradient>
             )}
           </TouchableOpacity>
           <Text style={[styles.photoHint, dm500 ? { fontFamily: dm500 } : null]}>Appuyez pour recadrer</Text>
@@ -422,21 +429,33 @@ export default function EditChildScreen() {
 
         <TouchableOpacity
           style={[
-            petitmoCtaStyles.primary,
-            petitmoCtaStyles.primaryFullWidth,
-            styles.saveButton,
+            styles.saveButtonWrap,
             (isSaving || isDeleting || !canSave) && petitmoCtaStyles.primaryDisabled,
           ]}
           onPress={handleSave}
           disabled={isSaving || isDeleting || !canSave}
+          activeOpacity={0.88}
         >
-          {isSaving ? (
-            <ActivityIndicator size="small" color={PETITMO_CTA_SPINNER_COLOR} />
-          ) : (
-            <Text style={[petitmoCtaStyles.primaryText, dm600 ? { fontFamily: dm600 } : null]}>
-              Enregistrer
-            </Text>
-          )}
+          <LinearGradient
+            colors={[...CAPTURE_CTA_IMPORT_GRADIENT]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={[petitmoCtaStyles.primaryFullWidth, styles.saveButtonGradient]}
+          >
+            {isSaving ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Text
+                style={[
+                  petitmoCtaStyles.primaryText,
+                  styles.saveButtonText,
+                  dm600 ? { fontFamily: dm600 } : null,
+                ]}
+              >
+                Enregistrer
+              </Text>
+            )}
+          </LinearGradient>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -558,11 +577,8 @@ const styles = StyleSheet.create({
     width: scale(40),
     height: scale(40),
     borderRadius: scale(20),
-    backgroundColor: THEME.brandCtaOrange,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 3,
-    borderColor: THEME.bg,
   },
   photoHint: {
     fontSize: FONT_SIZES.sm,
@@ -597,8 +613,18 @@ const styles = StyleSheet.create({
     color: '#8791A1',
     marginTop: SPACING.xs,
   },
-  saveButton: {
+  saveButtonWrap: {
     marginBottom: SPACING.lg,
+    borderRadius: PETITMO_CTA_BORDER_RADIUS,
+    overflow: 'hidden',
+  },
+  saveButtonGradient: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: PETITMO_CTA_BORDER_RADIUS,
+  },
+  saveButtonText: {
+    color: '#FFFFFF',
   },
   deleteButton: {
     flexDirection: 'row',

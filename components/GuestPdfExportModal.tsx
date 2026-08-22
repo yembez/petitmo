@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getLastGuestExportEmail } from '@/lib/guestExportPrefs';
 import { getPrivacyPolicyUrl } from '@/lib/privacyPolicyUrl';
 import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
+import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import { THEME } from '@/constants/theme';
 
 export type GuestPdfExportSubmit = {
@@ -126,12 +127,8 @@ export function GuestPdfExportModal({ visible, onClose, onSubmit, loading }: Pro
             <Pressable style={styles.btnGhost} onPress={handleClose} disabled={loading}>
               <Text style={styles.btnGhostText}>Annuler</Text>
             </Pressable>
-            <Pressable
-              style={[
-                petitmoCtaStyles.primary,
-                styles.btnPrimary,
-                (!gdprChecked || loading || !email.trim()) && petitmoCtaStyles.primaryDisabled,
-              ]}
+            <PetitmoPrimaryPressable
+              style={styles.btnPrimary}
               onPress={() => void handleConfirm()}
               disabled={!gdprChecked || loading || !email.trim()}
             >
@@ -140,7 +137,7 @@ export function GuestPdfExportModal({ visible, onClose, onSubmit, loading }: Pro
               ) : (
                 <Text style={[petitmoCtaStyles.primaryText, styles.btnPrimaryText]}>Continuer</Text>
               )}
-            </Pressable>
+            </PetitmoPrimaryPressable>
           </View>
         </View>
       </KeyboardAvoidingView>

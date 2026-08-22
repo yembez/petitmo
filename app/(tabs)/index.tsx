@@ -42,15 +42,22 @@ const CAPTURE_TITLE_LINE_HEIGHT = 24;
 const CAPTURE_TITLE_HEART_SIZE = scale(16);
 const CAPTURE_HEADER_DATE_FONT_SIZE = 15;
 const CAPTURE_HEADER_DATE_LINE_HEIGHT = 20;
-/** Hauteur de la ligne date / logo / paramètres (alignés sur le bouton). */
+/** Hauteur de la ligne date / paramètres (alignés sur le bouton). */
 const CAPTURE_HEADER_ROW_H = scale(40);
 
 import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
 import { scale, verticalScale } from '@/utils/responsive';
 import {
-  CAPTURE_SCREEN_ACCENT,
   CAPTURE_SCREEN_BG,
-  CAPTURE_SCREEN_RECORD_ACCENT,
+  CAPTURE_CTA_BORDER,
+  CAPTURE_CTA_DISC_BORDER_WIDTH,
+  CAPTURE_PHOTO_BORDER_GRADIENT,
+  CAPTURE_CTA_RECORD_GRADIENT,
+  CAPTURE_CTA_WRITE_GRADIENT,
+  CAPTURE_CTA_IMPORT_GRADIENT,
+  CAPTURE_CTA_GRADIENT_LOCATIONS,
+  CAPTURE_PILL_AGE_DOT,
+  CAPTURE_TITLE_HEART,
 } from '@/constants/captureScreenPalette';
 import { THEME } from '@/constants/theme';
 import {
@@ -68,11 +75,14 @@ import { promptFreeTierLimitThenPaywall } from '@/utils/freeTierLimitGate';
 import { getLocalChild, listLocalChildren, listLocalChildrenForUser } from '@/lib/localDb';
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
 import { useChildProfileDisplayUri } from '@/hooks/useChildProfileDisplayUri';
+import {
+  useCaptureHeroPillBackdrop,
+  type CaptureHeroPillBackdropMode,
+} from '@/hooks/useCaptureHeroPillBackdrop';
 import { childDisplayGivenName, childDisplayInitial } from '@/utils/childDisplayName';
 import { formatCaptureChildAge, formatCaptureHeaderDate } from '@/utils/date';
 import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 import { CaptureFamilyMosaic } from '@/components/CaptureFamilyMosaic';
-import PetitmoLogoManuscrit from '@/components/PetitmoLogoManuscrit';
 import {
   CAPTURE_HERO_IMAGE_CONTENT_POSITION,
   CAPTURE_HERO_IMAGE_OBJECT_POSITION,
@@ -103,10 +113,10 @@ const CAPTURE_PHOTO_EDGE_PADDING_H = scale(14);
 
 const CAPTURE_CTA_SIZE = scale(78);
 const CAPTURE_CTA_SIZE_COMPACT = scale(64);
-const CAPTURE_CTA_ICON_SIZE = scale(34);
-const CAPTURE_CTA_ICON_SIZE_COMPACT = scale(29);
-const CAPTURE_CTA_MIC_ICON_SIZE = scale(38);
-const CAPTURE_CTA_MIC_ICON_SIZE_COMPACT = scale(32);
+const CAPTURE_CTA_ICON_SIZE = scale(30);
+const CAPTURE_CTA_ICON_SIZE_COMPACT = scale(26);
+const CAPTURE_CTA_MIC_ICON_SIZE = scale(34);
+const CAPTURE_CTA_MIC_ICON_SIZE_COMPACT = scale(29);
 
 /** Tagline hero photo — maquette capture. */
 const CAPTURE_HERO_TAGLINE = '“Avec toi, l’ordinaire devient extraordinaire.”';
@@ -157,12 +167,14 @@ function CapturePhotoGlassPill({
   emphasized = false,
   align = 'left',
   accentDot = false,
+  backdropMode = 'light',
 }: {
   label: string;
   labelFontFamily?: string;
   emphasized?: boolean;
   align?: 'left' | 'right';
   accentDot?: boolean;
+  backdropMode?: CaptureHeroPillBackdropMode;
 }) {
   const content = (
     <View style={styles.capturePhotoPillInner}>
@@ -181,21 +193,37 @@ function CapturePhotoGlassPill({
     </View>
   );
 
+  const isDarkBackdrop = backdropMode === 'dark';
+
   if (Platform.OS === 'ios') {
     return (
-      <BlurView intensity={48} tint="light" style={styles.capturePhotoPill}>
+      <BlurView
+        intensity={isDarkBackdrop ? 56 : 48}
+        tint={isDarkBackdrop ? 'dark' : 'light'}
+        style={[styles.capturePhotoPill, isDarkBackdrop && styles.capturePhotoPillDark]}
+      >
         {content}
       </BlurView>
     );
   }
 
-  return <View style={[styles.capturePhotoPill, styles.capturePhotoPillFallback]}>{content}</View>;
+  return (
+    <View
+      style={[
+        styles.capturePhotoPill,
+        isDarkBackdrop ? styles.capturePhotoPillFallbackDark : styles.capturePhotoPillFallback,
+      ]}
+    >
+      {content}
+    </View>
+  );
 }
 
 function CaptureDiscCta({
   label,
   icon,
   discColor,
+  discGradient,
   discBorderColor,
   discBorderWidth = 0,
   haloColor,
@@ -204,10 +232,13 @@ function CaptureDiscCta({
   compact = false,
   accessibilityLabel,
   haptic = 'medium',
+  disableHalo = false,
 }: {
   label: string;
   icon: React.ReactNode;
-  discColor: string;
+  discColor?: string;
+  /** Dégradé TL → BR (prioritaire sur `discColor`). */
+  discGradient?: readonly [string, string];
   discBorderColor?: string;
   discBorderWidth?: number;
   /** Teinte du halo — par défaut la couleur du disque (ou du contour si fond clair). */
@@ -217,10 +248,13 @@ function CaptureDiscCta({
   compact?: boolean;
   accessibilityLabel?: string;
   haptic?: 'light' | 'medium';
+  /** Sans ombre portée / halo circulaire (ex. disque blanc « Enregistrer »). */
+  disableHalo?: boolean;
 }) {
   const pressScale = useRef(new Animated.Value(1)).current;
   const ctaSize = compact ? CAPTURE_CTA_SIZE_COMPACT : CAPTURE_CTA_SIZE;
-  const glowColor = haloColor ?? discBorderColor ?? discColor;
+  const glowColor =
+    haloColor ?? discGradient?.[1] ?? discBorderColor ?? discColor ?? '#000000';
 
   const runPressIn = useCallback(() => {
     if (Platform.OS === 'ios' || Platform.OS === 'android') {
@@ -264,15 +298,30 @@ function CaptureDiscCta({
             width: ctaSize,
             height: ctaSize,
             borderRadius: ctaSize / 2,
-            backgroundColor: discColor,
+            backgroundColor: discGradient ? 'transparent' : discColor,
             borderWidth: discBorderWidth,
             borderColor: discBorderColor ?? 'transparent',
+            overflow: 'hidden',
             transform: [{ scale: pressScale }],
-            ...captureCtaHaloStyle(glowColor),
+            ...(disableHalo ? {} : captureCtaHaloStyle(glowColor)),
           },
         ]}
       >
-        {icon}
+        {discGradient ? (
+          <LinearGradient
+            colors={[
+              discGradient[0],
+              discGradient[0],
+              discGradient[1],
+              discGradient[1],
+            ]}
+            locations={[...CAPTURE_CTA_GRADIENT_LOCATIONS]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={StyleSheet.absoluteFillObject}
+          />
+        ) : null}
+        <View style={styles.captureCtaDiscIcon}>{icon}</View>
       </Animated.View>
       <Text
         style={[
@@ -332,6 +381,9 @@ function CapturerScreen() {
   const heroDisplayUri = useChildProfileDisplayUri(child);
   const photoUri = heroDisplayUri ?? '';
   const heroPhotoCacheKey = child ? captureHeroPhotoRevision(child) : '';
+  const heroPillBackdrop = useCaptureHeroPillBackdrop(
+    familyChildren.length > 1 ? null : photoUri,
+  );
 
   useEffect(() => {
     if (!photoUri.trim()) return;
@@ -638,19 +690,6 @@ function CapturerScreen() {
               <View style={styles.captureHeaderTrailing}>
                 <SettingsHeaderButton size={CAPTURE_HEADER_ROW_H} />
               </View>
-              <View
-                style={styles.captureHeaderLogoAbsolute}
-                pointerEvents="none"
-                accessible
-                accessibilityRole="header"
-                accessibilityLabel="Petitmo"
-              >
-                <PetitmoLogoManuscrit
-                  width={scale(100)}
-                  height={scale(30)}
-                  color={THEME.textTertiary}
-                />
-              </View>
             </View>
           </View>
 
@@ -660,12 +699,16 @@ function CapturerScreen() {
               compact && styles.capturePhotoBleedCompact,
             ]}
           >
-          <View
+          <LinearGradient
+            colors={[...CAPTURE_PHOTO_BORDER_GRADIENT]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
             style={[
-              styles.capturePhotoCard,
-              compact && styles.capturePhotoCardCompact,
+              styles.capturePhotoCardBorder,
+              compact && styles.capturePhotoCardBorderCompact,
             ]}
           >
+          <View style={styles.capturePhotoCard}>
             {isFamilyMosaic ? (
               <CaptureFamilyMosaic
                 familyChildren={familyChildren}
@@ -700,6 +743,7 @@ function CapturerScreen() {
                     labelFontFamily={capturePhotoPillNameFont ?? captureSubtitleFont}
                     emphasized
                     align="left"
+                    backdropMode={heroPillBackdrop}
                   />
                   {childAgeLabel ? (
                     <CapturePhotoGlassPill
@@ -707,6 +751,7 @@ function CapturerScreen() {
                       labelFontFamily={captureSubtitleFont}
                       align="right"
                       accentDot
+                      backdropMode={heroPillBackdrop}
                     />
                   ) : null}
                 </View>
@@ -741,6 +786,7 @@ function CapturerScreen() {
               </>
             ) : null}
           </View>
+          </LinearGradient>
           </View>
 
           <View
@@ -762,8 +808,8 @@ function CapturerScreen() {
                 </Text>
                 <Heart
                   size={CAPTURE_TITLE_HEART_SIZE}
-                  color={CAPTURE_SCREEN_ACCENT}
-                  fill={CAPTURE_SCREEN_ACCENT}
+                  color={CAPTURE_TITLE_HEART}
+                  fill={CAPTURE_TITLE_HEART}
                   style={styles.captureTitleHeart}
                 />
                 <Text
@@ -791,14 +837,11 @@ function CapturerScreen() {
               label="Enregistrer"
               labelFontFamily={captureCtaLabelFont}
               accessibilityLabel="Enregistrer un audio"
-              discColor={THEME.captureRecordCtaBackground}
-              discBorderColor={CAPTURE_SCREEN_RECORD_ACCENT}
-              discBorderWidth={StyleSheet.hairlineWidth}
-              haloColor={CAPTURE_SCREEN_RECORD_ACCENT}
+              discGradient={CAPTURE_CTA_RECORD_GRADIENT}
               icon={
                 <MicIcon
                   size={compact ? CAPTURE_CTA_MIC_ICON_SIZE_COMPACT : CAPTURE_CTA_MIC_ICON_SIZE}
-                  color={CAPTURE_SCREEN_RECORD_ACCENT}
+                  color="#FFFFFF"
                 />
               }
               onPress={() => handleCaptureCtaPress('/record-voice')}
@@ -808,8 +851,7 @@ function CapturerScreen() {
             <CaptureDiscCta
               label="Écrire"
               labelFontFamily={captureCtaLabelFont}
-              discColor={CAPTURE_SCREEN_ACCENT}
-              haloColor={CAPTURE_SCREEN_ACCENT}
+              discGradient={CAPTURE_CTA_WRITE_GRADIENT}
               icon={
                 <PenIcon
                   size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
@@ -823,8 +865,7 @@ function CapturerScreen() {
               label="Importer"
               labelFontFamily={captureCtaLabelFont}
               accessibilityLabel="Importer des photos ou vidéos"
-              discColor={THEME.captureImportCtaBackground}
-              haloColor={THEME.captureImportCtaBackground}
+              discGradient={CAPTURE_CTA_IMPORT_GRADIENT}
               icon={
                 <ImageImportIcon
                   size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
@@ -888,16 +929,6 @@ const styles = StyleSheet.create({
     letterSpacing: -0.3,
     ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
   },
-  /** Centré sur la largeur écran — indépendant de la longueur de la date. */
-  captureHeaderLogoAbsolute: {
-    position: 'absolute',
-    left: -CAPTURE_CONTENT_PADDING_H,
-    right: -CAPTURE_CONTENT_PADDING_H,
-    top: 0,
-    height: CAPTURE_HEADER_ROW_H,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   captureHeaderTrailing: {
     width: CAPTURE_HEADER_ROW_H,
     height: CAPTURE_HEADER_ROW_H,
@@ -914,12 +945,12 @@ const styles = StyleSheet.create({
   capturePhotoBleedCompact: {
     marginBottom: verticalScale(8),
   },
-  capturePhotoCard: {
+  /** Anneau dégradé autour de la photo hero (padding = épaisseur du trait). */
+  capturePhotoCardBorder: {
     width: '100%',
     aspectRatio: CAPTURE_PHOTO_CARD_ASPECT,
     borderRadius: CAPTURE_PHOTO_CARD_RADIUS,
-    overflow: 'hidden',
-    backgroundColor: CAPTURE_SCREEN_BG,
+    padding: CAPTURE_CTA_DISC_BORDER_WIDTH,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -933,8 +964,14 @@ const styles = StyleSheet.create({
       default: {},
     }),
   },
-  capturePhotoCardCompact: {
+  capturePhotoCardBorderCompact: {
     aspectRatio: CAPTURE_PHOTO_CARD_ASPECT_COMPACT,
+  },
+  capturePhotoCard: {
+    flex: 1,
+    borderRadius: CAPTURE_PHOTO_CARD_RADIUS - CAPTURE_CTA_DISC_BORDER_WIDTH,
+    overflow: 'hidden',
+    backgroundColor: CAPTURE_SCREEN_BG,
   },
   capturePhotoPillsBar: {
     position: 'absolute',
@@ -960,6 +997,12 @@ const styles = StyleSheet.create({
   capturePhotoPillFallback: {
     backgroundColor: 'rgba(255, 255, 255, 0.28)',
   },
+  capturePhotoPillDark: {
+    borderColor: 'rgba(255, 255, 255, 0.32)',
+  },
+  capturePhotoPillFallbackDark: {
+    backgroundColor: 'rgba(28, 28, 30, 0.55)',
+  },
   capturePhotoPillInner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -969,7 +1012,7 @@ const styles = StyleSheet.create({
     width: scale(6),
     height: scale(6),
     borderRadius: scale(3),
-    backgroundColor: CAPTURE_SCREEN_ACCENT,
+    backgroundColor: CAPTURE_PILL_AGE_DOT,
   },
   capturePhotoPillText: {
     fontSize: scale(12),
@@ -1074,6 +1117,9 @@ const styles = StyleSheet.create({
   captureCtaDisc: {
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  captureCtaDiscIcon: {
+    zIndex: 1,
   },
   captureCtaLabel: {
     fontSize: scale(12),

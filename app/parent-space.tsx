@@ -14,6 +14,8 @@ import {
 import { usePathname, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft, Plus } from 'lucide-react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { BRAND_ACTION_GRADIENT } from '@/constants/captureScreenPalette';
 import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
 import { getChildren, setSelectedChild } from '@/services/children';
@@ -270,9 +272,14 @@ export default function ParentSpaceScreen() {
             onPress={() => router.push('/create-child')}
             activeOpacity={0.9}
           >
-            <View style={styles.addChildIcon}>
+            <LinearGradient
+              colors={[...BRAND_ACTION_GRADIENT]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.addChildIcon}
+            >
               <Plus size={ICON_SIZES.md} color="#FFFFFF" strokeWidth={2.5} />
-            </View>
+            </LinearGradient>
             <Text style={[styles.addChildText, dm600 ? { fontFamily: dm600 } : null]}>Ajouter un enfant</Text>
           </TouchableOpacity>
         </Section>
@@ -795,7 +802,6 @@ const styles = StyleSheet.create({
     width: scale(34),
     height: scale(34),
     borderRadius: scale(17),
-    backgroundColor: THEME.brandCtaOrange,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: SPACING.sm,

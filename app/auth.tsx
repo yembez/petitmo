@@ -38,6 +38,7 @@ import {
 import { THEME } from '@/constants/theme';
 import { FONT_SIZES, SPACING } from '@/constants/sizes';
 import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
+import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import { FREE_TIER_LIMIT } from '@/lib/limits';
 import { scale, verticalScale } from '@/utils/responsive';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
@@ -556,12 +557,8 @@ export default function AuthScreen() {
                   <View style={styles.forgotSpacer} />
                 )}
 
-                <TouchableOpacity
-                  style={[
-                    petitmoCtaStyles.primary,
-                    styles.primaryCta,
-                    busy && styles.ctaDisabled,
-                  ]}
+                <PetitmoPrimaryPressable
+                  style={styles.primaryCta}
                   onPress={onEmailSubmit}
                   disabled={busy}
                   activeOpacity={0.9}
@@ -575,7 +572,7 @@ export default function AuthScreen() {
                       {primaryCta}
                     </Text>
                   )}
-                </TouchableOpacity>
+                </PetitmoPrimaryPressable>
 
                 <TouchableOpacity
                   onPress={() => setMode(mode === 'signup' ? 'login' : 'signup')}
@@ -721,7 +718,7 @@ const styles = StyleSheet.create({
     width: scale(40),
     height: scale(40),
     borderRadius: scale(20),
-    backgroundColor: 'rgba(255, 127, 79, 0.12)',
+    backgroundColor: 'rgba(253, 119, 100, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: verticalScale(4),
@@ -848,7 +845,6 @@ const styles = StyleSheet.create({
     paddingVertical: verticalScale(12),
     width: '100%',
   },
-  ctaDisabled: { opacity: 0.7 },
   switchWrap: {
     marginTop: verticalScale(12),
     alignItems: 'center',

@@ -1,13 +1,14 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useId } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import { Audio } from 'expo-av';
 import { BlurView } from 'expo-blur';
 import { ensurePlaybackAudioForListening } from '@/lib/playbackAudioMode';
 import { Play, Pause } from 'lucide-react-native';
-import Svg, { Rect } from 'react-native-svg';
+import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from 'react-native-svg';
 import { scale } from '@/utils/responsive';
 import { formatDuration } from '@/utils/date';
 import { THEME } from '@/constants/theme';
+import { BRAND_ACTION_GRADIENT } from '@/constants/captureScreenPalette';
 
 const PLAY = scale(50);
 const STACK = scale(104);
@@ -16,11 +17,9 @@ const PLAY_FEED = scale(44);
 const BAR_COUNT = 42;
 /** Demi-hauteur de l’onde (barres centrées sur l’axe) */
 const WAVE_HALF = scale(18);
-/** Onde au repos / non lue — orange charte plein */
-const WAVE_ORANGE = THEME.brandCtaOrange;
-/** Onde en lecture — rouge charte */
+/** Onde en lecture (portion déjà jouée) — rouge charte */
 const WAVE_PLAYING = THEME.brandPrimary;
-const RING = 'rgba(255, 127, 79, 0.28)';
+const RING = 'rgba(253, 119, 100, 0.28)';
 const BAR_GAP = scale(2);
 
 interface AudioPlayerProps {
@@ -104,6 +103,7 @@ export default function AudioPlayer({
   feedPlayDiscOutline = false,
   disableBlurDisc = false,
 }: AudioPlayerProps) {
+  const waveGradId = `audioWaveGrad-${useId().replace(/:/g, '')}`;
   const [sound, setSound] = useState<Audio.Sound | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [position, setPosition] = useState(0);
@@ -386,6 +386,12 @@ export default function AudioPlayer({
     >
       {waveW > 1 && barW > 0 ? (
         <Svg width={waveW} height={waveH} viewBox={`0 0 ${waveW} ${waveH}`}>
+          <Defs>
+            <SvgLinearGradient id={waveGradId} x1="0" y1="0" x2="1" y2="0">
+              <Stop offset="0" stopColor={BRAND_ACTION_GRADIENT[0]} />
+              <Stop offset="1" stopColor={BRAND_ACTION_GRADIENT[1]} />
+            </SvgLinearGradient>
+          </Defs>
           {barHeights.map((amp, i) => {
             const h = Math.max(scale(3), amp * maxBarH);
             const x = i * (barW + BAR_GAP);
@@ -399,7 +405,7 @@ export default function AudioPlayer({
                 width={barW}
                 height={h}
                 rx={Math.min(barW / 2, scale(1.5))}
-                fill={isPlayed ? WAVE_PLAYING : WAVE_ORANGE}
+                fill={isPlayed ? WAVE_PLAYING : `url(#${waveGradId})`}
               />
             );
           })}

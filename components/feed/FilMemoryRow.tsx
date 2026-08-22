@@ -880,13 +880,13 @@ function FilMemoryRow({
               size={FEED_POST_ACTION_ICON_PX}
               color={
                 (memory.type === 'photo' ? feedPhotoFavorited : !!memory.is_favorite)
-                  ? THEME.brandCtaOrange
+                  ? THEME.feedFavoriteTerracotta
                   : ACTION_ICON_INK
               }
               strokeWidth={FEED_POST_ACTION_STROKE}
               fill={
                 (memory.type === 'photo' ? feedPhotoFavorited : !!memory.is_favorite)
-                  ? THEME.brandCtaOrange
+                  ? THEME.feedFavoriteTerracotta
                   : 'none'
               }
             />

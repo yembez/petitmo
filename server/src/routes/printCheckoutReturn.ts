@@ -44,11 +44,11 @@ export function registerPrintCheckoutReturnRoute(app: Express): void {
       font-family: system-ui, -apple-system, sans-serif; }
     body { display:flex; flex-direction:column; align-items:center; justify-content:center;
       padding:32px 24px; text-align:center; box-sizing:border-box; }
-    .halo { width:96px; height:96px; border-radius:48px; background:#FF7F4F; opacity:.4;
+    .halo { width:96px; height:96px; border-radius:48px; background:#FD7764; opacity:.4;
       margin-bottom:8px; }
     h1 { font-size:22px; font-weight:700; margin:16px 0 10px; line-height:1.3; }
     p { font-size:16px; color:rgba(255,255,255,.78); line-height:1.5; max-width:320px; margin:0 0 28px; }
-    a { display:inline-block; background:#FF7F4F; color:#fff; text-decoration:none;
+    a { display:inline-block; background:#FD7764; color:#fff; text-decoration:none;
       font-weight:700; font-size:16px; padding:14px 28px; border-radius:14px; }
   </style>
 </head>

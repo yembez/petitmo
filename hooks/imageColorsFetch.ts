@@ -43,6 +43,24 @@ export function pickBrightnessSampleHex(result: ImageColorsResult): string {
   return result.lightMuted ?? result.muted ?? result.dominant ?? '#808080';
 }
 
+export async function resolvePaletteDownloadHeaders(
+  originalUri: string,
+): Promise<Record<string, string> | undefined> {
+  try {
+    const host = new URL(originalUri).hostname;
+    if (host.includes('supabase')) {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      if (token) {
+        return { Authorization: `Bearer ${token}` };
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return undefined;
+}
+
 /**
  * Télécharge si besoin, puis `getColors` (même pipeline que la palette dominante).
  */
@@ -59,19 +77,7 @@ export async function fetchImageColorsResult(
   try {
     const { getColors } = await import('react-native-image-colors');
 
-    let downloadHeaders: Record<string, string> | undefined;
-    try {
-      const host = new URL(originalUri).hostname;
-      if (host.includes('supabase')) {
-        const { data } = await supabase.auth.getSession();
-        const token = data.session?.access_token;
-        if (token) {
-          downloadHeaders = { Authorization: `Bearer ${token}` };
-        }
-      }
-    } catch {
-      /* ignore */
-    }
+    const downloadHeaders = await resolvePaletteDownloadHeaders(originalUri);
 
     const localUri = await ensureLocalImageForPalette(originalUri, downloadHeaders);
 

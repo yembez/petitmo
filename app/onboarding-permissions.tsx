@@ -19,6 +19,7 @@ import { Bell, Images } from 'lucide-react-native';
 import { THEME } from '@/constants/theme';
 import { FONT_SIZES, ICON_SIZES, SPACING } from '@/constants/sizes';
 import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
+import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import { scale, verticalScale } from '@/utils/responsive';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
@@ -185,7 +186,7 @@ export default function OnboardingPermissionsScreen() {
             <Switch
               value={photosOn}
               onValueChange={v => void onTogglePhotos(v)}
-              trackColor={{ false: '#E5E5EA', true: 'rgba(255, 127, 79, 0.45)' }}
+              trackColor={{ false: '#E5E5EA', true: 'rgba(253, 119, 100, 0.45)' }}
               thumbColor={photosOn ? THEME.brandCtaOrange : '#FFFFFF'}
               ios_backgroundColor="#E5E5EA"
               accessibilityLabel={t('permissions.photosTitle')}
@@ -223,12 +224,8 @@ export default function OnboardingPermissionsScreen() {
       </View>
 
       <View style={styles.footer}>
-        <TouchableOpacity
-          style={[
-            petitmoCtaStyles.primary,
-            petitmoCtaStyles.primaryFullWidth,
-            busy && petitmoCtaStyles.primaryDisabled,
-          ]}
+        <PetitmoPrimaryPressable
+          style={petitmoCtaStyles.primaryFullWidth}
           disabled={busy}
           onPress={() => void finish()}
           activeOpacity={0.9}
@@ -240,7 +237,7 @@ export default function OnboardingPermissionsScreen() {
               {t('permissions.continueCta')}
             </Text>
           )}
-        </TouchableOpacity>
+        </PetitmoPrimaryPressable>
 
         <TouchableOpacity
           onPress={() => void finish()}
@@ -303,7 +300,7 @@ const styles = StyleSheet.create({
     width: scale(40),
     height: scale(40),
     borderRadius: scale(12),
-    backgroundColor: 'rgba(255, 127, 79, 0.1)',
+    backgroundColor: 'rgba(253, 119, 100, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -178,6 +178,7 @@ import { setLastGuestExportEmail } from '@/lib/guestExportPrefs';
 import { setPendingBookOrderPdfPayload } from '@/lib/pendingBookOrderPdf';
 import { isDeviceStorageFullError } from '@/utils/deviceStorageFull';
 import { THEME } from '@/constants/theme';
+import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 
 const HEADER_H = 44;
 const BOTTOM_H = 82;
@@ -3329,7 +3330,7 @@ export default function BookPreviewScreen() {
             accessibilityRole="button"
             accessibilityLabel={t('bookOrder.backToOrder')}
           >
-            <Text style={[styles.headerCtaText, dm700 && { fontFamily: dm700 }]} numberOfLines={1}>
+            <Text style={[styles.headerCtaTextDark, dm700 && { fontFamily: dm700 }]} numberOfLines={1}>
               {isLandscape ? t('bookOrder.backToOrderShort') : t('bookOrder.backToOrder')}
             </Text>
           </Pressable>
@@ -3356,7 +3357,7 @@ export default function BookPreviewScreen() {
             <View style={styles.headerRightSpacer} accessibilityElementsHidden />
           )
         ) : (
-          <Pressable
+          <PetitmoPrimaryPressable
             onPress={() => void handleExportBook()}
             hitSlop={12}
             style={[
@@ -3369,7 +3370,7 @@ export default function BookPreviewScreen() {
             <Text style={[styles.headerCtaText, dm700 && { fontFamily: dm700 }]}>
               {exporting || guestExportSubmitting ? 'Export…' : 'Exporter'}
             </Text>
-          </Pressable>
+          </PetitmoPrimaryPressable>
         )}
       </View>
 
@@ -3826,7 +3827,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   headerCtaOrange: {
-    backgroundColor: THEME.brandCtaOrange,
     borderRadius: 20,
     paddingVertical: 7,
     paddingHorizontal: 16,
@@ -4111,9 +4111,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 14,
+    borderWidth: 1,
+    borderColor: THEME.captureCtaBorderColor,
   },
   coverPickerGalleryBtnText: {
-    color: '#FFFFFF',
+    color: THEME.captureScreenCtaForeground,
     fontSize: 15,
     fontWeight: '700',
   },

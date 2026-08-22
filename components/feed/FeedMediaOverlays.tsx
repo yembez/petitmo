@@ -314,7 +314,7 @@ export function FeedPhotoFavoriteOverlay({
 }) {
   void inkOverride;
   const outlineInk = '#FFFFFF' as const;
-  const favoriteFill = THEME.brandCtaOrange;
+  const favoriteFill = THEME.feedFavoriteTerracotta;
 
   return (
     <View

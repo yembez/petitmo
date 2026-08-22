@@ -30,6 +30,7 @@ import { useFilRowActions } from '@/hooks/useFilRowActions';
 import { styles } from '@/components/feed/feedStyles';
 import { THEME } from '@/constants/theme';
 import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
+import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
 import { FeedHeader } from '@/components/feed/FeedHeader';
 import SettingsHeaderButton from '@/components/SettingsHeaderButton';
@@ -306,12 +307,12 @@ function FilScreen() {
           <SettingsHeaderButton />
         </View>
         <Text style={styles.emptyText}>Aucun enfant trouvé</Text>
-        <TouchableOpacity
-          style={[petitmoCtaStyles.primary, styles.createButton]}
+        <PetitmoPrimaryPressable
+          style={styles.createButton}
           onPress={() => router.push('/create-child')}
         >
           <Text style={[petitmoCtaStyles.primaryText, styles.createButtonText]}>Créer un profil</Text>
-        </TouchableOpacity>
+        </PetitmoPrimaryPressable>
       </View>
     );
   }

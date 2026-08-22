@@ -17,6 +17,7 @@ import { X, Check } from 'lucide-react-native';
 import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
 import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
+import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import { useMemoryTextFontScreen } from '@/hooks/useMemoryTextFontScreen';
 import {
   memoryTextEditChromeStyle,
@@ -345,15 +346,15 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
         )}
       </View>
 
-      <TouchableOpacity
-        style={[petitmoCtaStyles.primary, styles.saveButton]}
+      <PetitmoPrimaryPressable
+        style={styles.saveButton}
         onPress={handleSave}
         accessibilityRole="button"
         accessibilityLabel="Enregistrer"
       >
         <Check size={ICON_SIZES.sm} color={THEME.captureScreenCtaForeground} strokeWidth={2} />
         <Text style={petitmoCtaStyles.primaryText}>Enregistrer</Text>
-      </TouchableOpacity>
+      </PetitmoPrimaryPressable>
     </View>
   );
 

@@ -233,5 +233,26 @@
     "failed": "Impossible d’ouvrir ce partage dans Petitmo.",
     "unsupported": "Petitmo accepte les photos, vidéos et fichiers audio.",
     "needsRebuild": "Le partage vers Petitmo nécessite une mise à jour de l’app. Relance npm run dev:ios:build, puis réessaie."
+  },
+  "videoTrim": {
+    "title": "Raccourcir la vidéo",
+    "editorTitle": "Choisir le meilleur moment",
+    "subtitleFree": "Glisse la sélection pour choisir ton extrait (max {{max}} s).",
+    "subtitlePaid": "Glisse la sélection pour garder l’essentiel (max {{max}} s).",
+    "cancel": "Annuler",
+    "confirm": "Utiliser",
+    "playA11y": "Lire l’extrait",
+    "pauseA11y": "Pause",
+    "handleStartA11y": "Début de l’extrait",
+    "handleEndA11y": "Fin de l’extrait",
+    "handleRangeA11y": "Déplacer l’extrait",
+    "needsRebuildTitle": "Mise à jour requise",
+    "needsRebuildBody": "Le coupe-vidéo nécessite un nouveau build de l’app (dev ou TestFlight). Relance npm run dev:ios:build ou npm run tf:ios, puis réessaie.",
+    "tooShortTitle": "Extrait trop court",
+    "tooShortBody": "Choisis au moins une seconde de vidéo.",
+    "stillTooLongTitle": "Encore trop longue",
+    "stillTooLongBody": "Garde un extrait d’au plus {{max}} secondes.",
+    "exportFailedTitle": "Impossible de raccourcir",
+    "exportFailedBody": "Réessaie dans un instant."
   }
 }

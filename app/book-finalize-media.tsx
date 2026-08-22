@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Pressable, ActivityIndicator } from 'react-nati
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { THEME } from '@/constants/theme';
+import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import { scale } from '@/utils/responsive';
 import { getPendingBookOrderPdfPayload, clearPendingBookOrderPdfPayload } from '@/lib/pendingBookOrderPdf';
 import {
@@ -246,9 +247,9 @@ export default function BookFinalizeMediaScreen() {
           <>
             <Text style={styles.title}>Tout est prêt ❤️</Text>
             <Text style={styles.sub}>Ta commande est confirmée. Nous préparons maintenant ton livre.</Text>
-            <Pressable style={styles.cta} onPress={goToConfirmation} hitSlop={10}>
+            <PetitmoPrimaryPressable style={styles.cta} onPress={goToConfirmation}>
               <Text style={styles.ctaText}>Parfait</Text>
-            </Pressable>
+            </PetitmoPrimaryPressable>
           </>
         ) : phase === 'needs_network' ? (
           <>
@@ -257,9 +258,9 @@ export default function BookFinalizeMediaScreen() {
               Nous avons besoin d’une meilleure connexion pour terminer les audios et vidéos (QR) de ton livre.
             </Text>
             {statusLine ? <Text style={styles.errLine}>{statusLine}</Text> : null}
-            <Pressable style={styles.cta} onPress={onRetry} hitSlop={10}>
+            <PetitmoPrimaryPressable style={styles.cta} onPress={onRetry}>
               <Text style={styles.ctaText}>Réessayer</Text>
-            </Pressable>
+            </PetitmoPrimaryPressable>
             <Pressable onPress={onLater} hitSlop={10} style={styles.secondaryWrap}>
               <Text style={styles.secondaryText}>Continuer sans attendre</Text>
             </Pressable>
@@ -358,12 +359,11 @@ const styles = StyleSheet.create({
   spinnerRow: { marginTop: scale(14), alignItems: 'center' },
   cta: {
     marginTop: scale(18),
-    backgroundColor: THEME.brandCtaOrange,
     paddingVertical: scale(14),
     borderRadius: scale(12),
     alignItems: 'center',
   },
-  ctaText: { color: '#fff', fontSize: scale(16), fontWeight: '600' },
+  ctaText: { color: THEME.captureScreenCtaForeground, fontSize: scale(16), fontWeight: '600' },
   secondaryWrap: { marginTop: scale(14), alignItems: 'center' },
   secondaryText: { color: THEME.textMuted, fontSize: scale(15) },
 });

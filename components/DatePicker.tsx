@@ -5,6 +5,7 @@ import { scale, verticalScale } from '@/utils/responsive';
 import { SPACING, FONT_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
 import { PETITMO_CTA_BORDER_RADIUS, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
+import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 
 interface DatePickerProps {
   value: string;
@@ -159,12 +160,12 @@ export default function DatePicker({ value, onChange, placeholder = 'JJ/MM/AAAA'
               >
                 <Text style={styles.cancelButtonText}>Annuler</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalButton, petitmoCtaStyles.primary, styles.confirmButton]}
+              <PetitmoPrimaryPressable
+                style={[styles.modalButton, styles.confirmButton]}
                 onPress={handleConfirm}
               >
-                <Text style={[petitmoCtaStyles.primaryText, styles.confirmButtonText]}>Confirmer</Text>
-              </TouchableOpacity>
+                <Text style={petitmoCtaStyles.primaryText}>Confirmer</Text>
+              </PetitmoPrimaryPressable>
             </View>
           </View>
         </View>
@@ -258,7 +259,7 @@ const styles = StyleSheet.create({
     color: THEME.textPrimary,
   },
   pickerItemTextSelected: {
-    color: '#FFFFFF',
+    color: THEME.captureScreenCtaForeground,
     fontWeight: '600',
   },
   modalActions: {

@@ -21,7 +21,8 @@ import * as WebBrowser from 'expo-web-browser';
 import * as ExpoLinking from 'expo-linking';
 import { ChevronRight } from 'lucide-react-native';
 import { THEME } from '@/constants/theme';
-import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
+import { CAPTURE_CTA_BORDER } from '@/constants/captureScreenPalette';
+import { PETITMO_CTA_BORDER_WIDTH, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import {
   BOOK_COVER_THUMB_HEIGHT,
   BOOK_COVER_THUMB_WIDTH,
@@ -61,9 +62,6 @@ import {
   BookPdfGeneratingView,
 } from '@/components/BookPdfGeneratingOverlay';
 import BookCoverThumbnail from '@/components/BookCoverThumbnail';
-import PetitmoLogoManuscrit, {
-  PetitmoLogoManuscritTight,
-} from '@/components/PetitmoLogoManuscrit';
 import { getBookExportPrepIssues } from '@/services/bookExportPrep';
 import {
   clearPendingBookOrderPdfPayload,
@@ -1070,6 +1068,7 @@ export default function BookOrderScreen() {
           petitmoCtaStyles.primary,
           petitmoCtaStyles.primaryFullWidth,
           styles.cta,
+          styles.ctaOrderBlack,
           (submitting || !formIsComplete) && petitmoCtaStyles.primaryDisabled,
         ]}
         disabled={submitting || !formIsComplete}
@@ -1078,9 +1077,16 @@ export default function BookOrderScreen() {
         accessibilityLabel={ctaLabel}
       >
         {submitting ? (
-          <ActivityIndicator color={PETITMO_CTA_SPINNER_COLOR} />
+          <ActivityIndicator color="#FFFFFF" />
         ) : (
-          <Text style={[petitmoCtaStyles.primaryText, styles.ctaText, dm700 && { fontFamily: dm700 }]}>
+          <Text
+            style={[
+              petitmoCtaStyles.primaryText,
+              styles.ctaText,
+              styles.ctaOrderBlackText,
+              dm700 && { fontFamily: dm700 },
+            ]}
+          >
             {ctaLabel}
           </Text>
         )}
@@ -1240,30 +1246,20 @@ export default function BookOrderScreen() {
             accessibilityRole="button"
             accessibilityLabel={t('bookOrder.discoverPlus')}
           >
-            <View style={styles.plusLogoWrap}>
-              <PetitmoLogoManuscritTight
-                width={scale(130)}
-                height={scale(40)}
-                color={THEME.brandCtaOrange}
-              />
-              <Text style={[styles.plusLogoMark, dm700 && { fontFamily: dm700 }]}>+</Text>
-            </View>
-            <View style={styles.plusCopy}>
-              <Text style={[styles.plusSave, dm700 && { fontFamily: dm700 }]}>
-                {t('bookOrder.plusSave', {
-                  savings: formatAppCurrency(printQuote.premiumUpsell.savingsEuros, lang),
-                })}
-              </Text>
-              <Text style={[styles.plusPrice, dm500 && { fontFamily: dm500 }]}>
-                {t('bookOrder.plusPrice', {
-                  price: formatAppCurrency(printQuote.premiumUpsell.totalEuros, lang),
-                })}
-              </Text>
-              <Text style={[styles.plusLink, dm600 && { fontFamily: dm600 }]}>
-                {t('bookOrder.discoverPlus')}
-                {' >'}
-              </Text>
-            </View>
+            <Text style={[styles.plusSave, dm700 && { fontFamily: dm700 }]}>
+              {t('bookOrder.plusSave', {
+                savings: formatAppCurrency(printQuote.premiumUpsell.savingsEuros, lang),
+              })}
+            </Text>
+            <Text style={[styles.plusPrice, dm500 && { fontFamily: dm500 }]}>
+              {t('bookOrder.plusPrice', {
+                price: formatAppCurrency(printQuote.premiumUpsell.totalEuros, lang),
+              })}
+            </Text>
+            <Text style={[styles.plusLink, dm600 && { fontFamily: dm600 }]}>
+              {t('bookOrder.discoverPlus')}
+              {' >'}
+            </Text>
           </Pressable>
         ) : null}
 
@@ -1642,26 +1638,12 @@ const styles = StyleSheet.create({
   },
 
   plusBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: scale(12),
-    backgroundColor: 'rgba(255, 127, 79, 0.10)',
+    backgroundColor: 'rgba(253, 119, 100, 0.10)',
     borderRadius: scale(14),
     paddingVertical: scale(12),
     paddingHorizontal: scale(14),
     marginBottom: scale(16),
   },
-  plusLogoWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  plusLogoMark: {
-    fontSize: scale(24),
-    color: THEME.brandCtaOrange,
-    marginLeft: scale(-22),
-    marginTop: scale(-1.5),
-  },
-  plusCopy: { flex: 1, minWidth: 0 },
   plusSave: {
     fontSize: scale(15),
     fontWeight: '700',
@@ -1674,8 +1656,9 @@ const styles = StyleSheet.create({
     marginBottom: scale(4),
   },
   plusLink: {
-    fontSize: scale(13),
+    fontSize: scale(17),
     fontWeight: '600',
+    lineHeight: scale(22),
     color: THEME.brandCtaOrange,
   },
 
@@ -1779,10 +1762,10 @@ const styles = StyleSheet.create({
   },
   checkboxOn: {
     backgroundColor: THEME.brandCtaOrange,
-    borderColor: THEME.brandCtaOrange,
+    borderColor: THEME.captureCtaBorderColor,
   },
   checkboxMark: {
-    color: '#FFFFFF',
+    color: THEME.captureScreenCtaForeground,
     fontSize: scale(13),
     fontWeight: '700',
     lineHeight: scale(16),
@@ -1821,6 +1804,14 @@ const styles = StyleSheet.create({
   },
   cta: {
     marginTop: 0,
+  },
+  ctaOrderBlack: {
+    backgroundColor: CAPTURE_CTA_BORDER,
+    borderColor: CAPTURE_CTA_BORDER,
+    borderWidth: PETITMO_CTA_BORDER_WIDTH,
+  },
+  ctaOrderBlackText: {
+    color: '#FFFFFF',
   },
   ctaText: {
     fontSize: scale(16),

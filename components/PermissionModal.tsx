@@ -5,6 +5,7 @@ import { scale, verticalScale } from '@/utils/responsive';
 import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
 import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
+import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -77,13 +78,13 @@ export default function PermissionModal({ visible, type, onRequestPermission, on
             </View>
 
             <View style={styles.buttons}>
-              <TouchableOpacity
-                style={[petitmoCtaStyles.primary, petitmoCtaStyles.primaryFullWidth, styles.authorizeButton]}
+              <PetitmoPrimaryPressable
+                style={[petitmoCtaStyles.primaryFullWidth, styles.authorizeButton]}
                 onPress={onRequestPermission}
                 activeOpacity={0.9}
               >
                 <Text style={[petitmoCtaStyles.primaryText, styles.authorizeButtonText]}>Autoriser</Text>
-              </TouchableOpacity>
+              </PetitmoPrimaryPressable>
 
               <TouchableOpacity
                 style={styles.cancelButton}
