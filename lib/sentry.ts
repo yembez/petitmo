@@ -19,6 +19,10 @@ export function isSentryEnabled(): boolean {
 /**
  * Init une seule fois au boot. Sans DSN → no-op (dev local OK).
  * Tags : release / dist / OTA pour retrouver un bug bêta en 10 s.
+ *
+ * Crashs natifs (SIGABRT / TurboModule…) : `enableNative: true` (défaut SDK).
+ * Les stacks natives restent lisibles si les dSYM / source maps sont uploadés
+ * au build EAS (`SENTRY_AUTH_TOKEN` + org/project — voir OBSERVABILITY_BETA.md).
  */
 export function initPetitmoSentry(): void {
   if (initialized) return;
@@ -51,9 +55,14 @@ export function initPetitmoSentry(): void {
   Sentry.init({
     dsn,
     enabled: true,
-    sendDefaultPii: false,
-    tracesSampleRate: 0.15,
+    /** Crashs ObjC / TurboModule / SIGABRT — indispensable pour le diagnostic TestFlight. */
+    enableNative: true,
+    enableNativeCrashHandling: true,
     enableAutoSessionTracking: true,
+    attachStacktrace: true,
+    sendDefaultPii: false,
+    /** Perf légère — pas de session replay. */
+    tracesSampleRate: 0.15,
     environment: channel || (__DEV__ ? 'development' : 'production'),
     release,
     dist: Constants.nativeBuildVersion ?? undefined,
@@ -62,6 +71,13 @@ export function initPetitmoSentry(): void {
   Sentry.setTag('app.channel', channel || 'unknown');
   if (updateId) Sentry.setTag('app.updateId', updateId);
   Sentry.setTag('app.otaEmbedded', Updates.isEmbeddedLaunch ? 'yes' : 'no');
+  if (Constants.nativeBuildVersion) {
+    Sentry.setTag('app.build', String(Constants.nativeBuildVersion));
+  }
+
+  if (__DEV__) {
+    console.info('[sentry] reporting actif', { release, dist: Constants.nativeBuildVersion });
+  }
 }
 
 export async function enrichSentryUserContext(tags: {

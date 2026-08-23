@@ -15,11 +15,39 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ? iosUrlSchemeFromGoogleIosClientId(googleIosClientId)
     : undefined;
 
+  const sentryDsn = process.env.EXPO_PUBLIC_SENTRY_DSN?.trim();
+  const sentryOrg = process.env.SENTRY_ORG?.trim();
+  const sentryProject = process.env.SENTRY_PROJECT?.trim();
+
   const plugins = [
-    ...(config.plugins ?? []),
+    ...(config.plugins ?? []).filter(p => {
+      const name = Array.isArray(p) ? p[0] : p;
+      return name !== '@sentry/react-native' && name !== '@sentry/react-native/expo';
+    }),
     'expo-sqlite',
     'expo-localization',
-    '@sentry/react-native',
+    [
+      '@sentry/react-native/expo',
+      {
+        url: 'https://sentry.io/',
+        /** Upload dSYM / source maps au build EAS si `SENTRY_AUTH_TOKEN` est défini. */
+        ...(sentryOrg ? { organization: sentryOrg } : {}),
+        ...(sentryProject ? { project: sentryProject } : {}),
+        /**
+         * Init natif tôt (avant le JS) quand le DSN est connu au prebuild —
+         * aide à capturer les crashs TurboModule / boot.
+         */
+        ...(sentryDsn
+          ? {
+              useNativeInit: true,
+              options: {
+                dsn: sentryDsn,
+                sendDefaultPii: false,
+              },
+            }
+          : {}),
+      },
+    ],
   ] as NonNullable<ExpoConfig['plugins']>;
 
   if (iosUrlScheme) {

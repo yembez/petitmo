@@ -6,84 +6,100 @@ Objectif : quand une maman (ou toi) signale un souci, tu sais **quelle version**
 
 ## Ce qui est en place dans l’app
 
-1. **Sentry** (crashs / erreurs JS) — actif seulement si `EXPO_PUBLIC_SENTRY_DSN` est défini.
-2. **Espace parent → « Signaler un problème »** — ouvre un mail prérempli + copie le bloc technique + crée un event Sentry `user_report` (si DSN).
-3. **Version affichée** en bas de l’Espace parent : `1.0.0 (6) · ota ab12cd34`  
-   → build number + id de l’update OTA.
-
-Le bloc mail contient toujours :
-
-- version + build  
-- OTA update id + channel  
-- modèle iPhone + iOS  
-- tier (`free`/`paid`) + mode (`local`/`cloud`)  
-- écran courant  
-- id event Sentry (si actif)
+1. **Sentry** (crashs JS + natifs) — actif seulement si `EXPO_PUBLIC_SENTRY_DSN` est défini au **build**.
+2. **Espace parent → « Signaler un problème »** — mail prérempli + bloc technique + event Sentry `user_report` (si DSN).
+3. **Version** en bas de l’Espace parent : `1.0.0 (17) · ota …`
 
 ---
 
-## Activer Sentry (obligatoire pour la bêta ouverte)
+## Activer Sentry (une fois) — checklist
 
-1. Crée un compte / projet sur [sentry.io](https://sentry.io) → plateforme **React Native**.
-2. Copie le **DSN**.
-3. En local (`.env`, ne pas committer) :
+### 1. Projet Sentry
+
+1. [sentry.io](https://sentry.io) → créer un projet **React Native** (ou Expo).
+2. Noter :
+   - **DSN** (Settings → Client Keys)
+   - **Organization slug** (URL : `sentry.io/organizations/<org>/…`)
+   - **Project slug** (ex. `petitmo` / `react-native`)
+
+### 2. Variables EAS (production)
+
+```bash
+# DSN — embarqué dans le binaire TestFlight (obligatoire)
+eas env:create --name EXPO_PUBLIC_SENTRY_DSN \
+  --value "https://…@….ingest.sentry.io/…" \
+  --environment production \
+  --visibility sensitive
+
+# Org + project — upload dSYM / source maps pendant le build
+eas env:create --name SENTRY_ORG --value "TON_ORG_SLUG" --environment production --visibility plaintext
+eas env:create --name SENTRY_PROJECT --value "TON_PROJECT_SLUG" --environment production --visibility plaintext
+
+# Token auth (Settings → Auth Tokens → Create, scopes: project:releases, org:read)
+eas env:create --name SENTRY_AUTH_TOKEN \
+  --value "sntrys_…" \
+  --environment production \
+  --visibility secret
+```
+
+Même trio recommandé pour `--environment development` si tu builds des dev clients.
+
+### 3. Local (optionnel)
+
+Dans `.env` (ne pas committer) :
 
 ```bash
 EXPO_PUBLIC_SENTRY_DSN=https://…@….ingest.sentry.io/…
+SENTRY_ORG=…
+SENTRY_PROJECT=…
+# SENTRY_AUTH_TOKEN=…  # seulement pour builds locaux qui uploadent
 ```
 
-4. Sur EAS (production + development) :
+### 4. Rebuild natif
+
+Le DSN n’arrive **pas** par OTA s’il n’était pas dans le build précédent :
 
 ```bash
-eas env:create --name EXPO_PUBLIC_SENTRY_DSN --value "https://…@….ingest.sentry.io/…" --environment production --visibility sensitive
-eas env:create --name EXPO_PUBLIC_SENTRY_DSN --value "https://…@….ingest.sentry.io/…" --environment development --visibility sensitive
+eas build --platform ios --profile production
+eas submit --platform ios --profile production --latest
 ```
 
-5. Pour des **source maps** propres (lire la stack lisible) — plus tard, optionnel pour démarrer :
+### 5. Vérifier
 
-```bash
-eas secret:create --name SENTRY_AUTH_TOKEN --value "…" --type string
-```
+1. TestFlight → build avec Sentry.
+2. Espace parent → **Signaler un problème** → dans [Sentry Issues](https://sentry.io) un event `user_report`.
+3. Tags utiles : `app.build`, `app.channel`, `app.tier`, `app.userMode`.
 
-Et renseigner org/project dans la config plugin Sentry (voir docs Sentry Expo).  
-Sans ça, tu as quand même les crashs + messages, parfois moins lisibles.
-
-6. Pousse via **OTA** (si build OTA-ready) ou prochain `tf:ios` / `dev:ios:build`.
-
-Sans DSN : le bouton **Signaler** marche quand même (mail + presse-papiers). Seul Sentry est off.
+Sans DSN : Signaler marche (mail) ; Sentry reste off.
 
 ---
 
-## Comment trier un bug reçu
+## Lire un crash TestFlight dans Sentry
 
-| Source | Tu regardes | Tu fais |
-|--------|-------------|---------|
-| Mail « Signaler un problème » | Bloc `Infos techniques` | Note version/build/OTA ; cherche l’event Sentry si id présent |
-| Crash silencieux | [Sentry Issues](https://sentry.io) | Filtre `release:petitmo@1.0.0`, tag `app.channel`, `app.tier` |
-| « Ça marche pas le livre » sans mail | Demande capture + version en bas d’Espace parent | Compare avec ton build TestFlight |
+| Source | Où regarder |
+|--------|-------------|
+| Crash natif (SIGABRT / TurboModule) | Issues → filtre `release:petitmo@1.0.0` + tag `app.build:18` |
+| Erreur JS | Même vue, stack Hermes symboliquée si source maps uploadées |
+| Signalement manuel | tag `app.source=user_report` |
 
-### Tags Sentry utiles
+Si la stack native est illisible (`0x…`) : vérifier que `SENTRY_AUTH_TOKEN` + `SENTRY_ORG` + `SENTRY_PROJECT` étaient bien présents au build (logs EAS : upload Sentry).
 
-- `app.tier` — free / paid  
-- `app.userMode` — local / cloud  
-- `app.channel` — production / development  
-- `app.updateId` — id OTA  
-- `app.source=user_report` — signalements manuels  
+Le profil **production** n’a plus `SENTRY_DISABLE_AUTO_UPLOAD` — l’upload part dès que le token est là. Les profils preview / dev-ios gardent le disable pour ne pas spammer Sentry.
 
 ---
 
-## Checklist avant d’ouvrir la bêta aux mamans
+## Checklist avant bêta mamans
 
-- [ ] DSN Sentry sur EAS production  
-- [ ] Tu as reçu un **test** : Signaler un problème → mail reçu + event dans Sentry  
-- [ ] Version visible en Espace parent sur TestFlight  
-- [ ] Tu notes le build number TestFlight dans Notion / go-no-go  
+- [ ] DSN + org + project + auth token sur EAS production  
+- [ ] Build TestFlight après ajout du DSN  
+- [ ] Test « Signaler un problème » → event visible dans Sentry  
+- [ ] Noter le build number TestFlight  
 
 ---
 
-## Hors scope (volontairement, pour plus tard)
+## Hors scope (volontairement)
 
 - PostHog / session replay  
 - Dashboard KPI automatique  
 - Monitoring Stripe (abo = RevenueCat)  
-- Alertes Gelato avancées (garder un suivi manuel des `printer_order_id` pour l’instant)
+- Alertes Gelato avancées
