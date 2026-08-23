@@ -1,4 +1,4 @@
-import { DeviceEventEmitter, Platform } from 'react-native';
+import { DeviceEventEmitter, Image, Platform } from 'react-native';
 import { documentDirectory, downloadAsync, makeDirectoryAsync } from 'expo-file-system/legacy';
 import { getCachedUserMode } from '@/lib/userMode';
 import { getLocalMemoryById, upsertLocalMemory } from '@/lib/localDb';
@@ -216,7 +216,8 @@ function remotePhotoPrintRef(memory: Memory): string | null {
 }
 
 async function measureSandboxImagePx(uri: string): Promise<{ w: number; h: number } | null> {
-  const { Image } = await import('react-native');
+  // Import statique obligatoire : `await import('react-native')` force Metro importAll
+  // (PushNotificationIOS → NativeEventEmitter(null) → crash fatal New Arch).
   return await new Promise(resolve => {
     Image.getSize(
       uri,
