@@ -10,6 +10,7 @@ import {
   Alert,
   ActivityIndicator,
   DeviceEventEmitter,
+  Share,
 } from 'react-native';
 import { usePathname, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -45,6 +46,16 @@ import {
   formatAppVersionLabel,
 } from '@/lib/bugReportContext';
 import { isSentryEnabled } from '@/lib/sentry';
+import { applyAvailableOtaUpdate } from '@/services/applyOtaUpdate';
+import {
+  peekCachedExpoPushToken,
+  registerPushTokenInBackground,
+} from '@/services/registerPushToken';
+import {
+  getNotificationsGranted,
+  isNotificationsModuleAvailable,
+  requestNotificationsAccess,
+} from '@/lib/onboardingPermissions';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { useAppLanguage } from '@/hooks/useAppLanguage';
 import { formatAppCurrency, formatAppDate } from '@/utils/appLocale';
@@ -97,6 +108,7 @@ export default function ParentSpaceScreen() {
     return pending > 0 ? `Synchronisation (${pending})` : 'À jour';
   });
   const [versionLabel, setVersionLabel] = useState('—');
+  const [updateCheckBusy, setUpdateCheckBusy] = useState(false);
   const [supportKind, setSupportKind] = useState<SupportMessageKind | null>(null);
   const [signOutBusy, setSignOutBusy] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -104,6 +116,87 @@ export default function ParentSpaceScreen() {
     peekHasRealAuthAccount() ? hydratePrintOrderTitles(peekCachedPrintOrders()) : [],
   );
   const [ordersStatusRefreshing, setOrdersStatusRefreshing] = useState(false);
+
+  const handleCheckForUpdate = useCallback(() => {
+    setUpdateCheckBusy(true);
+    void (async () => {
+      try {
+        /** Reload immédiat si une OTA est prête ; sinon on affiche l’état courant. */
+        const reloaded = await applyAvailableOtaUpdate({
+          reload: true,
+          waitForNativeDownloadMs: 20_000,
+        });
+        if (reloaded) return;
+        const ctx = await collectBugReportContext({
+          pathname,
+          sentryEnabled: isSentryEnabled(),
+        });
+        setVersionLabel(formatAppVersionLabel(ctx));
+        Alert.alert(
+          'Mise à jour',
+          ctx.updateId.startsWith('embedded')
+            ? `Toujours sur le bundle embarqué (${ctx.updateId}). Vérifie le Wi‑Fi, puis ferme complètement l’app et rouvre-la.`
+            : `Tu es à jour · ${ctx.updateId.slice(0, 12)}…`,
+        );
+      } finally {
+        setUpdateCheckBusy(false);
+      }
+    })();
+  }, [pathname]);
+
+  const handleSharePushToken = useCallback(() => {
+    void (async () => {
+      let token = await peekCachedExpoPushToken();
+      if (!token) {
+        token = await registerPushTokenInBackground();
+      }
+      if (!token) {
+        Alert.alert(t('parent.application.pushTokenMissingTitle'), t('parent.application.pushTokenMissingBody'));
+        return;
+      }
+      try {
+        await Share.share({
+          message: token,
+          title: t('parent.application.pushTokenShareTitle'),
+        });
+      } catch {
+        Alert.alert(t('parent.application.pushTokenShareTitle'), `${token}\n\n${t('parent.application.pushTokenHint')}`);
+      }
+    })();
+  }, [t]);
+
+  const handleEnableNotifications = useCallback(() => {
+    void (async () => {
+      if (!(await isNotificationsModuleAvailable())) {
+        Alert.alert(t('parent.application.notificationsDeniedTitle'), t('parent.application.notificationsUnavailableBody'));
+        return;
+      }
+      if (await getNotificationsGranted()) {
+        void registerPushTokenInBackground();
+        Alert.alert(
+          t('parent.application.notificationsGrantedTitle'),
+          t('parent.application.notificationsGrantedBody'),
+        );
+        return;
+      }
+      const granted = await requestNotificationsAccess();
+      if (granted) {
+        void registerPushTokenInBackground();
+        Alert.alert(
+          t('parent.application.notificationsGrantedTitle'),
+          t('parent.application.notificationsGrantedBody'),
+        );
+        return;
+      }
+      Alert.alert(t('parent.application.notificationsDeniedTitle'), t('parent.application.notificationsDeniedBody'), [
+        { text: t('cancel'), style: 'cancel' },
+        {
+          text: t('parent.application.openSettings'),
+          onPress: () => void Linking.openSettings(),
+        },
+      ]);
+    })();
+  }, [t]);
 
   const refreshOrderTracking = useCallback(() => {
     setOrdersStatusRefreshing(true);
@@ -438,9 +531,63 @@ export default function ParentSpaceScreen() {
           </TouchableOpacity>
         </Section>
 
-        <Text style={[styles.versionText, dm500 ? { fontFamily: dm500 } : null]} accessibilityRole="text">
-          Version {versionLabel}
-        </Text>
+        <Section title="Application" titleFontFamily={dm700}>
+          <TouchableOpacity
+            style={styles.row}
+            activeOpacity={0.85}
+            disabled={updateCheckBusy}
+            onPress={handleCheckForUpdate}
+            accessibilityRole="button"
+            accessibilityLabel={t('parent.application.checkUpdate')}
+          >
+            <View style={styles.rowIconPlaceholder} />
+            <View style={styles.rowText}>
+              <Text style={[styles.rowLabel, dm500 ? { fontFamily: dm500 } : null]}>
+                {t('parent.application.checkUpdate')}
+              </Text>
+              <Text style={styles.rowDetail}>
+                {t('parent.application.versionPrefix', { label: versionLabel })}
+              </Text>
+            </View>
+            {updateCheckBusy ? (
+              <ActivityIndicator size="small" color={THEME.textMuted} />
+            ) : (
+              <Text style={styles.rowValue}>›</Text>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.row, styles.rowBorderTop]}
+            activeOpacity={0.85}
+            onPress={handleEnableNotifications}
+            accessibilityRole="button"
+            accessibilityLabel={t('parent.application.enableNotifications')}
+          >
+            <View style={styles.rowIconPlaceholder} />
+            <View style={styles.rowText}>
+              <Text style={[styles.rowLabel, dm500 ? { fontFamily: dm500 } : null]}>
+                {t('parent.application.enableNotifications')}
+              </Text>
+              <Text style={styles.rowDetail}>{t('parent.application.enableNotificationsHint')}</Text>
+            </View>
+            <Text style={styles.rowValue}>›</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.row, styles.rowBorderTop]}
+            activeOpacity={0.85}
+            onPress={handleSharePushToken}
+            accessibilityRole="button"
+            accessibilityLabel={t('parent.application.copyPushToken')}
+          >
+            <View style={styles.rowIconPlaceholder} />
+            <View style={styles.rowText}>
+              <Text style={[styles.rowLabel, dm500 ? { fontFamily: dm500 } : null]}>
+                {t('parent.application.copyPushToken')}
+              </Text>
+              <Text style={styles.rowDetail}>{t('parent.application.pushTokenHint')}</Text>
+            </View>
+            <Text style={styles.rowValue}>›</Text>
+          </TouchableOpacity>
+        </Section>
 
         {hasRealAccount ? (
           <Section title={t('parent.account.sectionTitle')} titleFontFamily={dm700}>
@@ -829,12 +976,5 @@ const styles = StyleSheet.create({
     color: '#2F5560',
     fontWeight: '700',
     fontSize: FONT_SIZES.sm,
-  },
-  versionText: {
-    marginTop: SPACING.sm,
-    paddingHorizontal: SPACING.md,
-    fontSize: FONT_SIZES.sm,
-    color: THEME.textMuted,
-    textAlign: 'center',
   },
 });

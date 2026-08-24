@@ -124,6 +124,23 @@
       "deleteConfirmBody": "Cette action est définitive. Ton compte et l’accès cloud associés seront supprimés. Les données locales de cet appareil seront aussi effacées.",
       "deleteFailed": "Impossible de supprimer le compte pour le moment."
     },
+    "application": {
+      "checkUpdate": "Rechercher une mise à jour",
+      "versionPrefix": "Version {{label}}",
+      "enableNotifications": "Activer les notifications",
+      "enableNotificationsHint": "Affiche la demande iOS (nécessaire pour apparaître dans Réglages)",
+      "notificationsGrantedTitle": "Notifications activées",
+      "notificationsGrantedBody": "Tu peux maintenant copier le token push pour un test.",
+      "notificationsDeniedTitle": "Notifications refusées",
+      "notificationsDeniedBody": "Ouvre les Réglages iOS pour autoriser Petitmo, puis reviens ici.",
+      "notificationsUnavailableBody": "Le module notifications n’est pas dispo sur ce build.",
+      "openSettings": "Ouvrir Réglages",
+      "copyPushToken": "Copier le token push (test)",
+      "pushTokenMissingTitle": "Pas de token push",
+      "pushTokenMissingBody": "Active d’abord les notifications (ligne ci-dessus). Il faut un iPhone physique.",
+      "pushTokenShareTitle": "Token Expo Push",
+      "pushTokenHint": "Colle-le sur expo.dev/notifications. Pour un test durable : verrouille l’écran avant Send."
+    },
     "orders": {
       "sectionTitle": "Mes commandes",
       "empty": "Aucune commande pour le moment.",
@@ -149,6 +166,13 @@
       "videosBody": "Tu as déjà utilisé tes {{count}} vidéos du plan gratuit. Pour en ajouter une nouvelle, passe à Petitmo+.",
       "voicesTitle": "Limite d’audios atteinte",
       "voicesBody": "Tu as déjà utilisé tes {{count}} souvenirs audio du plan gratuit. Pour en ajouter, passe à Petitmo+."
+    }
+  },
+  "fil": {
+    "empty": {
+      "title": "Aucun souvenir pour le moment",
+      "subtitle": "Commence à capturer des moments précieux",
+      "addA11y": "Capturer un premier souvenir"
     }
   },
   "tabs": {
@@ -253,6 +277,7 @@
     "stillTooLongTitle": "Encore trop longue",
     "stillTooLongBody": "Garde un extrait d’au plus {{max}} secondes.",
     "exportFailedTitle": "Impossible de raccourcir",
-    "exportFailedBody": "Réessaie dans un instant."
+    "exportFailedBody": "Réessaie dans un instant.",
+    "exporting": "Raccourcissement de la vidéo…"
   }
 }

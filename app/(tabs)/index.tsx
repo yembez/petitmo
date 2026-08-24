@@ -32,6 +32,7 @@ import { Inter_300Light_Italic, Inter_500Medium, Inter_700Bold } from '@expo-goo
 import { useFonts } from 'expo-font';
 import { Manrope_400Regular, Manrope_700Bold } from '@expo-google-fonts/manrope';
 import { DMSans_500Medium } from '@expo-google-fonts/dm-sans';
+import CapturePhotoGradientFrame from '@/components/CapturePhotoGradientFrame';
 import TabSceneTransition from '@/components/TabSceneTransition';
 import SettingsHeaderButton from '@/components/SettingsHeaderButton';
 import { loadedFontStyle } from '@/utils/loadedFontStyle';
@@ -101,7 +102,7 @@ const { width: SCREEN_W } = Dimensions.get('window');
 
 /** Zoom « respiration » sur la photo carte (1 → max). */
 const CAPTURE_HERO_BREATHE_MIN = 1;
-const CAPTURE_HERO_BREATHE_MAX = 1.03;
+const CAPTURE_HERO_BREATHE_MAX = 1.055;
 const CAPTURE_HERO_BREATHE_HALF_MS = 8500;
 
 const CAPTURE_PHOTO_CARD_RADIUS = scale(32);
@@ -699,10 +700,10 @@ function CapturerScreen() {
               compact && styles.capturePhotoBleedCompact,
             ]}
           >
-          <LinearGradient
-            colors={[...CAPTURE_PHOTO_BORDER_GRADIENT]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
+          <CapturePhotoGradientFrame
+            colors={CAPTURE_PHOTO_BORDER_GRADIENT}
+            borderRadius={CAPTURE_PHOTO_CARD_RADIUS}
+            animating={isTabFocused}
             style={[
               styles.capturePhotoCardBorder,
               compact && styles.capturePhotoCardBorderCompact,
@@ -786,7 +787,7 @@ function CapturerScreen() {
               </>
             ) : null}
           </View>
-          </LinearGradient>
+          </CapturePhotoGradientFrame>
           </View>
 
           <View

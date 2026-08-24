@@ -78,11 +78,7 @@ export function useFilRowActions(setMemories: Dispatch<SetStateAction<Memory[]>>
       const hasAudio = !!(memory.media_url?.trim() || memory.local_media_path?.trim());
       if (!hasAudio) return;
       try {
-        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (!perm.granted) {
-          Alert.alert('Accès refusé', 'Autorise l’accès aux photos pour ajouter une illustration.');
-          return;
-        }
+        /** PHPicker : pas de demande d’accès photothèque, la sélection suffit. */
         const result = await ImagePicker.launchImageLibraryAsync({
           mediaTypes: ['images'],
           quality: 0.85,

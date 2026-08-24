@@ -633,13 +633,9 @@ export default function RecordVoiceScreen() {
     }
   };
 
+  /** PHPicker : pas de demande d’accès photothèque, la sélection suffit. */
   const pickCoverImage = async () => {
     try {
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) {
-        Alert.alert('Accès refusé', 'Autorise l’accès aux photos pour ajouter une illustration.');
-        return;
-      }
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
         quality: 0.85,

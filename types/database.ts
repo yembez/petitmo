@@ -139,6 +139,28 @@ export interface Database {
         Update: { [key: string]: unknown }
         Relationships: []
       }
+      push_tokens: {
+        Row: {
+          id: string
+          user_id: string
+          expo_push_token: string
+          platform: 'ios' | 'android'
+          updated_at: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          expo_push_token: string
+          platform: 'ios' | 'android'
+          updated_at?: string
+          created_at?: string
+        }
+        Update: {
+          [key: string]: unknown
+        }
+        Relationships: []
+      }
     }
     Views: {}
     Functions: {}

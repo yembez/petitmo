@@ -36,7 +36,8 @@
         "CFBundleAllowMixedLocalizations": true,
         "CFBundleDevelopmentRegion": "fr",
         "UIBackgroundModes": [
-          "fetch"
+          "fetch",
+          "remote-notification"
         ],
         "NSCameraUsageDescription": "Petitmo a besoin d'accéder à ta caméra pour capturer des photos et vidéos de vos moments précieux.",
         "NSMicrophoneUsageDescription": "Petitmo a besoin d'accéder à ton microphone pour enregistrer la voix de ton enfant.",

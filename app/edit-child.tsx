@@ -162,10 +162,8 @@ export default function EditChildScreen() {
     }
   };
 
+  /** PHPicker : pas de demande d’accès photothèque, la sélection suffit. */
   const openImagePickerForCrop = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) return;
-
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: false,

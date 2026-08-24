@@ -1,9 +1,14 @@
 /**
  * Demandes photothèque + notifications pour l’écran onboarding.
- * Notifications : ne charge expo-notifications que si le module natif est présent
- * (sinon le binary actuel — Expo Go / ancien dev client — plante).
+ * Notifications : détection via `requireOptionalNativeModule` (New Arch /
+ * Expo Modules) — `NativeModules.Expo…` est souvent vide et donnait un faux
+ * « module indisponible ».
+ *
+ * Photothèque : c’est le **seul** endroit qui demande l’accès. Le picker d’import
+ * (`exif: true`, indispensable aux dates de prise) déclencherait sinon la boîte iOS
+ * au premier import — accord donné ici une fois pour toutes.
  */
-import { NativeModules } from 'react-native';
+import { requireOptionalNativeModule } from 'expo-modules-core';
 import * as ImagePicker from 'expo-image-picker';
 
 export {
@@ -11,24 +16,23 @@ export {
   markOnboardingPermissionsSeen,
 } from '@/lib/onboardingPermissionsSeen';
 
+/** `granted` couvre aussi l’accès limité (« Photos sélectionnées ») d’iOS. */
 export async function getPhotoLibraryGranted(): Promise<boolean> {
-  const { status } = await ImagePicker.getMediaLibraryPermissionsAsync();
-  return status === 'granted' || status === 'limited';
+  const { granted } = await ImagePicker.getMediaLibraryPermissionsAsync();
+  return granted;
 }
 
 export async function requestPhotoLibraryAccess(): Promise<boolean> {
-  const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  return status === 'granted' || status === 'limited';
+  const { granted } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  return granted;
 }
 
 type NotificationsModule = typeof import('expo-notifications');
 
 function hasNotificationsNative(): boolean {
-  const n = NativeModules as Record<string, unknown>;
   return !!(
-    n.ExpoPushTokenManager ||
-    n.ExpoNotificationPermissionsModule ||
-    n.ExpoNotifications
+    requireOptionalNativeModule('ExpoNotificationPermissionsModule') ||
+    requireOptionalNativeModule('ExpoPushTokenManager')
   );
 }
 

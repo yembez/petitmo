@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
+import { Plus } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useCallback, useMemo, useRef, useEffect, type ReactNode } from 'react';
 import { scale, verticalScale } from '@/utils/responsive';
@@ -29,7 +30,8 @@ import { useFeedMetaFonts } from '@/hooks/useFeedMetaFonts';
 import { useFilRowActions } from '@/hooks/useFilRowActions';
 import { styles } from '@/components/feed/feedStyles';
 import { THEME } from '@/constants/theme';
-import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
+import { PETITMO_CTA_BORDER_WIDTH, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
 import { FeedHeader } from '@/components/feed/FeedHeader';
@@ -49,6 +51,7 @@ import TabSceneTransition from '@/components/TabSceneTransition';
 
 function FilScreen() {
   const router = useRouter();
+  const { t } = useAppTranslation('common');
   const { pending: pendingUploads } = usePendingMediaUploads();
   const insets = useSafeAreaInsets();
   const [timingNudge, setTimingNudge] = useState<'DAY_30' | 'DAY_60' | null>(null);
@@ -361,8 +364,22 @@ function FilScreen() {
           ListEmptyComponent={
             feedData.length === 0 ? (
               <View style={[styles.emptyContainer, { minHeight: verticalScale(420) }]}>
-                <Text style={styles.emptyText}>Aucun souvenir pour le moment</Text>
-                <Text style={styles.emptySubText}>Commencez a capturer des moments precieux</Text>
+                <TouchableOpacity
+                  style={localStyles.emptyPlusDisc}
+                  activeOpacity={0.85}
+                  onPress={() => router.navigate('/(tabs)')}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('fil.empty.addA11y')}
+                >
+                  <Plus
+                    size={scale(36)}
+                    color={THEME.captureCtaBorderColor}
+                    fill="none"
+                    strokeWidth={2}
+                  />
+                </TouchableOpacity>
+                <Text style={localStyles.emptyTitle}>{t('fil.empty.title')}</Text>
+                <Text style={localStyles.emptySubtitle}>{t('fil.empty.subtitle')}</Text>
               </View>
             ) : null
           }
@@ -439,7 +456,33 @@ export default function FilScreenTab() {
   );
 }
 
+const EMPTY_PLUS_DISC = scale(76);
+
 const localStyles = StyleSheet.create({
+  /** Même disque contour « + » que l’onglet Capturer, en grand format. */
+  emptyPlusDisc: {
+    width: EMPTY_PLUS_DISC,
+    height: EMPTY_PLUS_DISC,
+    borderRadius: EMPTY_PLUS_DISC / 2,
+    borderWidth: PETITMO_CTA_BORDER_WIDTH,
+    borderColor: THEME.captureCtaBorderColor,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: verticalScale(22),
+  },
+  emptyTitle: {
+    fontSize: scale(20),
+    fontWeight: '600',
+    color: THEME.textPrimary,
+    textAlign: 'center',
+    marginBottom: verticalScale(10),
+  },
+  emptySubtitle: {
+    fontSize: scale(16),
+    lineHeight: scale(23),
+    color: THEME.textMuted,
+    textAlign: 'center',
+  },
   nudgeBanner: {
     position: 'absolute',
     left: 20,

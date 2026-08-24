@@ -218,13 +218,17 @@ function remotePhotoPrintRef(memory: Memory): string | null {
 async function measureSandboxImagePx(uri: string): Promise<{ w: number; h: number } | null> {
   // Import statique obligatoire : `await import('react-native')` force Metro importAll
   // (PushNotificationIOS → NativeEventEmitter(null) → crash fatal New Arch).
-  return await new Promise(resolve => {
-    Image.getSize(
-      uri,
-      (w, h) => resolve(w > 0 && h > 0 ? { w, h } : null),
-      () => resolve(null),
-    );
-  });
+  try {
+    return await new Promise(resolve => {
+      Image.getSize(
+        uri,
+        (w, h) => resolve(w > 0 && h > 0 ? { w, h } : null),
+        () => resolve(null),
+      );
+    });
+  } catch {
+    return null;
+  }
 }
 
 /** True si le souvenir a des refs cloud mais pas encore de fichiers sandbox lisibles pour l’affichage. */

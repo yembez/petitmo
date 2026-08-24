@@ -11,7 +11,7 @@ import {
   type MainTabRoute,
 } from '@/constants/contextualTabBar';
 import { THEME } from '@/constants/theme';
-import { PETITMO_CTA_BORDER_WIDTH } from '@/constants/petitmoCtaStyles';
+import CaptureTabPlusIcon from '@/components/CaptureTabPlusIcon';
 import {
   TAB_BAR_BACKGROUND,
   TAB_BAR_BORDER_WIDTH,
@@ -33,6 +33,13 @@ const TAB_ICON_SIZE = scale(24);
 const TAB_ICON_ROW_H = scale(28);
 /** Disque Capturer hors écran : un peu plus grand que la ligne d’icônes. */
 const TAB_CAPTURE_PLUS_DISC = scale(34);
+/** Contour du disque, plus épais que le liseré CTA standard pour tenir le dégradé. */
+const TAB_CAPTURE_RING_WIDTH = scale(2);
+/**
+ * Le disque dépasse la ligne d’icônes : sans ce léger basculement, le « + »
+ * et « Capturer » paraissent trop hauts par rapport aux autres onglets.
+ */
+const TAB_CAPTURE_NUDGE_Y = verticalScale(2);
 const TAB_LABEL_LINE_H = scale(12);
 const TAB_ICON_LABEL_GAP = verticalScale(3);
 
@@ -65,15 +72,16 @@ function TabBarGlyph({
 }) {
   if (captureHighlight) {
     return (
-      <View style={[styles.iconWrap, styles.iconWrapCaptureHighlight]}>
-        <View style={styles.capturePlusDisc} accessibilityElementsHidden>
-          <Plus
-            size={TAB_ICON_SIZE}
-            color={THEME.captureCtaBorderColor}
-            fill="none"
-            strokeWidth={focused ? 2.25 : 2}
-          />
-        </View>
+      <View
+        style={[styles.iconWrap, styles.iconWrapCaptureHighlight]}
+        accessibilityElementsHidden
+      >
+        <CaptureTabPlusIcon
+          size={TAB_CAPTURE_PLUS_DISC}
+          plusSize={TAB_ICON_SIZE}
+          ringWidth={TAB_CAPTURE_RING_WIDTH}
+          plusStrokeWidth={focused ? 2.25 : 2}
+        />
       </View>
     );
   }
@@ -182,6 +190,7 @@ export default function PetitmoContextTabBar({
               accessibilityLabel={options.tabBarAccessibilityLabel ?? label}
               onPress={onPress}
               onLongPress={onLongPress}
+              style={showCapturePlusHighlight ? styles.captureTabNudgeDown : undefined}
             >
               <TabBarGlyph
                 Icon={meta.Icon}
@@ -235,6 +244,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'transparent',
   },
+  captureTabNudgeDown: {
+    transform: [{ translateY: TAB_CAPTURE_NUDGE_Y }],
+  },
   iconWrap: {
     height: TAB_ICON_ROW_H,
     alignItems: 'center',
@@ -242,16 +254,6 @@ const styles = StyleSheet.create({
   },
   iconWrapCaptureHighlight: {
     height: TAB_CAPTURE_PLUS_DISC,
-  },
-  capturePlusDisc: {
-    width: TAB_CAPTURE_PLUS_DISC,
-    height: TAB_CAPTURE_PLUS_DISC,
-    borderRadius: TAB_CAPTURE_PLUS_DISC / 2,
-    backgroundColor: 'transparent',
-    borderWidth: PETITMO_CTA_BORDER_WIDTH,
-    borderColor: THEME.captureCtaBorderColor,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   tabLabel: {
     marginTop: TAB_ICON_LABEL_GAP,

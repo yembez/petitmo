@@ -24,6 +24,7 @@ import {
 } from '@/services/media';
 import { pullFamilyMemoriesFromRemoteToLocal } from '@/services/memoriesLocalSync';
 import { materializeCloudMediaForMemories } from '@/services/memoryCloudMaterialize';
+import { scheduleAfterOtaWindow } from '@/services/scheduleAfterOtaWindow';
 import { primeFeedVideoPosterStableCache } from '@/services/feedVideoPosterPrime';
 import {
   getChildren,
@@ -237,14 +238,18 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
           setMemories(prev => mergeMemoriesListPreservingVisualRowRefs(prev, fresh));
           void primeFeedVideoPosterStableCache(fresh);
           InteractionManager.runAfterInteractions(() => {
-            void materializeCloudMediaForMemories(fresh, { max: 16, batchSize: 2 });
-            void requestMissingMediaDerivatives(fresh);
+            scheduleAfterOtaWindow(() => {
+              void materializeCloudMediaForMemories(fresh, { max: 16, batchSize: 2 });
+              void requestMissingMediaDerivatives(fresh);
+            });
           });
         })();
       } else {
         InteractionManager.runAfterInteractions(() => {
-          void materializeCloudMediaForMemories(memoriesData, { max: 16, batchSize: 2 });
-          void requestMissingMediaDerivatives(memoriesData);
+          scheduleAfterOtaWindow(() => {
+            void materializeCloudMediaForMemories(memoriesData, { max: 16, batchSize: 2 });
+            void requestMissingMediaDerivatives(memoriesData);
+          });
         });
       }
     } catch (error) {

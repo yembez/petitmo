@@ -86,13 +86,8 @@ export default function CreateChildScreen() {
     }
   }, [authIntent, backBusy, router]);
 
+  /** PHPicker : pas de demande d’accès photothèque, la sélection suffit. */
   const handlePhotoUpload = async () => {
-    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-    if (permissionResult.granted === false) {
-      return;
-    }
-
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,

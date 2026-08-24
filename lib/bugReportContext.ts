@@ -24,7 +24,9 @@ export type BugReportContext = {
 function safeUpdateId(): string {
   try {
     if (!Updates.isEnabled) return 'embedded';
-    return Updates.updateId?.trim() || 'embedded';
+    const id = Updates.updateId?.trim() || 'unknown';
+    if (Updates.isEmbeddedLaunch) return `embedded:${id.slice(0, 8)}`;
+    return id;
   } catch {
     return 'n/a';
   }
@@ -90,7 +92,8 @@ export function formatAppVersionLabel(
   ctx: Pick<BugReportContext, 'appVersion' | 'buildNumber' | 'updateId'>,
 ): string {
   const base = `${ctx.appVersion} (${ctx.buildNumber})`;
-  if (!ctx.updateId || ctx.updateId === 'embedded' || ctx.updateId === 'n/a') return base;
+  if (!ctx.updateId || ctx.updateId === 'n/a') return base;
+  if (ctx.updateId.startsWith('embedded')) return `${base} · ${ctx.updateId}`;
   return `${base} · ota ${ctx.updateId.slice(0, 8)}`;
 }
 

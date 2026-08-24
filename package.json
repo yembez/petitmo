@@ -12,6 +12,8 @@
     "test": "vitest run",
     "android": "expo run:android",
     "ios": "expo run:ios",
+    "ios:device": "LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 SENTRY_DISABLE_AUTO_UPLOAD=true expo run:ios --device",
+    "ios:launch": "bash scripts/launch-ios-device.sh",
     "tf:ios": "eas build --platform ios --profile production --auto-submit",
     "dev:ios:build": "eas build --platform ios --profile dev-ios-device --clear-cache",
     "ota:production": "eas update --channel production --environment production",

@@ -2310,16 +2310,9 @@ export default function BookPreviewScreen() {
     [bookId, child?.id, prefetchCropDpiMeta]
   );
 
+  /** PHPicker : pas de demande d’accès photothèque, la sélection suffit. */
   const pickCoverFromGallery = useCallback(async () => {
     try {
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) {
-        Alert.alert(
-          'Accès refusé',
-          'Autorise l’accès à vos photos dans les réglages pour choisir une image de couverture.',
-        );
-        return;
-      }
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
         allowsEditing: false,

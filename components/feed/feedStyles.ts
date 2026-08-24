@@ -87,11 +87,16 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   headerAvatarRing: {
-    padding: HEADER_AVATAR_RING_PADDING,
+    padding: HEADER_AVATAR_RING_WIDTH,
     borderRadius:
       HEADER_AVATAR_PX / 2 + HEADER_AVATAR_RING_PADDING + HEADER_AVATAR_RING_WIDTH,
-    borderWidth: HEADER_AVATAR_RING_WIDTH,
-    borderColor: THEME.brandCtaOrange,
+    overflow: 'hidden',
+  },
+  /** Écart entre le liseré et la photo — repeint au fond écran, comme la pile multi-enfants. */
+  headerAvatarRingInner: {
+    padding: HEADER_AVATAR_RING_PADDING,
+    borderRadius: HEADER_AVATAR_PX / 2 + HEADER_AVATAR_RING_PADDING,
+    backgroundColor: THEME.familyFlowScreenBg,
     overflow: 'hidden',
   },
   headerAvatarImg: {

@@ -124,6 +124,23 @@
       "deleteConfirmBody": "This cannot be undone. Your account and associated cloud access will be removed. Local data on this device will also be erased.",
       "deleteFailed": "Could not delete the account right now."
     },
+    "application": {
+      "checkUpdate": "Check for update",
+      "versionPrefix": "Version {{label}}",
+      "enableNotifications": "Enable notifications",
+      "enableNotificationsHint": "Shows the iOS prompt (needed to appear in Settings)",
+      "notificationsGrantedTitle": "Notifications enabled",
+      "notificationsGrantedBody": "You can now copy the push token for a test.",
+      "notificationsDeniedTitle": "Notifications denied",
+      "notificationsDeniedBody": "Open iOS Settings to allow Petitmo, then come back here.",
+      "notificationsUnavailableBody": "The notifications module is not available on this build.",
+      "openSettings": "Open Settings",
+      "copyPushToken": "Copy push token (test)",
+      "pushTokenMissingTitle": "No push token",
+      "pushTokenMissingBody": "Enable notifications first (row above). A physical iPhone is required.",
+      "pushTokenShareTitle": "Expo Push token",
+      "pushTokenHint": "Paste it at expo.dev/notifications. For a lasting banner: lock the screen before Send."
+    },
     "orders": {
       "sectionTitle": "My orders",
       "empty": "No orders yet.",
@@ -149,6 +166,13 @@
       "videosBody": "You’ve used all {{count}} free-plan videos. Upgrade to Petitmo+ to add another.",
       "voicesTitle": "Audio limit reached",
       "voicesBody": "You’ve used all {{count}} free-plan audio memories. Upgrade to Petitmo+ to add more."
+    }
+  },
+  "fil": {
+    "empty": {
+      "title": "No memories yet",
+      "subtitle": "Start capturing precious moments",
+      "addA11y": "Capture a first memory"
     }
   },
   "tabs": {
@@ -253,6 +277,7 @@
     "stillTooLongTitle": "Still too long",
     "stillTooLongBody": "Keep a clip of at most {{max}} seconds.",
     "exportFailedTitle": "Couldn’t shorten",
-    "exportFailedBody": "Try again in a moment."
+    "exportFailedBody": "Try again in a moment.",
+    "exporting": "Shortening video…"
   }
 }

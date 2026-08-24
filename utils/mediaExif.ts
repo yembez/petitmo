@@ -88,13 +88,28 @@ async function getMediaLibraryModule(): Promise<MediaLibraryModule | null> {
 }
 
 /**
+ * Statut photothèque en lecture seule : l’accès se demande uniquement à l’onboarding
+ * (`lib/onboardingPermissions.ts`), jamais depuis un chemin d’import.
+ */
+async function hasPhotoLibraryAccessAlready(): Promise<boolean> {
+  try {
+    const res = await ImagePicker.getMediaLibraryPermissionsAsync();
+    return res.granted;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Date de prise via `assetId` + MediaLibrary — utile quand `exif: false` sur le picker (après rebuild natif).
+ * Repli seulement, et sans effet si l’accès a été refusé à l’onboarding.
  */
 async function resolveCapturedAtFromLibraryAssetId(
   assetId: string | null | undefined
 ): Promise<string | undefined> {
   const id = assetId?.trim();
   if (!id || Platform.OS === 'web') return undefined;
+  if (!(await hasPhotoLibraryAccessAlready())) return undefined;
   const MediaLibrary = await getMediaLibraryModule();
   if (!MediaLibrary) return undefined;
   try {

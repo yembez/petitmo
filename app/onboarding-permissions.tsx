@@ -1,6 +1,9 @@
 /**
  * Étape post-auth (avant create-child) : photothèque + notifications.
  * Règle d’or V2 : compte + local-first — pas de sync ici.
+ *
+ * Unique point de demande de la photothèque : une fois accordée ici, ni l’import
+ * ni les sélections de photo (profil, couverture livre/voix) ne rouvrent de boîte iOS.
  */
 import { useCallback, useEffect, useState } from 'react';
 import {
@@ -119,7 +122,9 @@ export default function OnboardingPermissionsScreen() {
     if (next) {
       const granted = await requestNotificationsAccess();
       setNotifsOn(granted);
-      if (!granted) {
+      if (granted) {
+        void import('@/services/registerPushToken').then(m => m.registerPushTokenInBackground());
+      } else {
         Alert.alert(t('permissions.deniedTitle'), t('permissions.notifsDeniedBody'), [
           { text: t('cancel'), style: 'cancel' },
           {

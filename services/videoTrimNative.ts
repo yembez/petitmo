@@ -42,11 +42,16 @@ type VideoTrimModule = {
   ) => Promise<{ outputPath?: string }>;
 };
 
+/**
+ * Toujours les **fonctions nommées** du package, jamais son `default`.
+ * `default` est la spec TurboModule brute : elle attend un objet d’options complet
+ * (`saveToPhoto`, `type`, `speed`, `removeAudio`…) que seuls les wrappers JS remplissent.
+ * Appeler le natif avec des champs manquants fait planter l’app à l’export.
+ */
 function loadVideoTrimModule(): VideoTrimModule | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require('react-native-video-trim') as VideoTrimModule & { default?: VideoTrimModule };
-    return mod.default ?? mod;
+    return require('react-native-video-trim') as VideoTrimModule;
   } catch {
     return null;
   }
@@ -75,11 +80,13 @@ export async function trimVideoClipToLocalFile(params: {
   const input = ensureVideoFileUri(params.inputUri);
   if (!input) throw new Error('VIDEO_TRIM_EMPTY_INPUT');
 
+  // Precise = ré-encode FFmpeg (RAM élevée → WatchdogTermination sur iPhone).
+  // Stream-copy (false) : coupe aux keyframes, bien plus léger pour la sauvegarde fil.
   const result = await mod.trim(input, {
     startTime: startMs,
     endTime: endMs,
     outputExt: 'mp4',
-    enablePreciseTrimming: true,
+    enablePreciseTrimming: false,
   });
 
   const out = ensureVideoFileUri((result.outputPath ?? '').trim());
@@ -103,41 +110,53 @@ export async function trimVideoClipToLocalFile(params: {
   return { uri: out, durationSec };
 }
 
-const FILMSTRIP_COUNT = 10;
+/** Nombre de vignettes de la piste de coupe (aligné sur `FILMSTRIP_SLOTS` de l’éditeur). */
+export const VIDEO_TRIM_FILMSTRIP_COUNT = 10;
 
 /**
- * Extrait des vignettes pour la piste de coupe (cache natif).
- * Retourne un tableau de même longueur que `count` (chaîne vide si échec).
+ * Vignettes de la piste de coupe.
+ *
+ * Extraction **séquentielle** et basse résolution : en parallèle, dix décodages FFmpeg
+ * s’ajoutaient au lecteur expo-av et faisaient tuer l’app pour dépassement mémoire.
+ * `onFrame` permet de peindre chaque vignette dès qu’elle est prête plutôt que d’attendre.
  */
 export async function loadVideoTrimFilmstripUris(
   inputUri: string,
   durationSec: number,
-  count = FILMSTRIP_COUNT,
+  opts?: {
+    count?: number;
+    onFrame?: (index: number, uri: string) => void;
+    /** Interrompt l’extraction dès que la modale se ferme. */
+    shouldContinue?: () => boolean;
+  },
 ): Promise<string[]> {
+  const count = Math.max(0, opts?.count ?? VIDEO_TRIM_FILMSTRIP_COUNT);
+  const slots = Array.from({ length: count }, () => '');
+
   const mod = loadVideoTrimModule();
-  if (typeof mod?.getFrameAt !== 'function' || durationSec <= 0 || count <= 0) {
-    return Array.from({ length: count }, () => '');
+  if (typeof mod?.getFrameAt !== 'function' || durationSec <= 0 || count === 0) {
+    return slots;
   }
 
   const input = ensureVideoFileUri(inputUri);
-  const slots = Array.from({ length: count }, () => '');
+  if (!input) return slots;
 
-  await Promise.all(
-    slots.map(async (_, i) => {
-      const timeMs = Math.round(((i + 0.5) / count) * durationSec * 1000);
-      try {
-        const frame = await mod.getFrameAt!(input, {
-          time: timeMs,
-          format: 'jpeg',
-          quality: 55,
-          maxWidth: 160,
-        });
-        slots[i] = ensureVideoFileUri((frame.outputPath ?? '').trim());
-      } catch {
-        slots[i] = '';
-      }
-    }),
-  );
+  for (let i = 0; i < count; i += 1) {
+    if (opts?.shouldContinue && !opts.shouldContinue()) break;
+    const timeMs = Math.round(((i + 0.5) / count) * durationSec * 1000);
+    try {
+      const frame = await mod.getFrameAt(input, {
+        time: timeMs,
+        format: 'jpeg',
+        quality: 55,
+        maxWidth: 160,
+      });
+      slots[i] = ensureVideoFileUri((frame.outputPath ?? '').trim());
+    } catch {
+      slots[i] = '';
+    }
+    if (slots[i]) opts?.onFrame?.(i, slots[i]);
+  }
 
   return slots;
 }

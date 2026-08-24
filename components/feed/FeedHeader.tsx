@@ -1,6 +1,8 @@
-import { memo } from 'react';
+import { memo, type ReactNode } from 'react';
 import { View, Text, TouchableOpacity, Platform, StyleSheet } from 'react-native';
 import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
+import { CAPTURE_PHOTO_BORDER_GRADIENT } from '@/constants/captureScreenPalette';
 import { calculateAge } from '@/utils/date';
 import { scale } from '@/utils/responsive';
 import type { Child } from '@/utils/feedHelpers';
@@ -31,6 +33,20 @@ function familyHeaderTitle(children: Child[]): string {
   return '';
 }
 
+/** Liseré dégradé bleu → orange, même spectre que le contour de la photo hero Capturer. */
+function AvatarGradientRing({ children }: { children: ReactNode }) {
+  return (
+    <LinearGradient
+      colors={[...CAPTURE_PHOTO_BORDER_GRADIENT]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={styles.headerAvatarRing}
+    >
+      <View style={styles.headerAvatarRingInner}>{children}</View>
+    </LinearGradient>
+  );
+}
+
 function FeedHeaderAvatarStack({
   familyChildren,
   onPressChild,
@@ -43,23 +59,24 @@ function FeedHeaderAvatarStack({
     const givenName = childDisplayGivenName(child.name) || child.name.trim() || 'Enfant';
     return (
       <TouchableOpacity
-        style={styles.headerAvatarRing}
         onPress={() => onPressChild(child)}
         activeOpacity={0.85}
         accessibilityRole="button"
         accessibilityLabel={`Modifier le profil de ${givenName}`}
       >
-        <ChildAvatar
-          key={`${child.id}-${child.updated_at ?? ''}-${child.local_photo_path ?? ''}`}
-          child={child}
-          size={HEADER_AVATAR_PX}
-        />
+        <AvatarGradientRing>
+          <ChildAvatar
+            key={`${child.id}-${child.updated_at ?? ''}-${child.local_photo_path ?? ''}`}
+            child={child}
+            size={HEADER_AVATAR_PX}
+          />
+        </AvatarGradientRing>
       </TouchableOpacity>
     );
   }
 
   return (
-    <View style={styles.headerAvatarRing}>
+    <AvatarGradientRing>
       <View style={headerAvatarStackStyles.row}>
         {familyChildren.map((child, index) => {
           const givenName = childDisplayGivenName(child.name) || child.name.trim() || 'Enfant';
@@ -83,7 +100,7 @@ function FeedHeaderAvatarStack({
           );
         })}
       </View>
-    </View>
+    </AvatarGradientRing>
   );
 }
 

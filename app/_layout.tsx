@@ -47,6 +47,14 @@ import { APP_BOOT_FONT_SOURCES } from '@/constants/appBootFonts';
 import { enrichSentryUserContext, initPetitmoSentry, Sentry } from '@/lib/sentry';
 
 initPetitmoSentry();
+
+/** OTA le plus tôt possible (avant auth / materialize) — pas de build natif. */
+if (!__DEV__) {
+  void import('@/services/applyOtaUpdate')
+    .then(m => m.applyAvailableOtaUpdate({ waitForNativeDownloadMs: 25_000 }))
+    .catch(() => {});
+}
+
 void SplashScreen.preventAutoHideAsync();
 
 function RootLayoutNav() {
@@ -145,6 +153,33 @@ function RootLayoutNav() {
     void initAuth();
   }, []);
 
+  /** Relance OTA après auth si le fetch au boot n’a pas suffi. */
+  useEffect(() => {
+    if (!isAuthReady) return;
+    const t = setTimeout(() => {
+      void import('@/services/applyOtaUpdate').then(m => m.applyAvailableOtaUpdate());
+    }, 800);
+    return () => clearTimeout(t);
+  }, [isAuthReady]);
+
+  /** Token push : fond uniquement, après session (permission déjà accordée ou non). */
+  useEffect(() => {
+    if (!isAuthReady) return;
+    void import('@/services/registerPushToken').then(m => m.registerPushTokenInBackground());
+  }, [isAuthReady]);
+
+  /** Tap sur une notif → ouvrir Capturer (écran d’accueil). */
+  useEffect(() => {
+    if (!isAuthReady) return;
+    let cleanup: (() => void) | undefined;
+    void import('@/services/pushNotificationOpen')
+      .then(m => m.installPushNotificationOpenHandlers())
+      .then(fn => {
+        cleanup = fn;
+      });
+    return () => cleanup?.();
+  }, [isAuthReady]);
+
   async function runWeeklyCleanup(): Promise<void> {
     const CLEANUP_KEY = 'petitmo_last_cleanup'
     const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000
@@ -184,6 +219,7 @@ function RootLayoutNav() {
           .then(() => {
             // Local d’abord ; pull cloud en fond → `memories-updated` soft si merge.
             void hydrateTabScreensFromLocal();
+            void import('@/services/registerPushToken').then(m => m.registerPushTokenInBackground());
           });
       }, 450);
     });

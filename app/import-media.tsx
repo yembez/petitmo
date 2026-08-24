@@ -5,8 +5,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   Alert,
-  AppState,
-  AppStateStatus,
   ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -17,7 +15,6 @@ import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
 import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
-import PermissionModal from '@/components/PermissionModal';
 import ImportBatchLayoutModal from '@/components/ImportBatchLayoutModal';
 import { FeedMediaPrepOverlay } from '@/components/FeedMediaPrepOverlay';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
@@ -33,7 +30,11 @@ import { promptFreeTierLimitThenPaywall } from '@/utils/freeTierLimitGate';
 import { IMPORT_DUPLICATE_ASSET } from '@/lib/importDuplicate';
 import { buildAlbumImportFingerprint, dedupePickerAssetsByLibraryId } from '@/utils/importLibraryDedupe';
 import { VideoTrimModal } from '@/components/VideoTrimModal';
-import { isVideoTrimNativeAvailable } from '@/services/videoTrimNative';
+import {
+  isVideoTrimNativeAvailable,
+  trimVideoClipToLocalFile,
+  VideoTrimNativeMissingError,
+} from '@/services/videoTrimNative';
 import { takePendingSharedImport } from '@/lib/pendingShareMedia';
 
 type ImportStickerPreview = {
@@ -151,8 +152,6 @@ export default function ImportMediaScreen() {
   const router = useRouter();
   const { t } = useAppTranslation('common');
   const { startBackgroundUploadNavigateToFeed } = usePendingMediaUploads();
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
-  const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [pickAttemptFinished, setPickAttemptFinished] = useState(false);
   /** Dès validation galerie : plus de roue sur cet écran (elle restait car `pickAttemptFinished` restait false). */
   const [navigatingToFeed, setNavigatingToFeed] = useState(false);
@@ -166,6 +165,8 @@ export default function ImportMediaScreen() {
     maxDurationSec: number;
     resolve: (asset: ImagePicker.ImagePickerAsset | null) => void;
   } | null>(null);
+  /** Trim FFmpeg hors modale (évite WatchdogTermination / Low memory). */
+  const [videoTrimExporting, setVideoTrimExporting] = useState(false);
   const autoGalleryLaunchedRef = useRef(false);
   /** 0 = pas de plafond picker (gratuit : on gère le message 20 s après sélection). */
   const videoMaxDurationRef = useRef(0);
@@ -178,55 +179,6 @@ export default function ImportMediaScreen() {
       videoMaxDurationRef.current = 0;
     });
   }, []);
-
-  useEffect(() => {
-    const subscription = AppState.addEventListener('change', handleAppStateChange);
-    return () => subscription.remove();
-  }, []);
-
-  const handleAppStateChange = (nextAppState: AppStateStatus) => {
-    if (nextAppState === 'active') {
-      checkPermissions();
-    }
-  };
-
-  const checkPermissions = async () => {
-    const result = await ImagePicker.getMediaLibraryPermissionsAsync();
-
-    if (!result.granted && !result.canAskAgain) {
-      router.back();
-      return;
-    }
-
-    if (!result.granted) {
-      setShowPermissionModal(true);
-    }
-
-    setHasPermission(result.granted);
-  };
-
-  const handleRequestPermission = async () => {
-    const result = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (result.granted) {
-      setHasPermission(true);
-      setShowPermissionModal(false);
-      const res = await pickFromLibrary();
-      if (res === 'cancelled') {
-        router.back();
-        return;
-      }
-      if (res === 'left' || res === 'batch_choice') return;
-      if (res !== 'committed') setPickAttemptFinished(true);
-    } else {
-      setShowPermissionModal(false);
-      router.back();
-    }
-  };
-
-  const handleCancelPermission = () => {
-    setShowPermissionModal(false);
-    router.back();
-  };
 
   /**
    * Enregistre le pending + `replace` fil **sans aucun await** : tout le réseau / EXIF part dans `upload()`.
@@ -662,7 +614,13 @@ export default function ImportMediaScreen() {
     }
   }, [processPickedAssets]);
 
-  /** Ouvre la galerie dès le montage — ou consomme un partage iOS (Share Extension). */
+  /**
+   * Ouvre la galerie dès le montage — ou consomme un partage iOS (Share Extension).
+   *
+   * Aucune demande d’autorisation photothèque : `launchImageLibraryAsync` passe par le
+   * sélecteur système (PHPicker) qui n’expose que les médias choisis. Demander l’accès
+   * ajouterait une boîte iOS inutile avant la grille de photos.
+   */
   useEffect(() => {
     if (autoGalleryLaunchedRef.current) return;
     autoGalleryLaunchedRef.current = true;
@@ -671,7 +629,6 @@ export default function ImportMediaScreen() {
       try {
         const shared = takePendingSharedImport();
         if (shared?.length) {
-          setHasPermission(true);
           const res = await processPickedAssets(shared);
           if (res === 'cancelled' || res === 'not_committed') {
             router.back();
@@ -682,22 +639,6 @@ export default function ImportMediaScreen() {
           if (res !== 'committed') setPickAttemptFinished(true);
           return;
         }
-
-        let perm = await ImagePicker.getMediaLibraryPermissionsAsync();
-        if (!perm.granted) {
-          perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        }
-        if (!perm.granted) {
-          if (!perm.canAskAgain) {
-            router.back();
-            return;
-          }
-          setShowPermissionModal(true);
-          setPickAttemptFinished(true);
-          setHasPermission(false);
-          return;
-        }
-        setHasPermission(true);
 
         const res = await pickFromLibrary();
         if (res === 'cancelled') {
@@ -756,18 +697,40 @@ export default function ImportMediaScreen() {
         setVideoTrimRequest(null);
         req?.resolve(null);
       }}
-      onConfirm={result => {
+      onConfirm={range => {
         const req = videoTrimRequest;
         if (!req) return;
         setVideoTrimRequest(null);
-        req.resolve({
-          ...req.asset,
-          uri: result.uri,
-          duration: result.durationSec * 1000,
-          type: 'video',
-          fileName: req.asset.fileName ?? `trim-${Date.now()}.mp4`,
-          mimeType: req.asset.mimeType ?? 'video/mp4',
-        });
+        void (async () => {
+          setVideoTrimExporting(true);
+          // Laisser la modale / player se démonter avant FFmpeg.
+          await new Promise<void>(resolve => setTimeout(resolve, 250));
+          try {
+            const result = await trimVideoClipToLocalFile({
+              inputUri: req.asset.uri,
+              startSec: range.startSec,
+              endSec: range.endSec,
+            });
+            req.resolve({
+              ...req.asset,
+              uri: result.uri,
+              duration: result.durationSec * 1000,
+              type: 'video',
+              fileName: req.asset.fileName ?? `trim-${Date.now()}.mp4`,
+              mimeType: req.asset.mimeType ?? 'video/mp4',
+            });
+          } catch (e) {
+            if (e instanceof VideoTrimNativeMissingError) {
+              Alert.alert(t('videoTrim.needsRebuildTitle'), t('videoTrim.needsRebuildBody'));
+            } else {
+              console.warn('[import-media] video trim export', e);
+              Alert.alert(t('videoTrim.exportFailedTitle'), t('videoTrim.exportFailedBody'));
+            }
+            req.resolve(null);
+          } finally {
+            setVideoTrimExporting(false);
+          }
+        })();
       }}
       onUpgrade={
         isFreeTierRef.current
@@ -784,32 +747,6 @@ export default function ImportMediaScreen() {
       }
     />
   );
-
-  if (hasPermission === null) {
-    return (
-      <>
-        {batchLayoutModalEl}
-        {videoTrimModalEl}
-        <View style={styles.container} />
-      </>
-    );
-  }
-
-  if (!hasPermission) {
-    return (
-      <>
-        {batchLayoutModalEl}
-        {videoTrimModalEl}
-        <View style={styles.container} />
-        <PermissionModal
-          visible={showPermissionModal}
-          type="photos"
-          onRequestPermission={handleRequestPermission}
-          onCancel={handleCancelPermission}
-        />
-      </>
-    );
-  }
 
   if (navigatingToFeed) {
     return (
@@ -839,6 +776,17 @@ export default function ImportMediaScreen() {
   }
 
   /** Pendant l’éditeur de coupe vidéo : modal plein écran uniquement. */
+  if (videoTrimExporting) {
+    return (
+      <>
+        {batchLayoutModalEl}
+        <View style={styles.container}>
+          <FeedMediaPrepOverlay label={t('videoTrim.exporting')} />
+        </View>
+      </>
+    );
+  }
+
   if (videoTrimRequest != null) {
     return (
       <>

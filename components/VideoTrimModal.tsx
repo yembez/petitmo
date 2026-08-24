@@ -21,13 +21,13 @@ import { VideoTrimEditor, type VideoTrimEditorValue } from '@/components/VideoTr
 import {
   isVideoTrimNativeAvailable,
   loadVideoTrimFilmstripUris,
-  trimVideoClipToLocalFile,
-  VideoTrimNativeMissingError,
+  VIDEO_TRIM_FILMSTRIP_COUNT,
 } from '@/services/videoTrimNative';
 
+/** Plage choisie — le parent ferme la modale puis lance le trim natif (moins de RAM). */
 export type VideoTrimModalConfirmResult = {
-  uri: string;
-  durationSec: number;
+  startSec: number;
+  endSec: number;
 };
 
 type Props = {
@@ -69,10 +69,10 @@ export function VideoTrimModal({
   const [trim, setTrim] = useState<VideoTrimEditorValue>(() =>
     initialTrimRange(durationSec, maxDurationSec),
   );
-  const [filmstripUris, setFilmstripUris] = useState<string[]>([]);
   const [videoReady, setVideoReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [isExporting, setIsExporting] = useState(false);
+  const [isConfirming, setIsConfirming] = useState(false);
+  const [filmstripUris, setFilmstripUris] = useState<string[]>([]);
 
   trimRef.current = trim;
 
@@ -83,22 +83,14 @@ export function VideoTrimModal({
     setTrim(initial);
     setEffectiveDurationSec(durationSec);
     setPlaybackUri(normalizeVideoPlaybackUri(videoUri));
-    setFilmstripUris([]);
     setVideoReady(false);
     setIsPlaying(false);
     isPlayingRef.current = false;
     exportingRef.current = false;
-    setIsExporting(false);
-
-    let alive = true;
-    void (async () => {
-      const dur = Math.max(durationSec, 1);
-      const frames = await loadVideoTrimFilmstripUris(videoUri, dur);
-      if (alive) setFilmstripUris(frames);
-    })();
+    setIsConfirming(false);
+    setFilmstripUris([]);
 
     return () => {
-      alive = false;
       void videoRef.current?.stopAsync().catch(() => {});
       void videoRef.current?.unloadAsync().catch(() => {});
     };
@@ -113,6 +105,35 @@ export function VideoTrimModal({
       return next;
     });
   }, [visible, effectiveDurationSec, maxDurationSec]);
+
+  /**
+   * Vignettes une fois le lecteur prêt : on évite de décoder les images en même temps
+   * que le chargement de la preview. Extraction interrompue si la modale se ferme.
+   */
+  const filmstripLoadedForRef = useRef('');
+  useEffect(() => {
+    if (!visible || !videoReady || effectiveDurationSec <= 0) return;
+    if (filmstripLoadedForRef.current === videoUri) return;
+    filmstripLoadedForRef.current = videoUri;
+
+    let alive = true;
+    setFilmstripUris(Array.from({ length: VIDEO_TRIM_FILMSTRIP_COUNT }, () => ''));
+    void loadVideoTrimFilmstripUris(videoUri, effectiveDurationSec, {
+      shouldContinue: () => alive && !exportingRef.current,
+      onFrame: (index, uri) => {
+        if (!alive) return;
+        setFilmstripUris(prev => {
+          const next = [...prev];
+          next[index] = uri;
+          return next;
+        });
+      },
+    });
+
+    return () => {
+      alive = false;
+    };
+  }, [visible, videoReady, effectiveDurationSec, videoUri]);
 
   const seekToTrimStart = useCallback(async () => {
     const startMs = Math.round(trimRef.current.startSec * 1000);
@@ -223,28 +244,19 @@ export function VideoTrimModal({
     }
 
     exportingRef.current = true;
-    setIsExporting(true);
+    setIsConfirming(true);
     await stopPlayback();
-
     try {
-      const result = await trimVideoClipToLocalFile({
-        inputUri: videoUri,
-        startSec: range.startSec,
-        endSec: range.endSec,
-      });
-      onConfirm(result);
-    } catch (e) {
-      if (e instanceof VideoTrimNativeMissingError) {
-        Alert.alert(t('videoTrim.needsRebuildTitle'), t('videoTrim.needsRebuildBody'));
-      } else {
-        console.warn('[VideoTrimModal] export', e);
-        Alert.alert(t('videoTrim.exportFailedTitle'), t('videoTrim.exportFailedBody'));
-      }
-    } finally {
-      exportingRef.current = false;
-      setIsExporting(false);
+      await videoRef.current?.unloadAsync();
+    } catch {
+      /* ignore */
     }
-  }, [maxDurationSec, onConfirm, stopPlayback, t, videoUri]);
+    setPlaybackUri('');
+    setVideoReady(false);
+    setFilmstripUris([]);
+    // Remonter la plage : le parent démonte la modale puis lance FFmpeg.
+    onConfirm({ startSec: range.startSec, endSec: range.endSec });
+  }, [maxDurationSec, onConfirm, stopPlayback, t]);
 
   const subtitle = isFreeTier
     ? t('videoTrim.subtitleFree', { max: maxDurationSec })
@@ -260,7 +272,7 @@ export function VideoTrimModal({
             style={styles.closeBtn}
             accessibilityRole="button"
             accessibilityLabel={t('videoTrim.cancel')}
-            disabled={isExporting}
+            disabled={isConfirming}
           >
             <X size={scale(22)} color={THEME.textPrimary} strokeWidth={2.2} />
           </TouchableOpacity>
@@ -295,7 +307,7 @@ export function VideoTrimModal({
             onPress={togglePlayback}
             accessibilityRole="button"
             accessibilityLabel={isPlaying ? t('videoTrim.pauseA11y') : t('videoTrim.playA11y')}
-            disabled={!videoReady || isExporting}
+            disabled={!videoReady || isConfirming}
           >
             {isPlaying ? (
               <Pause size={scale(26)} color="#FFFFFF" fill="#FFFFFF" />
@@ -321,25 +333,25 @@ export function VideoTrimModal({
         </View>
 
         {isFreeTier && onUpgrade ? (
-          <TouchableOpacity onPress={onUpgrade} style={styles.upgradeLink} disabled={isExporting}>
+          <TouchableOpacity onPress={onUpgrade} style={styles.upgradeLink} disabled={isConfirming}>
             <Text style={styles.upgradeLinkText}>{t('parent.freeTierLimit.ctaPlus')}</Text>
           </TouchableOpacity>
         ) : null}
 
         <View style={styles.actions}>
           <TouchableOpacity
-            style={[styles.secondaryBtn, isExporting && styles.btnDisabled]}
+            style={[styles.secondaryBtn, isConfirming && styles.btnDisabled]}
             onPress={onCancel}
-            disabled={isExporting}
+            disabled={isConfirming}
           >
             <Text style={styles.secondaryBtnText}>{t('videoTrim.cancel')}</Text>
           </TouchableOpacity>
           <PetitmoPrimaryPressable
             style={styles.primaryBtn}
             onPress={() => void handleConfirm()}
-            disabled={isExporting}
+            disabled={isConfirming}
           >
-            {isExporting ? (
+            {isConfirming ? (
               <ActivityIndicator color={PETITMO_CTA_SPINNER_COLOR} />
             ) : (
               <Text style={petitmoCtaStyles.primaryText}>{t('videoTrim.confirm')}</Text>
