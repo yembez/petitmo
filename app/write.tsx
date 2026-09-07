@@ -24,6 +24,7 @@ import { checkMemoryLimit, invalidateMemoryLimitCache } from '@/lib/limits';
 import { promptFreeTierLimitThenPaywall } from '@/utils/freeTierLimitGate';
 import { getOrSelectFirstChild } from '@/services/children';
 import { armFeedSnapToLatestOnFocus } from '@/services/feedScrollRestore';
+import { selectAppTab } from '@/services/selectAppTab';
 import {
   MAX_BOOK_LINES,
   MAX_TEXT_MEMORY_TITLE_CHARS,
@@ -46,6 +47,8 @@ import { upsertLocalMemory, getLocalMemoryById } from '@/lib/localDb';
 import { buildLocalTextMemory } from '@/services/localOnlyMemoryCapture';
 import { ensureMemoryUploadedForCloud } from '@/services/migration';
 import { updateMemoryText } from '@/services/media';
+import { MEMORY_EDITORIAL_FONT_FAMILY } from '@/constants/memoryTextFont';
+import { applyTextAlineasForInput, stripTextAlineas } from '@/utils/textAlineas';
 
 type SpeechRecognitionResultLike = {
   isFinal: boolean
@@ -103,7 +106,7 @@ export default function WriteScreen() {
 
     hydratedEditIdRef.current = editMemoryId;
     setTitle(mem.text_title?.trim() ?? '');
-    setContent(mem.content?.trim() ?? '');
+    setContent(applyTextAlineasForInput(mem.content?.trim() ?? ''));
   }, [editMemoryId, isEditing, router]);
 
   useEffect(() => {
@@ -135,12 +138,18 @@ export default function WriteScreen() {
 
           if (finalTranscript) {
             setContent(prev => {
-              const merged = prev + finalTranscript;
+              const prevCanon = stripTextAlineas(prev);
+              const merged = prevCanon + finalTranscript;
               const normalized =
-                !prev.trim() && merged.trim()
+                !prevCanon.trim() && merged.trim()
                   ? capitalizeFirstLetterFr(merged)
                   : merged;
-              return enforceTextBookLineBudgetOnInput(prev, normalized, MAX_BOOK_LINES);
+              const capped = enforceTextBookLineBudgetOnInput(
+                prevCanon,
+                normalized,
+                MAX_BOOK_LINES,
+              );
+              return applyTextAlineasForInput(capped);
             });
           }
         };
@@ -266,7 +275,24 @@ export default function WriteScreen() {
 
       Alert.alert('Succès', 'Moment sauvegardé avec succès');
       armFeedSnapToLatestOnFocus();
-      router.push('/(tabs)/fil');
+      /**
+       * write = fullScreenModal au-dessus des tabs.
+       * - `replace` → flash Capturer (onglet d’origine révélé pendant l’anim).
+       * - `navigate` depuis le modal → pile incohérente (on reste sur l’éditeur).
+       * On bascule le fil via jumpTo sous le modal, puis on dismiss.
+       */
+      selectAppTab('fil');
+      requestAnimationFrame(() => {
+        if (router.canDismiss()) {
+          router.dismiss();
+          return;
+        }
+        if (router.canGoBack()) {
+          router.back();
+          return;
+        }
+        router.replace('/(tabs)/fil');
+      });
     } catch (error) {
       console.error('Error saving text:', error);
       Alert.alert(TEXT_SAVE_FAILED_ALERT_TITLE, TEXT_SAVE_FAILED_ALERT_MESSAGE);
@@ -276,7 +302,7 @@ export default function WriteScreen() {
   };
 
   const handleSave = async () => {
-    const trimmed = content.trim();
+    const trimmed = stripTextAlineas(content).trim();
     const textToSave = clampText(trimmed);
     if (!textToSave) {
       Alert.alert('Erreur', 'Saisis du texte');
@@ -286,7 +312,10 @@ export default function WriteScreen() {
     if (textToSave !== trimmed) {
       Alert.alert(TEXT_TRUNCATION_ALERT_TITLE, TEXT_TRUNCATION_ALERT_MESSAGE, [
         { text: TEXT_TRUNCATION_MODIFY_LABEL, style: 'cancel' },
-        { text: TEXT_TRUNCATION_SAVE_LABEL, onPress: () => void executeSave(textToSave) },
+        {
+          text: TEXT_TRUNCATION_SAVE_LABEL,
+          onPress: () => void (isEditing ? executeUpdate(textToSave) : executeSave(textToSave)),
+        },
       ]);
       return;
     }
@@ -338,13 +367,16 @@ export default function WriteScreen() {
           placeholderTextColor="#0F0F0F"
           value={content}
           onChangeText={t =>
-            setContent(prev =>
-              enforceTextBookLineBudgetOnInput(
-                prev,
-                applyLeadingCapitalWhenStartingText(prev, t),
+            setContent(prev => {
+              const prevCanon = stripTextAlineas(prev);
+              const nextCanon = stripTextAlineas(t);
+              const capped = enforceTextBookLineBudgetOnInput(
+                prevCanon,
+                applyLeadingCapitalWhenStartingText(prevCanon, nextCanon),
                 MAX_BOOK_LINES,
-              )
-            )
+              );
+              return applyTextAlineasForInput(capped);
+            })
           }
           autoFocus
           textAlignVertical="top"
@@ -352,7 +384,7 @@ export default function WriteScreen() {
           autoCorrect
         />
         <Text style={styles.charCounter}>
-          {estimateBookLines(content)}/{MAX_BOOK_LINES} lignes · livre
+          {estimateBookLines(stripTextAlineas(content))}/{MAX_BOOK_LINES} lignes · livre
         </Text>
 
         {Platform.OS === 'web' && isWebSpeechSupported && (
@@ -414,6 +446,8 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     fontSize: FONT_SIZES.md,
+    fontFamily: MEMORY_EDITORIAL_FONT_FAMILY,
+    fontWeight: '400',
     color: '#000000',
     lineHeight: scale(22),
     paddingBottom: scale(80),

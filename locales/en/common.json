@@ -38,7 +38,7 @@
     "switchToLoginAction": "Sign in",
     "switchToSignupPrefix": "No account yet — ",
     "switchToSignupAction": "Create one",
-    "discoverPlus": "Discover Petitmo+",
+    "discoverPlus": "Discover Petit Cœur+",
     "benefitMemoriesTitle": "Up to {{count}} memories",
     "benefitMemoriesBody": "Text, photos, audio and video.",
     "benefitSavedTitle": "Your memories saved",
@@ -124,6 +124,9 @@
       "deleteConfirmBody": "This cannot be undone. Your account and associated cloud access will be removed. Local data on this device will also be erased.",
       "deleteFailed": "Could not delete the account right now."
     },
+    "subscription": {
+      "upgradeCta": "Sweetoo Premium"
+    },
     "application": {
       "checkUpdate": "Check for update",
       "versionPrefix": "Version {{label}}",
@@ -173,6 +176,15 @@
       "title": "No memories yet",
       "subtitle": "Start capturing precious moments",
       "addA11y": "Capture a first memory"
+    },
+    "share": {
+      "a11y": "Share this memory",
+      "unavailableTitle": "Sharing unavailable",
+      "unavailableBody": "Sharing isn’t available on this device.",
+      "mediaMissingTitle": "File unavailable",
+      "mediaMissingBody": "This memory isn’t available offline on this device yet.",
+      "failedTitle": "Couldn’t share",
+      "failedBody": "Couldn’t open the share sheet. Please try again."
     }
   },
   "tabs": {
@@ -212,9 +224,9 @@
     "priceTtc": "{{price}} incl. tax",
     "seePriceDetail": "See price breakdown",
     "hidePriceDetail": "Hide price breakdown",
-    "plusSave": "Save {{savings}} with Petitmo+",
+    "plusSave": "Save {{savings}} with Petit Cœur+",
     "plusPrice": "This book would cost you {{price}}.",
-    "discoverPlus": "Discover Petitmo+",
+    "discoverPlus": "Discover Petit Cœur+",
     "sectionDelivery": "Delivery",
     "sectionBeforeOrder": "Before ordering",
     "fieldFullName": "Full name",
@@ -279,5 +291,9 @@
     "exportFailedTitle": "Couldn’t shorten",
     "exportFailedBody": "Try again in a moment.",
     "exporting": "Shortening video…"
+  },
+  "paywall": {
+    "premiumLabel": "Premium",
+    "brandA11y": "Petit Cœur Premium"
   }
 }

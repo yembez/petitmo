@@ -27,7 +27,7 @@ import { signOutRealAccount } from '@/lib/authAccount';
 import { listLocalChildrenForUser } from '@/lib/localDb';
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
 import DatePicker from '@/components/DatePicker';
-import PetitmoLogoManuscrit from '@/components/PetitmoLogoManuscrit';
+import PetitCoeurLogo, { PETIT_COEUR_LOGO_VIEWBOX } from '@/components/PetitCoeurLogo';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
 import { CHILD_PROFILE_PHOTO_ASPECT } from '@/utils/captureHeroMetrics';
 
@@ -165,7 +165,11 @@ export default function CreateChildScreen() {
         </View>
 
         <View style={styles.logoContainer}>
-          <PetitmoLogoManuscrit width={scale(132)} height={scale(40)} color={THEME.textPrimary} />
+          <PetitCoeurLogo
+            width={scale(180)}
+            height={scale(180) * (PETIT_COEUR_LOGO_VIEWBOX.height / PETIT_COEUR_LOGO_VIEWBOX.width)}
+            color={THEME.textPrimary}
+          />
         </View>
 
         <Text style={[styles.title, dm700 ? { fontFamily: dm700 } : null]}>

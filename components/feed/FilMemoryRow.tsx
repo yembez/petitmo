@@ -18,6 +18,7 @@ import {
   MapPin,
   Maximize2,
 } from 'lucide-react-native';
+import ShareForwardIcon from '@/components/ShareForwardIcon';
 import {
   memo,
   useCallback,
@@ -57,6 +58,7 @@ import { clampAudioBookAnnotation } from '@/lib/audioBookAnnotation';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { FeedMediaPrepOverlay } from '@/components/FeedMediaPrepOverlay';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
+import { shareMemory } from '@/services/shareMemory';
 import { Video, ResizeMode, type AVPlaybackStatus } from 'expo-av';
 import { Swipeable, RectButton } from "react-native-gesture-handler";
 import {
@@ -240,6 +242,7 @@ function FilMemoryRow({
   pendingPrepLabel,
 }: FilMemoryRowProps) {
   const { t } = useAppTranslation('common');
+  const [shareBusy, setShareBusy] = useState(false);
   const isFeedVideoAutoplay = useIsFeedVideoAutoplay(memory.id);
   const memoryEditorialFont = useMemoryEditorialFont();
   const memoryEditorialBoldFont = useMemoryEditorialBoldFont();
@@ -385,6 +388,19 @@ function FilMemoryRow({
     }
     immersiveLaunchRef.current(memory.id, albumPhotoIndex);
   };
+
+  const handleShareMemory = useCallback(() => {
+    if (isOptimisticFeedPending || shareBusy) return;
+    setShareBusy(true);
+    void shareMemory(memory, {
+      unavailableTitle: t('fil.share.unavailableTitle'),
+      unavailableBody: t('fil.share.unavailableBody'),
+      mediaMissingTitle: t('fil.share.mediaMissingTitle'),
+      mediaMissingBody: t('fil.share.mediaMissingBody'),
+      failedTitle: t('fil.share.failedTitle'),
+      failedBody: t('fil.share.failedBody'),
+    }).finally(() => setShareBusy(false));
+  }, [isOptimisticFeedPending, memory, shareBusy, t]);
 
   const skipImmersive = isOptimisticFeedPending;
 
@@ -865,32 +881,55 @@ function FilMemoryRow({
             )}
           </View>
 
-          <TouchableOpacity
-            style={[
-              styles.feedFavoriteDiscCta,
-              (memory.type === 'photo' ? feedPhotoFavorited : !!memory.is_favorite) &&
-                styles.feedFavoriteDiscCtaActive,
-            ]}
-            onPress={() => void toggleFavorite(memory.id)}
-            activeOpacity={0.75}
-            accessibilityRole="button"
-            accessibilityLabel="Favori"
-          >
-            <Heart
-              size={FEED_POST_ACTION_ICON_PX}
-              color={
-                (memory.type === 'photo' ? feedPhotoFavorited : !!memory.is_favorite)
-                  ? THEME.feedFavoriteTerracotta
-                  : ACTION_ICON_INK
-              }
-              strokeWidth={FEED_POST_ACTION_STROKE}
-              fill={
-                (memory.type === 'photo' ? feedPhotoFavorited : !!memory.is_favorite)
-                  ? THEME.feedFavoriteTerracotta
-                  : 'none'
-              }
-            />
-          </TouchableOpacity>
+          <View style={styles.postActionsRight}>
+            {!isOptimisticFeedPending ? (
+              <TouchableOpacity
+                style={styles.feedPencilDiscCta}
+                onPress={handleShareMemory}
+                activeOpacity={0.75}
+                disabled={shareBusy}
+                accessibilityRole="button"
+                accessibilityLabel={t('fil.share.a11y')}
+              >
+                {shareBusy ? (
+                  <ActivityIndicator size="small" color={ACTION_ICON_INK} />
+                ) : (
+                  <ShareForwardIcon
+                    size={FEED_POST_ACTION_ICON_PX}
+                    color={ACTION_ICON_INK}
+                    strokeWidth={FEED_POST_ACTION_STROKE}
+                  />
+                )}
+              </TouchableOpacity>
+            ) : null}
+
+            <TouchableOpacity
+              style={[
+                styles.feedFavoriteDiscCta,
+                (memory.type === 'photo' ? feedPhotoFavorited : !!memory.is_favorite) &&
+                  styles.feedFavoriteDiscCtaActive,
+              ]}
+              onPress={() => void toggleFavorite(memory.id)}
+              activeOpacity={0.75}
+              accessibilityRole="button"
+              accessibilityLabel="Favori"
+            >
+              <Heart
+                size={FEED_POST_ACTION_ICON_PX}
+                color={
+                  (memory.type === 'photo' ? feedPhotoFavorited : !!memory.is_favorite)
+                    ? THEME.feedFavoriteTerracotta
+                    : ACTION_ICON_INK
+                }
+                strokeWidth={FEED_POST_ACTION_STROKE}
+                fill={
+                  (memory.type === 'photo' ? feedPhotoFavorited : !!memory.is_favorite)
+                    ? THEME.feedFavoriteTerracotta
+                    : 'none'
+                }
+              />
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
       </View>

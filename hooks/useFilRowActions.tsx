@@ -11,6 +11,7 @@ import {
 } from '@/services/media';
 import { Swipeable } from 'react-native-gesture-handler';
 import type { Memory } from '@/utils/feedHelpers';
+import { notifyFilNewestMemoryRemoved } from '@/services/feedScrollRestore';
 
 export function useFilRowActions(setMemories: Dispatch<SetStateAction<Memory[]>>) {
   const router = useRouter();
@@ -125,7 +126,10 @@ export function useFilRowActions(setMemories: Dispatch<SetStateAction<Memory[]>>
           onPress: async () => {
             swipeRefs.current.get(memory.id)?.close();
             const id = memory.id;
-            setMemories(prev => prev.filter(m => m.id !== id));
+            setMemories(prev => {
+              if (prev[0]?.id === id) notifyFilNewestMemoryRemoved();
+              return prev.filter(m => m.id !== id);
+            });
             await deleteMemory(id);
           },
         },

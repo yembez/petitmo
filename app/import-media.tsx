@@ -28,7 +28,11 @@ import { checkMemoryLimit, checkVideoLimit, FREE_TIER_VIDEO_MAX_DURATION, PAID_T
 import { mediaDurationToSeconds } from '@/utils/mediaDuration';
 import { promptFreeTierLimitThenPaywall } from '@/utils/freeTierLimitGate';
 import { IMPORT_DUPLICATE_ASSET } from '@/lib/importDuplicate';
-import { buildAlbumImportFingerprint, dedupePickerAssetsByLibraryId } from '@/utils/importLibraryDedupe';
+import {
+  buildAlbumImportFingerprintFromAssets,
+  computeImportContentFingerprint,
+  dedupePickerAssetsByLibraryId,
+} from '@/utils/importLibraryDedupe';
 import { VideoTrimModal } from '@/components/VideoTrimModal';
 import {
   isVideoTrimNativeAvailable,
@@ -89,6 +93,7 @@ async function importSeparatePhotosWithConcurrency(
         const meta = await buildImportMetadataFromPickerAsset(asset, { isVideo: false });
         const locationOverride =
           meta.locationLabel && meta.locationLabel.trim() ? meta.locationLabel.trim() : undefined;
+        const contentFp = await computeImportContentFingerprint(asset.uri);
         const m = await uploadMedia({
           uri: asset.uri,
           type: 'photo',
@@ -99,6 +104,7 @@ async function importSeparatePhotosWithConcurrency(
           fileName: asset.fileName ?? null,
           suppressFeedEmit: true,
           importAssetId: asset.assetId ?? null,
+          importSourceFingerprint: contentFp,
         });
         results[idx] = m;
         if (m) opts?.onInserted?.(m);
@@ -234,6 +240,7 @@ export default function ImportMediaScreen() {
                 mimeType: pickedAsset.mimeType ?? null,
                 fileName: pickedAsset.fileName ?? null,
                 importAssetId: pickedAsset.assetId ?? null,
+                importSourceFingerprint: await computeImportContentFingerprint(pickedAsset.uri),
               });
               return m ? [m] : null;
             },
@@ -388,7 +395,7 @@ export default function ImportMediaScreen() {
               const meta = await buildImportMetadataFromPickerAsset(first, { isVideo: false });
               const locationOverride =
                 meta.locationLabel && meta.locationLabel.trim() ? meta.locationLabel.trim() : undefined;
-              const albumFp = buildAlbumImportFingerprint(assets.map(a => a.assetId));
+              const albumFp = await buildAlbumImportFingerprintFromAssets(assets);
               const m = await uploadPhotoAlbum({
                 uris,
                 childId,
@@ -420,6 +427,7 @@ export default function ImportMediaScreen() {
               mimeType: pickedAsset.mimeType ?? null,
               fileName: pickedAsset.fileName ?? null,
               importAssetId: pickedAsset.assetId ?? null,
+              importSourceFingerprint: await computeImportContentFingerprint(pickedAsset.uri),
             });
             return m ? [m] : null;
           },

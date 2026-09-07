@@ -19,7 +19,7 @@ import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Image } from 'expo-image';
 import { Video, ResizeMode, type AVPlaybackStatus } from 'expo-av';
-import { ChevronDown, ChevronUp, Volume2, VolumeX, X } from 'lucide-react-native';
+import { ChevronDown, ChevronUp, Pencil, Volume2, VolumeX, X } from 'lucide-react-native';
 import { scale, verticalScale } from '@/utils/responsive';
 import {
   clearMemoryViewerSession,
@@ -27,7 +27,7 @@ import {
 } from '@/services/memoryViewerSession';
 import { safeRouterBack } from '@/utils/safeRouterBack';
 import type { Memory, Child } from '@/types/local';
-import { listLocalChildren } from '@/lib/localDb';
+import { getLocalMemoryById, listLocalChildren } from '@/lib/localDb';
 import { getChildren } from '@/services/children';
 import {
   getPrimaryPhotoUriForImmersiveViewer,
@@ -35,7 +35,7 @@ import {
   isPhotoUrlFavoritedWithVariants,
   parseFavoritePhotoUrls,
 } from '@/utils/memoryPhotos';
-import { toggleFavoritePhotoUrl } from '@/services/media';
+import { toggleFavoritePhotoUrl, updateMemoryContent } from '@/services/media';
 import { extractMediaBucketPath } from '@/lib/mediaSignedUrl';
 import { formatDateLong, formatDuration } from '@/utils/date';
 import { formatFamilyAgesLine, sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
@@ -50,12 +50,8 @@ import AudioPlayer from '@/components/AudioPlayer';
 import EditTextModal from '@/components/EditTextModal';
 import { feedMemoryTextEditPreviewVariant } from '@/utils/memoryTextEditStyles';
 import { bookLineBudgetForMemoryType, bookCharsPerLineForMemoryType } from '@/utils/textLimits';
-import { updateMemoryContent } from '@/services/media';
 import { useToggleFavorite } from '@/hooks/useToggleFavorite';
-import {
-  FeedAgeOverlay,
-  FeedPhotoFavoriteOverlay,
-} from '@/components/feed/FeedMediaOverlays';
+import { FeedPhotoFavoriteOverlay } from '@/components/feed/FeedMediaOverlays';
 import { ScrollableTextBlock } from '@/components/ScrollableTextBlock';
 import { IMMERSIVE_CAPTION_SCROLL_MAX_H } from '@/constants/feedLayout';
 import { THEME } from '@/constants/theme';
@@ -99,6 +95,8 @@ function immersiveTopFadeHeight(pageHeight: number): number {
 
 /** Hauteur réservée sous la vidéo pour le curseur + labels temps (relevé du cœur favori). */
 const IMMERSIVE_VIDEO_SCRUBBER_RESERVE = verticalScale(44);
+/** Place du crayon sous le cœur (taille disque + écart). */
+const IMMERSIVE_EDIT_UNDER_FAVORITE = scale(32) + verticalScale(8);
 
 function immersiveVideoSeekFraction(locationX: number, trackWidth: number): number {
   if (trackWidth <= 0) return 0;
@@ -239,7 +237,7 @@ function MemoryViewerScreenInner() {
     sortChildrenByBirthdateAsc(listLocalChildren()),
   );
   const [visibleItemKey, setVisibleItemKey] = useState<string | null>(null);
-  const [editingTextMemory, setEditingTextMemory] = useState<Memory | null>(null);
+  const [editingCaptionMemory, setEditingCaptionMemory] = useState<Memory | null>(null);
   const listRef = useRef<FlatList<ImmersiveViewerItem>>(null);
   const didHydrateRef = useRef(false);
   const innerScrollLockCountRef = useRef(0);
@@ -350,6 +348,23 @@ function MemoryViewerScreenInner() {
     useCallback(() => {
       setStatusBarStyle(closeOnMediaChrome ? 'light' : 'dark');
       void ensurePlaybackAudioForListening();
+      // Retour depuis /write : recharger titre + corps depuis SQLite (local-first).
+      setMemories(prev => {
+        let changed = false;
+        const next = prev.map(m => {
+          const fresh = getLocalMemoryById(m.id);
+          if (!fresh) return m;
+          if (
+            fresh.content === m.content &&
+            (fresh.text_title ?? null) === (m.text_title ?? null)
+          ) {
+            return m;
+          }
+          changed = true;
+          return { ...m, content: fresh.content, text_title: fresh.text_title };
+        });
+        return changed ? next : prev;
+      });
       const frame = requestAnimationFrame(() => {
         listRef.current?.recordInteraction?.();
       });
@@ -422,7 +437,14 @@ function MemoryViewerScreenInner() {
           width={windowW}
           albumPhotoSlot={albumSlot}
           familyChildren={familyChildren}
-          onRequestEditText={m => setEditingTextMemory(m)}
+          onRequestEditText={m => {
+            if (m.id.startsWith('pending_')) return;
+            if (m.type === 'text') {
+              router.push({ pathname: '/write', params: { memoryId: m.id } });
+              return;
+            }
+            setEditingCaptionMemory(m);
+          }}
           toggleFavorite={toggleFavorite}
           onFavoritePhotoUrlsUpdated={urls => handleFavoritePhotoUrlsUpdated(memory.id, urls)}
           onInnerScrollLock={lockPagerScroll}
@@ -447,12 +469,13 @@ function MemoryViewerScreenInner() {
       unlockPagerScroll,
       goToViewerIndex,
       isFocused,
+      router,
     ],
   );
 
-  const handleSaveTextEdit = useCallback(
+  const handleSaveCaptionEdit = useCallback(
     async (text: string) => {
-      const target = editingTextMemory;
+      const target = editingCaptionMemory;
       if (!target) return;
       setMemories(prev => prev.map(m => (m.id === target.id ? { ...m, content: text } : m)));
       const ok = await updateMemoryContent(target.id, text);
@@ -462,9 +485,9 @@ function MemoryViewerScreenInner() {
           "Ton texte est bien enregistré sur l’app, mais la synchronisation a échoué. Réessaie plus tard."
         );
       }
-      setEditingTextMemory(null);
+      setEditingCaptionMemory(null);
     },
-    [editingTextMemory, setMemories]
+    [editingCaptionMemory],
   );
 
   const getItemLayout = useCallback(
@@ -486,15 +509,19 @@ function MemoryViewerScreenInner() {
     <View style={[styles.root, styles.viewerShell, { minHeight: windowH }]}>
       <StatusBar style={closeOnMediaChrome ? 'light' : 'dark'} />
       <EditTextModal
-        key={editingTextMemory?.id ?? 'closed'}
-        visible={editingTextMemory !== null}
-        initialText={editingTextMemory?.content ?? ''}
-        previewVariant={feedMemoryTextEditPreviewVariant(editingTextMemory?.type)}
-        bookLineBudget={bookLineBudgetForMemoryType(editingTextMemory?.type)}
-        bookCharsPerLine={bookCharsPerLineForMemoryType(editingTextMemory?.type)}
-        title="Modifier le texte"
-        onClose={() => setEditingTextMemory(null)}
-        onSave={handleSaveTextEdit}
+        key={editingCaptionMemory?.id ?? 'caption-edit-closed'}
+        visible={editingCaptionMemory !== null}
+        initialText={editingCaptionMemory?.content ?? ''}
+        previewVariant={feedMemoryTextEditPreviewVariant(editingCaptionMemory?.type)}
+        bookLineBudget={bookLineBudgetForMemoryType(editingCaptionMemory?.type)}
+        bookCharsPerLine={bookCharsPerLineForMemoryType(editingCaptionMemory?.type)}
+        title={
+          editingCaptionMemory?.content?.trim()
+            ? 'Modifier l’annotation'
+            : 'Annoter'
+        }
+        onClose={() => setEditingCaptionMemory(null)}
+        onSave={handleSaveCaptionEdit}
       />
       <Pressable
         onPress={() => {
@@ -629,10 +656,10 @@ function ImmersivePage({
         {postDateLabel}
         {loc ? ` · ${loc}` : ''}
       </Text>
-      {!mediaChrome && !!ageAt ? (
+      {!!ageAt ? (
         <Text
           style={[
-            styles.metaAgeOnText,
+            mediaChrome ? styles.metaAgeOnMedia : styles.metaAgeOnText,
             feedAgeFontFamily ? { fontFamily: feedAgeFontFamily } : styles.metaAgeSystem,
           ]}
           numberOfLines={2}
@@ -642,6 +669,19 @@ function ImmersivePage({
       ) : null}
     </View>
   );
+
+  const captionParagraphs = useMemo(() => {
+    const raw = (memory.content ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+    if (!raw) return [];
+    const parts = raw.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
+    return parts.length > 0 ? parts : [raw];
+  }, [memory.content]);
+
+  const editFabBottom =
+    overlayBottomInset +
+    (memory.type === 'video' && isActive ? IMMERSIVE_VIDEO_SCRUBBER_RESERVE : 0);
+  /** Cœur au-dessus du crayon (même colonne bas-droite). */
+  const favoriteBottomInset = editFabBottom + IMMERSIVE_EDIT_UNDER_FAVORITE;
 
   return (
     <View style={{ height, width, backgroundColor: BG }}>
@@ -653,7 +693,7 @@ function ImmersivePage({
               albumPhotoSlot={albumPhotoSlot}
               onToggleMemoryFavorite={toggleFavorite}
               onFavoritePhotoUrlsUpdated={onFavoritePhotoUrlsUpdated}
-              overlayBottomInset={overlayBottomInset}
+              overlayBottomInset={favoriteBottomInset}
             />
           )}
           {memory.type === 'video' && (
@@ -670,7 +710,7 @@ function ImmersivePage({
               memory={memory}
               width={width}
               onToggleFavorite={toggleFavorite}
-              overlayBottomInset={overlayBottomInset}
+              overlayBottomInset={favoriteBottomInset}
             />
           )}
           {memory.type === 'text' && (
@@ -680,7 +720,7 @@ function ImmersivePage({
               viewportHeight={textViewportH}
               onTapEdit={() => onRequestEditText(memory)}
               onToggleFavorite={toggleFavorite}
-              overlayBottomInset={overlayBottomInset}
+              overlayBottomInset={favoriteBottomInset}
               showMarginNav={!!showTextMarginNav}
               canGoPrev={!!canTextNavPrev}
               canGoNext={!!canTextNavNext}
@@ -728,37 +768,59 @@ function ImmersivePage({
                 </Text>
               </View>
             ) : null}
-            {!!ageAt && (memory.type === 'photo' || memory.type === 'video' || memory.type === 'voice') ? (
-              <FeedAgeOverlay
-                ageLabel={ageAt}
-                feedAgeFontFamily={feedAgeFontFamily}
-                bottomInset={
-                  overlayBottomInset +
-                  (memory.type === 'video' && isActive ? IMMERSIVE_VIDEO_SCRUBBER_RESERVE : 0)
-                }
-              />
-            ) : null}
           </>
         ) : (
           <View style={[styles.topTextMeta, { paddingTop: topChromePadTop }]} pointerEvents="none">
             {metaBlock}
           </View>
         )}
+
+        <Pressable
+          onPress={() => onRequestEditText(memory)}
+          style={[
+            styles.editTextFab,
+            mediaChrome ? styles.editTextFabOnMedia : styles.editTextFabOnText,
+            { bottom: scale(12) + editFabBottom },
+          ]}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel={
+            memory.type === 'text'
+              ? 'Modifier le texte'
+              : memory.content?.trim()
+                ? 'Modifier l’annotation'
+                : 'Ajouter une annotation'
+          }
+        >
+          <Pencil
+            size={scale(16)}
+            color={mediaChrome ? '#FFFFFF' : THEME.textPrimary}
+            strokeWidth={2.2}
+          />
+        </Pressable>
       </View>
 
-      {memory.type !== 'text' && !!memory.content?.trim() && (
+      {memory.type !== 'text' && captionParagraphs.length > 0 && (
         <View style={styles.footer}>
           <ScrollableTextBlock
             maxHeight={captionScrollMaxH}
             onInnerScrollLock={onInnerScrollLock}
             onInnerScrollUnlock={onInnerScrollUnlock}
           >
-            <Text
-              style={[feedStyles.captionAnnotation, { fontFamily: memoryEditorialFont }]}
-              {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
-            >
-              {memory.content.trim()}
-            </Text>
+            {captionParagraphs.map((para, idx) => (
+              <Text
+                key={idx}
+                style={[
+                  feedStyles.captionAnnotation,
+                  { fontFamily: memoryEditorialFont },
+                  idx > 0 && feedStyles.textBookParagraphSpacing,
+                ]}
+                {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
+              >
+                {EM_QUAD}
+                {para.replace(/\n/g, `\n${EM_QUAD}`)}
+              </Text>
+            ))}
           </ScrollableTextBlock>
         </View>
       )}
@@ -998,7 +1060,10 @@ function ImmersiveVideo({
   const posterFit = resizeMode === ResizeMode.CONTAIN ? ('contain' as const) : ('cover' as const);
 
   const showSeekBar = isActive && !!trimmedUri && durationMillis > 0;
-  const favoriteBottomInset = overlayBottomInset + (showSeekBar ? IMMERSIVE_VIDEO_SCRUBBER_RESERVE : 0);
+  const favoriteBottomInset =
+    overlayBottomInset +
+    IMMERSIVE_EDIT_UNDER_FAVORITE +
+    (showSeekBar ? IMMERSIVE_VIDEO_SCRUBBER_RESERVE : 0);
 
   const favoriteOverlay = (
     <FeedPhotoFavoriteOverlay
@@ -1120,13 +1185,19 @@ function ImmersiveVoice({
       ) : (
         <View style={[StyleSheet.absoluteFillObject, { backgroundColor: THEME.bgScreen }]} />
       )}
-      <View style={[styles.voicePlayerImmersive, hasCover && styles.voicePlayerImmersiveCoverScrim]}>
+      <View
+        style={[
+          styles.voicePlayerImmersive,
+          hasCover && styles.voicePlayerImmersiveCompact,
+        ]}
+      >
         {playbackUri ? (
           <AudioPlayer
             uri={playbackUri}
             duration={memory.duration || 0}
             playbackStartSec={memory.voice_playback_start_sec ?? null}
             variant={hasCover ? 'coverBottom' : 'default'}
+            compactPlayWave
             controlIconColor={hasCover ? '#1C1C1E' : '#FFFFFF'}
             coverFlushBottom={hasCover}
           />
@@ -1153,8 +1224,8 @@ function TextImmersiveMarginRail({
   onGoPrev: () => void;
   onGoNext: () => void;
 }) {
-  const hintActive = 'rgba(28, 28, 30, 0.22)';
-  const hintDisabled = 'rgba(28, 28, 30, 0.08)';
+  const hintActive = 'rgba(28, 28, 30, 0.48)';
+  const hintDisabled = 'rgba(28, 28, 30, 0.22)';
 
   const panResponder = useMemo(
     () =>
@@ -1247,6 +1318,8 @@ function ImmersiveText({
           <ScrollableTextBlock
             maxHeight={viewportHeight}
             contentContainerStyle={styles.textWrapCentered}
+            onPress={onTapEdit}
+            accessibilityLabel="Modifier le texte"
           >
             {title ? (
               <Text
@@ -1255,9 +1328,7 @@ function ImmersiveText({
                   styles.immersiveTextCentered,
                   { fontFamily: memoryEditorialBoldFont },
                 ]}
-                onPress={onTapEdit}
-                accessibilityRole="button"
-                accessibilityLabel="Modifier le texte"
+                accessibilityRole="header"
                 {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
               >
                 {title}
@@ -1268,16 +1339,12 @@ function ImmersiveText({
                 key={idx}
                 style={[
                   feedStyles.textContent,
-                  styles.immersiveTextCentered,
                   { fontFamily: memoryEditorialFont },
                   idx > 0 && feedStyles.textBookParagraphSpacing,
                 ]}
-                onPress={onTapEdit}
-                accessibilityRole="button"
-                accessibilityLabel="Modifier le texte"
                 {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
               >
-                {para}
+                {EM_QUAD}{para.replace(/\n/g, `\n${EM_QUAD}`)}
               </Text>
             ))}
           </ScrollableTextBlock>
@@ -1354,9 +1421,9 @@ const styles = StyleSheet.create({
     gap: verticalScale(4),
   },
   textMarginLine: {
-    width: StyleSheet.hairlineWidth,
+    width: StyleSheet.hairlineWidth * 1.5,
     height: verticalScale(36),
-    backgroundColor: 'rgba(28, 28, 30, 0.18)',
+    backgroundColor: 'rgba(28, 28, 30, 0.40)',
   },
   pageBody: {
     flex: 1,
@@ -1440,6 +1507,23 @@ const styles = StyleSheet.create({
     color: THEME.textSecondary,
     fontSize: scale(12.5),
     letterSpacing: -0.1,
+  },
+  /** Crayon sous le cœur favori (colonne bas-droite). */
+  editTextFab: {
+    position: 'absolute',
+    right: scale(12),
+    zIndex: 9,
+    width: scale(32),
+    height: scale(32),
+    borderRadius: scale(16),
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editTextFabOnMedia: {
+    backgroundColor: 'rgba(0,0,0,0.28)',
+  },
+  editTextFabOnText: {
+    backgroundColor: 'rgba(0, 0, 0, 0.06)',
   },
   /** Photo immersive : conteneur pour overlays (favori + date) comme dans le fil. */
   photoImmersiveWrap: {
@@ -1588,7 +1672,13 @@ const styles = StyleSheet.create({
   voicePlayerImmersive: {
     width: '100%',
     paddingVertical: verticalScale(16),
-    paddingHorizontal: scale(16),
+    paddingLeft: scale(16),
+    // Crayon bas-droite (right 12 + disque 32) + petit écart.
+    paddingRight: scale(12) + scale(32) + scale(8),
+  },
+  /** Vue immersive audio : raccourcit le bandeau sombre derrière la wave. */
+  voicePlayerImmersiveCompact: {
+    paddingVertical: verticalScale(8),
   },
   voicePlayerImmersiveCoverScrim: {
     backgroundColor: 'rgba(0,0,0,0.42)',

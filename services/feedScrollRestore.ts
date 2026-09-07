@@ -1,3 +1,5 @@
+import { DeviceEventEmitter } from 'react-native';
+
 /** Intentions de position du fil (survit au démontage de l’onglet / modale viewer). */
 export type FeedScrollIntent =
   | { type: 'restore'; offsetY: number }
@@ -7,6 +9,13 @@ export type FeedScrollIntent =
   | { type: 'snapToKey'; key: string };
 
 let pendingIntent: FeedScrollIntent | null = null;
+
+/** Premier souvenir du fil retiré : rester en haut (évite le saut MVC vers la carte suivante). */
+export const PETITMO_FIL_NEWEST_REMOVED = 'petitmo:fil-newest-removed';
+
+export function notifyFilNewestMemoryRemoved(): void {
+  DeviceEventEmitter.emit(PETITMO_FIL_NEWEST_REMOVED);
+}
 
 /** Retour viewer immersif : restaurer l’offset vertical exact. */
 export function setFeedScrollRestoreOffset(offsetY: number): void {

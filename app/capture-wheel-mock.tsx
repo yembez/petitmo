@@ -6,7 +6,7 @@ import { Image as RNImage } from 'react-native';
 import { Camera, Image as ImageIcon, Mic, PenLine, Settings } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { scale, verticalScale } from '@/utils/responsive';
-import PetitmoLogoManuscrit from '@/components/PetitmoLogoManuscrit';
+import PetitCoeurLogo, { PETIT_COEUR_LOGO_VIEWBOX } from '@/components/PetitCoeurLogo';
 import { FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
 
 type SegmentSpec = {
@@ -196,7 +196,10 @@ export default function CaptureWheelMockScreen() {
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + verticalScale(18) }]}>
         <View style={styles.headerBanner} />
-        <PetitmoLogoManuscrit width={scale(135.2 * 0.8)} height={scale(40.3 * 0.8)} />
+        <PetitCoeurLogo
+          width={scale(160)}
+          height={scale(160) * (PETIT_COEUR_LOGO_VIEWBOX.height / PETIT_COEUR_LOGO_VIEWBOX.width)}
+        />
         <View style={styles.headerRight}>
           <Text
             onPress={() => router.push('/parent-space')}

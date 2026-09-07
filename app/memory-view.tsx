@@ -191,7 +191,7 @@ export default function MemoryViewScreen() {
       try {
         next = await addMemoryToBook(bookId, memoryId);
       } catch (e) {
-        Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
+        Alert.alert('Petit Cœur', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
         return;
       }
       if (!next) return;
@@ -219,7 +219,7 @@ export default function MemoryViewScreen() {
     try {
       created = await createBookWithMemories(newBookTitle, [memoryId]);
     } catch (e) {
-      Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
+      Alert.alert('Petit Cœur', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
       return;
     }
     setBooks(prev => [created, ...prev]);
@@ -229,7 +229,12 @@ export default function MemoryViewScreen() {
   useFocusEffect(
     useCallback(() => {
       setStatusBarStyle('dark');
-    }, [])
+      // Retour depuis /write : peindre SQLite immédiatement.
+      if (memoryId) {
+        const local = getLocalMemoryById(memoryId);
+        if (local) setMemory(local);
+      }
+    }, [memoryId])
   );
 
   const handleSaveEdit = async (text: string) => {
@@ -477,7 +482,10 @@ export default function MemoryViewScreen() {
 
             {memory.type === 'text' && (
               <Pressable
-                onPress={() => setEditModalVisible(true)}
+                onPress={() => {
+                  if (memory.id.startsWith('pending_')) return;
+                  router.push({ pathname: '/write', params: { memoryId: memory.id } });
+                }}
                 style={({ pressed }) => [pressed && { opacity: 0.92 }]}
                 accessibilityRole="button"
                 accessibilityLabel="Modifier le texte"
@@ -556,13 +564,7 @@ export default function MemoryViewScreen() {
         previewVariant={feedMemoryTextEditPreviewVariant(memory.type)}
         bookLineBudget={bookLineBudgetForMemoryType(memory.type)}
         bookCharsPerLine={bookCharsPerLineForMemoryType(memory.type)}
-        title={
-          memory.type === 'text'
-            ? 'Modifier le texte'
-            : contentText
-              ? 'Modifier l’annotation'
-              : 'Annoter'
-        }
+        title={contentText ? 'Modifier l’annotation' : 'Annoter'}
         onClose={() => setEditModalVisible(false)}
         onSave={handleSaveEdit}
       />

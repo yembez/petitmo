@@ -7,6 +7,7 @@ import {
   RefreshControl,
   StyleSheet,
   InteractionManager,
+  DeviceEventEmitter,
   type StyleProp,
   type ViewStyle,
   type ViewProps,
@@ -42,6 +43,7 @@ import { setMemoryViewerSession } from '@/services/memoryViewerSession';
 import {
   consumeFeedScrollIntent,
   setFeedScrollRestoreOffset,
+  PETITMO_FIL_NEWEST_REMOVED,
   type FeedScrollIntent,
 } from '@/services/feedScrollRestore';
 import { useFocusEffect } from '@react-navigation/native';
@@ -264,6 +266,18 @@ function FilScreen() {
   );
 
   useEffect(() => {
+    const sub = DeviceEventEmitter.addListener(PETITMO_FIL_NEWEST_REMOVED, () => {
+      const snapTop = () => {
+        listRef.current?.scrollToOffset({ offset: 0, animated: false });
+        feedScrollOffsetRef.current = 0;
+      };
+      snapTop();
+      requestAnimationFrame(snapTop);
+    });
+    return () => sub.remove();
+  }, []);
+
+  useEffect(() => {
     if (feedListOpacity !== 0) return;
     const fallback = setTimeout(() => {
       pendingScrollIntentRef.current = null;
@@ -385,14 +399,11 @@ function FilScreen() {
           }
           removeClippedSubviews={false}
           // Ancre le contenu visible quand des cellules au-dessus du viewport se re-mesurent
-          // (virtualisation, hauteurs variables sans getItemLayout) : sans ça, chaque re-mesure
-          // décale tout le fil → sauts/flashs pendant le scroll, y compris « avant d'arriver »
-          // sur une vidéo. L'autoscroll top reste réservé aux uploads en cours.
+          // (virtualisation, hauteurs variables sans getItemLayout).
+          // autoscrollToTopThreshold : si on est en haut, rester en haut (ex. suppression du dernier souvenir).
           maintainVisibleContentPosition={{
             minIndexForVisible: 0,
-            ...(pendingUploads.length > 0
-              ? { autoscrollToTopThreshold: Math.round(verticalScale(80)) }
-              : {}),
+            autoscrollToTopThreshold: Math.round(verticalScale(80)),
           }}
           initialNumToRender={6}
           // Lots plus petits + fenêtre plus étroite : chaque FilMemoryRow est lourd (Swipeable,

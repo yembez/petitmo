@@ -38,7 +38,7 @@
     "switchToLoginAction": "Se connecter",
     "switchToSignupPrefix": "Pas encore de compte — ",
     "switchToSignupAction": "En créer un",
-    "discoverPlus": "Découvrir Petitmo+",
+    "discoverPlus": "Découvrir Petit Cœur+",
     "benefitMemoriesTitle": "Jusqu'à {{count}} souvenirs",
     "benefitMemoriesBody": "Textes, photos, audios et vidéos.",
     "benefitSavedTitle": "Vos souvenirs sauvegardés",
@@ -124,6 +124,9 @@
       "deleteConfirmBody": "Cette action est définitive. Ton compte et l’accès cloud associés seront supprimés. Les données locales de cet appareil seront aussi effacées.",
       "deleteFailed": "Impossible de supprimer le compte pour le moment."
     },
+    "subscription": {
+      "upgradeCta": "Petit cœur premium"
+    },
     "application": {
       "checkUpdate": "Rechercher une mise à jour",
       "versionPrefix": "Version {{label}}",
@@ -173,6 +176,15 @@
       "title": "Aucun souvenir pour le moment",
       "subtitle": "Commence à capturer des moments précieux",
       "addA11y": "Capturer un premier souvenir"
+    },
+    "share": {
+      "a11y": "Partager ce souvenir",
+      "unavailableTitle": "Partage indisponible",
+      "unavailableBody": "Le partage n’est pas disponible sur cet appareil.",
+      "mediaMissingTitle": "Fichier indisponible",
+      "mediaMissingBody": "Ce souvenir n’est pas encore disponible hors ligne sur cet appareil.",
+      "failedTitle": "Partage impossible",
+      "failedBody": "Impossible d’ouvrir le partage. Réessaie dans un instant."
     }
   },
   "tabs": {
@@ -212,9 +224,9 @@
     "priceTtc": "{{price}} TTC",
     "seePriceDetail": "Voir le détail du prix",
     "hidePriceDetail": "Masquer le détail du prix",
-    "plusSave": "Économise {{savings}} avec Petitmo+",
+    "plusSave": "Économise {{savings}} avec Petit Cœur+",
     "plusPrice": "Ce livre te revient à {{price}}.",
-    "discoverPlus": "Découvrir Petitmo+",
+    "discoverPlus": "Découvrir Petit Cœur+",
     "sectionDelivery": "Livraison",
     "sectionBeforeOrder": "Avant de commander",
     "fieldFullName": "Nom complet",
@@ -279,5 +291,9 @@
     "exportFailedTitle": "Impossible de raccourcir",
     "exportFailedBody": "Réessaie dans un instant.",
     "exporting": "Raccourcissement de la vidéo…"
+  },
+  "paywall": {
+    "premiumLabel": "Premium",
+    "brandA11y": "Petit Cœur Premium"
   }
 }

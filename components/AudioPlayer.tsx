@@ -36,6 +36,8 @@ interface AudioPlayerProps {
   controlIconColor?: string;
   /** Réduit les marges internes pour coller play + onde au bas du visuel (ex. fil avec photo). */
   coverFlushBottom?: boolean;
+  /** Mode plus compact (utilisé en vue immersive audio). */
+  compactPlayWave?: boolean;
   /** Fil : liseré noir fin autour du disque play / pause. */
   feedPlayDiscOutline?: boolean;
   /** Fil : désactive le flou temps réel (BlurView) du disque play pour un scroll fluide. */
@@ -50,6 +52,7 @@ function GlassPlayDisc({
   onPress,
   outline,
   disableBlur,
+  solidDark,
 }: {
   size: number;
   iconSize: number;
@@ -59,12 +62,15 @@ function GlassPlayDisc({
   outline?: boolean;
   /** Fil : évite le flou temps réel (BlurView) qui saccade le scroll — fallback verre statique. */
   disableBlur?: boolean;
+  /** Disque noir opaque avec icône blanche (vue immersive audio). */
+  solidDark?: boolean;
 }) {
+  const iconColor = solidDark ? '#FFFFFF' : controlIconColor;
   const icon = isPlaying ? (
-    <Pause size={iconSize} color={controlIconColor} fill={controlIconColor} strokeWidth={0} />
+    <Pause size={iconSize} color={iconColor} fill={iconColor} strokeWidth={0} />
   ) : (
     <View style={{ marginLeft: scale(size >= PLAY ? 4 : 3) }}>
-      <Play size={iconSize} color={controlIconColor} fill={controlIconColor} strokeWidth={0} />
+      <Play size={iconSize} color={iconColor} fill={iconColor} strokeWidth={0} />
     </View>
   );
 
@@ -73,12 +79,15 @@ function GlassPlayDisc({
       style={[
         styles.glassPlayOuter,
         outline && styles.glassPlayOuterOutline,
+        solidDark && styles.glassPlaySolidDark,
         { width: size, height: size, borderRadius: size / 2 },
       ]}
       onPress={onPress}
       activeOpacity={0.88}
     >
-      {Platform.OS === 'ios' && !disableBlur ? (
+      {solidDark ? (
+        <View style={[StyleSheet.absoluteFillObject, styles.glassPlayContent]}>{icon}</View>
+      ) : Platform.OS === 'ios' && !disableBlur ? (
         <BlurView intensity={72} tint="light" style={StyleSheet.absoluteFillObject}>
           <View style={styles.glassPlaySheen} />
           <View style={styles.glassPlayContent}>{icon}</View>
@@ -100,6 +109,7 @@ export default function AudioPlayer({
   variant = 'default',
   controlIconColor = '#FFFFFF',
   coverFlushBottom = false,
+  compactPlayWave = false,
   feedPlayDiscOutline = false,
   disableBlurDisc = false,
 }: AudioPlayerProps) {
@@ -145,7 +155,9 @@ export default function AudioPlayer({
   );
 
   const [waveW, setWaveW] = useState(0);
-  const waveHalf = variant === 'feedRow' ? scale(12) : WAVE_HALF;
+  const compact = compactPlayWave && variant !== 'feedRow';
+  const waveHalf =
+    variant === 'feedRow' ? scale(12) : compact ? WAVE_HALF / 2 : WAVE_HALF;
   const waveH = waveHalf * 2;
   const barW =
     waveW > 1 ? Math.max(scale(2), (waveW - BAR_GAP * (BAR_COUNT - 1)) / BAR_COUNT) : 0;
@@ -183,10 +195,20 @@ export default function AudioPlayer({
   useEffect(() => {
     return () => {
       if (sound) {
-        sound.unloadAsync();
+        void sound.unloadAsync();
       }
     };
   }, [sound]);
+
+  // Changement d’URI (recyclage fil) : reset état ; l’unload passe par l’effet [sound].
+  useEffect(() => {
+    setIsPlaying(false);
+    setPosition(0);
+    setDisplayFrac(0);
+    finishedRef.current = false;
+    soundRef.current = null;
+    setSound(null);
+  }, [uri]);
 
   const loadSound = async () => {
     try {
@@ -266,22 +288,37 @@ export default function AudioPlayer({
 
   const togglePlayPause = async () => {
     try {
-      let currentSound = sound;
+      let currentSound = sound ?? soundRef.current;
 
       if (!currentSound) {
         currentSound = await loadSound();
         if (!currentSound) return;
       }
 
-      if (isPlaying) {
+      let st = await currentSound.getStatusAsync();
+      if (!st.isLoaded) {
+        // Son unloadé / race (recyclage fil) : on recharge puis on joue.
+        setIsPlaying(false);
+        try {
+          await currentSound.unloadAsync();
+        } catch {
+          /* ignore */
+        }
+        soundRef.current = null;
+        setSound(null);
+        currentSound = await loadSound();
+        if (!currentSound) return;
+        st = await currentSound.getStatusAsync();
+        if (!st.isLoaded) return;
+      }
+
+      if (st.isPlaying) {
         await currentSound.pauseAsync();
+        setIsPlaying(false);
         return;
       }
 
       await ensurePlaybackAudioForListening();
-
-      const st = await currentSound.getStatusAsync();
-      if (!st.isLoaded) return;
 
       const w = clipWindowRef.current;
       if (w.active) {
@@ -306,15 +343,18 @@ export default function AudioPlayer({
       await currentSound.playAsync();
     } catch (error) {
       console.error('Error toggling play/pause:', error);
+      setIsPlaying(false);
     }
   };
 
-  const stack = STACK;
+  const stack = compact ? STACK / 2 : STACK;
+  const playLocal = compact ? PLAY : PLAY;
   const ringSizes = [stack * 0.92, stack * 0.76, stack * 0.6];
   const feedRowH = Math.max(PLAY_FEED, waveH);
 
   /** Bas du bouton aligné sur le bas de l’onde (fil avec photo), sans grande pile décorative. */
-  const PLAY_FLUSH = scale(54);
+  const PLAY_FLUSH_BASE = scale(54);
+  const PLAY_FLUSH = PLAY_FLUSH_BASE;
   const playFeedEl = (
     <GlassPlayDisc
       size={PLAY_FEED}
@@ -339,7 +379,14 @@ export default function AudioPlayer({
   );
 
   const playStackEl = (
-    <View style={[styles.playStack, variant === 'coverBottom' && styles.playStackCover, { width: stack, height: stack }]}>
+    <View
+      style={[
+        styles.playStack,
+        variant === 'coverBottom' && styles.playStackCover,
+        compact && variant !== 'coverBottom' && { marginBottom: scale(8) },
+        { width: stack, height: stack },
+      ]}
+    >
       {ringSizes.map((size, idx) => (
         <View
           key={idx}
@@ -358,12 +405,12 @@ export default function AudioPlayer({
       <View
         style={{
           position: 'absolute',
-          top: (stack - PLAY) / 2,
-          left: (stack - PLAY) / 2,
+          top: (stack - playLocal) / 2,
+          left: (stack - playLocal) / 2,
         }}
       >
         <GlassPlayDisc
-          size={PLAY}
+          size={playLocal}
           iconSize={scale(22)}
           isPlaying={isPlaying}
           controlIconColor={controlIconColor}
@@ -380,7 +427,7 @@ export default function AudioPlayer({
       style={[
         styles.waveform,
         (variant === 'coverBottom' || variant === 'feedRow') && styles.waveformCover,
-        variant === 'feedRow' && { height: waveH },
+        { height: waveH },
       ]}
       onLayout={e => setWaveW(Math.max(0, Math.floor(e.nativeEvent.layout.width)))}
     >
@@ -432,6 +479,23 @@ export default function AudioPlayer({
   );
 
   if (variant === 'coverBottom') {
+    // Compact immersif : play aligné sur le bas du bloc (wave + compteur),
+    // sinon le disque reste trop haut à cause de la timeRow sous l’onde.
+    if (compact) {
+      return (
+        <View style={[styles.containerCover, coverFlushBottom && styles.containerCoverFlush]}>
+          <View style={[styles.coverBottomRow, styles.coverBottomRowCompact]}>
+            <View style={styles.coverPlayLift}>
+              {coverFlushBottom ? playFlushEl : playStackEl}
+            </View>
+            <View style={styles.coverWaveTimeCol}>
+              {waveformEl}
+              {timeRowEl}
+            </View>
+          </View>
+        </View>
+      );
+    }
     return (
       <View style={[styles.containerCover, coverFlushBottom && styles.containerCoverFlush]}>
         <View style={[styles.coverBottomRow, coverFlushBottom && styles.coverBottomRowFlush]}>
@@ -511,6 +575,18 @@ const styles = StyleSheet.create({
   coverBottomRowFlush: {
     alignItems: 'flex-end',
   },
+  coverBottomRowCompact: {
+    alignItems: 'flex-end',
+  },
+  /** Remonte légèrement le play au-dessus du bas du compteur. */
+  coverPlayLift: {
+    marginBottom: scale(10),
+    flexShrink: 0,
+  },
+  coverWaveTimeCol: {
+    flex: 1,
+    minWidth: 0,
+  },
   playStack: {
     marginBottom: scale(16),
     position: 'relative',
@@ -547,6 +623,10 @@ const styles = StyleSheet.create({
   },
   glassPlayFallback: {
     backgroundColor: 'rgba(255, 255, 255, 0.82)',
+  },
+  glassPlaySolidDark: {
+    backgroundColor: '#1C1C1E',
+    borderColor: 'transparent',
   },
   glassPlaySheen: {
     ...StyleSheet.absoluteFillObject,

@@ -17,11 +17,11 @@ export const BRAND_ACTION_GREEN_RGB = BRAND_ACTION_ACCENT_RGB;
 /** @deprecated alias — `BRAND_ACTION_ACCENT` */
 export const CAPTURE_SCREEN_ACCENT = BRAND_ACTION_ACCENT;
 
-/** Contour noir fin — photo hero (disques CTA Capturer : sans contour). */
+/** Contour noir fin — usages legacy hors Capturer. */
 export const CAPTURE_CTA_BORDER = '#1C1C1E';
-/** Épaisseur contour photo hero Capturer. */
+/** Épaisseur contour legacy (disques / anneaux hors hero Capturer). */
 export const CAPTURE_CTA_DISC_BORDER_WIDTH = 1.5;
-/** Contour photo hero — dégradé bleu → orange (même spectre que les CTA Capturer). */
+/** Dégradé bleu → orange — anneaux avatar fil / tab « + » (plus sur le hero Capturer). */
 export const CAPTURE_PHOTO_BORDER_GRADIENT = ['#599BFC', '#FD7D4D'] as const;
 
 /**

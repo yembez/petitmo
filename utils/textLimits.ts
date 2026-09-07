@@ -13,11 +13,11 @@ export const MAX_BOOK_CAPTION_LINES = 12;
 
 /**
  * Légende audio / vidéo (visuel + carte QR) — gabarit maquette : **6 lignes** de
- * ~70 caractères (typo EB Garamond, colonne ~134 mm à côté de la carte QR).
+ * ~70 caractères (typo DM Sans, colonne ~134 mm à côté de la carte QR).
  */
 export const MAX_MEDIA_CAPTION_LINES = 6;
 
-/** Largeur moyenne d’une ligne de légende média (à côté de la carte QR), EB Garamond 12 pt. */
+/** Largeur moyenne d’une ligne de légende média (à côté de la carte QR), DM Sans ~12 pt. */
 export const MEDIA_CAPTION_CHARS_PER_LINE = 50;
 
 /** @deprecated Préférer `MAX_MEDIA_CAPTION_LINES` */
@@ -63,7 +63,7 @@ export const TEXT_TRUNCATION_ALERT_TITLE =
   'Ton texte complet ne tient pas sur une page du livre';
 
 export const TEXT_TRUNCATION_ALERT_MESSAGE =
-  'Petitmo limite la longueur des souvenirs texte pour qu’ils tiennent sur une page du livre (28 lignes maximum, retours à la ligne et lignes vides inclus). La fin de ton message serait coupée à l’enregistrement.\n\nTu peux revenir au texte pour le raccourcir, ou enregistrer seulement ce qui tiendra dans le livre.';
+  'Petit Cœur limite la longueur des souvenirs texte pour qu’ils tiennent sur une page du livre (28 lignes maximum, retours à la ligne et lignes vides inclus). La fin de ton message serait coupée à l’enregistrement.\n\nTu peux revenir au texte pour le raccourcir, ou enregistrer seulement ce qui tiendra dans le livre.';
 
 export const TEXT_TRUNCATION_MODIFY_LABEL = 'Modifier le texte';
 export const TEXT_TRUNCATION_SAVE_LABEL = 'Enregistrer la version courte';

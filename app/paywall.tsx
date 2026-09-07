@@ -3,12 +3,10 @@ import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   Pressable,
   ActivityIndicator,
   Alert,
   ScrollView,
-  Platform,
 } from 'react-native'
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -24,7 +22,10 @@ import {
   DMSans_700Bold,
 } from '@expo-google-fonts/dm-sans'
 import { BookOpen, ChevronRight, Cloud, Lock, X } from 'lucide-react-native'
-import PetitmoLogoManuscrit, { PETITMO_LOGO_VIEWBOX } from '@/components/PetitmoLogoManuscrit'
+import PetitCoeurLogo, { PETIT_COEUR_LOGO_VIEWBOX } from '@/components/PetitCoeurLogo'
+import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable'
+import { PETITMO_CTA_SPINNER_COLOR } from '@/constants/petitmoCtaStyles'
+import { useAppTranslation } from '@/hooks/useAppTranslation'
 import { upgradeToFullCloud } from '@/services/migration'
 import { flushPendingCloudUploadsOnce } from '@/services/pendingCloudFlush'
 import { hydrateTabScreensFromLocal } from '@/services/tabScreensHydrate'
@@ -70,8 +71,8 @@ function isSubscribeOnboarding(raw: unknown): boolean {
   return typeof v === 'string' && v.trim() === 'subscribe'
 }
 
-/** Hero souscription hors quota souvenirs : pas de « X premiers souvenirs » (cf. AGENTS.md). */
-const PAYWALL_NEUTRAL_HEADLINE = 'Les abonnements pour préserver chaque moment'
+/** Hero souscription hors quota souvenirs : logo + Premium (cf. AGENTS.md). */
+const PAYWALL_BRAND_LOGO_W = 190
 
 const VALID_PAYWALL_CONTEXTS = [
   'GENERAL',
@@ -108,7 +109,7 @@ const PAYWALL_MESSAGES: Record<
 > = {
   GENERAL: {
     eyebrow: 'Petitmo+',
-    title: () => PAYWALL_NEUTRAL_HEADLINE,
+    title: () => 'Premium',
     subtitle: '',
   },
   LIMIT_REACHED: {
@@ -184,6 +185,7 @@ function formatEuro(n: number) {
 export default function PaywallScreen() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
+  const { t } = useAppTranslation('common')
   const params = useLocalSearchParams<PaywallParams>()
   const context: PaywallContext = normalizePaywallContext(params.context)
   const returnTo = normalizePaywallReturnTo(params.returnTo)
@@ -304,15 +306,12 @@ export default function PaywallScreen() {
   const contentPadH = { paddingLeft: 20 + insets.left, paddingRight: 20 + insets.right }
   const heroH = Math.min(Math.round(hp(32)), Math.round(screenHeight * 0.34))
 
-  const paywallLogoW = scale(78)
-  const paywallLogoH = paywallLogoW * (PETITMO_LOGO_VIEWBOX.height / PETITMO_LOGO_VIEWBOX.width)
-  const logoPlusLayout = {
-    position: 'absolute' as const,
-    right: scale(-12),
-    top: paywallLogoH * 0.17,
-    fontSize: scale(23),
-    lineHeight: scale(26),
-  }
+  const paywallCornerLogoW = scale(88)
+  const paywallCornerLogoH =
+    paywallCornerLogoW * (PETIT_COEUR_LOGO_VIEWBOX.height / PETIT_COEUR_LOGO_VIEWBOX.width)
+  const paywallBrandLogoW = scale(PAYWALL_BRAND_LOGO_W)
+  const paywallBrandLogoH =
+    paywallBrandLogoW * (PETIT_COEUR_LOGO_VIEWBOX.height / PETIT_COEUR_LOGO_VIEWBOX.width)
 
   /** Heure, batterie, signal… en blanc sur le hero sombre (comme Capturer / Favoris). */
   useFocusEffect(
@@ -349,27 +348,21 @@ export default function PaywallScreen() {
           style={styles.heroFade}
           pointerEvents="none"
         />
-        <View
-          style={[styles.heroLogoBlock, { top: insets.top + 8, left: 16 + insets.left }]}
-          pointerEvents="none"
-          accessibilityRole="image"
-          accessibilityLabel="Petitmo+"
-        >
-          <View style={[styles.logoRow, { width: paywallLogoW, height: paywallLogoH }]}>
-            <PetitmoLogoManuscrit
-              width={paywallLogoW}
-              height={paywallLogoH}
+        {showMemoryLimitHero ? (
+          <View
+            style={[styles.heroLogoBlock, { top: insets.top + 8, left: 6 + insets.left }]}
+            pointerEvents="none"
+            accessibilityRole="image"
+            accessibilityLabel={t('paywall.brandA11y')}
+          >
+            <PetitCoeurLogo
+              width={paywallCornerLogoW}
+              height={paywallCornerLogoH}
               color="#FFFFFF"
               shadow
             />
-            <Text
-              style={[styles.logoPlus, logoPlusLayout]}
-              {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
-            >
-              +
-            </Text>
           </View>
-        </View>
+        ) : null}
         <Pressable
           onPress={dismissPaywall}
           style={({ pressed }) => [
@@ -390,7 +383,7 @@ export default function PaywallScreen() {
           <>
             <Text style={[styles.headline, dm700 && { fontFamily: dm700 }]}>{msg.title(childName)}</Text>
             <Text style={[styles.subline, dm500 && { fontFamily: dm500 }]}>{msg.subtitle}</Text>
-            <TouchableOpacity
+            <PetitmoPrimaryPressable
               style={[
                 styles.primaryCta,
                 { marginTop: 24 },
@@ -402,7 +395,7 @@ export default function PaywallScreen() {
               accessibilityRole="button"
             >
               {isLoading ? (
-                <ActivityIndicator color="#FFFFFF" />
+                <ActivityIndicator color={PETITMO_CTA_SPINNER_COLOR} />
               ) : (
                 <View style={styles.primaryCtaInner}>
                   <Text style={[styles.primaryCtaText, dm600 && { fontFamily: dm600 }]}>
@@ -411,7 +404,7 @@ export default function PaywallScreen() {
                   <ChevronRight size={20} color="#FFFFFF" strokeWidth={2.5} />
                 </View>
               )}
-            </TouchableOpacity>
+            </PetitmoPrimaryPressable>
             <Pressable
               onPress={dismissPaywall}
               style={({ pressed }) => [styles.dismissCta, { marginTop: 16 }, pressed && { opacity: 0.78 }]}
@@ -440,25 +433,23 @@ export default function PaywallScreen() {
         ) : (
           <>
             <View
-              style={styles.headlineNeutralWrap}
+              style={styles.brandHeroWrap}
               accessibilityRole="header"
-              accessibilityLabel={PAYWALL_NEUTRAL_HEADLINE}
+              accessibilityLabel={t('paywall.brandA11y')}
             >
-              <Text
-                style={[styles.headlineNeutralLine1, dm700 && { fontFamily: dm700 }]}
-                numberOfLines={2}
-                adjustsFontSizeToFit
-                minimumFontScale={0.78}
-                maxFontSizeMultiplier={1.35}
-              >
-                {PAYWALL_NEUTRAL_HEADLINE}
+              <PetitCoeurLogo
+                width={paywallBrandLogoW}
+                height={paywallBrandLogoH}
+                color="#1C1C1E"
+              />
+              <Text style={[styles.brandPremiumLabel, dm700 && { fontFamily: dm700 }]}>
+                {t('paywall.premiumLabel')}
               </Text>
             </View>
-            <View style={styles.neutralHeadlineSpacer} />
           </>
         )}
 
-        <View style={styles.plansRow}>
+        <View style={[styles.plansRow, !showMemoryLimitHero && styles.plansRowAfterBrand]}>
           <Pressable
             onPress={() => setSelectedPlan('yearly')}
             style={({ pressed }) => [
@@ -563,7 +554,7 @@ export default function PaywallScreen() {
           />
         </View>
 
-        <TouchableOpacity
+        <PetitmoPrimaryPressable
           style={[
             styles.primaryCta,
             isLoading && { opacity: 0.75 },
@@ -575,7 +566,7 @@ export default function PaywallScreen() {
           accessibilityRole="button"
         >
           {isLoading ? (
-            <ActivityIndicator color="#FFFFFF" />
+            <ActivityIndicator color={PETITMO_CTA_SPINNER_COLOR} />
           ) : (
             <View style={styles.primaryCtaInner}>
               <Text style={[styles.primaryCtaText, dm600 && { fontFamily: dm600 }]}>
@@ -584,7 +575,7 @@ export default function PaywallScreen() {
               <ChevronRight size={20} color="#FFFFFF" strokeWidth={2.5} />
             </View>
           )}
-        </TouchableOpacity>
+        </PetitmoPrimaryPressable>
 
         <Pressable
           onPress={dismissPaywall}
@@ -646,10 +637,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     zIndex: 3,
   },
-  logoRow: {
-    position: 'relative',
-    overflow: 'visible',
-  },
   heroTopFade: {
     position: 'absolute',
     top: 0,
@@ -657,14 +644,6 @@ const styles = StyleSheet.create({
     right: 0,
     height: '48%',
     zIndex: 1,
-  },
-  logoPlus: {
-    color: '#FFFFFF',
-    fontWeight: '800',
-    letterSpacing: -1,
-    textShadowColor: 'rgba(0,0,0,0.45)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
   },
   closeFab: {
     position: 'absolute',
@@ -695,21 +674,24 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 22,
   },
-  /** Paywall « générique » : deux `Text` séparés + `adjustsFontSizeToFit` sur L1 → jamais de coupure en 3 lignes */
-  headlineNeutralWrap: {
+  /** Paywall générique : logo + Premium — descendu vers les cartes plan */
+  brandHeroWrap: {
     alignSelf: 'center',
+    alignItems: 'center',
     width: screenWidth - 48,
     maxWidth: screenWidth - 48,
+    marginTop: verticalScale(22),
+    marginBottom: verticalScale(2),
+    gap: verticalScale(4),
   },
-  headlineNeutralLine1: {
+  brandPremiumLabel: {
     textAlign: 'center',
-    fontSize: scale(18),
-    lineHeight: scale(24),
-    letterSpacing: -0.28,
+    fontSize: scale(11),
+    lineHeight: scale(14),
+    letterSpacing: 0.9,
     color: '#1C1C1E',
-    textShadowColor: 'rgba(255,255,255,1)',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 16,
+    fontWeight: '700',
+    textTransform: 'uppercase',
   },
   headlineCount: {
     color: ACCENT,
@@ -731,6 +713,9 @@ const styles = StyleSheet.create({
   },
   neutralHeadlineSpacer: {
     height: verticalScale(12),
+  },
+  plansRowAfterBrand: {
+    marginTop: verticalScale(4),
   },
   benefitsCard: {
     marginTop: verticalScale(12),
@@ -899,12 +884,9 @@ const styles = StyleSheet.create({
     marginTop: verticalScale(22),
     height: 54,
     borderRadius: 14,
-    backgroundColor: ACCENT,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 20,
-    borderWidth: 1,
-    borderColor: THEME.captureCtaBorderColor,
   },
   primaryCtaInner: {
     flexDirection: 'row',

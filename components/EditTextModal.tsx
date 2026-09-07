@@ -39,8 +39,8 @@ import {
 } from '@/utils/textLimits';
 import {
   applyLeadingCapitalWhenStartingText,
-  capitalizeFirstLetterFr,
 } from '@/utils/frenchTextInput';
+import { applyTextAlineasForInput, stripTextAlineas } from '@/utils/textAlineas';
 
 const TEXT_INPUT_WEB_LANG =
   Platform.OS === 'web' ? ({ lang: 'fr-FR' } as Record<string, string>) : {};
@@ -86,26 +86,30 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
   const charsPerLine = props.bookCharsPerLine ?? BOOK_CHARS_PER_LINE;
 
   const [text, setText] = React.useState(
-    props.variant === 'title-body' ? '' : props.initialText
+    props.variant === 'title-body' ? '' : applyTextAlineasForInput(props.initialText)
   );
   const [fieldTitle, setFieldTitle] = React.useState(
     props.variant === 'title-body' ? props.initialTitle : ''
   );
   const [fieldBody, setFieldBody] = React.useState(
-    props.variant === 'title-body' ? props.initialBody : ''
+    props.variant === 'title-body' ? applyTextAlineasForInput(props.initialBody) : ''
   );
 
-  const applyBodyInput = (prev: string, next: string) =>
-    enforceTextBookLineBudgetOnInput(
-      prev,
-      applyLeadingCapitalWhenStartingText(prev, next),
+  const applyBodyInput = (prev: string, next: string) => {
+    const prevCanon = stripTextAlineas(prev);
+    const nextCanon = stripTextAlineas(next);
+    const capped = enforceTextBookLineBudgetOnInput(
+      prevCanon,
+      applyLeadingCapitalWhenStartingText(prevCanon, nextCanon),
       lineBudget,
       charsPerLine,
     );
+    return applyTextAlineasForInput(capped);
+  };
 
   const handleSave = () => {
     if (props.variant === 'title-body') {
-      const bodyRaw = fieldBody.trim();
+      const bodyRaw = stripTextAlineas(fieldBody).trim();
       const finalBody =
         lineBudget === MAX_BOOK_LINES
           ? clampText(bodyRaw)
@@ -132,7 +136,7 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
       return;
     }
 
-    const raw = text.trim();
+    const raw = stripTextAlineas(text).trim();
     const finalText =
       lineBudget === MAX_BOOK_LINES
         ? clampText(raw)
@@ -246,7 +250,7 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
                   Double saut de ligne = nouveau paragraphe (alinéa)
                 </Text>
                 <Text style={styles.charHint}>
-                  {estimateBookLines(fieldBody, charsPerLine)}/{lineBudget} lignes · livre
+                  {estimateBookLines(stripTextAlineas(fieldBody), charsPerLine)}/{lineBudget} lignes · livre
                 </Text>
               </View>
             </>
@@ -292,7 +296,7 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
                 autoCorrect
               />
               <Text style={styles.charHint}>
-                {estimateBookLines(fieldBody, charsPerLine)}/{lineBudget} lignes · livre
+                {estimateBookLines(stripTextAlineas(fieldBody), charsPerLine)}/{lineBudget} lignes · livre
               </Text>
             </>
           )
@@ -339,7 +343,7 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
                 </Text>
               ) : null}
               <Text style={styles.charHint}>
-                {estimateBookLines(text, charsPerLine)}/{lineBudget} lignes · livre
+                {estimateBookLines(stripTextAlineas(text), charsPerLine)}/{lineBudget} lignes · livre
               </Text>
             </View>
           </>

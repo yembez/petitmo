@@ -30,29 +30,28 @@ import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
 import * as Haptics from 'expo-haptics';
 import { Inter_300Light_Italic, Inter_500Medium, Inter_700Bold } from '@expo-google-fonts/inter';
 import { useFonts } from 'expo-font';
+import * as Font from 'expo-font';
 import { Manrope_400Regular, Manrope_700Bold } from '@expo-google-fonts/manrope';
 import { DMSans_500Medium } from '@expo-google-fonts/dm-sans';
-import CapturePhotoGradientFrame from '@/components/CapturePhotoGradientFrame';
 import TabSceneTransition from '@/components/TabSceneTransition';
 import SettingsHeaderButton from '@/components/SettingsHeaderButton';
+import PetitCoeurLogo, { PETIT_COEUR_LOGO_VIEWBOX } from '@/components/PetitCoeurLogo';
 import { loadedFontStyle } from '@/utils/loadedFontStyle';
 
 /** Tailles maquette capture (px logiques). */
 const CAPTURE_TITLE_FONT_SIZE = 18;
 const CAPTURE_TITLE_LINE_HEIGHT = 24;
 const CAPTURE_TITLE_HEART_SIZE = scale(16);
-const CAPTURE_HEADER_DATE_FONT_SIZE = 15;
-const CAPTURE_HEADER_DATE_LINE_HEIGHT = 20;
-/** Hauteur de la ligne date / paramètres (alignés sur le bouton). */
+/** Hauteur de la ligne logo / paramètres (alignés sur le bouton). */
 const CAPTURE_HEADER_ROW_H = scale(40);
+const CAPTURE_HEADER_LOGO_W = scale(122);
+const CAPTURE_HEADER_LOGO_H =
+  CAPTURE_HEADER_LOGO_W * (PETIT_COEUR_LOGO_VIEWBOX.height / PETIT_COEUR_LOGO_VIEWBOX.width);
 
 import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
 import { scale, verticalScale } from '@/utils/responsive';
 import {
   CAPTURE_SCREEN_BG,
-  CAPTURE_CTA_BORDER,
-  CAPTURE_CTA_DISC_BORDER_WIDTH,
-  CAPTURE_PHOTO_BORDER_GRADIENT,
   CAPTURE_CTA_RECORD_GRADIENT,
   CAPTURE_CTA_WRITE_GRADIENT,
   CAPTURE_CTA_IMPORT_GRADIENT,
@@ -81,7 +80,7 @@ import {
   type CaptureHeroPillBackdropMode,
 } from '@/hooks/useCaptureHeroPillBackdrop';
 import { childDisplayGivenName, childDisplayInitial } from '@/utils/childDisplayName';
-import { formatCaptureChildAge, formatCaptureHeaderDate } from '@/utils/date';
+import { formatCaptureChildAge } from '@/utils/date';
 import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 import { CaptureFamilyMosaic } from '@/components/CaptureFamilyMosaic';
 import {
@@ -353,12 +352,21 @@ function CapturerScreen() {
     Inter_500Medium,
     Inter_700Bold,
   });
-  const captureTitleFont = captureFontsLoaded ? 'Inter_500Medium' : undefined;
-  const captureTitleBoldFont = captureFontsLoaded ? 'Inter_700Bold' : undefined;
-  const captureSubtitleFont = captureFontsLoaded ? 'Manrope_400Regular' : undefined;
-  const capturePhotoPillNameFont = captureFontsLoaded ? 'Manrope_700Bold' : undefined;
-  const captureCtaLabelFont = captureFontsLoaded ? 'DMSans_500Medium' : undefined;
-  const captureTaglineFont = captureFontsLoaded ? 'Inter_300Light_Italic' : undefined;
+  /** Boot a déjà chargé ces faces : ne pas attendre un 2ᵉ `useFonts` (flash « ? »). */
+  const captureFontsReady =
+    captureFontsLoaded ||
+    (Font.isLoaded('Inter_500Medium') &&
+      Font.isLoaded('Inter_700Bold') &&
+      Font.isLoaded('Manrope_400Regular') &&
+      Font.isLoaded('Manrope_700Bold') &&
+      Font.isLoaded('DMSans_500Medium') &&
+      Font.isLoaded('Inter_300Light_Italic'));
+  const captureTitleFont = captureFontsReady ? 'Inter_500Medium' : undefined;
+  const captureTitleBoldFont = captureFontsReady ? 'Inter_700Bold' : undefined;
+  const captureSubtitleFont = captureFontsReady ? 'Manrope_400Regular' : undefined;
+  const capturePhotoPillNameFont = captureFontsReady ? 'Manrope_700Bold' : undefined;
+  const captureCtaLabelFont = captureFontsReady ? 'DMSans_500Medium' : undefined;
+  const captureTaglineFont = captureFontsReady ? 'Inter_300Light_Italic' : undefined;
   const usableH = Math.max(280, windowH);
   const layoutH = Math.min(frame.height > 1 ? frame.height : usableH, usableH);
   const compact = layoutH < 600;
@@ -634,7 +642,6 @@ function CapturerScreen() {
     );
   }
 
-  const captureHeaderDate = formatCaptureHeaderDate();
   const captureBottomReserve = tabBarFloatingOverlapPad(insets.bottom);
   const childGivenName = childDisplayGivenName(child.name);
   const childAgeLabel = child.birthdate ? formatCaptureChildAge(child.birthdate) : '';
@@ -677,16 +684,12 @@ function CapturerScreen() {
         >
           <View style={{ paddingTop: insets.top + verticalScale(8) }}>
             <View style={styles.capturePageHeader}>
-              <View style={styles.captureHeaderLeading}>
-                <Text
-                  style={[
-                    styles.captureHeaderDate,
-                    loadedFontStyle(captureTitleFont) ?? { fontWeight: '500' },
-                  ]}
-                  accessibilityRole="header"
-                >
-                  {captureHeaderDate}
-                </Text>
+              <View style={styles.captureHeaderLogo} pointerEvents="none">
+                <PetitCoeurLogo
+                  width={CAPTURE_HEADER_LOGO_W}
+                  height={CAPTURE_HEADER_LOGO_H}
+                  color={THEME.textPrimary}
+                />
               </View>
               <View style={styles.captureHeaderTrailing}>
                 <SettingsHeaderButton size={CAPTURE_HEADER_ROW_H} />
@@ -700,13 +703,10 @@ function CapturerScreen() {
               compact && styles.capturePhotoBleedCompact,
             ]}
           >
-          <CapturePhotoGradientFrame
-            colors={CAPTURE_PHOTO_BORDER_GRADIENT}
-            borderRadius={CAPTURE_PHOTO_CARD_RADIUS}
-            animating={isTabFocused}
+          <View
             style={[
-              styles.capturePhotoCardBorder,
-              compact && styles.capturePhotoCardBorderCompact,
+              styles.capturePhotoCardOuter,
+              compact && styles.capturePhotoCardOuterCompact,
             ]}
           >
           <View style={styles.capturePhotoCard}>
@@ -787,7 +787,7 @@ function CapturerScreen() {
               </>
             ) : null}
           </View>
-          </CapturePhotoGradientFrame>
+          </View>
           </View>
 
           <View
@@ -797,32 +797,64 @@ function CapturerScreen() {
             ]}
           >
             <View style={styles.captureContentSection} accessibilityRole="header">
-              <View style={styles.captureTitleRow}>
-                <Text
-                  style={[
-                    styles.captureTitle,
-                    loadedFontStyle(captureTitleFont) ?? { fontWeight: '500' },
-                  ]}
-                >
-                  Quel souvenir pour{' '}
-                  {isFamilyMosaic ? 'votre famille' : childGivenName || "l'enfant"}{' '}
-                </Text>
-                <Heart
-                  size={CAPTURE_TITLE_HEART_SIZE}
-                  color={CAPTURE_TITLE_HEART}
-                  fill={CAPTURE_TITLE_HEART}
-                  style={styles.captureTitleHeart}
-                />
-                <Text
-                  style={[
-                    styles.captureTitle,
-                    styles.captureTitleBold,
-                    loadedFontStyle(captureTitleBoldFont) ?? { fontWeight: '700' },
-                  ]}
-                >
-                  aujourd&apos;hui ?
-                </Text>
-              </View>
+              {isFamilyMosaic ? (
+                <View style={styles.captureTitleStack}>
+                  <Text
+                    style={[
+                      styles.captureTitle,
+                      loadedFontStyle(captureTitleFont) ?? { fontWeight: '500' },
+                    ]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.88}
+                  >
+                    Quel souvenir pour vos petits cœurs
+                  </Text>
+                  <View style={styles.captureTitleRow}>
+                    <Heart
+                      size={CAPTURE_TITLE_HEART_SIZE}
+                      color={CAPTURE_TITLE_HEART}
+                      fill={CAPTURE_TITLE_HEART}
+                      style={styles.captureTitleHeartLeading}
+                    />
+                    <Text
+                      style={[
+                        styles.captureTitle,
+                        styles.captureTitleBold,
+                        loadedFontStyle(captureTitleBoldFont) ?? { fontWeight: '700' },
+                      ]}
+                    >
+                      aujourd&apos;hui ?
+                    </Text>
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.captureTitleRow}>
+                  <Text
+                    style={[
+                      styles.captureTitle,
+                      loadedFontStyle(captureTitleFont) ?? { fontWeight: '500' },
+                    ]}
+                  >
+                    Quel souvenir pour {childGivenName || "l'enfant"}{' '}
+                  </Text>
+                  <Heart
+                    size={CAPTURE_TITLE_HEART_SIZE}
+                    color={CAPTURE_TITLE_HEART}
+                    fill={CAPTURE_TITLE_HEART}
+                    style={styles.captureTitleHeart}
+                  />
+                  <Text
+                    style={[
+                      styles.captureTitle,
+                      styles.captureTitleBold,
+                      loadedFontStyle(captureTitleBoldFont) ?? { fontWeight: '700' },
+                    ]}
+                  >
+                    aujourd&apos;hui ?
+                  </Text>
+                </View>
+              )}
               <Text
                 style={[
                   styles.captureSubtitle,
@@ -918,17 +950,10 @@ const styles = StyleSheet.create({
     marginBottom: verticalScale(12),
     overflow: 'visible',
   },
-  captureHeaderLeading: {
+  captureHeaderLogo: {
     flexShrink: 1,
-    maxWidth: '40%',
-    zIndex: 1,
-  },
-  captureHeaderDate: {
-    fontSize: CAPTURE_HEADER_DATE_FONT_SIZE,
-    lineHeight: CAPTURE_HEADER_DATE_LINE_HEIGHT,
-    color: THEME.textPrimary,
-    letterSpacing: -0.3,
-    ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
+    alignItems: 'flex-start',
+    justifyContent: 'center',
   },
   captureHeaderTrailing: {
     width: CAPTURE_HEADER_ROW_H,
@@ -946,12 +971,11 @@ const styles = StyleSheet.create({
   capturePhotoBleedCompact: {
     marginBottom: verticalScale(8),
   },
-  /** Anneau dégradé autour de la photo hero (padding = épaisseur du trait). */
-  capturePhotoCardBorder: {
+  /** Cadre photo hero — sans contour, ombre légère. */
+  capturePhotoCardOuter: {
     width: '100%',
     aspectRatio: CAPTURE_PHOTO_CARD_ASPECT,
     borderRadius: CAPTURE_PHOTO_CARD_RADIUS,
-    padding: CAPTURE_CTA_DISC_BORDER_WIDTH,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -965,12 +989,12 @@ const styles = StyleSheet.create({
       default: {},
     }),
   },
-  capturePhotoCardBorderCompact: {
+  capturePhotoCardOuterCompact: {
     aspectRatio: CAPTURE_PHOTO_CARD_ASPECT_COMPACT,
   },
   capturePhotoCard: {
     flex: 1,
-    borderRadius: CAPTURE_PHOTO_CARD_RADIUS - CAPTURE_CTA_DISC_BORDER_WIDTH,
+    borderRadius: CAPTURE_PHOTO_CARD_RADIUS,
     overflow: 'hidden',
     backgroundColor: CAPTURE_SCREEN_BG,
   },
@@ -1078,6 +1102,10 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
   },
   captureTitleBold: {},
+  captureTitleStack: {
+    alignSelf: 'stretch',
+    alignItems: 'flex-start',
+  },
   captureTitleRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1086,6 +1114,10 @@ const styles = StyleSheet.create({
   },
   captureTitleHeart: {
     marginHorizontal: scale(4),
+    marginBottom: scale(1),
+  },
+  captureTitleHeartLeading: {
+    marginRight: scale(4),
     marginBottom: scale(1),
   },
   captureSubtitle: {

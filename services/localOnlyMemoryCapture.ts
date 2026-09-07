@@ -134,6 +134,7 @@ export async function captureMemoryLocalOnly(params: {
   capturedAtIso?: string;
   locationOverride?: string | null;
   importAssetId?: string | null;
+  importSourceFingerprint?: string | null;
 }): Promise<Memory | null> {
   const {
     uri,
@@ -149,6 +150,9 @@ export async function captureMemoryLocalOnly(params: {
 
   const stampLibraryAsset = (mem: Memory): Memory => {
     mem.import_asset_id = params.importAssetId?.trim() ? params.importAssetId.trim() : null;
+    mem.import_source_fingerprint = params.importSourceFingerprint?.trim()
+      ? params.importSourceFingerprint.trim()
+      : null;
     return mem;
   };
   const id = newLocalMemoryId();

@@ -11,7 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useEffect } from 'react';
 import { Lock } from 'lucide-react-native';
 import { scale, verticalScale } from '@/utils/responsive';
-import PetitmoLogoManuscrit from '@/components/PetitmoLogoManuscrit';
+import PetitCoeurLogo, { PETIT_COEUR_LOGO_VIEWBOX } from '@/components/PetitCoeurLogo';
 import { SPACING, FONT_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
 import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
@@ -95,7 +95,11 @@ export default function OnboardingScreen() {
 
         <View style={[styles.contentContainer, { paddingTop: insets.top + verticalScale(12) }]}>
           <View style={styles.logoContainer}>
-            <PetitmoLogoManuscrit width={scale(150)} height={scale(45)} color="#FFFFFF" />
+            <PetitCoeurLogo
+              width={scale(200)}
+              height={scale(200) * (PETIT_COEUR_LOGO_VIEWBOX.height / PETIT_COEUR_LOGO_VIEWBOX.width)}
+              color="#FFFFFF"
+            />
           </View>
 
           <View style={styles.topTaglineBlock}>

@@ -405,14 +405,14 @@ export default function ParentSpaceScreen() {
               }
               activeOpacity={0.85}
               accessibilityRole="button"
-              accessibilityLabel="Passer à Petitmo plus"
+              accessibilityLabel={t('parent.subscription.upgradeCta')}
             >
               <View style={styles.rowIconPlaceholder} />
               <View style={styles.rowText}>
                 <Text
                   style={[styles.rowLabel, styles.rowLabelAccent, dm500 ? { fontFamily: dm500 } : null]}
                 >
-                  Passer à Petitmo+
+                  {t('parent.subscription.upgradeCta')}
                 </Text>
               </View>
               <Text style={styles.rowValue}>›</Text>

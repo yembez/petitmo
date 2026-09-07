@@ -125,6 +125,11 @@ interface UploadMediaParams {
   suppressFeedEmit?: boolean;
   /** Photothèque uniquement — évite un second import du même média pour cet enfant. */
   importAssetId?: string | null;
+  /**
+   * Empreinte contenu (`file:…`) — fallback quand `assetId` manque, et filet même s’il est présent.
+   * Distinct des empreintes album (`album:…`).
+   */
+  importSourceFingerprint?: string | null;
 }
 
 function throwIfImportDuplicate(
@@ -1593,6 +1598,7 @@ export async function uploadMedia({
   fileName,
   suppressFeedEmit = false,
   importAssetId,
+  importSourceFingerprint,
 }: UploadMediaParams): Promise<MemoryRow | null> {
   console.log('[uploadMedia] called', { type, childId });
   try {
@@ -1608,7 +1614,7 @@ export async function uploadMedia({
       }
     }
 
-    throwIfImportDuplicate(childId, { importAssetId });
+    throwIfImportDuplicate(childId, { importAssetId, importSourceFingerprint });
 
     if ((await getCachedUserMode()) === 'local') {
       const userId = await resolveCaptureUserId(childId);
@@ -1623,6 +1629,7 @@ export async function uploadMedia({
         capturedAtIso,
         locationOverride,
         importAssetId,
+        importSourceFingerprint,
       });
       if (localMem) {
         upsertLocalMemory(localMem);
@@ -1713,6 +1720,9 @@ export async function uploadMedia({
         synced_at: null,
         sync_status: 'pending',
         import_asset_id: importAssetId?.trim() ? importAssetId.trim() : null,
+        import_source_fingerprint: importSourceFingerprint?.trim()
+          ? importSourceFingerprint.trim()
+          : null,
       };
 
       upsertLocalMemory(mem);
@@ -1814,6 +1824,9 @@ export async function uploadMedia({
         synced_at: null,
         sync_status: 'pending',
         import_asset_id: importAssetId?.trim() ? importAssetId.trim() : null,
+        import_source_fingerprint: importSourceFingerprint?.trim()
+          ? importSourceFingerprint.trim()
+          : null,
       };
 
       upsertLocalMemory(mem);
@@ -1965,6 +1978,9 @@ export async function uploadMedia({
         synced_at: null,
         sync_status: 'pending',
         import_asset_id: importAssetId?.trim() ? importAssetId.trim() : null,
+        import_source_fingerprint: importSourceFingerprint?.trim()
+          ? importSourceFingerprint.trim()
+          : null,
       };
 
       upsertLocalMemory(mem);
@@ -2096,6 +2112,9 @@ export async function uploadMedia({
       print_px_h: printPxH,
       sync_status: 'synced',
       import_asset_id: importAssetId?.trim() ? importAssetId.trim() : null,
+      import_source_fingerprint: importSourceFingerprint?.trim()
+        ? importSourceFingerprint.trim()
+        : null,
     };
     upsertLocalMemory(out);
     return out;

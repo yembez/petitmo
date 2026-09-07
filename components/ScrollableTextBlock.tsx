@@ -10,6 +10,7 @@ type Props = {
   showsVerticalScrollIndicator?: boolean;
   /** Tap (sans scroll) — ex. ouvrir la vue immersive depuis un souvenir texte. */
   onPress?: () => void;
+  accessibilityLabel?: string;
   /** Bloque le scroll parent (ex. FlatList paging) pendant un scroll interne. */
   onInnerScrollLock?: () => void;
   onInnerScrollUnlock?: () => void;
@@ -26,6 +27,7 @@ export function ScrollableTextBlock({
   contentContainerStyle,
   showsVerticalScrollIndicator = true,
   onPress,
+  accessibilityLabel = 'Ouvrir en plein écran',
   onInnerScrollLock,
   onInnerScrollUnlock,
 }: Props) {
@@ -56,7 +58,7 @@ export function ScrollableTextBlock({
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel="Ouvrir en plein écran"
+      accessibilityLabel={accessibilityLabel}
     >
       {children}
     </Pressable>

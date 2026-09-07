@@ -1631,7 +1631,7 @@ export const FavorisScreen = memo(function FavorisScreen({
 
     if (selectedItems.length === 0) {
       if (targetId) {
-        Alert.alert('Petitmo', 'Sélectionne au moins un souvenir à ajouter.');
+        Alert.alert('Petit Cœur', 'Sélectionne au moins un souvenir à ajouter.');
       }
       return;
     }
@@ -1645,13 +1645,13 @@ export const FavorisScreen = memo(function FavorisScreen({
           memoryPhotoRefs: selectedMemoryPhotoRefs,
         });
       } catch (e) {
-        Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
+        Alert.alert('Petit Cœur', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
         return;
       } finally {
         createBookInFlightRef.current = false;
       }
       if (!updated) {
-        Alert.alert('Petitmo', 'Livre introuvable.');
+        Alert.alert('Petit Cœur', 'Livre introuvable.');
         return;
       }
       for (const item of selectedItems) {
@@ -1682,7 +1682,7 @@ export const FavorisScreen = memo(function FavorisScreen({
       // APPEND : chaque tuile (y compris 2 photos du même album) = une page.
       const changingItems = selectedItems.filter(it => favorisItemWouldChangeBook(it, book));
       if (changingItems.length === 0) {
-        Alert.alert('Petitmo', 'Ces souvenirs sont déjà dans le livre.');
+        Alert.alert('Petit Cœur', 'Ces souvenirs sont déjà dans le livre.');
         return;
       }
       const pageEntriesToAdd = changingItems.map(pageEntryForFavorisGridItem);
@@ -1696,7 +1696,7 @@ export const FavorisScreen = memo(function FavorisScreen({
           { pageEntries: pageEntriesToAdd },
         );
         if (!updated) {
-          Alert.alert('Petitmo', 'Livre introuvable.');
+          Alert.alert('Petit Cœur', 'Livre introuvable.');
           return;
         }
         const afterPages = bookPageEntries(updated).length;
@@ -1710,7 +1710,7 @@ export const FavorisScreen = memo(function FavorisScreen({
           });
         }
       } catch (e) {
-        Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
+        Alert.alert('Petit Cœur', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
         return;
       } finally {
         createBookInFlightRef.current = false;

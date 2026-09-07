@@ -711,6 +711,12 @@ const styles = StyleSheet.create({
     gap: scale(8),
     flexShrink: 1,
   },
+  postActionsRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: scale(8),
+    flexShrink: 0,
+  },
   /** Disque crayon fil — fond blanc + liseré noir (parité CTA cœur). */
   feedPencilDiscCta: {
     width: scale(40),
