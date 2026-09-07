@@ -127,8 +127,8 @@ export const THEME = {
   captureMaquetteViolet: '#5B47D6',
   /** Icône + libellé onglet actif tab bar — accent Capturer. */
   tabBarActiveTint: CAPTURE_TAB_ACTIVE,
-  /** Icône + libellé onglets inactifs (assombris vs `textSecondary`). */
-  tabBarInactiveTint: '#4F4F52',
+  /** Icône + libellé onglets inactifs — noir charte pour lisibilité sur fond beige. */
+  tabBarInactiveTint: '#1C1C1E',
   /** Fond tab bar — beige écran Capturer (`#FEFBF7`). */
   tabBarBackground: CAPTURE_SCREEN_BG,
   /** @deprecated — `tabBarBackground` */
