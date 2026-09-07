@@ -6,7 +6,7 @@
   "type": "commonjs",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc && cp -R src/brand dist/brand",
+    "build": "tsc && rm -rf dist/brand && cp -R src/brand dist/brand",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
     "worker:once": "tsx src/worker/runOnce.ts",

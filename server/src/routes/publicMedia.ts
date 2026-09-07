@@ -2,7 +2,7 @@ import type { Express, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
-  petitmoLogoHtml,
+  petitCoeurLogoHtml,
   publicMediaPageHeaderHtml,
   resolvePublicMediaDisplayContext,
   type PublicMediaDisplayContext,
@@ -67,8 +67,9 @@ function htmlPage(
     body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,sans-serif;background:#F6F4F1;margin:0;padding:0;color:#1C1C1E}
     .wrap{max-width:560px;margin:0 auto;padding:28px 18px}
     .page-top{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:14px}
-    .page-top-logo{flex:0 0 auto;overflow:visible}
-    .logo-svg{height:38px;width:auto;max-width:min(160px,42vw);display:block;overflow:visible}
+    .page-top-logo{flex:0 0 auto}
+    /* Lockup très large (1024x188) : piloter par la largeur pour garder le ratio. */
+    .logo-img{width:min(196px,48vw);height:auto;display:block}
     .page-header-text{flex:1;min-width:0;padding-top:2px;text-align:right}
     .page-header-kind{font-size:14px;font-weight:500;line-height:1.3;color:#1C1C1E}
     .page-header-date{margin-top:3px;font-size:12px;font-weight:400;line-height:1.35;color:#6B7280}
@@ -89,7 +90,7 @@ function htmlPage(
 <body>
   <div class="wrap">
     <div class="page-top">
-      <div class="page-top-logo">${petitmoLogoHtml()}</div>
+      <div class="page-top-logo">${petitCoeurLogoHtml()}</div>
       ${pageHeaderText}
     </div>
     ${mainBlock}
@@ -166,7 +167,7 @@ function saveControlsHtml(token: string, kind: TokenRow['kind']): string {
             try {
               var file = new File([blob], filename, { type: blob.type || 'video/mp4' });
               if (navigator.canShare({ files: [file] })) {
-                await navigator.share({ files: [file], title: 'Souvenir Petitmo' });
+                await navigator.share({ files: [file], title: 'Souvenir Petit Cœur' });
                 markSaved();
                 return;
               }
@@ -329,7 +330,7 @@ async function signedPlayerResponse(
     .status(200)
     .set('Cache-Control', 'no-store')
     .type('text/html')
-    .send(htmlPage('Petitmo · Souvenir', mainBody, '', pageHeaderText, flatLayout));
+    .send(htmlPage('Petit Cœur · Souvenir', mainBody, '', pageHeaderText, flatLayout));
   return true;
 }
 
@@ -410,7 +411,7 @@ export function registerPublicMediaRoutes(app: Express, supabase: SupabaseClient
             .status(200)
             .set('Cache-Control', 'no-store')
             .type('text/html')
-            .send(htmlPage('Petitmo · Souvenir', failedHtml(fresh.last_error, token)));
+            .send(htmlPage('Petit Cœur · Souvenir', failedHtml(fresh.last_error, token)));
           return;
         }
       }
@@ -419,7 +420,7 @@ export function registerPublicMediaRoutes(app: Express, supabase: SupabaseClient
         .status(200)
         .set('Cache-Control', 'no-store')
         .type('text/html')
-        .send(htmlPage('Petitmo · Souvenir', failedHtml(row.last_error, token)));
+        .send(htmlPage('Petit Cœur · Souvenir', failedHtml(row.last_error, token)));
       return;
     }
 
@@ -429,7 +430,7 @@ export function registerPublicMediaRoutes(app: Express, supabase: SupabaseClient
       .type('text/html')
       .send(
         htmlPage(
-          'Petitmo · Souvenir',
+          'Petit Cœur · Souvenir',
           `<div style="font-weight:700;font-size:18px">Ce souvenir prend vie…</div>
            <div class="muted" style="margin-top:6px">Revenez dans quelques instants ❤️</div>
            <a class="btn" href="/m/${encodeURIComponent(token)}">Actualiser</a>`,

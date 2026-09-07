@@ -50,7 +50,7 @@ function main(): void {
         printPageMm: [PRINT_PAGE_WIDTH_MM, PRINT_PAGE_HEIGHT_MM],
         bleedMm: PRINT_BLEED_MM,
       },
-      qrWorker: '2026-07-04-logo-viewbox',
+      qrWorker: '2026-09-07-petit-coeur-logo',
     });
   });
 

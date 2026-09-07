@@ -114,22 +114,22 @@ export function escapePublicMediaHtml(text: string): string {
     .replace(/"/g, '&quot;');
 }
 
-let cachedLogoSvg: string | null = null;
+let cachedLogoHtml: string | null = null;
 
-export function petitmoLogoHtml(): string {
-  if (!cachedLogoSvg) {
-    const raw = readFileSync(join(__dirname, 'brand', 'petitmo-logo-manuscrit.svg'), 'utf8');
-    cachedLogoSvg = raw
-      .replace(/<\?xml[^?]*\?>\s*/i, '')
-      .replace(
-        '<svg',
-        '<svg class="logo-svg" preserveAspectRatio="xMinYMid meet" role="img" aria-label="Petitmo"',
-      );
+/**
+ * Logo Petit Cœur (même lockup que l’app : `logo_petit_coeur_trois_points_ink`).
+ * Inline en data URI : la page QR est une visite unique, on évite une seconde requête.
+ */
+export function petitCoeurLogoHtml(): string {
+  if (!cachedLogoHtml) {
+    const png = readFileSync(join(__dirname, 'brand', 'petit-coeur-logo.png'));
+    const src = `data:image/png;base64,${png.toString('base64')}`;
+    cachedLogoHtml = `<img class="logo-img" src="${src}" width="1024" height="188" alt="Petit Cœur"/>`;
   }
-  return cachedLogoSvg;
+  return cachedLogoHtml;
 }
 
-/** Titre + date / âge hors carte — aligné à droite, sur la ligne du logo Petitmo. */
+/** Titre + date / âge hors carte — aligné à droite, sur la ligne du logo Petit Cœur. */
 export function publicMediaPageHeaderHtml(
   kind: 'audio' | 'video',
   ctx: PublicMediaDisplayContext,
