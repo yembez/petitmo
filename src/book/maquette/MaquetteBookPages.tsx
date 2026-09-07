@@ -76,18 +76,24 @@ import {
   pdfTextMemoryGuillemetBodyStyle,
   pdfTextMemoryTitleStyle,
   BOOK_VISUAL_MARGIN_MM,
-  BOOK_DIGITAL_PAGE_WIDTH_MM,
-  COVER_TITLE_SPINE_SAFE_EXTRA_MM,
   PHOTO_FULL_BAND_HEIGHT_RATIO,
   PHOTO_NOTE_BAND_HEIGHT_MM,
   PHOTO_FULL_FP_FOOTER_MM,
   PHOTO_FULL_FP_IMAGE_HEIGHT_MM,
 } from '@/src/book/pdfPreviewTypo';
+import {
+  bookCoverThemeForId,
+  COVER_HAIRLINE_W_MM,
+  COVER_PHOTO_FRAME_H_MM,
+  COVER_PHOTO_INSET_MM,
+  COVER_PHOTO_TOP_MM,
+  COVER_TEXT_GAP_MM,
+} from '@/constants/bookCoverColors';
 
 /** Alinéa (cadratin) en début de paragraphe — typographie roman. */
 const EM_QUAD = '\u2003';
 
-/** Style corps souvenir — Roboto, pas d’italique hérité (parité fil). */
+/** Style corps souvenir — DM Sans, pas d’italique hérité (parité fil). */
 function memoryTextStyle(fontFamily: string) {
   return {
     fontFamily,
@@ -475,7 +481,7 @@ function dateFrCaps(iso: string): string {
 
 /**
  * Libellé date + âges famille à la date du souvenir (`memories.created_at`).
- * Parité PDF serveur : Phase 2 (`htmlBook.ts` utilise encore un seul `birthdate`).
+ * Parité PDF serveur : `htmlBook.ts` + `formatFamilyAgesLine` (tous les enfants).
  */
 function dateWithAgeCaps(memory: Memory, familyChildren: Child[]): string {
   const iso = memoryBookDisplayDateIso(memory);
@@ -538,6 +544,11 @@ function CroppedPhotoDisplay({
   const recycleKey = imageRecyclingKey?.trim() || uri;
   /** Une fois en layout aspect, on y reste (sinon fill→aspect = bandeau blanc). */
   const stickyAspectRef = useRef<{ w: number; h: number } | null>(null);
+  const stickyAspectKeyRef = useRef(recycleKey);
+  if (stickyAspectKeyRef.current !== recycleKey) {
+    stickyAspectKeyRef.current = recycleKey;
+    stickyAspectRef.current = null;
+  }
   if (coverMode && imgPxW && imgPxH && imgPxW > 0 && imgPxH > 0) {
     stickyAspectRef.current = { w: imgPxW, h: imgPxH };
   }
@@ -731,6 +742,8 @@ type Props = {
   coverDisplayTitle?: string;
   /** URL de la photo de couverture (si définie par le livre). */
   coverPhotoUri?: string | null;
+  /** Couleur de fond couverture. */
+  coverColorId?: string | null;
   /** Recadrage de la photo de couverture (pan + zoom). */
   coverPhotoCrop?: PhotoCrop;
   /** Dimensions fichier couverture (aperçu lecture seule au ratio réel). */
@@ -771,6 +784,7 @@ function MaquetteBookPages(props: Props) {
     onRotate,
     coverDisplayTitle,
     coverPhotoUri,
+    coverColorId,
     coverPhotoCrop,
     coverPhotoImgPxW,
     coverPhotoImgPxH,
@@ -817,7 +831,6 @@ function MaquetteBookPages(props: Props) {
           child={page.child}
           width={width}
           height={height}
-          pad={pad}
           typoScale={typoScale}
           dm400={dm400}
           garamondIt={garamondIt}
@@ -828,6 +841,7 @@ function MaquetteBookPages(props: Props) {
           coverPhotoImgPxW={coverPhotoImgPxW}
           coverPhotoImgPxH={coverPhotoImgPxH}
           coverPhotoRenderKey={coverPhotoRenderKey}
+          coverColorId={coverColorId}
           onPressCoverPhoto={onRequestCoverPhoto}
           inlineCropConfig={inlineCropConfig}
           onPressTitle={onRequestTextEdit}
@@ -981,7 +995,7 @@ function MaquetteBookPages(props: Props) {
               Chaque moment compte.
             </Text>
             <Text style={[styles.backLine2, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
-              petitmo · vos souvenirs pour toujours
+              petit cœur · vos souvenirs pour toujours
             </Text>
             <View style={[styles.backRule, { marginTop: pdfPtToPreviewPx(12, width), width: pdfMmToPreviewPxW(20, width) }]} />
           </View>
@@ -1001,7 +1015,6 @@ function MaquetteCover({
   child,
   width,
   height,
-  pad,
   typoScale,
   dm400,
   garamondIt,
@@ -1012,6 +1025,7 @@ function MaquetteCover({
   coverPhotoImgPxW,
   coverPhotoImgPxH,
   coverPhotoRenderKey,
+  coverColorId,
   onPressCoverPhoto,
   inlineCropConfig,
   onPressTitle,
@@ -1019,7 +1033,6 @@ function MaquetteCover({
   child: Child;
   width: number;
   height: number;
-  pad: number;
   typoScale: number;
   dm400?: string;
   garamondIt?: string;
@@ -1031,12 +1044,19 @@ function MaquetteCover({
   coverPhotoImgPxW?: number;
   coverPhotoImgPxH?: number;
   coverPhotoRenderKey?: string;
+  coverColorId?: string | null;
   inlineCropConfig?: InlineCropConfig;
   onPressTitle: () => void;
 }) {
-  const photoUri = coverPhotoUri?.trim() || child.photo_url?.trim() || null;
-  /** Aligné PDF (`BOOK_COVER_PHOTO_HEIGHT_RATIO` = 142/216) : ~65,7 % de la hauteur page. */
-  const imgH = height * (142 / 216);
+  const theme = bookCoverThemeForId(coverColorId);
+  /** Parité `server/src/pdf/htmlBook.ts` : sans couverture choisie, repli avatar enfant. */
+  const photoUri = coverPhotoUri?.trim() || child?.photo_url?.trim() || null;
+  const insetX = pdfMmToPreviewPxW(COVER_PHOTO_INSET_MM, width);
+  const insetTop = pdfMmToPreviewPxH(COVER_PHOTO_TOP_MM, height);
+  const frameW = Math.max(1, width - 2 * insetX);
+  const frameH = pdfMmToPreviewPxH(COVER_PHOTO_FRAME_H_MM, height);
+  const textGap = pdfMmToPreviewPxH(COVER_TEXT_GAP_MM, height);
+  const hairlineW = pdfMmToPreviewPxW(COVER_HAIRLINE_W_MM, width);
   const y = new Date().getFullYear();
   const periodLine = bookYearLabel || `${y - 1} – ${y}`;
 
@@ -1045,77 +1065,104 @@ function MaquetteCover({
   const coverImgPxW = positiveImgPx(coverPhotoImgPxW, coverInline?.dpiMeta?.imgPxW);
   const coverImgPxH = positiveImgPx(coverPhotoImgPxH, coverInline?.dpiMeta?.imgPxH);
 
+  const recycleKey = (coverPhotoRenderKey ?? photoUri ?? '').trim() || photoUri || 'book-cover';
   const coverHasDims = (coverImgPxW ?? 0) > 0 && (coverImgPxH ?? 0) > 0;
   const coverUseInlineCrop = !!coverInline && coverHasDims;
+  /** Recadrage persisté : layout aspect. Sinon fill cadre (évite écrasement si dims sticky obsolètes). */
+  const coverUseCroppedLayout = !!coverPhotoCrop && coverHasDims;
+
+  const coverImageEl = photoUri ? (
+    coverUseCroppedLayout ? (
+      <CroppedPhotoDisplay
+        uri={photoUri}
+        width={frameW}
+        height={frameH}
+        crop={coverPhotoCrop}
+        coverMode
+        imgPxW={coverImgPxW}
+        imgPxH={coverImgPxH}
+        imageRecyclingKey={recycleKey}
+      />
+    ) : (
+      <ExpoImage
+        source={{ uri: photoUri }}
+        recyclingKey={recycleKey}
+        cachePolicy="memory-disk"
+        transition={0}
+        priority="high"
+        style={StyleSheet.absoluteFillObject}
+        contentFit="cover"
+      />
+    )
+  ) : null;
+
+  const photoBlock = photoUri ? (
+    <View style={StyleSheet.absoluteFill}>
+      {coverUseInlineCrop ? (
+        <BookPagePhotoFrame
+          uri={photoUri}
+          frameW={frameW}
+          frameH={frameH}
+          crop={coverPhotoCrop}
+          inlineCrop={coverInline}
+          coverMode
+          imgPxW={coverImgPxW}
+          imgPxH={coverImgPxH}
+        />
+      ) : canPickCover ? (
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={() => onPressCoverPhoto?.()}
+          accessibilityRole="button"
+          accessibilityLabel="Choisir la photo de couverture"
+        >
+          {coverImageEl}
+        </Pressable>
+      ) : (
+        coverImageEl
+      )}
+    </View>
+  ) : canPickCover ? (
+    <Pressable
+      style={StyleSheet.absoluteFill}
+      onPress={() => onPressCoverPhoto?.()}
+      accessibilityRole="button"
+      accessibilityLabel="Choisir la photo de couverture"
+    >
+      <View style={[styles.coverPh, { backgroundColor: theme.placeholder }]} />
+    </Pressable>
+  ) : (
+    <View style={[styles.coverPh, { backgroundColor: theme.placeholder }]} />
+  );
 
   return (
-    <View style={[styles.paper, styles.coverPaper, { width, height }]}>
-      <View style={[styles.coverImgBlock, { height: imgH }]}>
-        {photoUri ? (
-          // Clé stable : un `key={uri}` remonte le bloc à chaque heal/sign → bandeau blanc.
-          <View style={StyleSheet.absoluteFill}>
-            {coverUseInlineCrop ? (
-              <BookPagePhotoFrame
-                uri={photoUri}
-                frameW={width}
-                frameH={imgH}
-                crop={coverPhotoCrop}
-                inlineCrop={coverInline}
-                coverMode
-                imgPxW={coverImgPxW}
-                imgPxH={coverImgPxH}
-              />
-            ) : canPickCover ? (
-              <Pressable
-                style={StyleSheet.absoluteFill}
-                onPress={() => onPressCoverPhoto?.()}
-                accessibilityRole="button"
-                accessibilityLabel="Choisir la photo de couverture"
-              >
-                <CroppedPhotoDisplay
-                  uri={photoUri}
-                  width={width}
-                  height={imgH}
-                  crop={coverPhotoCrop}
-                  coverMode
-                  imgPxW={coverImgPxW}
-                  imgPxH={coverImgPxH}
-                  imageRecyclingKey="book-cover-browse"
-                />
-              </Pressable>
-            ) : (
-              <CroppedPhotoDisplay
-                uri={photoUri}
-                width={width}
-                height={imgH}
-                crop={coverPhotoCrop}
-                coverMode
-                imgPxW={coverImgPxW}
-                imgPxH={coverImgPxH}
-                imageRecyclingKey="book-cover-browse"
-              />
-            )}
-          </View>
-        ) : canPickCover ? (
-          <Pressable
-            style={StyleSheet.absoluteFill}
-            onPress={() => onPressCoverPhoto?.()}
-            accessibilityRole="button"
-            accessibilityLabel="Choisir la photo de couverture"
-          >
-            <View style={[styles.coverPh, { height: imgH }]} />
-          </Pressable>
-        ) : (
-          <View style={[styles.coverPh, { height: imgH }]} />
-        )}
+    <View
+      style={[
+        styles.paper,
+        styles.coverPaper,
+        { width, height, backgroundColor: theme.paper },
+      ]}
+    >
+      <View
+        style={[
+          styles.coverImgBlock,
+          {
+            width: frameW,
+            height: frameH,
+            marginTop: insetTop,
+            marginLeft: insetX,
+          },
+        ]}
+      >
+        {photoBlock}
       </View>
       <View
         style={[
           styles.coverTextBlock,
           {
-            paddingLeft: pad + Math.round((width * COVER_TITLE_SPINE_SAFE_EXTRA_MM) / BOOK_DIGITAL_PAGE_WIDTH_MM),
-            paddingRight: pad,
-            paddingTop: Math.round(8 * typoScale),
+            paddingLeft: insetX,
+            paddingRight: insetX,
+            paddingTop: textGap,
           },
         ]}
       >
@@ -1124,14 +1171,33 @@ function MaquetteCover({
             style={[
               styles.coverTitle,
               pdfCoverTitleStyle(width),
+              { color: theme.ink },
               garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
             ]}
           >
             {titleLine}
           </Text>
         </Pressable>
-        <Text style={[styles.coverYears, pdfCoverPeriodStyle(width), dm400 && { fontFamily: dm400 }]}>{periodLine}</Text>
-        <View style={[styles.coverHairline, { marginTop: Math.round(16 * typoScale) }]} />
+        <Text
+          style={[
+            styles.coverYears,
+            pdfCoverPeriodStyle(width),
+            { color: theme.muted },
+            dm400 && { fontFamily: dm400 },
+          ]}
+        >
+          {periodLine}
+        </Text>
+        <View
+          style={[
+            styles.coverHairline,
+            {
+              marginTop: Math.round(16 * typoScale),
+              width: hairlineW,
+              backgroundColor: theme.line,
+            },
+          ]}
+        />
       </View>
       <CoverPageSpineOverlay />
     </View>
@@ -2069,34 +2135,26 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   coverImgBlock: {
-    width: '100%',
     overflow: 'hidden',
     position: 'relative',
   },
   coverPh: {
     flex: 1,
-    backgroundColor: '#E8E8ED',
   },
   coverTextBlock: {
     flex: 1,
-    justifyContent: 'center',
-    paddingTop: 8,
+    justifyContent: 'flex-start',
   },
   coverTitle: {
     fontSize: 26,
-    color: INK,
     fontWeight: '400',
   },
   coverYears: {
     marginTop: 8,
     fontSize: 13,
-    color: MUTED,
   },
   coverHairline: {
-    marginTop: 16,
     height: StyleSheet.hairlineWidth,
-    backgroundColor: LINE,
-    width: '100%',
   },
   chapterCenter: {
     flex: 1,

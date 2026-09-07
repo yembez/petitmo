@@ -1,6 +1,6 @@
 /**
  * Aligné sur `lib/mediaBookCaption.ts` — package serveur isolé.
- * Gabarit : 6 lignes de ~70 caractères (EB Garamond, colonne à côté de la carte QR).
+ * Gabarit : 6 lignes de ~70 caractères (DM Sans, colonne à côté de la carte QR).
  */
 export const MAX_MEDIA_CAPTION_LINES = 6;
 export const MEDIA_CAPTION_CHARS_PER_LINE = 50;

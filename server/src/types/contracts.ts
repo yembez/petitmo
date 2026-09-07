@@ -61,6 +61,8 @@ export type GenerateBookPdfPayload = {
   coverPhotoImgPxH?: number;
   coverTitle: string;
   coverYearLabel: string;
+  /** Couleur fond couverture (white|cream|olive|navy|charcoal|black). */
+  coverColorId?: string | null;
   chapterTitle: string;
   qrBaseUrl: string;
   exportMode: 'digital' | 'print';
@@ -72,6 +74,8 @@ export type GenerateBookPdfPayload = {
    * Requis si l’auth est un JWT ticket `export_pdf`.
    */
   guestChild?: { name: string; photo_url?: string | null; birthdate?: string | null };
+  /** Légendes multi-enfants — parité maquette (`formatFamilyAgesLine`). */
+  guestFamilyChildren?: Array<{ name: string; birthdate?: string | null }>;
   guestMemories?: GuestMemoryForPdfPayload[];
 };
 

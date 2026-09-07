@@ -86,7 +86,7 @@ export function pdfMmToPreviewPxUniform(
  */
 const MIN_FS = 1;
 
-/** Réduction légère globale des corps souvenirs (Roboto) — parité `htmlBook.ts` (×15/16). */
+/** Réduction légère globale des corps souvenirs (DM Sans) — parité `htmlBook.ts` (×15/16). */
 const MEMORY_TEXT_SCALE = 15 / 16;
 
 function memorySouvenirPt(basePt: number): number {

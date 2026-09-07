@@ -4,9 +4,7 @@ import {
   PRINT_PAGE_HEIGHT_MM,
   PRINT_PAGE_WIDTH_MM,
   PRINT_BLEED_MM,
-  BOOK_COVER_PHOTO_HEIGHT_RATIO,
   BOOK_VISUAL_MARGIN_MM,
-  COVER_TITLE_SPINE_SAFE_EXTRA_MM,
   PDF_MEDIA_TEXT_PAD_X_MM,
   PHOTO_FULL_BAND_HEIGHT_RATIO,
   PHOTO_NOTE_INNER_MM,
@@ -14,6 +12,16 @@ import {
   PHOTO_FULL_FP_FOOTER_MM,
   PHOTO_FULL_FP_IMAGE_HEIGHT_MM,
 } from '../constants/pdfDigitalSpec';
+import {
+  bookCoverThemeForId,
+  COVER_HAIRLINE_W_MM,
+  COVER_PHOTO_FRAME_H_MM,
+  COVER_PHOTO_FRAME_W_MM,
+  COVER_PHOTO_INSET_MM,
+  COVER_PHOTO_TOP_MM,
+  COVER_TEXT_GAP_MM,
+  type BookCoverColorId,
+} from './coverColors';
 import type { BookPageServer } from '../types/contracts';
 import type { ChildRow, MemoryRow } from './memoryRow';
 import type { GelatoCoverLayout } from '../gelato/coverDimensions';
@@ -28,6 +36,7 @@ import {
   resolveTextMemoryBookLayout,
   textMemoryBodyAlignCenter,
   textMemoryBodyTextAlign,
+  type FamilyChildForAge,
 } from './maquetteAlign';
 
 const EM = '\u2003';
@@ -43,9 +52,16 @@ export type BuildBookHtmlInput = {
   coverPhotoUrl?: string | null;
   coverPhotoImgPxW?: number;
   coverPhotoImgPxH?: number;
+  /** Couleur fond couverture (white|cream|olive|navy|charcoal|black). */
+  coverColorId?: BookCoverColorId | string | null;
   memoriesById: Map<string, MemoryRow>;
   /** memoryId → token ; QR = `${qrBaseUrl}/${token}` (ex: https://petitmo.app/m/{token}). */
   qrTokensByMemoryId: Map<string, string>;
+  /**
+   * Tous les enfants du compte (noms + birthdates) — légendes multi-enfants.
+   * Défaut : `[child]` si omis.
+   */
+  familyChildren?: FamilyChildForAge[];
 };
 
 function esc(s: string): string {
@@ -220,26 +236,28 @@ function pageCover(
   printBleed: boolean,
   coverImgPxW?: number,
   coverImgPxH?: number,
+  coverColorId?: string | null,
 ): string {
+  const theme = bookCoverThemeForId(coverColorId);
   const explicit = (coverPhotoUrl ?? '').trim();
   const src = explicit ? imgAttr(explicit) : imgAttr(child.photo_url);
-  const bleedCls = printBleed ? ' bleed-x' : '';
-  // Cadre = bandeau réel (parité maquette : pageW × pageH×142/216), pas 216:142.
-  const pageWmm = printBleed ? PRINT_PAGE_WIDTH_MM : DIGITAL_PAGE_WIDTH_MM;
-  const pageHmm = printBleed ? PRINT_PAGE_HEIGHT_MM : DIGITAL_PAGE_HEIGHT_MM;
-  const coverFrameHmm = pageHmm * BOOK_COVER_PHOTO_HEIGHT_RATIO;
-  const coverFrameWmm = printBleed ? pageWmm + 2 * PRINT_BLEED_MM : pageWmm;
+  const bleed = printBleed ? PRINT_BLEED_MM : 0;
+  const insetX = bleed + COVER_PHOTO_INSET_MM;
+  const insetTop = bleed + COVER_PHOTO_TOP_MM;
+  const frameW = COVER_PHOTO_FRAME_W_MM;
+  const frameH = COVER_PHOTO_FRAME_H_MM;
+  const textTop = insetTop + frameH;
   const visual = src
-    ? croppedFrameHtml(src, crop, coverImgPxW, coverImgPxH, coverFrameWmm, coverFrameHmm, '', 'bleed')
+    ? croppedFrameHtml(src, crop, coverImgPxW, coverImgPxH, frameW, frameH, '', 'bleed')
     : '<div class="cover-placeholder"></div>';
-  return `<div class="page cover">
-  <div class="cover-photo${bleedCls}">
+  return `<div class="page cover" style="background:${theme.paper}">
+  <div class="cover-photo" style="left:${insetX}mm;top:${insetTop}mm;width:${frameW}mm;height:${frameH}mm;">
     ${visual}
   </div>
-  <div class="cover-text">
-    <div class="cover-title">${esc(title)}</div>
-    <div class="cover-period">${esc(yearLabel)}</div>
-    <div class="cover-hairline"></div>
+  <div class="cover-text" style="margin-top:${textTop}mm;padding-left:${insetX}mm;padding-right:${insetX}mm;padding-top:${COVER_TEXT_GAP_MM}mm;">
+    <div class="cover-title" style="color:${theme.ink}">${esc(title)}</div>
+    <div class="cover-period" style="color:${theme.muted}">${esc(yearLabel)}</div>
+    <div class="cover-hairline" style="width:${COVER_HAIRLINE_W_MM}mm;background:${theme.line}"></div>
   </div>
 </div>`;
 }
@@ -279,7 +297,7 @@ function pagePhotoFull(
   rot: number,
   pageNum: number,
   crop: PhotoCrop | undefined,
-  birthdate: string | null | undefined,
+  familyChildren: FamilyChildForAge[],
   variant: 'FP' | 'M' | undefined,
   printBleed: boolean,
   photoRef?: string | null,
@@ -321,7 +339,7 @@ function pagePhotoFull(
   </div>
   <div class="pf-footer">
     <div class="pf-meta-row">
-      <div class="pf-meta">${esc(dateWithAgeCaps(memoryBookDisplayDateIso(m), birthdate))}</div>
+      <div class="pf-meta">${esc(dateWithAgeCaps(memoryBookDisplayDateIso(m), familyChildren))}</div>
       ${locLabel ? `<div class="pf-meta pf-meta-loc">${esc(locLabel)}</div>` : ''}
     </div>
     <div class="pf-body-wrap">${captionHtml ? `<div class="pf-caption body text-memory-editorial">${captionHtml}</div>` : ''}</div>
@@ -335,7 +353,7 @@ function pagePhotoNote(
   rot: number,
   pageNum: number,
   crop: PhotoCrop | undefined,
-  birthdate: string | null | undefined,
+  familyChildren: FamilyChildForAge[],
   photoRef?: string | null,
   cropImgPxW?: number,
   cropImgPxH?: number,
@@ -357,7 +375,7 @@ function pagePhotoNote(
   </div>
   <div class="pn-text">
     <div class="pn-meta-row">
-      <div class="label">${esc(dateWithAgeCaps(memoryBookDisplayDateIso(m), birthdate))}</div>
+      <div class="label">${esc(dateWithAgeCaps(memoryBookDisplayDateIso(m), familyChildren))}</div>
       ${locLabel ? `<div class="label pn-meta-loc">${esc(locLabel)}</div>` : ''}
     </div>
     <div class="pn-body-wrap">${legend ? `<div class="body text-memory-editorial">${romanHtml(legend)}</div>` : ''}</div>
@@ -369,7 +387,7 @@ function pagePhotoNote(
 function pageQuote(
   m: MemoryRow,
   pageNum: number,
-  birthdate: string | null | undefined
+  familyChildren: FamilyChildForAge[]
 ): string {
   const layout = resolveTextMemoryBookLayout(m);
   const { body, tier, variant, title } = layout;
@@ -419,7 +437,7 @@ function pageQuote(
         <div class="quote-rule-seg"></div>
       </div>
       <div class="quote-meta-row">
-        <div class="label">${esc(dateWithAgeCaps(memoryBookDisplayDateIso(m), birthdate))}</div>
+        <div class="label">${esc(dateWithAgeCaps(memoryBookDisplayDateIso(m), familyChildren))}</div>
         ${locLabel ? `<div class="label quote-meta-loc">${esc(locLabel)}</div>` : ''}
       </div>
     </div>
@@ -460,7 +478,7 @@ function pageMediaQr(
   pageNum: number,
   rot: number,
   crop: PhotoCrop | undefined,
-  birthdate: string | null | undefined,
+  familyChildren: FamilyChildForAge[],
   cropImgPxW?: number,
   cropImgPxH?: number,
   printBleed = false,
@@ -489,7 +507,7 @@ function pageMediaQr(
   </div>
   <div class="pn-text media-qr-below">
     <div class="media-qr-meta-row">
-      <span class="label media-qr-meta-date">${esc(dateWithAgeCaps(memoryBookDisplayDateIso(m), birthdate))}</span>
+      <span class="label media-qr-meta-date">${esc(dateWithAgeCaps(memoryBookDisplayDateIso(m), familyChildren))}</span>
       ${locLabel ? `<span class="label media-qr-meta-loc">${esc(locLabel)}</span>` : ''}
     </div>
     <div class="media-qr-sep"></div>
@@ -517,12 +535,12 @@ function pageAudio(
   pageNum: number,
   rot: number,
   crop: PhotoCrop | undefined,
-  birthdate: string | null | undefined,
+  familyChildren: FamilyChildForAge[],
   cropImgPxW?: number,
   cropImgPxH?: number,
   printBleed = false,
 ): string {
-  return pageMediaQr('audio', m, qrUrl, pageNum, rot, crop, birthdate, cropImgPxW, cropImgPxH, printBleed);
+  return pageMediaQr('audio', m, qrUrl, pageNum, rot, crop, familyChildren, cropImgPxW, cropImgPxH, printBleed);
 }
 
 function pageVideo(
@@ -531,19 +549,19 @@ function pageVideo(
   pageNum: number,
   rot: number,
   crop: PhotoCrop | undefined,
-  birthdate: string | null | undefined,
+  familyChildren: FamilyChildForAge[],
   cropImgPxW?: number,
   cropImgPxH?: number,
   printBleed = false,
 ): string {
-  return pageMediaQr('video', m, qrUrl, pageNum, rot, crop, birthdate, cropImgPxW, cropImgPxH, printBleed);
+  return pageMediaQr('video', m, qrUrl, pageNum, rot, crop, familyChildren, cropImgPxW, cropImgPxH, printBleed);
 }
 
 function pageBackCover(): string {
   return `<div class="page back-cover">
   <div class="back-inner">
     <div class="subtitle" style="color:#AEAEB2;">Chaque moment compte.</div>
-    <div class="label" style="margin-top:8pt;">petitmo · vos souvenirs pour toujours</div>
+    <div class="label" style="margin-top:8pt;">petit cœur · vos souvenirs pour toujours</div>
     <div class="chapter-rule" style="margin-top:12pt;"></div>
   </div>
 </div>`;
@@ -561,23 +579,23 @@ function pageGelatoWraparoundSpread(
   coverPhotoImgPxW?: number,
   coverPhotoImgPxH?: number,
 ): string {
+  const theme = bookCoverThemeForId(input.coverColorId);
   const { contentFront, contentBack, spine, spreadWidthMm, spreadHeightMm } = layout;
   const explicit = (coverPhotoUrl ?? '').trim();
   const src = explicit ? imgAttr(explicit) : imgAttr(child.photo_url);
   const coverCrop = input.pages.find(p => p.type === 'cover')?.crop;
 
-  /**
-   * Parité maquette : photo flush haut / côtés du panneau avant.
-   * `contentFront` Gelato = zone safe (inset ~20 mm du wraparound) — si on y confine
-   * la photo, le preview commande montre des bandes blanches. On étend la photo dans
-   * le fond perdu haut + droite jusqu’au bord du spread.
-   */
-  const photoLeftMm = contentFront.leftMm;
-  const photoTopMm = 0;
-  const photoWidthMm = Math.max(contentFront.widthMm, spreadWidthMm - contentFront.leftMm);
-  const photoHeightMm =
-    contentFront.topMm + contentFront.heightMm * BOOK_COVER_PHOTO_HEIGHT_RATIO;
-  const spacerPct = (BOOK_COVER_PHOTO_HEIGHT_RATIO * 100).toFixed(2);
+  const scaleX = contentFront.widthMm / DIGITAL_PAGE_WIDTH_MM;
+  const scaleY = contentFront.heightMm / DIGITAL_PAGE_HEIGHT_MM;
+  const insetX = COVER_PHOTO_INSET_MM * scaleX;
+  const insetTop = COVER_PHOTO_TOP_MM * scaleY;
+  const photoWidthMm = COVER_PHOTO_FRAME_W_MM * scaleX;
+  const photoHeightMm = COVER_PHOTO_FRAME_H_MM * scaleY;
+  const photoLeftMm = contentFront.leftMm + insetX;
+  const photoTopMm = contentFront.topMm + insetTop;
+  const textPadTop = COVER_TEXT_GAP_MM * scaleY;
+  const hairlineW = COVER_HAIRLINE_W_MM * scaleX;
+  const spacerPct = ((insetTop + photoHeightMm) / contentFront.heightMm) * 100;
 
   const visual = src
     ? croppedFrameHtml(
@@ -595,26 +613,26 @@ function pageGelatoWraparoundSpread(
   const spineTitle = esc(input.coverTitle.slice(0, 48));
 
   return `<div class="page">
-  <div class="gw-canvas" style="width:${spreadWidthMm}mm;height:${spreadHeightMm}mm;">
-    <div class="gw-panel gw-back" style="left:${contentBack.leftMm}mm;top:${contentBack.topMm}mm;width:${contentBack.widthMm}mm;height:${contentBack.heightMm}mm;">
+  <div class="gw-canvas" style="width:${spreadWidthMm}mm;height:${spreadHeightMm}mm;background:${theme.paper};">
+    <div class="gw-panel gw-back" style="left:${contentBack.leftMm}mm;top:${contentBack.topMm}mm;width:${contentBack.widthMm}mm;height:${contentBack.heightMm}mm;background:${theme.paper};">
       <div class="gw-back-inner">
-        <div class="subtitle" style="color:#AEAEB2;">Chaque moment compte.</div>
-        <div class="label" style="margin-top:8pt;">petitmo · vos souvenirs pour toujours</div>
-        <div class="chapter-rule" style="margin-top:12pt;"></div>
+        <div class="subtitle" style="color:${theme.muted}">Chaque moment compte.</div>
+        <div class="label" style="margin-top:8pt;color:${theme.muted}">petit cœur · vos souvenirs pour toujours</div>
+        <div class="chapter-rule" style="margin-top:12pt;background:${theme.line}"></div>
       </div>
     </div>
-    <div class="gw-panel gw-spine" style="left:${spine.leftMm}mm;top:${spine.topMm}mm;width:${spine.widthMm}mm;height:${spine.heightMm}mm;">
-      <div class="gw-spine-title">${spineTitle}</div>
+    <div class="gw-panel gw-spine" style="left:${spine.leftMm}mm;top:${spine.topMm}mm;width:${spine.widthMm}mm;height:${spine.heightMm}mm;background:${theme.paper};">
+      <div class="gw-spine-title" style="color:${theme.ink}">${spineTitle}</div>
     </div>
-    <div class="gw-front-photo-bleed" style="left:${photoLeftMm}mm;top:${photoTopMm}mm;width:${photoWidthMm}mm;height:${photoHeightMm}mm;">
+    <div class="gw-front-photo-bleed" style="left:${photoLeftMm}mm;top:${photoTopMm}mm;width:${photoWidthMm}mm;height:${photoHeightMm}mm;background:${theme.paper};">
       ${visual}
     </div>
-    <div class="gw-panel gw-front" style="left:${contentFront.leftMm}mm;top:${contentFront.topMm}mm;width:${contentFront.widthMm}mm;height:${contentFront.heightMm}mm;">
-      <div class="gw-front-photo-spacer" style="height:${spacerPct}%;"></div>
-      <div class="gw-front-text">
-        <div class="cover-title">${esc(input.coverTitle)}</div>
-        <div class="cover-period">${esc(input.coverYearLabel)}</div>
-        <div class="cover-hairline"></div>
+    <div class="gw-panel gw-front" style="left:${contentFront.leftMm}mm;top:${contentFront.topMm}mm;width:${contentFront.widthMm}mm;height:${contentFront.heightMm}mm;background:transparent;">
+      <div class="gw-front-photo-spacer" style="height:${spacerPct.toFixed(2)}%;"></div>
+      <div class="gw-front-text" style="padding:${textPadTop.toFixed(2)}mm ${insetX.toFixed(2)}mm 6mm ${insetX.toFixed(2)}mm;background:transparent;">
+        <div class="cover-title" style="color:${theme.ink}">${esc(input.coverTitle)}</div>
+        <div class="cover-period" style="color:${theme.muted}">${esc(input.coverYearLabel)}</div>
+        <div class="cover-hairline" style="width:${hairlineW.toFixed(2)}mm;background:${theme.line}"></div>
       </div>
     </div>
   </div>
@@ -622,7 +640,7 @@ function pageGelatoWraparoundSpread(
 }
 
 function renderPage(page: BookPageServer, input: BuildBookHtmlInput, pageNum: number, _pageWmm: number): string {
-  const { child, coverTitle, coverYearLabel, chapterTitle, qrBaseUrl, coverPhotoUrl, coverPhotoImgPxW, coverPhotoImgPxH, memoriesById, qrTokensByMemoryId } =
+  const { child, coverTitle, coverYearLabel, chapterTitle, qrBaseUrl, coverPhotoUrl, coverPhotoImgPxW, coverPhotoImgPxH, coverColorId, memoriesById, qrTokensByMemoryId } =
     input;
   const printBleed = input.exportMode === 'print';
   switch (page.type) {
@@ -635,7 +653,8 @@ function renderPage(page: BookPageServer, input: BuildBookHtmlInput, pageNum: nu
         page.crop,
         printBleed,
         coverPhotoImgPxW,
-        coverPhotoImgPxH
+        coverPhotoImgPxH,
+        coverColorId,
       );
     case 'chapter':
       return pageChapter(page.month ?? '', page.chapterNum ?? 0, chapterTitle, pageNum);
@@ -651,7 +670,10 @@ function renderPage(page: BookPageServer, input: BuildBookHtmlInput, pageNum: nu
       const m = mergedMemory(raw, page.textOverride);
       const rot = page.rotation ?? 0;
       const crop = page.crop;
-      const birthdate = child.birthdate;
+      const familyChildren =
+        input.familyChildren && input.familyChildren.length > 0
+          ? input.familyChildren
+          : [{ name: child.name, birthdate: child.birthdate ?? null }];
       switch (page.type) {
         case 'photo-full':
           return pagePhotoFull(
@@ -659,7 +681,7 @@ function renderPage(page: BookPageServer, input: BuildBookHtmlInput, pageNum: nu
             rot,
             pageNum,
             crop,
-            birthdate,
+            familyChildren,
             page.variant,
             printBleed,
             page.photoRef,
@@ -672,14 +694,14 @@ function renderPage(page: BookPageServer, input: BuildBookHtmlInput, pageNum: nu
             rot,
             pageNum,
             crop,
-            birthdate,
+            familyChildren,
             page.photoRef,
             page.cropImgPxW,
             page.cropImgPxH,
             printBleed,
           );
         case 'quote':
-          return pageQuote(m, pageNum, birthdate);
+          return pageQuote(m, pageNum, familyChildren);
         case 'audio': {
           const tok = qrTokensByMemoryId.get(id) ?? '';
           const qrTarget = tok ? `${qrBaseUrl}/${tok}` : '';
@@ -689,7 +711,7 @@ function renderPage(page: BookPageServer, input: BuildBookHtmlInput, pageNum: nu
             pageNum,
             rot,
             crop,
-            birthdate,
+            familyChildren,
             page.cropImgPxW,
             page.cropImgPxH,
             printBleed,
@@ -704,7 +726,7 @@ function renderPage(page: BookPageServer, input: BuildBookHtmlInput, pageNum: nu
             pageNum,
             rot,
             crop,
-            birthdate,
+            familyChildren,
             page.cropImgPxW,
             page.cropImgPxH,
             printBleed,
@@ -736,7 +758,7 @@ function buildHtmlDocument(
       ? PRINT_BLEED_MM + PHOTO_NOTE_BAND_HEIGHT_MM
       : PHOTO_NOTE_BAND_HEIGHT_MM
   ).toFixed(2);
-  const coverPhotoHmm = (pageHmm * BOOK_COVER_PHOTO_HEIGHT_RATIO).toFixed(2);
+  const coverPhotoHmm = COVER_PHOTO_FRAME_H_MM.toFixed(2);
   const pfImgHmm = (pageHmm * PHOTO_FULL_BAND_HEIGHT_RATIO).toFixed(2);
   const gelatoPageCss = gelatoSpread
     ? `
@@ -762,7 +784,7 @@ function buildHtmlDocument(
 .gw-spine-title {
   writing-mode: vertical-rl;
   transform: rotate(180deg);
-  font-family: 'EB Garamond', serif;
+  font-family: 'DM Sans', sans-serif;
   font-style: italic;
   font-size: 8pt;
   color: #1C1C1E;
@@ -786,12 +808,10 @@ function buildHtmlDocument(
   flex: 1;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
   position: relative;
   z-index: 2;
-  background: #fff;
-  /* +${COVER_TITLE_SPINE_SAFE_EXTRA_MM}mm à gauche : marge hinge / rigole Gelato */
-  padding: 3mm 8mm 6mm ${8 + COVER_TITLE_SPINE_SAFE_EXTRA_MM}mm;
+  background: transparent;
 }
 .page.gelato-endpaper { background: #fff; }
 `
@@ -805,7 +825,7 @@ function buildHtmlDocument(
 <title>${esc(title)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500&amp;family=EB+Garamond:ital,wght@0,400;1,400&amp;family=Roboto:wght@400&amp;display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;1,400&amp;display=swap" rel="stylesheet" />
 <style>
 
 * { margin:0; padding:0; box-sizing:border-box;
@@ -821,8 +841,6 @@ function buildHtmlDocument(
   --pf-fp-img-h:calc(var(--page-h) - var(--pf-fp-footer-h));
   --pad-x:15mm;
   --pad-x-safe:calc(15mm + var(--bleed));
-  --cover-title-pad-left:calc(var(--pad-x) + ${COVER_TITLE_SPINE_SAFE_EXTRA_MM}mm);
-  --cover-title-pad-left-safe:calc(var(--pad-x-safe) + ${COVER_TITLE_SPINE_SAFE_EXTRA_MM}mm);
   --media-pad-x:${PDF_MEDIA_TEXT_PAD_X_MM}mm;
   --media-pad-x-safe:calc(${PDF_MEDIA_TEXT_PAD_X_MM}mm + var(--bleed));
   --visual-margin:${BOOK_VISUAL_MARGIN_MM}mm;
@@ -898,25 +916,23 @@ body.print-bleed .inner {
 .sage { background:#6B8F7E; }
 .vocal { background:#5C8FA6; }
 
-.cover { flex-direction:column; }
-.cover-photo { width:var(--page-w); height:var(--cover-photo-h); overflow:hidden; flex-shrink:0; }
+.cover { flex-direction:column; position:relative; }
+.cover-photo {
+  position:absolute; overflow:hidden; flex-shrink:0;
+}
 /* Cadre / img : tailles via inline mm (bookPhotoCropLayout). Pas de left/top % ici. */
 .crop-frame { position:relative; overflow:hidden; }
 .crop-img { display:block; max-width:none; }
 .cover-placeholder { width:100%; height:100%; background:#E8E8ED; }
 .cover-text {
-  flex:1; display:flex; flex-direction:column; justify-content:center;
-  padding:4mm var(--pad-x) 10mm var(--cover-title-pad-left);
-}
-body.print-bleed .cover-text {
-  padding-left:var(--cover-title-pad-left-safe);
-  padding-right:var(--pad-x-safe);
+  flex:1; display:flex; flex-direction:column; justify-content:flex-start;
+  box-sizing:border-box;
 }
 .cover-title {
-  font-family:'EB Garamond',serif; font-style:italic; font-size:22pt; color:#1C1C1E;
+  font-family:'DM Sans',sans-serif; font-style:italic; font-size:22pt;
 }
-.cover-period { font-family:'DM Sans',sans-serif; font-size:11pt; color:#AEAEB2; margin-top:5pt; }
-.cover-hairline { height:.3pt; background:rgba(0,0,0,.08); margin-top:10pt; width:100%; }
+.cover-period { font-family:'DM Sans',sans-serif; font-size:11pt; margin-top:5pt; }
+.cover-hairline { height:.3pt; margin-top:10pt; }
 
 .chapter-inner {
   flex:1; display:flex; flex-direction:column;

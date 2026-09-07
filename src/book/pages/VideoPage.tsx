@@ -1,7 +1,6 @@
 import { View, Text, StyleSheet, Image } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useFonts, DMSans_400Regular, DMSans_600SemiBold } from '@expo-google-fonts/dm-sans';
-import { EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
+import { useFonts, DMSans_400Regular, DMSans_400Regular_Italic, DMSans_600SemiBold } from '@expo-google-fonts/dm-sans';
 import QRCode from 'react-native-qrcode-svg';
 import type { Memory } from '@/types/local';
 import { formatBookLocationShort } from '@/utils/date';
@@ -40,14 +39,14 @@ export default function VideoPage({
   const [fontsLoaded] = useFonts({
     DMSans_400Regular,
     DMSans_600SemiBold,
-    EBGaramond_400Regular_Italic,
+    DMSans_400Regular_Italic,
   });
 
   const pageHeight = width / BOOK_PAGE_RATIO;
   const imageZoneHeight = (width / BOOK_PAGE_RATIO) * IMAGE_ZONE_RATIO;
   const dm400 = fontsLoaded ? 'DMSans_400Regular' : undefined;
   const dm600 = fontsLoaded ? 'DMSans_600SemiBold' : undefined;
-  const garamondIt = fontsLoaded ? 'EBGaramond_400Regular_Italic' : undefined;
+  const garamondIt = fontsLoaded ? 'DMSans_400Regular_Italic' : undefined;
 
   const thumb = memory.poster_url ?? memory.thumbnail_url;
   const dur = formatDuration(memory.duration);

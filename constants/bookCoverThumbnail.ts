@@ -1,33 +1,31 @@
 import { BOOK_PAGE_RATIO } from '@/src/book/pdfPreviewTypo';
 import { scale } from '@/utils/responsive';
+import {
+  BOOK_COVER_PHOTO_HEIGHT_RATIO as COVER_PHOTO_H_RATIO,
+  type BookCoverColorTheme,
+} from '@/constants/bookCoverColors';
+
+export type { BookCoverColorTheme };
 
 /** Miniature couverture liste Livres — ratio Gelato 21×28 (aligné maquette / PDF). */
 export const BOOK_COVER_THUMB_WIDTH = scale(120);
 export const BOOK_COVER_THUMB_HEIGHT = BOOK_COVER_THUMB_WIDTH / BOOK_PAGE_RATIO;
 
-/** Proportion bande photo couverture (142 mm sur trim historique 216 mm) — aligné PDF / maquette. */
-export const BOOK_COVER_PHOTO_HEIGHT_RATIO = 142 / 216;
-
-export type BookCoverColorTheme = {
-  paper: string;
-  ink: string;
-  muted: string;
-  line: string;
-  placeholder: string;
-};
+/** @deprecated Prefer layout mm in `bookCoverColors` — ratio cadre photo / page. */
+export const BOOK_COVER_PHOTO_HEIGHT_RATIO = COVER_PHOTO_H_RATIO;
 
 export const BOOK_COVER_THEME_DEFAULT: BookCoverColorTheme = {
-  paper: '#FFFFFF',
+  paper: '#EBE8E7',
   ink: '#1C1C1E',
   muted: '#6B7280',
-  line: 'rgba(0,0,0,0.10)',
-  placeholder: '#E8E8ED',
+  line: 'rgba(28,28,30,0.18)',
+  placeholder: '#E0DCDA',
 };
 
 export const BOOK_COVER_THEME_WARM: BookCoverColorTheme = {
-  paper: '#FBF8F4',
+  paper: '#DFD5CB',
   ink: '#1C1C1E',
-  muted: '#6B7280',
-  line: 'rgba(0,0,0,0.09)',
-  placeholder: '#EDE8E0',
+  muted: '#6B635C',
+  line: 'rgba(28,28,30,0.16)',
+  placeholder: '#D2C6BA',
 };

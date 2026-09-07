@@ -1,10 +1,11 @@
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { BookPage } from '@/src/book/BookEngine';
 import type { Child, Memory } from '@/types/local';
 import type { PhotoCrop } from '@/src/book/photoCrop';
 import type { BookMaquetteTypography } from '@/constants/bookMaquetteTypography';
+import { bookCoverThemeForId } from '@/constants/bookCoverColors';
 import { BookBrowseLeaf } from '@/components/BookBrowseLeaf';
 import { PORTRAIT_BROWSE_ROW_GAP, PORTRAIT_BROWSE_SPINE_W, type BookSpreadRow } from '@/utils/bookSpreadLayout';
 import {
@@ -12,6 +13,11 @@ import {
   bookPortraitPerfRender,
   diffPortraitRowProps,
 } from '@/utils/bookPortraitSpreadPerf';
+import { scale } from '@/utils/responsive';
+
+/** Bords couverture autour d’une double page ouverte (mode browse portrait). */
+const COVER_EDGE_W = scale(8);
+const COVER_RIM_H = scale(7);
 
 type PageRow = { page: BookPage; pageNum: number; folio: number | null };
 
@@ -22,6 +28,7 @@ export type BookPortraitSpreadRowProps = {
   child: Child;
   familyChildren: Child[];
   coverYearLabel: string;
+  coverColorId?: string | null;
   coverTitleLine: string | null;
   chapterTitleLine: string | null;
   coverPhotoBrowseUri: string | null;
@@ -47,6 +54,7 @@ function BookPortraitSpreadRowInner({
   child,
   familyChildren,
   coverYearLabel,
+  coverColorId,
   coverTitleLine,
   chapterTitleLine,
   coverPhotoBrowseUri,
@@ -69,6 +77,7 @@ function BookPortraitSpreadRowInner({
   bookPortraitPerfRender('BookPortraitSpreadRow', { spreadIndex, leftPage, rightPage });
 
   const isPair = Boolean(item.left && item.right);
+  const coverTheme = useMemo(() => bookCoverThemeForId(coverColorId), [coverColorId]);
 
   const renderLeaf = (row: PageRow) => {
     const mem = getMemoryForPage(row.page);
@@ -82,6 +91,7 @@ function BookPortraitSpreadRowInner({
         familyChildren={familyChildren}
         memory={mem}
         coverYearLabel={coverYearLabel}
+        coverColorId={coverColorId}
         coverTitleLine={coverTitleLine}
         chapterTitleLine={chapterTitleLine}
         coverPhotoBrowseUri={coverPhotoBrowseUri}
@@ -112,6 +122,28 @@ function BookPortraitSpreadRowInner({
     return (
       <View style={styles.browseRow}>
         <View style={styles.browsePairWrap}>
+          {/**
+           * Plan couverture derrière les pages seulement (pas les folios).
+           * Déborde dans le padding latéral / l’espace folio pour simuler le carton ouvert.
+           */}
+          <View
+            pointerEvents="none"
+            style={[
+              styles.coverBoard,
+              {
+                backgroundColor: coverTheme.paper,
+                top: -COVER_RIM_H,
+                left: -COVER_EDGE_W,
+                width: pageW * 2 + COVER_EDGE_W * 2,
+                height: pageH + COVER_RIM_H * 2,
+              },
+            ]}
+          >
+            <View
+              style={[styles.coverBoardInnerLine, { borderColor: coverTheme.line }]}
+              pointerEvents="none"
+            />
+          </View>
           <View style={styles.browsePairRow}>
             {item.left ? renderLeaf(item.left) : null}
             {item.right ? renderLeaf(item.right) : null}
@@ -176,10 +208,20 @@ const styles = StyleSheet.create({
   browsePairRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
+    zIndex: 1,
+  },
+  coverBoard: {
+    position: 'absolute',
+    zIndex: 0,
+  },
+  coverBoardInnerLine: {
+    ...StyleSheet.absoluteFillObject,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   browseSpine: {
     position: 'absolute',
     top: 0,
+    zIndex: 2,
     alignItems: 'center',
     justifyContent: 'center',
   },

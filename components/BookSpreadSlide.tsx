@@ -35,6 +35,7 @@ type BookSpreadSlideProps = {
   child: Child;
   familyChildren: Child[];
   coverYearLabel: string;
+  coverColorId?: string | null;
   coverTitleLine: string | null;
   chapterTitleLine: string | null;
   coverPhotoBrowseUri: string | null;
@@ -55,6 +56,7 @@ function SpreadMaquettePage({
   child,
   familyChildren,
   coverYearLabel,
+  coverColorId,
   coverTitleLine,
   chapterTitleLine,
   coverPhotoBrowseUri,
@@ -66,12 +68,14 @@ function SpreadMaquettePage({
   memoryPhotoRefs,
   getMemoryForPage,
   onRequestTextEditForPage,
+  mediaRevision,
 }: {
   row: PageRow;
   dims: { width: number; height: number };
   child: Child;
   familyChildren: Child[];
   coverYearLabel: string;
+  coverColorId?: string | null;
   coverTitleLine: string | null;
   chapterTitleLine: string | null;
   coverPhotoBrowseUri: string | null;
@@ -83,6 +87,7 @@ function SpreadMaquettePage({
   memoryPhotoRefs?: Record<string, string>;
   getMemoryForPage: (page: BookPage) => Memory | null;
   onRequestTextEditForPage: (pageNum: number) => void;
+  mediaRevision?: string;
 }) {
   const mem = memoryForMaquette(row.page, getMemoryForPage(row.page));
   const needsQr = row.page.type === 'audio' || row.page.type === 'video';
@@ -125,9 +130,15 @@ function SpreadMaquettePage({
           row.page.type === 'cover' ? (coverTitleLine ?? `Journal de ${child.name}`) : undefined
         }
         coverPhotoUri={row.page.type === 'cover' ? coverPhotoBrowseUri : null}
+        coverColorId={row.page.type === 'cover' ? coverColorId : undefined}
         coverPhotoCrop={photoCrops.cover}
         coverPhotoImgPxW={row.page.type === 'cover' ? cropDpiMetaCover?.imgPxW : undefined}
         coverPhotoImgPxH={row.page.type === 'cover' ? cropDpiMetaCover?.imgPxH : undefined}
+        coverPhotoRenderKey={
+          row.page.type === 'cover'
+            ? `spread:${coverPhotoBrowseUri ?? ''}:${mediaRevision ?? ''}`
+            : undefined
+        }
         chapterDisplayTitle={row.page.type === 'chapter' ? (chapterTitleLine ?? undefined) : undefined}
         onRotate={() => {}}
         onRequestTextEdit={() => onRequestTextEditForPage(row.pageNum - 1)}
@@ -145,6 +156,7 @@ function BookSpreadSlideInner({
   child,
   familyChildren,
   coverYearLabel,
+  coverColorId,
   coverTitleLine,
   chapterTitleLine,
   coverPhotoBrowseUri,
@@ -156,7 +168,7 @@ function BookSpreadSlideInner({
   memoryPhotoRefs,
   getMemoryForPage,
   onRequestTextEditForPage,
-  mediaRevision: _mediaRevision,
+  mediaRevision,
 }: BookSpreadSlideProps) {
   const left = item.left;
   const right = item.right;
@@ -167,6 +179,7 @@ function BookSpreadSlideInner({
     child,
     familyChildren,
     coverYearLabel,
+    coverColorId,
     coverTitleLine,
     chapterTitleLine,
     coverPhotoBrowseUri,
@@ -178,6 +191,7 @@ function BookSpreadSlideInner({
     memoryPhotoRefs,
     getMemoryForPage,
     onRequestTextEditForPage,
+    mediaRevision,
   };
 
   return (
@@ -220,7 +234,7 @@ function spreadSlidePropsEqual(a: BookSpreadSlideProps, b: BookSpreadSlideProps)
   if (a.item !== b.item) return false;
   if (a.screenWidth !== b.screenWidth || a.availHLandscape !== b.availHLandscape) return false;
   if (a.child !== b.child || a.familyChildren !== b.familyChildren) return false;
-  if (a.coverYearLabel !== b.coverYearLabel) return false;
+  if (a.coverYearLabel !== b.coverYearLabel || a.coverColorId !== b.coverColorId) return false;
   if (a.coverTitleLine !== b.coverTitleLine || a.chapterTitleLine !== b.chapterTitleLine) return false;
   if (a.coverPhotoBrowseUri !== b.coverPhotoBrowseUri) return false;
   if (

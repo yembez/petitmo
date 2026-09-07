@@ -26,9 +26,9 @@ export function registerPrintCheckoutReturnRoute(app: Express): void {
     const escaped = deep.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
     const title = canceled ? 'Paiement annulé' : 'Ton livre prend vie';
     const sub = canceled
-      ? 'Tu peux fermer cette fenêtre pour revenir dans Petitmo.'
-      : 'Retour dans Petitmo — garde l’app ouverte pendant la préparation.';
-    const cta = 'Ouvrir Petitmo';
+      ? 'Tu peux fermer cette fenêtre pour revenir dans Petit Cœur.'
+      : 'Retour dans Petit Cœur — garde l’app ouverte pendant la préparation.';
+    const cta = 'Ouvrir Petit Cœur';
     res
       .status(200)
       .set('Cache-Control', 'no-store')
@@ -38,7 +38,7 @@ export function registerPrintCheckoutReturnRoute(app: Express): void {
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Petitmo</title>
+  <title>Petit Cœur</title>
   <style>
     html,body { margin:0; height:100%; background:#1C1C1E; color:#fff;
       font-family: system-ui, -apple-system, sans-serif; }

@@ -12,7 +12,7 @@ export default function CoverPage({ child, width }: CoverPageProps) {
   return (
     <View style={[styles.root, { width, height }]}>
       <View style={styles.inner}>
-        <Text style={styles.title}>Petitmo</Text>
+        <Text style={styles.title}>Petit Cœur</Text>
         <Text style={styles.name}>{child.name}</Text>
       </View>
     </View>

@@ -8,17 +8,21 @@ import type { PhotoCrop } from '@/src/book/photoCrop';
 import { scale, verticalScale } from '@/utils/responsive';
 import CoverPageSpineOverlay from '@/components/CoverPageSpineOverlay';
 import {
-  BOOK_COVER_PHOTO_HEIGHT_RATIO,
-  BOOK_COVER_THEME_DEFAULT,
-  BOOK_COVER_THEME_WARM,
   BOOK_COVER_THUMB_HEIGHT,
   BOOK_COVER_THUMB_WIDTH,
   type BookCoverColorTheme,
 } from '@/constants/bookCoverThumbnail';
 import {
-  BOOK_DIGITAL_PAGE_WIDTH_MM,
-  COVER_TITLE_SPINE_SAFE_EXTRA_MM,
-} from '@/src/book/pdfPreviewTypo';
+  bookCoverThemeForId,
+  COVER_HAIRLINE_W_MM,
+  COVER_PHOTO_FRAME_H_MM,
+  COVER_PHOTO_INSET_MM,
+  COVER_PHOTO_TOP_MM,
+  COVER_TEXT_GAP_MM,
+  parseBookCoverColorId,
+  type BookCoverColorId,
+} from '@/constants/bookCoverColors';
+import { BOOK_DIGITAL_PAGE_WIDTH_MM, BOOK_DIGITAL_PAGE_HEIGHT_MM } from '@/src/book/pdfPreviewTypo';
 
 export type BookCoverThumbnailProps = {
   title: string;
@@ -26,17 +30,28 @@ export type BookCoverThumbnailProps = {
   /** Recadrage couverture (parité éditeur ↔ liste Livres). */
   coverPhotoCrop?: PhotoCrop;
   dateLabel?: string;
-  colorTheme?: 'default' | 'warm' | BookCoverColorTheme;
+  /** Id palette couverture, ou thème legacy `warm` / objet. */
+  colorTheme?: 'default' | 'warm' | BookCoverColorId | BookCoverColorTheme;
+  coverColorId?: BookCoverColorId | string | null;
   imageHeaders?: Record<string, string>;
   /** Clé stable expo-image (ex. id livre) — évite re-décodage au retour sur l’onglet. */
   imageRecyclingKey?: string;
   titleFontFamily?: string;
 };
 
-function resolveTheme(colorTheme: BookCoverThumbnailProps['colorTheme']): BookCoverColorTheme {
-  if (colorTheme === 'warm') return BOOK_COVER_THEME_WARM;
+function resolveTheme(
+  colorTheme: BookCoverThumbnailProps['colorTheme'],
+  coverColorId?: BookCoverThumbnailProps['coverColorId'],
+): BookCoverColorTheme {
+  if (coverColorId != null && String(coverColorId).trim()) {
+    return bookCoverThemeForId(coverColorId);
+  }
+  if (colorTheme === 'warm') return bookCoverThemeForId('cream');
+  if (typeof colorTheme === 'string' && colorTheme !== 'default') {
+    return bookCoverThemeForId(parseBookCoverColorId(colorTheme));
+  }
   if (colorTheme && typeof colorTheme === 'object') return colorTheme;
-  return BOOK_COVER_THEME_DEFAULT;
+  return bookCoverThemeForId('white');
 }
 
 function BookCoverThumbnail({
@@ -45,17 +60,22 @@ function BookCoverThumbnail({
   coverPhotoCrop,
   dateLabel = '',
   colorTheme = 'default',
+  coverColorId,
   imageHeaders,
   imageRecyclingKey,
   titleFontFamily,
 }: BookCoverThumbnailProps) {
-  const theme = resolveTheme(colorTheme);
+  const theme = resolveTheme(colorTheme, coverColorId);
   const garamondIt = titleFontFamily;
 
   const faceW = BOOK_COVER_THUMB_WIDTH;
   const faceH = BOOK_COVER_THUMB_HEIGHT;
-  const photoH = faceH * BOOK_COVER_PHOTO_HEIGHT_RATIO;
-  const textH = faceH - photoH;
+  const insetX = Math.round((faceW * COVER_PHOTO_INSET_MM) / BOOK_DIGITAL_PAGE_WIDTH_MM);
+  const insetTop = Math.round((faceH * COVER_PHOTO_TOP_MM) / BOOK_DIGITAL_PAGE_HEIGHT_MM);
+  const frameW = Math.max(1, faceW - 2 * insetX);
+  const frameH = Math.round((faceH * COVER_PHOTO_FRAME_H_MM) / BOOK_DIGITAL_PAGE_HEIGHT_MM);
+  const textGap = Math.round((faceH * COVER_TEXT_GAP_MM) / BOOK_DIGITAL_PAGE_HEIGHT_MM);
+  const hairlineW = Math.round((faceW * COVER_HAIRLINE_W_MM) / BOOK_DIGITAL_PAGE_WIDTH_MM);
 
   const uri = coverImageUri?.trim() || null;
   const imgSize = useImagePixelSize(coverPhotoCrop ? uri : null);
@@ -68,9 +88,6 @@ function BookCoverThumbnail({
       : null;
 
   const coverTitle = title.trim() || 'Mon livre';
-  const textPadX = scale(8);
-  const textPadLeft =
-    textPadX + Math.round((faceW * COVER_TITLE_SPINE_SAFE_EXTRA_MM) / BOOK_DIGITAL_PAGE_WIDTH_MM);
 
   return (
     <View style={styles.outer} pointerEvents="none">
@@ -85,12 +102,22 @@ function BookCoverThumbnail({
           },
         ]}
       >
-        <View style={[styles.photoZone, { height: photoH }]}>
+        <View
+          style={[
+            styles.photoZone,
+            {
+              width: frameW,
+              height: frameH,
+              marginTop: insetTop,
+              marginLeft: insetX,
+            },
+          ]}
+        >
           {useCoverCrop ? (
             <BookPagePhotoFrame
               uri={uri!}
-              frameW={faceW}
-              frameH={photoH}
+              frameW={frameW}
+              frameH={frameH}
               crop={coverPhotoCrop}
               coverMode
               imgPxW={imgSize.w}
@@ -111,7 +138,7 @@ function BookCoverThumbnail({
             </View>
           )}
         </View>
-        <View style={[styles.textZone, { height: textH, paddingLeft: textPadLeft, paddingRight: textPadX }]}>
+        <View style={[styles.textZone, { paddingLeft: insetX, paddingRight: insetX, paddingTop: textGap }]}>
           <Text
             style={[
               styles.coverTitle,
@@ -127,7 +154,7 @@ function BookCoverThumbnail({
               {dateLabel.trim()}
             </Text>
           ) : null}
-          <View style={[styles.hairline, { backgroundColor: theme.line }]} />
+          <View style={[styles.hairline, { backgroundColor: theme.line, width: hairlineW }]} />
         </View>
         <CoverPageSpineOverlay />
       </View>
@@ -158,7 +185,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   photoZone: {
-    width: '100%',
     overflow: 'hidden',
     position: 'relative',
   },
@@ -168,9 +194,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   textZone: {
-    justifyContent: 'center',
-    paddingTop: verticalScale(6),
-    paddingBottom: verticalScale(4),
+    flex: 1,
+    justifyContent: 'flex-start',
   },
   coverTitle: {
     fontSize: scale(11),
@@ -185,6 +210,5 @@ const styles = StyleSheet.create({
   hairline: {
     marginTop: verticalScale(5),
     height: StyleSheet.hairlineWidth,
-    width: '100%',
   },
 });

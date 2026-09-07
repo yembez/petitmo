@@ -19,7 +19,7 @@ import { scale } from '@/utils/responsive';
 export const BOOK_PDF_GENERATING_TITLE = 'Ton livre prend vie ❤️';
 
 export const BOOK_PDF_GENERATING_SUBTITLE =
-  'Merci de garder Petitmo ouvert pendant la préparation.';
+  'Merci de garder Petit Cœur ouvert pendant la préparation.';
 
 type ViewProps = {
   active?: boolean;

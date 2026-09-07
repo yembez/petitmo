@@ -9,7 +9,10 @@ import {
   PHOTO_FULL_FP_FOOTER_MM,
   PHOTO_FULL_FP_IMAGE_HEIGHT_MM,
 } from '@/src/book/pdfPreviewTypo';
-import { BOOK_COVER_PHOTO_HEIGHT_RATIO } from '@/constants/bookCoverThumbnail';
+import {
+  COVER_PHOTO_FRAME_H_MM,
+  COVER_PHOTO_FRAME_W_MM,
+} from '@/constants/bookCoverColors';
 import type { PhotoFullVariant } from '@/src/book/BookEngine';
 
 export const BOOK_PAGE_W_MM = 210;
@@ -25,9 +28,9 @@ export function bookPrintFrameMmFor(
   pageType: BookPhotoPageType,
   photoFullVariant?: PhotoFullVariant
 ): { w: number; h: number } {
-  /** Bandeau couverture = pageH × 142/216 (~183,7 mm), pas 142 mm absolus. */
+  /** Cadre photo couverture inset (parité maquette / PDF). */
   if (pageType === 'cover') {
-    return { w: BOOK_PAGE_W_MM, h: BOOK_PAGE_H_MM * BOOK_COVER_PHOTO_HEIGHT_RATIO };
+    return { w: COVER_PHOTO_FRAME_W_MM, h: COVER_PHOTO_FRAME_H_MM };
   }
   const m = BOOK_VISUAL_MARGIN_MM;
   if (pageType === 'photo-full' && photoFullVariant === 'FP') {

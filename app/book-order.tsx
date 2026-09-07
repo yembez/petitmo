@@ -16,7 +16,6 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useFonts, EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
 import * as WebBrowser from 'expo-web-browser';
 import * as ExpoLinking from 'expo-linking';
 import { ChevronRight } from 'lucide-react-native';
@@ -40,6 +39,8 @@ import {
   resolveBookListRowCoverUri,
   type Book,
 } from '@/services/books';
+import { listLocalChildren } from '@/lib/localDb';
+import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 import { getChildren } from '@/services/children';
 import { isInitExportConfigured } from '@/services/initExportApi';
 import { initPrintOrderExport } from '@/services/printBookOrder';
@@ -93,6 +94,7 @@ import { bookCoverPeriodLabelForBook } from '@/utils/bookCoverPeriodLabel';
 import { normalizeMemoryMediaUriForDisplay } from '@/utils/memoryPhotos';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { useAppLanguage } from '@/hooks/useAppLanguage';
+import { useFonts, DMSans_400Regular_Italic } from '@expo-google-fonts/dm-sans';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
 import { rememberLocalPrintOrder } from '@/lib/printOrdersCache';
 import { isDeviceStorageFullError } from '@/utils/deviceStorageFull';
@@ -136,9 +138,16 @@ async function withFreshBookPayloadForExport(
   try {
     const book = await getBook(payload.bookId);
     const pages = refreshBookPdfPagesMemoriesFromSqlite(payload.pages);
+    const familyFromLocal = sortChildrenByBirthdateAsc(listLocalChildren());
     let next: GenerateBookPdfServerInput = {
       ...payload,
       pages,
+      familyChildren:
+        familyFromLocal.length > 0
+          ? familyFromLocal
+          : payload.familyChildren && payload.familyChildren.length > 0
+            ? payload.familyChildren
+            : [payload.child],
     };
     if (book) {
       // Local-first : URI print / book_covers résolue avant la ref cloud stockée.
@@ -220,8 +229,8 @@ export default function BookOrderScreen() {
   const { t } = useAppTranslation('common');
   const lang = useAppLanguage();
   const { dm500, dm600, dm700 } = useDmSansFamilyFlowFonts();
-  const [coverFontsLoaded] = useFonts({ EBGaramond_400Regular_Italic });
-  const coverTitleFontFamily = coverFontsLoaded ? 'EBGaramond_400Regular_Italic' : undefined;
+  const [coverFontsLoaded] = useFonts({ DMSans_400Regular_Italic });
+  const coverTitleFontFamily = coverFontsLoaded ? 'DMSans_400Regular_Italic' : undefined;
   const params = useLocalSearchParams<{
     bookId?: string;
     childId?: string;
@@ -1148,7 +1157,8 @@ export default function BookOrderScreen() {
                     coverImageUri={coverUri}
                     coverPhotoCrop={coverCrop}
                     dateLabel={coverDateLabel}
-                    imageRecyclingKey={`order-cover-${bookId}-${book?.coverPhotoUrl ?? ''}-${coverCropKey}`}
+                    coverColorId={book?.coverColorId}
+                    imageRecyclingKey={`order-cover-${bookId}-${book?.coverPhotoUrl ?? ''}-${coverCropKey}-${book?.coverColorId ?? ''}`}
                     titleFontFamily={coverTitleFontFamily}
                   />
                 </View>
@@ -1204,7 +1214,7 @@ export default function BookOrderScreen() {
                   </Text>
                 ) : (
                   <Text style={[styles.priceDetailLine, dm500 && { fontFamily: dm500 }]}>
-                    QR audio/vidéo : {printQuote.qrCount} · inclus Petitmo+
+                    QR audio/vidéo : {printQuote.qrCount} · inclus Petit Cœur+
                   </Text>
                 )}
                 {tier === 'paid' ? (
@@ -1270,7 +1280,7 @@ export default function BookOrderScreen() {
               const stamp = Date.now().toString(36);
               setEmail(`qa+gelato-${stamp}@example.com`);
               setEmailEditing(false);
-              setShippingName('Test Petitmo Gelato');
+              setShippingName('Test Petit Cœur Gelato');
               setLine1('12 rue Example');
               setLine2('');
               setCity('Paris');

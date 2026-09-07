@@ -60,6 +60,27 @@ function isGuestChild(
   return typeof o.name === 'string' && o.name.trim().length > 0;
 }
 
+function resolveFamilyChildrenForPdf(
+  body: GenerateBookPdfPayload,
+  fallbackChild: { name: string; birthdate?: string | null },
+): Array<{ name: string; birthdate: string | null }> {
+  const fromPayload = body.guestFamilyChildren;
+  if (Array.isArray(fromPayload) && fromPayload.length > 0) {
+    return fromPayload
+      .filter(c => typeof c?.name === 'string' && c.name.trim().length > 0)
+      .map(c => ({
+        name: c.name.trim(),
+        birthdate: c.birthdate?.trim() ? c.birthdate.trim() : null,
+      }));
+  }
+  return [
+    {
+      name: fallbackChild.name,
+      birthdate: fallbackChild.birthdate?.trim() ? fallbackChild.birthdate.trim() : null,
+    },
+  ];
+}
+
 function isPayload(body: unknown): body is GenerateBookPdfPayload {
   if (!body || typeof body !== 'object') return false;
   const b = body as Record<string, unknown>;
@@ -172,7 +193,7 @@ export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient,
 
     if (!isPrint && body.subscriptionTier === 'free' && !body.digitalExportPaid) {
       res.status(402).json({
-        error: 'Export digital : Petitmo+ ou achat à l’acte requis.',
+        error: 'Export digital : Petit Cœur+ ou achat à l’acte requis.',
         code: 'EXPORT_PAYMENT_REQUIRED',
       });
       return;
@@ -194,6 +215,33 @@ export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient,
     if (!child) {
       res.status(403).json({ error: 'Child not found or access denied' });
       return;
+    }
+
+    let familyChildrenForHtml: Array<{ name: string; birthdate: string | null }>;
+    if (Array.isArray(body.guestFamilyChildren) && body.guestFamilyChildren.length > 0) {
+      familyChildrenForHtml = resolveFamilyChildrenForPdf(
+        body,
+        child as { name: string; birthdate?: string | null },
+      );
+    } else {
+      const { data: allChildrenRows } = await supabase
+        .from('children')
+        .select('name, birthdate')
+        .eq('user_id', userId);
+      familyChildrenForHtml = (allChildrenRows ?? [])
+        .filter(c => typeof c.name === 'string' && c.name.trim().length > 0)
+        .map(c => ({
+          name: String(c.name).trim(),
+          birthdate: c.birthdate?.trim() ? String(c.birthdate).trim() : null,
+        }));
+      if (familyChildrenForHtml.length === 0) {
+        familyChildrenForHtml = [
+          {
+            name: (child as ChildRow).name,
+            birthdate: (child as ChildRow).birthdate ?? null,
+          },
+        ];
+      }
     }
 
     const memoryIds = [
@@ -316,6 +364,7 @@ export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient,
       const html = buildBookHtml({
         coverTitle: body.coverTitle,
         coverYearLabel: body.coverYearLabel,
+        coverColorId: body.coverColorId ?? null,
         chapterTitle: body.chapterTitle,
         qrBaseUrl: body.qrBaseUrl,
         exportMode: isPrint ? 'print' : 'digital',
@@ -326,6 +375,7 @@ export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient,
         coverPhotoImgPxH: body.coverPhotoImgPxH,
         memoriesById: memoriesForHtml,
         qrTokensByMemoryId: qrResult.tokensByMemoryId,
+        familyChildren: familyChildrenForHtml,
       });
 
       const pdf = isPrint
@@ -424,7 +474,7 @@ async function handleTicketPdf(
 
   if (row.subscription_tier === 'free' && !body.digitalExportPaid) {
     res.status(402).json({
-      error: 'Export digital : Petitmo+ ou achat à l’acte requis.',
+      error: 'Export digital : Petit Cœur+ ou achat à l’acte requis.',
       code: 'EXPORT_PAYMENT_REQUIRED',
     });
     return;
@@ -512,9 +562,12 @@ async function handleTicketPdf(
         ? ((await signUrlForPdfRender(supabase, projectOrigin, coverRawTicket)) ?? coverRawTicket)
         : null;
 
+    const familyChildrenTicket = resolveFamilyChildrenForPdf(body, body.guestChild);
+
     const html = buildBookHtml({
       coverTitle: body.coverTitle,
       coverYearLabel: body.coverYearLabel,
+        coverColorId: body.coverColorId ?? null,
       chapterTitle: body.chapterTitle,
       qrBaseUrl: body.qrBaseUrl,
       exportMode: body.exportMode,
@@ -525,6 +578,7 @@ async function handleTicketPdf(
       coverPhotoImgPxH: body.coverPhotoImgPxH,
       memoriesById: memoriesForHtml,
       qrTokensByMemoryId: qrResult.tokensByMemoryId,
+      familyChildren: familyChildrenTicket,
     });
 
     const pdf =
@@ -729,6 +783,7 @@ async function handleTicketPrintPdf(
     const bookHtmlInput = {
       coverTitle: body.coverTitle,
       coverYearLabel: body.coverYearLabel,
+        coverColorId: body.coverColorId ?? null,
       chapterTitle: body.chapterTitle,
       qrBaseUrl: body.qrBaseUrl,
       exportMode: 'print' as const,
@@ -739,6 +794,7 @@ async function handleTicketPrintPdf(
       coverPhotoImgPxH: body.coverPhotoImgPxH,
       memoriesById: memoriesForHtmlPrint,
       qrTokensByMemoryId: qrResult.tokensByMemoryId,
+      familyChildren: resolveFamilyChildrenForPdf(body, body.guestChild),
     };
 
     let pdf: Buffer;

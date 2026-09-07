@@ -1,8 +1,7 @@
 import { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useFonts, DMSans_400Regular, DMSans_600SemiBold } from '@expo-google-fonts/dm-sans';
-import { EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
+import { useFonts, DMSans_400Regular, DMSans_400Regular_Italic, DMSans_600SemiBold } from '@expo-google-fonts/dm-sans';
 import { Pencil } from 'lucide-react-native';
 import type { Memory } from '@/types/local';
 import { formatBookLocationShort } from '@/utils/date';
@@ -38,7 +37,7 @@ export default function PhotoNotePage({
   const [fontsLoaded] = useFonts({
     DMSans_400Regular,
     DMSans_600SemiBold,
-    EBGaramond_400Regular_Italic,
+    DMSans_400Regular_Italic,
   });
 
   const [editOpen, setEditOpen] = useState(false);
@@ -50,7 +49,7 @@ export default function PhotoNotePage({
 
   const dm400 = fontsLoaded ? 'DMSans_400Regular' : undefined;
   const dm600 = fontsLoaded ? 'DMSans_600SemiBold' : undefined;
-  const garamondItalic = fontsLoaded ? 'EBGaramond_400Regular_Italic' : undefined;
+  const garamondItalic = fontsLoaded ? 'DMSans_400Regular_Italic' : undefined;
 
   const handleSave = useCallback(
     (text: string) => {

@@ -18,10 +18,10 @@ export const PRINT_PAGE_WIDTH_MM = PRINT_TRIM_WIDTH_MM + 2 * PRINT_BLEED_MM;
 export const PRINT_PAGE_HEIGHT_MM = PRINT_TRIM_HEIGHT_MM + 2 * PRINT_BLEED_MM;
 
 /**
- * Proportion bande photo couverture (142 mm sur trim historique 216 mm).
- * Multipliée par `--page-h` dans `htmlBook` — zones internes à recaler dans un prompt dédié.
+ * Ratio hauteur cadre photo couverture inset / page (134/280).
+ * Miroir `server/src/pdf/coverColors.ts` + `constants/bookCoverColors.ts`.
  */
-export const BOOK_COVER_PHOTO_HEIGHT_RATIO = 142 / 216;
+export const BOOK_COVER_PHOTO_HEIGHT_RATIO = 134 / 280;
 
 /** Marge visuelle [M] — parité `pdfPreviewTypo.ts` / maquette app. */
 export const BOOK_VISUAL_MARGIN_MM = 12;

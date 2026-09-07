@@ -119,7 +119,7 @@ export function GuestPdfExportModal({ visible, onClose, onSubmit, loading }: Pro
               </Text>
             </Pressable>
             <View style={styles.rowBetween}>
-              <Text style={styles.rowText}>Recevoir des nouvelles Petitmo (optionnel)</Text>
+              <Text style={styles.rowText}>Recevoir des nouvelles Petit Cœur (optionnel)</Text>
               <Switch value={marketing} onValueChange={setMarketing} disabled={loading} />
             </View>
           </ScrollView>

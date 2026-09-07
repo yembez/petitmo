@@ -142,7 +142,7 @@ export function AddToBookModal({
           await addMemoriesToBook(bookId, toAdd, { memoryPhotoRefs });
         }
       } catch (e) {
-        Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
+        Alert.alert('Petit Cœur', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
         return;
       }
       await refreshBooks();
@@ -176,7 +176,7 @@ export function AddToBookModal({
         memoryPhotoRefs,
       });
     } catch (e) {
-      Alert.alert('Petitmo', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
+      Alert.alert('Petit Cœur', e instanceof Error ? e.message : "Impossible d'ajouter à ce livre.");
       return;
     }
     const updated = created;

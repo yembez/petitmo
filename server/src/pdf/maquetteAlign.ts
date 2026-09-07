@@ -3,6 +3,13 @@
  * reproduise l’aperçu (citations, forme d’onde audio, dates).
  */
 
+import {
+  formatFamilyAgesLine,
+  type FamilyChildForAge,
+} from './familyAges';
+
+export type { FamilyChildForAge };
+
 const BAR_W = 3;
 const BAR_GAP = 2.5;
 const BAR_COUNT = 24;
@@ -233,12 +240,12 @@ export function formatAgeAtMemory(
 }
 
 /**
- * Libellé date + âge (parité avec `dateWithAgeCaps` de la maquette client).
- * Ex. « 12 Mars 2026 · 2 ans 3 mois ».
+ * Libellé date + âges famille (parité maquette `dateWithAgeCaps` + `formatFamilyAgesLine`).
+ * Ex. « 12 Mars 2026 · L. 3 ans - T. 11 mois ».
  */
-export function dateWithAgeCaps(iso: string, birthdate: string | null | undefined): string {
+export function dateWithAgeCaps(iso: string, familyChildren: FamilyChildForAge[]): string {
   const date = dateFrCaps(iso);
-  const age = formatAgeAtMemory(birthdate, iso);
+  const age = formatFamilyAgesLine(familyChildren, iso);
   return age ? `${date} · ${age}` : date;
 }
 

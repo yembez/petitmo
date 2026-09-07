@@ -9,8 +9,7 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useFonts, DMSans_400Regular, DMSans_500Medium } from '@expo-google-fonts/dm-sans';
-import { EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
+import { useFonts, DMSans_400Regular, DMSans_400Regular_Italic, DMSans_500Medium } from '@expo-google-fonts/dm-sans';
 import { THEME } from '@/constants/theme';
 import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import { scale } from '@/utils/responsive';
@@ -52,7 +51,7 @@ export default function BookOrderConfirmationScreen() {
   const [fontsLoaded] = useFonts({
     DMSans_400Regular,
     DMSans_500Medium,
-    EBGaramond_400Regular_Italic,
+    DMSans_400Regular_Italic,
   });
 
   const exportMode = useMemo(() => parseMode(params.exportMode), [params.exportMode]);
@@ -97,7 +96,7 @@ export default function BookOrderConfirmationScreen() {
     if (resultPdfUri) void shareBookPdf(resultPdfUri);
   }, [resultPdfUri]);
 
-  const garamondItalic = fontsLoaded ? 'EBGaramond_400Regular_Italic' : undefined;
+  const garamondItalic = fontsLoaded ? 'DMSans_400Regular_Italic' : undefined;
   const dm400 = fontsLoaded ? 'DMSans_400Regular' : undefined;
   const dm500 = fontsLoaded ? 'DMSans_500Medium' : undefined;
 

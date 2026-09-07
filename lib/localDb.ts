@@ -157,6 +157,9 @@ export function initLocalDb(): void {
     if (!bookNames.has('pageEntries')) {
       db.execSync(`ALTER TABLE books ADD COLUMN pageEntries TEXT;`)
     }
+    if (!bookNames.has('coverColorId')) {
+      db.execSync(`ALTER TABLE books ADD COLUMN coverColorId TEXT;`)
+    }
   } catch {
     /* migration douce */
   }
@@ -200,6 +203,8 @@ export type LocalBookRow = {
    */
   pageEntries?: LocalBookPageEntry[]
   coverPhotoUrl?: string | null
+  /** Couleur fond couverture (`white` | `cream` | …). */
+  coverColorId?: string | null
   rotations?: Record<string, number>
   photoCrops?: Record<string, { xPct: number; yPct: number; scale: number }>
   textEdits?: Record<string, { content?: string | null }>
@@ -272,6 +277,10 @@ function deserializeLocalBook(row: Record<string, unknown>): LocalBookRow {
     memoryPhotoRefs: Object.keys(memoryPhotoRefs).length ? memoryPhotoRefs : undefined,
     pageEntries: pageEntries.length ? pageEntries : undefined,
     coverPhotoUrl: (row.coverPhotoUrl as string | null) ?? null,
+    coverColorId:
+      typeof row.coverColorId === 'string' && row.coverColorId.trim().length > 0
+        ? (row.coverColorId as string).trim()
+        : null,
     rotations: Object.keys(rotations).length ? rotations : undefined,
     photoCrops: Object.keys(photoCrops).length ? photoCrops : undefined,
     textEdits: Object.keys(textEdits).length ? textEdits : undefined,
@@ -302,13 +311,15 @@ export function upsertLocalBook(book: Omit<LocalBookRow, 'updatedAt'>): void {
   const memoryPhotoRefs =
     book.memoryPhotoRefs !== undefined ? book.memoryPhotoRefs : existing?.memoryPhotoRefs
   const pageEntries = book.pageEntries !== undefined ? book.pageEntries : existing?.pageEntries
+  const coverColorId =
+    book.coverColorId !== undefined ? book.coverColorId : existing?.coverColorId ?? null
 
   db.runSync(
     `INSERT OR REPLACE INTO books (
-      id, title, createdAt, memoryIds, memoryPhotoRefs, pageEntries, coverPhotoUrl,
+      id, title, createdAt, memoryIds, memoryPhotoRefs, pageEntries, coverPhotoUrl, coverColorId,
       rotations, photoCrops, textEdits, chapterTitle,
       updatedAt
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
       book.id,
       (book.title ?? '').trim() || 'Livre',
@@ -319,6 +330,7 @@ export function upsertLocalBook(book: Omit<LocalBookRow, 'updatedAt'>): void {
         : null,
       pageEntries && pageEntries.length ? JSON.stringify(pageEntries) : null,
       book.coverPhotoUrl ?? null,
+      coverColorId ?? null,
       book.rotations ? JSON.stringify(book.rotations) : null,
       book.photoCrops ? JSON.stringify(book.photoCrops) : null,
       book.textEdits ? JSON.stringify(book.textEdits) : null,

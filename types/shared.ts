@@ -69,6 +69,8 @@ export type GenerateBookPdfPayload = {
   coverPhotoImgPxH?: number;
   coverTitle: string;
   coverYearLabel: string;
+  /** Couleur fond couverture (white|cream|olive|navy|charcoal|black). */
+  coverColorId?: string | null;
   chapterTitle: string;
   /**
    * Origine publique du service PDF (sans slash final), ex. `https://xxx.up.railway.app`.
@@ -87,6 +89,11 @@ export type GenerateBookPdfPayload = {
   digitalExportPaid?: boolean;
   /** Flux ticket : enfant inline (pas de ligne `children`). */
   guestChild?: { name: string; photo_url?: string | null; birthdate?: string | null };
+  /**
+   * Tous les enfants du compte pour légendes multi-enfants (parité maquette).
+   * Si omis : repli sur `guestChild` seul, ou tous les `children` du user (chemin session).
+   */
+  guestFamilyChildren?: Array<{ name: string; birthdate?: string | null }>;
   guestMemories?: GuestMemoryForPdfPayload[];
 };
 

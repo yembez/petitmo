@@ -22,7 +22,8 @@ import type {
   GuestMemoryForPdfPayload,
 } from '@/types/shared';
 import { supabase } from '@/lib/supabase';
-import { getLocalMemoryById } from '@/lib/localDb';
+import { getLocalMemoryById, listLocalChildren } from '@/lib/localDb';
+import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 import { getSignedMediaDisplayUrl } from '@/lib/mediaSignedUrl';
 import {
   ensureChildRowExistsOnSupabaseForExport,
@@ -66,11 +67,11 @@ import { publicMediaBaseUrl } from '@/lib/publicMediaBaseUrl';
 
 /** Erreur HTTP / téléchargement après appel au service PDF. */
 export const EXPORT_SERVER_FAILED_CONTACT_MESSAGE =
-  'L’export PDF a échoué (service indisponible ou erreur serveur). Réessaie plus tard. Si le problème persiste, contacte le support Petitmo depuis les Réglages de l’app.';
+  'L’export PDF a échoué (service indisponible ou erreur serveur). Réessaie plus tard. Si le problème persiste, contacte le support Petit Cœur depuis les Réglages de l’app.';
 
 /** URL serveur absente ou export sans passer par le service — PDF livre impossible depuis l’app. */
 export const PDF_EXPORT_REQUIRES_SERVER_MESSAGE =
-  'L’export PDF livre n’est disponible que via le service Petitmo (même rendu que la commande). Ce service n’est pas configuré dans cette version de l’app : vérifie la configuration build (EXPO_PUBLIC_PDF_SERVER_URL) ou réessaie plus tard.';
+  'L’export PDF livre n’est disponible que via le service Petit Cœur (même rendu que la commande). Ce service n’est pas configuré dans cette version de l’app : vérifie la configuration build (EXPO_PUBLIC_PDF_SERVER_URL) ou réessaie plus tard.';
 
 function pdfServerBaseUrl(): string | null {
   const raw = process.env.EXPO_PUBLIC_PDF_SERVER_URL?.trim();
@@ -1210,15 +1211,42 @@ export function mapBookPagesToServerPayload(
   });
 }
 
+function guestFamilyChildrenForPdfPayload(
+  child: Child,
+  familyChildren?: Child[],
+): Array<{ name: string; birthdate: string | null }> {
+  const source =
+    familyChildren && familyChildren.length > 0
+      ? familyChildren
+      : listLocalChildren();
+  const sorted = sortChildrenByBirthdateAsc(source.length > 0 ? source : [child]);
+  const mapped = sorted
+    .map(c => ({
+      name: (c.name ?? '').trim(),
+      birthdate: c.birthdate?.trim() ? c.birthdate.trim() : null,
+    }))
+    .filter(c => c.name.length > 0);
+  if (mapped.length > 0) return mapped;
+  return [
+    {
+      name: (child.name ?? '').trim() || 'Enfant',
+      birthdate: child.birthdate?.trim() ? child.birthdate.trim() : null,
+    },
+  ];
+}
+
 export type GenerateBookPdfServerInput = {
   bookId: string;
   childId: string;
   child: Child;
+  /** Tous les enfants locaux — légendes multi-enfants (parité maquette). */
+  familyChildren?: Child[];
   coverPhotoUrl?: string | null;
   coverPhotoImgPxW?: number;
   coverPhotoImgPxH?: number;
   coverTitle: string;
   coverYearLabel: string;
+  coverColorId?: string | null;
   chapterTitle: string;
   pages: BookPage[];
   rotations: Record<string, number>;
@@ -1324,6 +1352,7 @@ export async function generateBookPdfViaServer(input: GenerateBookPdfServerInput
     coverPhotoImgPxH: input.coverPhotoImgPxH,
     coverTitle: input.coverTitle,
     coverYearLabel: input.coverYearLabel,
+    coverColorId: input.coverColorId ?? null,
     chapterTitle: input.chapterTitle,
     // QR stable public : `https://petitmo.app/m/{token}` (pas le serveur PDF).
     qrBaseUrl: publicMediaBaseUrl(),
@@ -1332,6 +1361,7 @@ export async function generateBookPdfViaServer(input: GenerateBookPdfServerInput
     subscriptionTier,
     ...(subscriptionTier === 'free' ? { digitalExportPaid } : {}),
     ...(guestMemoryOverrides.length > 0 ? { guestMemories: guestMemoryOverrides } : {}),
+    guestFamilyChildren: guestFamilyChildrenForPdfPayload(input.child, input.familyChildren),
   };
 
   const res = await fetch(`${base}/v1/books/generate-pdf`, {
@@ -1754,6 +1784,7 @@ async function generateBookPdfWithExportTicketBody(
     coverPhotoImgPxH: input.coverPhotoImgPxH,
     coverTitle: input.coverTitle,
     coverYearLabel: input.coverYearLabel,
+    coverColorId: input.coverColorId ?? null,
     chapterTitle: input.chapterTitle,
     qrBaseUrl: publicMediaBaseUrl(),
     exportMode: input.exportMode === 'print' ? 'print' : 'digital',
@@ -1765,6 +1796,7 @@ async function generateBookPdfWithExportTicketBody(
       photo_url: input.child.photo_url ?? null,
       birthdate: input.child.birthdate ?? null,
     },
+    guestFamilyChildren: guestFamilyChildrenForPdfPayload(input.child, input.familyChildren),
     guestMemories,
   };
 

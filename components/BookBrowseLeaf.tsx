@@ -23,6 +23,7 @@ export type BookBrowseLeafProps = {
   familyChildren: Child[];
   memory: Memory | null;
   coverYearLabel: string;
+  coverColorId?: string | null;
   coverTitleLine: string | null;
   chapterTitleLine: string | null;
   coverPhotoBrowseUri: string | null;
@@ -48,6 +49,7 @@ function BookBrowseLeafInner({
   familyChildren,
   memory,
   coverYearLabel,
+  coverColorId,
   coverTitleLine,
   chapterTitleLine,
   coverPhotoBrowseUri,
@@ -62,7 +64,7 @@ function BookBrowseLeafInner({
   prefetchUri,
   onOpenEditor,
   onPrefetchImage,
-  mediaRevision: _mediaRevision,
+  mediaRevision,
 }: BookBrowseLeafProps) {
   const pageIndex = row.pageNum - 1;
   const showFolio = row.folio != null && row.folio > 0;
@@ -121,9 +123,20 @@ function BookBrowseLeafInner({
               row.page.type === 'cover' ? (coverTitleLine ?? `Journal de ${child.name}`) : undefined
             }
             coverPhotoUri={row.page.type === 'cover' ? coverPhotoBrowseUri : null}
+            coverColorId={row.page.type === 'cover' ? coverColorId : undefined}
             coverPhotoCrop={photoCrops.cover}
             coverPhotoImgPxW={row.page.type === 'cover' ? cropDpiMetaCover?.imgPxW : undefined}
             coverPhotoImgPxH={row.page.type === 'cover' ? cropDpiMetaCover?.imgPxH : undefined}
+            coverPhotoRenderKey={
+              row.page.type === 'cover'
+                ? `browse:${coverPhotoBrowseUri ?? ''}:${mediaRevision ?? ''}`
+                : undefined
+            }
+            key={
+              row.page.type === 'cover'
+                ? `cover-leaf-${coverPhotoBrowseUri ?? 'empty'}-${mediaRevision ?? ''}`
+                : undefined
+            }
             chapterDisplayTitle={row.page.type === 'chapter' ? (chapterTitleLine ?? undefined) : undefined}
             onRotate={() => {}}
             onRequestTextEdit={handlePress}

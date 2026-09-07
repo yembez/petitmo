@@ -20,7 +20,7 @@ export function parsePetitmoShippingAddress(raw: unknown): PetitmoShippingAddres
 
 export function splitShippingName(fullName: string): { firstName: string; lastName: string } {
   const t = fullName.trim();
-  if (!t) return { firstName: 'Client', lastName: 'Petitmo' };
+  if (!t) return { firstName: 'Client', lastName: 'Petit Cœur' };
   const parts = t.split(/\s+/);
   if (parts.length === 1) return { firstName: parts[0]!, lastName: '-' };
   return { firstName: parts[0]!, lastName: parts.slice(1).join(' ') };

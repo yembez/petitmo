@@ -6,7 +6,6 @@ import {
   Pressable,
 } from 'react-native';
 import { useFonts, DMSans_400Regular, DMSans_400Regular_Italic, DMSans_600SemiBold } from '@expo-google-fonts/dm-sans';
-import { EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
 import type { Memory } from '@/types/local';
 import EditTextModal from '@/components/EditTextModal';
 import { BOOK_PAGE_RATIO } from '@/src/book/pdfPreviewTypo';
@@ -36,7 +35,6 @@ export default function QuotePage({
     DMSans_400Regular,
     DMSans_400Regular_Italic,
     DMSans_600SemiBold,
-    EBGaramond_400Regular_Italic,
   });
 
   const [editOpen, setEditOpen] = useState(false);
@@ -45,7 +43,7 @@ export default function QuotePage({
   const dm400 = fontsLoaded ? 'DMSans_400Regular' : undefined;
   const dm600 = fontsLoaded ? 'DMSans_600SemiBold' : undefined;
   const dmItalic = fontsLoaded ? 'DMSans_400Regular_Italic' : undefined;
-  const garamondIt = fontsLoaded ? 'EBGaramond_400Regular_Italic' : undefined;
+  const garamondIt = dmItalic;
 
   const bodyText = memory.content ?? '';
 
