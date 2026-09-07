@@ -19,13 +19,18 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Plus } from 'lucide-react-native';
-import { useFonts, EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
 import { Inter_500Medium, Inter_700Bold } from '@expo-google-fonts/inter';
+import { useFonts, DMSans_400Regular_Italic } from '@expo-google-fonts/dm-sans';
 import { RectButton, Swipeable, TouchableOpacity as GestureTouchableOpacity } from 'react-native-gesture-handler';
 import { scale, verticalScale } from '@/utils/responsive';
 import { THEME } from '@/constants/theme';
 import BookCoverThumbnail from '@/components/BookCoverThumbnail';
+import BookCoverColorSwatches from '@/components/BookCoverColorSwatches';
 import SettingsHeaderButton from '@/components/SettingsHeaderButton';
+import {
+  parseBookCoverColorId,
+  type BookCoverColorId,
+} from '@/constants/bookCoverColors';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { bookCoverPeriodLabelForBook } from '@/utils/bookCoverPeriodLabel';
 import {
@@ -39,6 +44,7 @@ import {
   listBooksFromSqliteSync,
   PETITMO_BOOKS_UPDATED_EVENT,
   resolveBookListRowCoverUri,
+  upsertBook,
   type Book,
 } from '@/services/books';
 import { feedBooksHydrationSnapshot, setFeedBooksHydrationSnapshot } from '@/services/tabScreensCache';
@@ -71,6 +77,7 @@ type BookListRowProps = {
   listMetaFontFamily?: string;
   onOpen: (book: Book) => void;
   onDelete: (book: Book) => void;
+  onCoverColorChange: (book: Book, colorId: BookCoverColorId) => void;
 };
 
 function coverCropsEqual(
@@ -88,11 +95,18 @@ function bookListRowPropsEqual(prev: BookListRowProps, next: BookListRowProps): 
   if (prev.coverTitleFontFamily !== next.coverTitleFontFamily) return false;
   if (prev.listTitleFontFamily !== next.listTitleFontFamily) return false;
   if (prev.listMetaFontFamily !== next.listMetaFontFamily) return false;
-  if (prev.onOpen !== next.onOpen || prev.onDelete !== next.onDelete) return false;
+  if (
+    prev.onOpen !== next.onOpen ||
+    prev.onDelete !== next.onDelete ||
+    prev.onCoverColorChange !== next.onCoverColorChange
+  ) {
+    return false;
+  }
   const a = prev.book;
   const b = next.book;
   if (a.id !== b.id || a.title !== b.title || a.createdAt !== b.createdAt) return false;
   if ((a.coverPhotoUrl ?? '') !== (b.coverPhotoUrl ?? '')) return false;
+  if ((a.coverColorId ?? '') !== (b.coverColorId ?? '')) return false;
   if (!coverCropsEqual(a.photoCrops, b.photoCrops)) return false;
   if (a.memoryIds.length !== b.memoryIds.length) return false;
   for (let i = 0; i < a.memoryIds.length; i++) {
@@ -109,6 +123,7 @@ const BookListRow = memo(function BookListRow({
   listMetaFontFamily,
   onOpen,
   onDelete,
+  onCoverColorChange,
 }: BookListRowProps) {
   const { t } = useAppTranslation('common');
   const swipeRef = useRef<Swipeable>(null);
@@ -124,6 +139,7 @@ const BookListRow = memo(function BookListRow({
   const count = bookPageEntries(book).length;
   const pageCountLabel = formatBookListGelatoPageCountLabel(book);
   const dateLabel = bookCoverPeriodLabelForBook(book);
+  const coverColorId = parseBookCoverColorId(book.coverColorId);
 
   const handleRowPress = () => {
     if (suppressRowPressRef.current) {
@@ -163,46 +179,56 @@ const BookListRow = memo(function BookListRow({
         </View>
       )}
     >
-      <GestureTouchableOpacity
-        style={styles.row}
-        activeOpacity={0.92}
-        onPress={handleRowPress}
-        accessibilityRole="button"
-        accessibilityLabel={`Livre ${book.title}`}
-      >
-        <BookCoverThumbnail
-          title={book.title}
-          coverImageUri={coverUri}
-          coverPhotoCrop={coverCrop}
-          dateLabel={dateLabel}
-          imageRecyclingKey={`book-cover-${book.id}-${book.coverPhotoUrl ?? ''}-${coverCropKey}`}
-          titleFontFamily={coverTitleFontFamily}
-        />
-        <View style={styles.rowText}>
-          <Text
-            style={[
-              styles.rowTitle,
-              listTitleFontFamily
-                ? { fontFamily: listTitleFontFamily }
-                : { fontWeight: '700' },
-            ]}
-            numberOfLines={2}
-          >
-            {book.title}
-          </Text>
-          <Text
-            style={[
-              styles.rowMeta,
-              listMetaFontFamily
-                ? { fontFamily: listMetaFontFamily }
-                : { fontWeight: '500' },
-            ]}
-          >
-            {count === 0 ? t('book.listNoPages') : pageCountLabel}
-          </Text>
+      <View style={styles.row}>
+        <GestureTouchableOpacity
+          style={styles.rowOpen}
+          activeOpacity={0.92}
+          onPress={handleRowPress}
+          accessibilityRole="button"
+          accessibilityLabel={`Livre ${book.title}`}
+        >
+          <BookCoverThumbnail
+            title={book.title}
+            coverImageUri={coverUri}
+            coverPhotoCrop={coverCrop}
+            dateLabel={dateLabel}
+            coverColorId={coverColorId}
+            imageRecyclingKey={`book-cover-${book.id}-${book.coverPhotoUrl ?? ''}-${coverUri ?? ''}-${coverCropKey}-${coverColorId}`}
+            titleFontFamily={coverTitleFontFamily}
+          />
+          <View style={styles.rowText}>
+            <Text
+              style={[
+                styles.rowTitle,
+                listTitleFontFamily
+                  ? { fontFamily: listTitleFontFamily }
+                  : { fontWeight: '700' },
+              ]}
+              numberOfLines={2}
+            >
+              {book.title}
+            </Text>
+            <Text
+              style={[
+                styles.rowMeta,
+                listMetaFontFamily
+                  ? { fontFamily: listMetaFontFamily }
+                  : { fontWeight: '500' },
+              ]}
+            >
+              {count === 0 ? t('book.listNoPages') : pageCountLabel}
+            </Text>
+          </View>
+          <Text style={styles.chevron}>→</Text>
+        </GestureTouchableOpacity>
+        <View style={styles.swatchesSlot}>
+          <BookCoverColorSwatches
+            compact
+            value={coverColorId}
+            onChange={id => onCoverColorChange(book, id)}
+          />
         </View>
-        <Text style={styles.chevron}>→</Text>
-      </GestureTouchableOpacity>
+      </View>
     </Swipeable>
   );
 }, bookListRowPropsEqual);
@@ -217,7 +243,7 @@ function CreateBookListTile({
   const { t } = useAppTranslation('common');
   return (
     <TouchableOpacity
-      style={styles.row}
+      style={[styles.row, styles.rowOpen]}
       activeOpacity={0.92}
       onPress={onPress}
       accessibilityRole="button"
@@ -252,11 +278,11 @@ function LivresScreen() {
   const booksSigRef = useRef(booksListVisualSignature(books));
 
   const [listFontsLoaded] = useFonts({
-    EBGaramond_400Regular_Italic,
+    DMSans_400Regular_Italic,
     Inter_500Medium,
     Inter_700Bold,
   });
-  const coverTitleFontFamily = listFontsLoaded ? 'EBGaramond_400Regular_Italic' : undefined;
+  const coverTitleFontFamily = listFontsLoaded ? 'DMSans_400Regular_Italic' : undefined;
   const listTitleFontFamily = listFontsLoaded ? 'Inter_700Bold' : undefined;
   const listMetaFontFamily = listFontsLoaded ? 'Inter_500Medium' : undefined;
 
@@ -305,39 +331,55 @@ function LivresScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      /** Déjà affiché → resync SQLite ; répare les couvertures favoris en arrière-plan si besoin. */
-      if (booksRef.current.length > 0) {
-        applyBooksList(listBooksFromSqliteSync());
-        healBooksInBackground();
-        return;
-      }
-      const cached = feedBooksHydrationSnapshot;
-      if (cached.length > 0) {
-        applyBooksList(cached);
-        void load();
-        return;
-      }
-      void load();
-    }, [applyBooksList, load, healBooksInBackground])
+      /**
+       * Resync SQLite au focus (couverture / couleur peuvent avoir changé dans l’éditeur),
+       * mais via la signature visuelle : pas de `setBooks` si rien ne change à l’écran.
+       */
+      applyBooksList(listBooksFromSqliteSync());
+      healBooksInBackground();
+    }, [applyBooksList, healBooksInBackground])
   );
 
   useEffect(() => {
     const sub = DeviceEventEmitter.addListener('petitmo:memories-invalidate', () => {
       void load();
     });
+    /**
+     * Émis aussi par la sync (restore cloud) : peindre SQLite sans condition ferait
+     * clignoter la liste « pour le cloud ». `applyBooksList` ne rend que si le visuel change.
+     */
     const subBooks = DeviceEventEmitter.addListener(PETITMO_BOOKS_UPDATED_EVENT, () => {
       applyBooksList(listBooksFromSqliteSync());
-      void load();
+      healBooksInBackground();
     });
     return () => {
       sub.remove();
       subBooks.remove();
     };
-  }, [load, applyBooksList]);
+  }, [load, applyBooksList, healBooksInBackground]);
 
   const onRefresh = useCallback(() => {
     void load({ pull: true, force: true });
   }, [load]);
+
+  const confirmDelete = useCallback((b: Book) => {
+    Alert.alert('Supprimer ce livre ?', 'Cette action est définitive.', [
+      { text: 'Annuler', style: 'cancel' },
+      {
+        text: 'Supprimer',
+        style: 'destructive',
+        onPress: () => {
+          setBooks(prev => {
+            const next = prev.filter(x => x.id !== b.id);
+            booksSigRef.current = booksListVisualSignature(next);
+            setFeedBooksHydrationSnapshot(next);
+            return next;
+          });
+          void deleteBook(b.id);
+        },
+      },
+    ]);
+  }, []);
 
   const openBook = useCallback(
     (book: Book) => {
@@ -372,23 +414,15 @@ function LivresScreen() {
     [router, confirmDelete]
   );
 
-  const confirmDelete = useCallback((b: Book) => {
-    Alert.alert('Supprimer ce livre ?', 'Cette action est définitive.', [
-      { text: 'Annuler', style: 'cancel' },
-      {
-        text: 'Supprimer',
-        style: 'destructive',
-        onPress: () => {
-          setBooks(prev => {
-            const next = prev.filter(x => x.id !== b.id);
-            booksSigRef.current = booksListVisualSignature(next);
-            setFeedBooksHydrationSnapshot(next);
-            return next;
-          });
-          void deleteBook(b.id);
-        },
-      },
-    ]);
+  const handleCoverColorChange = useCallback((b: Book, colorId: BookCoverColorId) => {
+    const nextBook = { ...b, coverColorId: colorId };
+    setBooks(prev => {
+      const next = prev.map(x => (x.id === b.id ? nextBook : x));
+      booksSigRef.current = booksListVisualSignature(next);
+      setFeedBooksHydrationSnapshot(next);
+      return next;
+    });
+    void upsertBook(nextBook).catch(() => {});
   }, []);
 
   const openCreateFlow = useCallback(() => {
@@ -405,9 +439,17 @@ function LivresScreen() {
         listMetaFontFamily={listMetaFontFamily}
         onOpen={openBook}
         onDelete={confirmDelete}
+        onCoverColorChange={handleCoverColorChange}
       />
     ),
-    [coverTitleFontFamily, listTitleFontFamily, listMetaFontFamily, openBook, confirmDelete]
+    [
+      coverTitleFontFamily,
+      listTitleFontFamily,
+      listMetaFontFamily,
+      openBook,
+      confirmDelete,
+      handleCoverColorChange,
+    ]
   );
 
   const startCreateFlowToFavoris = useCallback(() => {
@@ -613,15 +655,21 @@ const styles = StyleSheet.create({
     height: verticalScale(10),
   },
   row: {
-    flexDirection: 'row',
-    alignItems: 'center',
     backgroundColor: THEME.bg,
     borderRadius: scale(14),
     padding: scale(14),
     paddingLeft: scale(12),
     borderWidth: 1,
     borderColor: 'rgba(0,0,0,0.08)',
+  },
+  rowOpen: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: scale(14),
+  },
+  swatchesSlot: {
+    marginTop: verticalScale(12),
+    width: '100%',
   },
   swipeDeleteContainer: {
     width: BOOK_SWIPE_DELETE_WIDTH,
@@ -656,6 +704,7 @@ const styles = StyleSheet.create({
   },
   chevron: {
     marginLeft: scale(8),
+    marginTop: verticalScale(18),
     fontSize: scale(18),
     color: THEME.textMuted,
     fontWeight: '700',

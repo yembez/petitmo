@@ -58,15 +58,20 @@ import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 import { buildBookPages, type BookPageMemorySpec } from '@/src/book/BookEngine';
 import { formatGelatoPrintPageCountLabel } from '@/utils/bookGelatoInnerPages';
 
-/** Chemin local SQLite souvent invalide après sync cloud / autre appareil — ne pas l’afficher tel quel. */
+/**
+ * Ref couverture locale **morte** : uniquement fuite Bundle (`…/Petitmo.app/…`) ou chemin
+ * d’un ancien container iOS (réinstall / nouveau build).
+ *
+ * Un `file://…/petitmo_memories/…` du container **courant** est une ref parfaitement valide :
+ * la marquer « stale » faisait retomber `findBookCoverMemory` / `resolveBookCoverDisplayUri` sur
+ * « 1re photo du livre », donc réécrire l’ancienne couverture juste après un changement.
+ */
 function looksLikeStaleLocalCoverRef(ref: string): boolean {
   const t = ref.trim();
   if (!t || isCloudMediaReference(t)) return false;
   return (
-    t.includes('petitmo_memories/') ||
-    t.startsWith('file://') ||
     t.includes('/Bundle/Application/') ||
-    t.includes('.app/') ||
+    /\/[^/]+\.app\//i.test(t) ||
     isSandboxUriFromForeignContainer(t)
   );
 }
@@ -243,6 +248,8 @@ export type Book = {
   pageEntries?: BookPageEntry[];
   /** URL de la photo de couverture (sinon fallback photo enfant / souvenirs). */
   coverPhotoUrl?: string | null;
+  /** Couleur fond couverture (`white` | `cream` | `olive` | `navy` | `charcoal` | `black`). */
+  coverColorId?: string | null;
   /** Rotation appliquée à chaque photo (memoryId → degrés, multiples de 90). */
   rotations?: Record<string, number>;
   /**
@@ -505,6 +512,12 @@ function normalizeBook(raw: unknown): Book | null {
       ? r.coverPhotoUrl.trim()
       : null;
 
+  const coverColorId =
+    typeof (r as { coverColorId?: unknown }).coverColorId === 'string' &&
+    ((r as { coverColorId: string }).coverColorId).trim().length > 0
+      ? (r as { coverColorId: string }).coverColorId.trim()
+      : null;
+
   const memoryPhotoRefs: Record<string, string> = {};
   if (r.memoryPhotoRefs && typeof r.memoryPhotoRefs === 'object') {
     for (const [k, v] of Object.entries(r.memoryPhotoRefs as Record<string, unknown>)) {
@@ -563,6 +576,7 @@ function normalizeBook(raw: unknown): Book | null {
     memoryPhotoRefs: derived.memoryPhotoRefs,
     pageEntries: resolvedEntries,
     coverPhotoUrl,
+    coverColorId,
     rotations: Object.keys(rotations).length > 0 ? rotations : undefined,
     photoCrops: Object.keys(photoCrops).length > 0 ? photoCrops : undefined,
     textEdits: Object.keys(textEdits).length > 0 ? textEdits : undefined,
@@ -599,6 +613,7 @@ async function writeAll(books: Book[]): Promise<void> {
       memoryPhotoRefs: normalized.memoryPhotoRefs,
       pageEntries: normalized.pageEntries,
       coverPhotoUrl: normalized.coverPhotoUrl ?? null,
+      coverColorId: normalized.coverColorId ?? null,
       rotations: normalized.rotations,
       photoCrops: normalized.photoCrops,
       textEdits: normalized.textEdits,
@@ -675,8 +690,8 @@ export function findVisualCoverMemoryByRef(
 
 export function findBookCoverMemory(book: Book): Memory | null {
   const direct = (book.coverPhotoUrl ?? '').trim();
-  // Ref cloud / URL utile : match strict sur le souvenir.
-  if (direct && !looksLikeStaleLocalCoverRef(direct)) {
+  // Match strict d’abord — y compris ref sandbox : c’est le choix explicite de l’utilisatrice.
+  if (direct) {
     for (const memoryId of book.memoryIds) {
       const m = getLocalMemoryById(memoryId);
       if (m && m.type === 'photo' && bookCoverMatchesMemory(m, direct)) return m;
@@ -706,8 +721,11 @@ export function resolveBookCoverDisplayUri(
   const legacyBookCovers = direct.includes('petitmo_memories/book_covers/');
 
   if (legacyBookCovers) {
-    const byBookId = dedicatedBookCoverUriForBook(book.id);
-    if (byBookId) return byBookId;
+    // Ref legacy = chemin dédié : print OK ; UI → souvenir / cloud (évite cache file:// figé).
+    if (variant === 'print') {
+      const byBookId = dedicatedBookCoverUriForBook(book.id);
+      if (byBookId) return byBookId;
+    }
     // Copie `book_covers/` absente (autre appareil) → souvenirs / cloud plus bas.
   } else if (direct) {
     let cloudFromMemory: string | null = null;
@@ -724,10 +742,15 @@ export function resolveBookCoverDisplayUri(
     const fromFavorites = resolveCoverFromBookFavorites(book, direct, variant);
     if (fromFavorites && !isCloudMediaReference(fromFavorites)) return fromFavorites;
 
-    // Copie `book_covers/` = même bytes que le spread si la cover a été choisie / persistée.
-    // Toujours avant le cloud (liste + print / export).
-    const dedicated = dedicatedBookCoverUriForBook(book.id);
-    if (dedicated) return dedicated;
+    /**
+     * `book_covers/{id}.jpg` est une copie print écrasée sur place.
+     * Liste / éditeur / browse : ne jamais s’y fier (cache Image + URI stable = vignette stale / écrasée).
+     * Print / PDF uniquement.
+     */
+    if (variant === 'print') {
+      const dedicated = dedicatedBookCoverUriForBook(book.id);
+      if (dedicated) return dedicated;
+    }
 
     if (fromFavorites) return fromFavorites;
     if (cloudFromMemory) return cloudFromMemory;
@@ -737,7 +760,9 @@ export function resolveBookCoverDisplayUri(
     }
 
     if (looksLikeStaleLocalCoverRef(direct)) {
-      const cloudFallback = resolveBookCoverCloudFallbackUri(book, '', variant);
+      const cloudFallback =
+        resolveBookCoverCloudFallbackUri(book, direct, variant) ??
+        resolveBookCoverCloudFallbackUri(book, '', variant);
       if (cloudFallback) return cloudFallback;
       const coverMem = findBookCoverMemory(book);
       if (coverMem?.type === 'photo') {
@@ -905,8 +930,15 @@ export async function applyBookCoverFromUri(params: {
   let book = normalizeBook(rawBook) ?? rawBook;
 
   if (!trimmed) {
-    book = { ...book, coverPhotoUrl: null };
+    const clearedCrops = { ...(book.photoCrops ?? {}) };
+    delete clearedCrops.cover;
+    book = {
+      ...book,
+      coverPhotoUrl: null,
+      photoCrops: Object.keys(clearedCrops).length > 0 ? clearedCrops : undefined,
+    };
     await upsertBook(book);
+    notifyBooksUpdated();
     return { book, editorUri: null };
   }
 
@@ -974,10 +1006,18 @@ export async function applyBookCoverFromUri(params: {
   if (!printSrc) printSrc = coverRef;
   await persistBookCoverUri(params.bookId, printSrc);
 
-  book = { ...book, coverPhotoUrl: coverRef };
+  // Nouveau visuel → invalider le recadrage couverture (sinon maquette / liste « écrasées »).
+  const nextCrops = { ...(book.photoCrops ?? {}) };
+  delete nextCrops.cover;
+  book = {
+    ...book,
+    coverPhotoUrl: coverRef,
+    photoCrops: Object.keys(nextCrops).length > 0 ? nextCrops : undefined,
+  };
   await upsertBook(book);
 
-  DeviceEventEmitter.emit('petitmo:memories-invalidate');
+  notifyBooksUpdated();
+  // Pas de `memories-invalidate` : évite un heal async qui course avec le choix utilisateur.
 
   return {
     book,
@@ -1112,7 +1152,9 @@ function healStaleLocalCoverPhotoRef(book: Book): Book {
     if (canon && !looksLikeStaleLocalCoverRef(canon)) {
       return { ...book, coverPhotoUrl: canon };
     }
-    const cloud = resolveBookCoverCloudFallbackUri(book, '', 'list');
+    const cloud =
+      resolveBookCoverCloudFallbackUri(book, direct, 'list') ??
+      resolveBookCoverCloudFallbackUri(book, '', 'list');
     if (cloud && isCloudMediaReference(cloud)) {
       return { ...book, coverPhotoUrl: cloud };
     }
@@ -1271,6 +1313,7 @@ export function booksListVisualSignature(books: readonly Book[]): string {
         b.memoryIds.join(','),
         String(bookPageEntries(b).length),
         b.coverPhotoUrl ?? '',
+        b.coverColorId ?? '',
         cover,
         cropSig,
       ].join('|');
@@ -1414,12 +1457,13 @@ export async function upsertBook(next: Book): Promise<void> {
     memoryPhotoRefs: normalized.memoryPhotoRefs,
     pageEntries: normalized.pageEntries,
     coverPhotoUrl: normalized.coverPhotoUrl ?? null,
+    coverColorId: normalized.coverColorId ?? null,
     rotations: normalized.rotations,
     photoCrops: normalized.photoCrops,
     textEdits: normalized.textEdits,
     chapterTitle: normalized.chapterTitle ?? null,
   });
-  void backupBooksToSupabaseIfPremium().catch(() => {});
+  scheduleBooksCloudBackup();
 }
 
 /** Retire les pages dont le souvenir est introuvable en local. */
@@ -1663,7 +1707,8 @@ export async function deleteBook(bookId: string): Promise<void> {
     } catch {
       /* pending conservé : restore ignorera cet id ; flush au prochain démarrage */
     }
-    await backupBooksToSupabaseIfPremium().catch(() => {});
+    // Suppression = irréversible : pousser tout de suite, sans attendre le debounce.
+    flushBooksCloudBackupNow();
   })();
 }
 
@@ -1748,7 +1793,14 @@ function coverPhotoUrlForCloudBackup(b: LocalBookRow): string | null {
   const healed = healStaleLocalCoverPhotoRef(book);
   const url = (healed.coverPhotoUrl ?? '').trim();
   if (url && isCloudMediaReference(url) && !looksLikeStaleLocalCoverRef(url)) return url;
-  const cloud = resolveBookCoverCloudFallbackUri(healed, '', 'list');
+  /**
+   * Ref locale : remonter l’équivalent cloud **du souvenir choisi**.
+   * Un repli ref vide renverrait la 1re photo du livre — au prochain restore Supabase
+   * écrasait la couverture locale par l’ancienne.
+   */
+  const cloud =
+    (url ? resolveBookCoverCloudFallbackUri(healed, url, 'list') : null) ??
+    (url ? null : resolveBookCoverCloudFallbackUri(healed, '', 'list'));
   if (cloud && isCloudMediaReference(cloud)) return cloud;
   return null;
 }
@@ -1770,6 +1822,7 @@ export async function backupBooksToSupabaseIfPremium(): Promise<void> {
     page_entries: b.pageEntries ?? null,
     memory_photo_refs: b.memoryPhotoRefs ?? null,
     cover_photo_url: coverPhotoUrlForCloudBackup(b),
+    cover_color_id: b.coverColorId ?? null,
     rotations: b.rotations ?? null,
     photo_crops: b.photoCrops ?? null,
     text_edits: b.textEdits ?? null,
@@ -1778,11 +1831,69 @@ export async function backupBooksToSupabaseIfPremium(): Promise<void> {
 
   // Upsert tout : robuste et idempotent.
   const { error: upsertErr } = await booksTable().upsert(payload, { onConflict: 'id' });
-  if (upsertErr) {
-    // Migration page_entries pas encore appliquée en prod → fallback sans colonnes nouvelles.
-    const legacy = payload.map(({ page_entries: _pe, memory_photo_refs: _mr, ...rest }) => rest);
-    await booksTable().upsert(legacy, { onConflict: 'id' });
+  if (!upsertErr) return;
+
+  /**
+   * Repli progressif si une migration manque en prod : ne retirer que le strict nécessaire,
+   * sinon un simple `cover_color_id` absent ferait aussi perdre `page_entries` dans le cloud.
+   */
+  const withoutColor = payload.map(({ cover_color_id: _cc, ...rest }) => rest);
+  const { error: noColorErr } = await booksTable().upsert(withoutColor, { onConflict: 'id' });
+  if (!noColorErr) return;
+
+  const legacy = payload.map(
+    ({ page_entries: _pe, memory_photo_refs: _mr, cover_color_id: _cc, ...rest }) => rest,
+  );
+  await booksTable().upsert(legacy, { onConflict: 'id' });
+}
+
+/**
+ * Backup cloud **groupé**. L’utilisatrice essaie plusieurs couleurs de couverture avant de
+ * choisir : SQLite est écrit à chaque tap (source de vérité, instantané), mais le push
+ * Supabase — qui envoie tous les livres — est coalescé.
+ *
+ * Fond uniquement : aucun `await` sur un chemin d’affichage, aucune erreur remontée à l’UI.
+ */
+const BOOKS_CLOUD_BACKUP_DEBOUNCE_MS = 2500;
+let booksBackupTimer: ReturnType<typeof setTimeout> | null = null;
+let booksBackupRunning = false;
+let booksBackupDirty = false;
+
+async function runBooksCloudBackup(): Promise<void> {
+  // Un push est déjà en vol : marquer sale plutôt que d’en lancer un concurrent.
+  if (booksBackupRunning) {
+    booksBackupDirty = true;
+    return;
   }
+  booksBackupRunning = true;
+  try {
+    do {
+      booksBackupDirty = false;
+      await backupBooksToSupabaseIfPremium();
+    } while (booksBackupDirty);
+  } catch {
+    /* réessai au prochain upsert / retour au premier plan */
+  } finally {
+    booksBackupRunning = false;
+  }
+}
+
+/** Écriture locale faite → planifier le push cloud (coalescé). */
+export function scheduleBooksCloudBackup(): void {
+  if (booksBackupTimer) clearTimeout(booksBackupTimer);
+  booksBackupTimer = setTimeout(() => {
+    booksBackupTimer = null;
+    void runBooksCloudBackup();
+  }, BOOKS_CLOUD_BACKUP_DEBOUNCE_MS);
+}
+
+/** Mise en arrière-plan / suppression : pousser sans attendre le debounce. */
+export function flushBooksCloudBackupNow(): void {
+  if (booksBackupTimer) {
+    clearTimeout(booksBackupTimer);
+    booksBackupTimer = null;
+  }
+  void runBooksCloudBackup();
 }
 
 function safeStringArray(x: unknown): string[] {
@@ -1869,10 +1980,19 @@ export async function restoreBooksFromSupabaseIfPremium(): Promise<void> {
 
   let { data, error } = await booksTable()
     .select(
-      'id, user_id, title, created_at, updated_at, memory_ids, page_entries, memory_photo_refs, cover_photo_url, rotations, photo_crops, text_edits, chapter_title'
+      'id, user_id, title, created_at, updated_at, memory_ids, page_entries, memory_photo_refs, cover_photo_url, cover_color_id, rotations, photo_crops, text_edits, chapter_title'
     )
     .eq('user_id', userId)
     .order('updated_at', { ascending: false });
+
+  if (error) {
+    ({ data, error } = await booksTable()
+      .select(
+        'id, user_id, title, created_at, updated_at, memory_ids, page_entries, memory_photo_refs, cover_photo_url, rotations, photo_crops, text_edits, chapter_title'
+      )
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false }));
+  }
 
   if (error) {
     ({ data, error } = await booksTable()
@@ -1920,7 +2040,23 @@ export async function restoreBooksFromSupabaseIfPremium(): Promise<void> {
           : remoteMemoryIds.length > 0
             ? remoteMemoryIds
             : localMemoryIds;
-    const coverPhotoUrl = typeof row.cover_photo_url === 'string' ? row.cover_photo_url : null;
+    /**
+     * Le backup ne peut pousser qu’une ref **cloud** : une couverture encore local-only
+     * remonte `null`. Ne jamais effacer la ref locale dans ce cas (sinon la liste
+     * retombe sur la 1re photo du livre juste après un changement de couverture).
+     */
+    const remoteCoverPhotoUrl = typeof row.cover_photo_url === 'string' ? row.cover_photo_url : null;
+    const coverPhotoUrl = remoteCoverPhotoUrl ?? local?.coverPhotoUrl ?? null;
+    /**
+     * `cover_color_id` peut manquer côté serveur (colonne pas encore déployée → le backup
+     * retombe sur le payload legacy, et le `select` sur la variante sans la colonne).
+     * Le choix local est la source de vérité : ne jamais l’effacer avec un remote absent.
+     */
+    const remoteCoverColorId =
+      typeof row.cover_color_id === 'string' && row.cover_color_id.trim().length > 0
+        ? row.cover_color_id.trim()
+        : null;
+    const coverColorId = remoteCoverColorId ?? local?.coverColorId ?? null;
     const rotations = safeRecordNumber(row.rotations);
     const photoCrops = safePhotoCrops(row.photo_crops);
     const textEdits = safeTextEdits(row.text_edits);
@@ -1953,6 +2089,7 @@ export async function restoreBooksFromSupabaseIfPremium(): Promise<void> {
       pageEntries,
       memoryPhotoRefs,
       coverPhotoUrl,
+      coverColorId,
       rotations: rotations ?? undefined,
       photoCrops: photoCrops ?? undefined,
       textEdits: textEdits ?? undefined,

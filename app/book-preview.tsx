@@ -28,8 +28,6 @@ import {
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { useFonts, DMSans_400Regular, DMSans_400Regular_Italic, DMSans_500Medium, DMSans_600SemiBold, DMSans_700Bold } from '@expo-google-fonts/dm-sans';
-import { EBGaramond_400Regular, EBGaramond_400Regular_Italic } from '@expo-google-fonts/eb-garamond';
-import { MEMORY_TEXT_FONT_SOURCES } from '@/constants/memoryTextFont';
 import { buildBookMaquetteTypography } from '@/constants/bookMaquetteTypography';
 import { BookSpreadSlide } from '@/components/BookSpreadSlide';
 import { BookPortraitSpreadRow } from '@/components/BookPortraitSpreadRow';
@@ -127,8 +125,12 @@ import {
   resolveBookCoverPrintUri,
   bookPageEntries,
   upsertBook,
+  notifyBooksUpdated,
+  flushBooksCloudBackupNow,
+  listBooksFromSqliteSync,
   type Book,
 } from '@/services/books';
+import { setFeedBooksHydrationSnapshot } from '@/services/tabScreensCache';
 import { shareBookPdf } from '@/services/bookPdf';
 import {
   generateBookPdfViaServer,
@@ -155,6 +157,7 @@ import {
 } from '@/services/favorisMemories';
 import { buildFavorisGridItems } from '@/utils/favorisGridItems';
 import { FavoriteCoverPickerTile } from '@/components/FavoriteCoverPickerTile';
+import { parseBookCoverColorId } from '@/constants/bookCoverColors';
 import { peekSyncBookVideoPosterDisplayUri } from '@/utils/bookVideoPosterUri';
 import { runBookExportPrepInBackground } from '@/services/bookExportPrep';
 import { getBookExportPrepIssues } from '@/services/bookExportPrep';
@@ -376,9 +379,6 @@ export default function BookPreviewScreen() {
     DMSans_500Medium,
     DMSans_600SemiBold,
     DMSans_700Bold,
-    EBGaramond_400Regular,
-    EBGaramond_400Regular_Italic,
-    ...MEMORY_TEXT_FONT_SOURCES,
   });
   const maquetteTypography = useMemo(
     () => buildBookMaquetteTypography(fontsLoaded),
@@ -434,6 +434,11 @@ export default function BookPreviewScreen() {
   bookSnapshotRef.current = bookSnapshot;
   const [coverPhotoUrl, setCoverPhotoUrl] = useState<string | null>(
     localSnapshot ? resolveBookCoverEditorUri(localSnapshot.book) : null,
+  );
+  /** Force le remount FlatList + Image après un pick couverture (PureComponent / cache). */
+  const [coverEpoch, setCoverEpoch] = useState(0);
+  const [coverColorId, setCoverColorId] = useState(
+    parseBookCoverColorId(localSnapshot?.book?.coverColorId),
   );
   /** Texte des pages chapitre (éditable). */
   const [chapterTitleLine, setChapterTitleLine] = useState<string | null>(
@@ -652,7 +657,7 @@ export default function BookPreviewScreen() {
   }, [signedCoverPhotoUrl, coverPhotoUrl]);
 
   const coverPhotoBrowseUriRaw = useMemo(
-    () => (bookSnapshot ? resolveBookCoverDisplayUri(bookSnapshot, { variant: 'list' }) : null),
+    () => (bookSnapshot ? resolveBookCoverDisplayUri(bookSnapshot, { variant: 'editor' }) : null),
     [bookSnapshot],
   );
   const signedCoverBrowseUrl = useSignedMediaUrl(coverPhotoBrowseUriRaw);
@@ -688,15 +693,36 @@ export default function BookPreviewScreen() {
   const stickyCoverBrowseUriRef = useRef<string | null>(null);
   const stickyCoverBrowseImgPxRef = useRef<{ w: number; h: number } | null>(null);
   const stickyCoverBookIdRef = useRef(bookId);
+  const stickyCoverIdentityRef = useRef<string | null>(bookSnapshot?.coverPhotoUrl ?? null);
+  const coverIdentity = bookSnapshot?.coverPhotoUrl ?? null;
   if (stickyCoverBookIdRef.current !== bookId) {
     stickyCoverBookIdRef.current = bookId;
     stickyCoverBrowseUriRef.current = null;
     stickyCoverBrowseImgPxRef.current = null;
+    stickyCoverIdentityRef.current = coverIdentity;
+  } else if (stickyCoverIdentityRef.current !== coverIdentity) {
+    // Nouvelle photo de couverture → libérer ratio / URI sticky (sinon vignette écrasée).
+    stickyCoverIdentityRef.current = coverIdentity;
+    stickyCoverBrowseUriRef.current = null;
+    stickyCoverBrowseImgPxRef.current = null;
   }
-  if (coverPhotoBrowseUriResolved) {
+  if (coverPhotoDisplayUri?.trim()) {
+    stickyCoverBrowseUriRef.current = coverPhotoDisplayUri.trim();
+  } else if (coverPhotoBrowseUriResolved) {
     stickyCoverBrowseUriRef.current = coverPhotoBrowseUriResolved;
   }
-  const coverPhotoBrowseUri = coverPhotoBrowseUriResolved ?? stickyCoverBrowseUriRef.current;
+  /**
+   * Même source que l’éditeur quand dispo — sinon resolve book / sticky.
+   * `coverEpoch` dans la dépendance force le recalcul après pick.
+   */
+  const coverPhotoBrowseUri = useMemo(() => {
+    return (
+      coverPhotoDisplayUri?.trim() ||
+      coverPhotoBrowseUriResolved ||
+      stickyCoverBrowseUriRef.current
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- coverEpoch invalide volontairement
+  }, [coverPhotoDisplayUri, coverPhotoBrowseUriResolved, coverEpoch]);
 
   /**
    * Ratio cover dès le 1er paint (SQLite) — évite le bascule fill→aspect
@@ -890,6 +916,7 @@ export default function BookPreviewScreen() {
         bookForHeal = b;
         // Ne pas vider `cover` dpi meta : fill→aspect à chaque load = bandeau blanc haut.
         setCoverTitleLine(b.title);
+        setCoverColorId(parseBookCoverColorId(b.coverColorId));
         if (coverSeqAtStart === coverApplySeqRef.current) {
           setCoverPhotoUrl(resolveBookCoverEditorUri(b));
         }
@@ -1055,6 +1082,7 @@ export default function BookPreviewScreen() {
         if (snap.book.rotations) setRotations(snap.book.rotations);
         if (snap.book.photoCrops) setPhotoCrops(snap.book.photoCrops);
         setCoverTitleLine(snap.book.title);
+        setCoverColorId(parseBookCoverColorId(snap.book.coverColorId));
         setCoverPhotoUrl(resolveBookCoverEditorUri(snap.book));
       }
       const task = InteractionManager.runAfterInteractions(() => {
@@ -1243,8 +1271,10 @@ export default function BookPreviewScreen() {
         if (!b) return;
         const hasRotations = Object.keys(rotations).some(k => rotations[k] !== 0);
         const hasCrops = Object.keys(photoCrops).length > 0;
+        const coverFromSnap = bookSnapshotRef.current?.coverPhotoUrl;
         await upsertBook({
           ...b,
+          coverPhotoUrl: coverFromSnap !== undefined ? coverFromSnap : b.coverPhotoUrl,
           rotations: hasRotations ? rotations : undefined,
           photoCrops: hasCrops ? photoCrops : undefined,
           textEdits: undefined,
@@ -1612,19 +1642,41 @@ export default function BookPreviewScreen() {
 
   const unlockAndBack = useCallback(() => {
     unlockOrientationPortrait();
-    /** Depuis « Revoir mon livre » : resauver le pending (pages / QR à jour pour le prix) puis pop. */
+    /** Flush couverture avant pop — la liste Livres lit SQLite au focus. */
     void (async () => {
+      if (bookId) {
+        try {
+          const b = await getBook(bookId);
+          const snap = bookSnapshotRef.current;
+          if (b && snap) {
+            await upsertBook({
+              ...b,
+              coverPhotoUrl: snap.coverPhotoUrl ?? null,
+              coverColorId: snap.coverColorId ?? b.coverColorId,
+              photoCrops: snap.photoCrops,
+            });
+          }
+          setFeedBooksHydrationSnapshot(listBooksFromSqliteSync());
+          notifyBooksUpdated();
+          // Sortie d’éditeur = choix figé : ne pas laisser traîner le debounce backup.
+          flushBooksCloudBackupNow();
+        } catch (e) {
+          if (__DEV__) console.warn('[book-preview] flush cover before back', e);
+        }
+      }
       if (fromOrderReview && child) {
         try {
           await setPendingBookOrderPdfPayload({
             bookId: bookId ?? `draft-${child.id}`,
             childId: child.id,
             child,
+            familyChildren,
             coverPhotoUrl: coverPhotoPrintUri || bookSnapshot?.coverPhotoUrl?.trim() || null,
             coverPhotoImgPxW: coverPhotoImgPxForPdf?.w,
             coverPhotoImgPxH: coverPhotoImgPxForPdf?.h,
             coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
             coverYearLabel,
+            coverColorId,
             chapterTitle: chapterTitleLine ?? 'Notre histoire',
             pages,
             rotations,
@@ -1677,7 +1729,9 @@ export default function BookPreviewScreen() {
     coverPhotoPrintUri,
     coverTitleLine,
     coverYearLabel,
+    coverColorId,
     cropDpiMetaByKey,
+    familyChildren,
     fromOrderReview,
     pages,
     photoCrops,
@@ -1710,6 +1764,7 @@ export default function BookPreviewScreen() {
       if (snap.book.rotations) setRotations(snap.book.rotations);
       if (snap.book.photoCrops) setPhotoCrops(snap.book.photoCrops);
       setCoverTitleLine(snap.book.title);
+        setCoverColorId(parseBookCoverColorId(snap.book.coverColorId));
       setCoverPhotoUrl(resolveBookCoverEditorUri(snap.book));
     }
     InteractionManager.runAfterInteractions(() => {
@@ -1851,7 +1906,7 @@ export default function BookPreviewScreen() {
       offset: screenWidth * editorPageIndex,
       animated: false,
     });
-  }, [editorOpen, editorPageIndex, screenWidth]);
+  }, [editorOpen, editorPageIndex, screenWidth, coverEpoch]);
 
   useEffect(() => {
     editorOpenRef.current = editorOpen;
@@ -1878,6 +1933,7 @@ export default function BookPreviewScreen() {
       }
     })();
   }, []);
+
 
   const closeCoverPicker = useCallback(() => {
     setCoverPickerOpen(false);
@@ -1917,6 +1973,28 @@ export default function BookPreviewScreen() {
         )
         .join('|'),
     [bookMemories],
+  );
+  /** FlatList = PureComponent : sans ça, changer la couv ne re-render pas les cellules spread. */
+  const bookPagerExtraData = useMemo(
+    () =>
+      [
+        bookMediaRevision,
+        String(coverEpoch),
+        bookSnapshot?.coverPhotoUrl ?? '',
+        coverPhotoBrowseUri ?? '',
+        coverPhotoUrl ?? '',
+        photoCrops.cover
+          ? `${photoCrops.cover.xPct},${photoCrops.cover.yPct},${photoCrops.cover.scale}`
+          : '',
+      ].join('|'),
+    [
+      bookMediaRevision,
+      coverEpoch,
+      bookSnapshot?.coverPhotoUrl,
+      coverPhotoBrowseUri,
+      coverPhotoUrl,
+      photoCrops.cover,
+    ],
   );
   const bulkPortraitPrefetchKeyRef = useRef<string | null>(null);
 
@@ -2177,10 +2255,15 @@ export default function BookPreviewScreen() {
           coverYearLabel={coverYearLabel}
           coverDisplayTitle={page.type === 'cover' ? coverDisplayTitle : undefined}
           coverPhotoUri={page.type === 'cover' ? coverPhotoEditorRenderUri : null}
+          coverColorId={page.type === 'cover' ? coverColorId : undefined}
           coverPhotoCrop={photoCrops.cover}
           coverPhotoImgPxW={page.type === 'cover' ? cropDpiMetaByKey.cover?.imgPxW : undefined}
           coverPhotoImgPxH={page.type === 'cover' ? cropDpiMetaByKey.cover?.imgPxH : undefined}
-          coverPhotoRenderKey={page.type === 'cover' ? (bookSnapshot?.coverPhotoUrl ?? coverPhotoUrl ?? '') : undefined}
+          coverPhotoRenderKey={
+            page.type === 'cover'
+              ? `editor:${bookSnapshot?.coverPhotoUrl ?? coverPhotoUrl ?? ''}:${coverEpoch}`
+              : undefined
+          }
           onRequestCoverPhoto={page.type === 'cover' ? openCoverPicker : undefined}
           inlineCropConfig={{
             dpiMetaByKey: cropDpiMetaByKey,
@@ -2205,6 +2288,7 @@ export default function BookPreviewScreen() {
       coverPhotoEditorRenderUri,
       coverTitleLine,
       coverYearLabel,
+      coverColorId,
       chapterTitleLine,
       cropDpiMetaByKey,
       merge,
@@ -2217,6 +2301,10 @@ export default function BookPreviewScreen() {
       qrTokensByMemoryId,
       maquetteTypography,
       bookSnapshot?.memoryPhotoRefs,
+      bookSnapshot?.coverPhotoUrl,
+      coverPhotoUrl,
+      coverEpoch,
+      familyChildren,
     ]
   );
 
@@ -2231,11 +2319,25 @@ export default function BookPreviewScreen() {
       setCoverPickerOpen(false);
       if (!trimmed) {
         setCoverPhotoUrl(null);
+        stickyCoverBrowseUriRef.current = null;
+        stickyCoverBrowseImgPxRef.current = null;
+        stickyCoverIdentityRef.current = null;
         if (!bookId) return;
         const b = await getBook(bookId);
         if (!b) return;
-        await upsertBook({ ...b, coverPhotoUrl: null });
-        setBookSnapshot({ ...b, coverPhotoUrl: null });
+        const clearedCrops = { ...(b.photoCrops ?? {}) };
+        delete clearedCrops.cover;
+        const next = {
+          ...b,
+          coverPhotoUrl: null,
+          photoCrops: Object.keys(clearedCrops).length > 0 ? clearedCrops : undefined,
+        };
+        await upsertBook(next);
+        notifyBooksUpdated();
+        setPhotoCrops(next.photoCrops ?? {});
+        setBookSnapshot(next);
+        setCoverEpoch(e => e + 1);
+        setFeedBooksHydrationSnapshot(listBooksFromSqliteSync());
         return;
       }
       if (!bookId) {
@@ -2244,7 +2346,7 @@ export default function BookPreviewScreen() {
         return;
       }
       if (!child?.id) {
-        Alert.alert('Petitmo', 'Profil enfant introuvable.');
+        Alert.alert('Petit Cœur', 'Profil enfant introuvable.');
         return;
       }
       try {
@@ -2259,18 +2361,20 @@ export default function BookPreviewScreen() {
           const { cover: _c, ...rest } = prev;
           return rest;
         });
-        setPhotoCrops(prev => {
-          if (!prev.cover) return prev;
-          const { cover: _c, ...rest } = prev;
-          return rest;
-        });
+        // Livre persisté sans crop couverture — aligner l’état UI (évite réappliquer l’ancien crop).
+        setPhotoCrops(applied.book.photoCrops ?? {});
         setBookSnapshot(applied.book);
+        stickyCoverBrowseUriRef.current = null;
+        stickyCoverBrowseImgPxRef.current = null;
+        stickyCoverIdentityRef.current = applied.book.coverPhotoUrl ?? null;
         const nextEditorUri =
           applied.editorUri?.trim() ||
           resolveBookCoverEditorUri(applied.book)?.trim() ||
           normalizeMemoryMediaUriForDisplay(trimmed) ||
           trimmed;
         setCoverPhotoUrl(nextEditorUri);
+        setCoverEpoch(e => e + 1);
+        setFeedBooksHydrationSnapshot(listBooksFromSqliteSync());
         if (applied.importedMemoryId) {
           const imported = getLocalMemoryById(applied.importedMemoryId) as Memory | null;
           if (imported) {
@@ -2300,11 +2404,11 @@ export default function BookPreviewScreen() {
         if (e instanceof Error && e.message === 'LIMIT_REACHED') {
           Alert.alert(
             'Limite atteinte',
-            'Tu as atteint le nombre maximum de souvenirs gratuits. Passe à Petitmo+ pour continuer.',
+            'Tu as atteint le nombre maximum de souvenirs gratuits. Passe à Petit Cœur+ pour continuer.',
           );
           return;
         }
-        Alert.alert('Petitmo', e instanceof Error ? e.message : 'Impossible de changer la couverture.');
+        Alert.alert('Petit Cœur', e instanceof Error ? e.message : 'Impossible de changer la couverture.');
       }
     },
     [bookId, child?.id, prefetchCropDpiMeta]
@@ -2378,6 +2482,7 @@ export default function BookPreviewScreen() {
           child={child}
           familyChildren={familyChildren}
           coverYearLabel={coverYearLabel}
+          coverColorId={coverColorId}
           coverTitleLine={coverTitleLine}
           chapterTitleLine={chapterTitleLine}
           coverPhotoBrowseUri={coverPhotoBrowseUri}
@@ -2389,7 +2494,7 @@ export default function BookPreviewScreen() {
           memoryPhotoRefs={bookSnapshot?.memoryPhotoRefs}
           getMemoryForPage={getMemoryForPage}
           onRequestTextEditForPage={onSpreadTextEditForPage}
-          mediaRevision={bookMediaRevision}
+          mediaRevision={bookPagerExtraData}
         />
       );
     },
@@ -2401,6 +2506,7 @@ export default function BookPreviewScreen() {
       coverPhotoBrowseUri,
       coverTitleLine,
       coverYearLabel,
+      coverColorId,
       cropDpiMetaByKey,
       familyChildren,
       getMemoryForPage,
@@ -2410,7 +2516,7 @@ export default function BookPreviewScreen() {
       photoCrops,
       rotations,
       screenWidth,
-      bookMediaRevision,
+      bookPagerExtraData,
     ],
   );
 
@@ -2492,6 +2598,7 @@ export default function BookPreviewScreen() {
           child={child}
           familyChildren={familyChildren}
           coverYearLabel={coverYearLabel}
+          coverColorId={coverColorId}
           coverTitleLine={coverTitleLine}
           chapterTitleLine={chapterTitleLine}
           coverPhotoBrowseUri={coverPhotoBrowseUri}
@@ -2506,7 +2613,7 @@ export default function BookPreviewScreen() {
           getPrefetchUri={getPrefetchUriForRow}
           onOpenEditor={onOpenBrowseEditor}
           onPrefetchImage={onPrefetchBrowseImage}
-          mediaRevision={bookMediaRevision}
+          mediaRevision={bookPagerExtraData}
         />
       );
     },
@@ -2519,12 +2626,13 @@ export default function BookPreviewScreen() {
       coverPhotoBrowseUri,
       coverTitleLine,
       coverYearLabel,
+      coverColorId,
       dm400,
       cropDpiMetaByKey,
       bookSnapshot?.memoryPhotoRefs,
       familyChildren,
       getMemoryForPage,
-      bookMediaRevision,
+      bookPagerExtraData,
       getPrefetchUriForRow,
       maquetteTypography,
       onOpenBrowseEditor,
@@ -2550,6 +2658,7 @@ export default function BookPreviewScreen() {
     : isLandscape
       ? (spreadRows[currentPageIndex]?.right?.page ?? spreadRows[currentPageIndex]?.left?.page)
       : pageRows[currentPageIndex]?.page;
+
 
   const actionsDisabled = !editorOpen && isLandscape;
 
@@ -2875,11 +2984,13 @@ export default function BookPreviewScreen() {
             bookId: bookId ?? `draft-${child.id}`,
             childId: child.id,
             child,
+            familyChildren,
             coverPhotoUrl: coverPhotoPrintUri || bookSnapshot?.coverPhotoUrl?.trim() || null,
             coverPhotoImgPxW: coverPhotoImgPxForPdf?.w,
             coverPhotoImgPxH: coverPhotoImgPxForPdf?.h,
             coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
             coverYearLabel,
+      coverColorId,
             chapterTitle: chapterTitleLine ?? 'Notre histoire',
             pages,
             rotations,
@@ -2936,6 +3047,7 @@ export default function BookPreviewScreen() {
       child,
       coverTitleLine,
       coverYearLabel,
+      coverColorId,
       exporting,
       guestExportModalVisible,
       pages,
@@ -2990,11 +3102,13 @@ export default function BookPreviewScreen() {
         bookId: bookId ?? `draft-${child.id}`,
         childId: child.id,
         child,
+        familyChildren,
         coverPhotoUrl: coverPhotoPrintUri || bookSnapshot?.coverPhotoUrl?.trim() || null,
         coverPhotoImgPxW: coverPhotoImgPxForPdf?.w,
         coverPhotoImgPxH: coverPhotoImgPxForPdf?.h,
         coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
         coverYearLabel,
+      coverColorId,
         chapterTitle: chapterTitleLine ?? 'Notre histoire',
         pages,
         rotations,
@@ -3005,7 +3119,7 @@ export default function BookPreviewScreen() {
         exportMode: 'screen',
       });
       } catch (e) {
-        Alert.alert('Petitmo', isDeviceStorageFullError(e) ? t('bookOrder.storageFull') : (e instanceof Error ? e.message : 'Impossible de préparer la commande.'));
+        Alert.alert('Petit Cœur', isDeviceStorageFullError(e) ? t('bookOrder.storageFull') : (e instanceof Error ? e.message : 'Impossible de préparer la commande.'));
         return;
       }
       router.push({
@@ -3029,6 +3143,7 @@ export default function BookPreviewScreen() {
     coverPhotoImgPxForPdf,
     coverTitleLine,
     coverYearLabel,
+      coverColorId,
     cropDpiMetaByKey,
     exporting,
     guestExportSubmitting,
@@ -3084,11 +3199,13 @@ export default function BookPreviewScreen() {
         bookId: bookId ?? `draft-${child.id}`,
         childId: child.id,
         child,
+        familyChildren,
         coverPhotoUrl: coverPhotoPrintUri || bookSnapshot?.coverPhotoUrl?.trim() || null,
         coverPhotoImgPxW: coverPhotoImgPxForPdf?.w,
         coverPhotoImgPxH: coverPhotoImgPxForPdf?.h,
         coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
         coverYearLabel,
+      coverColorId,
         chapterTitle: chapterTitleLine ?? 'Notre histoire',
         pages,
         rotations,
@@ -3099,7 +3216,7 @@ export default function BookPreviewScreen() {
         exportMode: 'print',
       });
       } catch (e) {
-        Alert.alert('Petitmo', isDeviceStorageFullError(e) ? t('bookOrder.storageFull') : (e instanceof Error ? e.message : 'Impossible de préparer la commande.'));
+        Alert.alert('Petit Cœur', isDeviceStorageFullError(e) ? t('bookOrder.storageFull') : (e instanceof Error ? e.message : 'Impossible de préparer la commande.'));
         return;
       }
       router.push({
@@ -3124,6 +3241,7 @@ export default function BookPreviewScreen() {
     coverPhotoImgPxForPdf,
     coverTitleLine,
     coverYearLabel,
+      coverColorId,
     cropDpiMetaByKey,
     exporting,
     guestExportSubmitting,
@@ -3158,11 +3276,13 @@ export default function BookPreviewScreen() {
           bookId: bookId ?? `draft-${child.id}`,
           childId: child.id,
           child,
+          familyChildren,
           coverPhotoUrl: coverPhotoPrintUri || bookSnapshot?.coverPhotoUrl?.trim() || null,
           coverPhotoImgPxW: coverPhotoImgPxForPdf?.w,
           coverPhotoImgPxH: coverPhotoImgPxForPdf?.h,
           coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
           coverYearLabel,
+      coverColorId,
           chapterTitle: chapterTitleLine ?? 'Notre histoire',
           pages,
           rotations,
@@ -3203,6 +3323,7 @@ export default function BookPreviewScreen() {
       coverPhotoImgPxForPdf,
       coverTitleLine,
       coverYearLabel,
+      coverColorId,
       cropDpiMetaByKey,
       pages,
       photoCrops,
@@ -3377,14 +3498,14 @@ export default function BookPreviewScreen() {
         <Text style={styles.bannerErr}>{error}</Text>
       ) : null}
 
+
       {isLandscape ? (
         <FlatList
           ref={listRef}
-          key="spread"
           data={spreadRows}
           keyExtractor={(_, i) => i.toString()}
           renderItem={renderSpreadItem as any}
-          extraData={bookMediaRevision}
+          extraData={bookPagerExtraData}
           horizontal
           pagingEnabled
           decelerationRate="fast"
@@ -3405,11 +3526,10 @@ export default function BookPreviewScreen() {
         />
       ) : (
         <FlatList
-          key="browse"
           data={spreadRows}
           keyExtractor={(_, i) => i.toString()}
           renderItem={renderPortraitSpreadItem as any}
-          extraData={bookMediaRevision}
+          extraData={bookPagerExtraData}
           showsVerticalScrollIndicator={false}
           style={[styles.list, styles.browseList]}
           contentContainerStyle={[
@@ -3492,10 +3612,10 @@ export default function BookPreviewScreen() {
 
             <FlatList
               ref={editorListRef}
-              key="editor"
               data={pageRows}
               keyExtractor={(_, i) => i.toString()}
               renderItem={renderPageItem as any}
+              extraData={bookPagerExtraData}
               horizontal
               pagingEnabled
               scrollEnabled={textEditTarget == null && !editorPhotoZoomed}
@@ -4104,8 +4224,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 14,
-    borderWidth: 1,
-    borderColor: THEME.captureCtaBorderColor,
   },
   coverPickerGalleryBtnText: {
     color: THEME.captureScreenCtaForeground,

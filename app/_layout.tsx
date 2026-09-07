@@ -31,6 +31,7 @@ import {
   pruneOrphanEmptyBookDuplicates,
   restoreBooksFromSupabaseIfPremium,
   backupBooksToSupabaseIfPremium,
+  flushBooksCloudBackupNow,
   flushPendingBookDeletesToSupabase,
 } from '@/services/books';
 import {
@@ -43,7 +44,7 @@ import {
   hydrateTabScreensFromSqliteSync,
 } from '@/services/tabScreensHydrate';
 import { flushPendingCloudUploadsOnce } from '@/services/pendingCloudFlush';
-import { APP_BOOT_FONT_SOURCES } from '@/constants/appBootFonts';
+import { APP_BOOT_FONT_SOURCES, areAppBootFontsLoaded } from '@/constants/appBootFonts';
 import { enrichSentryUserContext, initPetitmoSentry, Sentry } from '@/lib/sentry';
 
 initPetitmoSentry();
@@ -60,9 +61,11 @@ void SplashScreen.preventAutoHideAsync();
 function RootLayoutNav() {
   useFrameworkReady();
   const [bootFontsLoaded, bootFontsError] = useFonts(APP_BOOT_FONT_SOURCES);
-  const bootFontsReady = bootFontsLoaded || !!bootFontsError;
+  /** Erreur de charge ≠ ready : on garderait les « ? » iOS. */
+  const bootFontsReady = (bootFontsLoaded && areAppBootFontsLoaded()) || !!bootFontsError;
   const [isAuthReady, setIsAuthReady] = useState(false);
-  const [forceBootPastSplash, setForceBootPastSplash] = useState(false);
+  /** Filet auth uniquement — ne force jamais l’UI sans polices. */
+  const [forceAuthReady, setForceAuthReady] = useState(false);
   const pathname = usePathname();
 
   /** Portrait partout sauf prévisualisation livre (paysage au pivot). */
@@ -115,7 +118,10 @@ function RootLayoutNav() {
     const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
       if (next === 'active') {
         void processPendingGuestRawUploads();
+        return;
       }
+      // Mise en arrière-plan : pousser le backup livres en attente (debounce non écoulé).
+      flushBooksCloudBackupNow();
     });
 
     return () => sub.remove();
@@ -259,21 +265,21 @@ function RootLayoutNav() {
   }, [isAuthReady]);
 
   useEffect(() => {
-    if (!isAuthReady || !bootFontsReady) return;
+    if (!bootFontsReady) return;
+    if (!isAuthReady && !forceAuthReady) return;
     void SplashScreen.hideAsync();
-  }, [bootFontsReady, isAuthReady]);
+  }, [bootFontsReady, isAuthReady, forceAuthReady]);
 
-  /** Filet anti-blocage splash (fonts / auth / OTA incompatible) — local-first. */
+  /** Filet anti-blocage splash sur auth / OTA — les polices restent bloquantes. */
   useEffect(() => {
     const t = setTimeout(() => {
-      setForceBootPastSplash(true);
+      setForceAuthReady(true);
       setIsAuthReady(true);
-      void SplashScreen.hideAsync();
     }, 6000);
     return () => clearTimeout(t);
   }, []);
 
-  if ((!isAuthReady || !bootFontsReady) && !forceBootPastSplash) {
+  if (!bootFontsReady || (!isAuthReady && !forceAuthReady)) {
     return <View style={styles.bootShell} />;
   }
 
@@ -307,7 +313,15 @@ function RootLayoutNav() {
         <Stack.Screen name="edit-child" />
         <Stack.Screen name="parent-space" />
         <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="write" />
+        <Stack.Screen
+          name="write"
+          options={{
+            /** Au-dessus de memory-viewer (fullScreenModal) ; sinon le push reste invisible. */
+            presentation: 'fullScreenModal',
+            animation: 'slide_from_bottom',
+            contentStyle: { flex: 1, backgroundColor: THEME.bgScreen },
+          }}
+        />
         <Stack.Screen name="camera" />
         <Stack.Screen name="record-voice" />
         <Stack.Screen name="import-media" />
