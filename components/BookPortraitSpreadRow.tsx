@@ -1,5 +1,5 @@
 import { memo, useMemo } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { BookPage } from '@/src/book/BookEngine';
 import type { Child, Memory } from '@/types/local';
@@ -13,11 +13,16 @@ import {
   bookPortraitPerfRender,
   diffPortraitRowProps,
 } from '@/utils/bookPortraitSpreadPerf';
-import { scale } from '@/utils/responsive';
+import { scale, verticalScale } from '@/utils/responsive';
 
-/** Bords couverture autour d’une double page ouverte (mode browse portrait). */
-const COVER_EDGE_W = scale(8);
-const COVER_RIM_H = scale(7);
+/**
+ * Bords couverture autour d’une double page ouverte (mode browse portrait).
+ * Liseré discret : les bandes haute / basse sont nettement plus fines que les latérales.
+ */
+/** Bandes verticales (gauche / droite). */
+const COVER_EDGE_W = scale(6);
+/** Bandes horizontales (haut / bas). */
+const COVER_RIM_H = scale(3);
 
 type PageRow = { page: BookPage; pageNum: number; folio: number | null };
 
@@ -174,6 +179,38 @@ function BookPortraitSpreadRowInner({
   const only = item.left ?? item.right;
   if (!only) return <View style={styles.browseRow} />;
 
+  if (only.page.type === 'cover') {
+    return (
+      <View style={[styles.browseRow, styles.browseRowSingle]}>
+        <View style={styles.browsePairWrap}>
+          {/**
+           * Livre fermé : pas de liseré (un plat de couverture n’en montre pas), mais
+           * un vrai volume — deux calques d’ombre au format exact de la page.
+           * Diffusion large d’abord, contact serré ensuite : RN ne gère qu’une ombre
+           * par vue, on les empile.
+           */}
+          <View
+            pointerEvents="none"
+            style={[
+              styles.coverBoard,
+              styles.coverSoloAmbient,
+              { backgroundColor: coverTheme.paper, top: 0, left: 0, width: pageW, height: pageH },
+            ]}
+          />
+          <View
+            pointerEvents="none"
+            style={[
+              styles.coverBoard,
+              styles.coverSoloContact,
+              { backgroundColor: coverTheme.paper, top: 0, left: 0, width: pageW, height: pageH },
+            ]}
+          />
+          <View style={styles.browsePairRow}>{renderLeaf(only)}</View>
+        </View>
+      </View>
+    );
+  }
+
   return <View style={[styles.browseRow, styles.browseRowSingle]}>{renderLeaf(only)}</View>;
 }
 
@@ -213,6 +250,43 @@ const styles = StyleSheet.create({
   coverBoard: {
     position: 'absolute',
     zIndex: 0,
+    /**
+     * Ombre portée extérieure : le carton ouvert repose sur le fond.
+     * Plus large et plus douce que celle des pages (`browseLeafShadow`) pour rester dessous.
+     * Android : pas d’`elevation` — elle primerait sur `zIndex` et ferait passer le plan
+     * couverture par-dessus les pages. Ombre iOS / web uniquement.
+     */
+    ...Platform.select({
+      android: {},
+      default: {
+        shadowColor: '#000000',
+        shadowOffset: { width: 0, height: verticalScale(6) },
+        shadowOpacity: 0.2,
+        shadowRadius: scale(16),
+      },
+    }),
+  },
+  /** Couverture seule : diffusion large, le livre fermé décolle du fond. */
+  coverSoloAmbient: {
+    ...Platform.select({
+      android: {},
+      default: {
+        shadowOffset: { width: 0, height: verticalScale(14) },
+        shadowOpacity: 0.26,
+        shadowRadius: scale(24),
+      },
+    }),
+  },
+  /** Couverture seule : ombre de contact, ancre le bas du livre. */
+  coverSoloContact: {
+    ...Platform.select({
+      android: {},
+      default: {
+        shadowOffset: { width: 0, height: verticalScale(3) },
+        shadowOpacity: 0.22,
+        shadowRadius: scale(6),
+      },
+    }),
   },
   coverBoardInnerLine: {
     ...StyleSheet.absoluteFillObject,

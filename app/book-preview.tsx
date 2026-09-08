@@ -437,6 +437,8 @@ export default function BookPreviewScreen() {
   );
   /** Force le remount FlatList + Image après un pick couverture (PureComponent / cache). */
   const [coverEpoch, setCoverEpoch] = useState(0);
+  /** Import couverture en cours (copie sandbox + dims) — roue discrète sur le cadre. */
+  const [coverApplying, setCoverApplying] = useState(false);
   const [coverColorId, setCoverColorId] = useState(
     parseBookCoverColorId(localSnapshot?.book?.coverColorId),
   );
@@ -1653,7 +1655,13 @@ export default function BookPreviewScreen() {
               ...b,
               coverPhotoUrl: snap.coverPhotoUrl ?? null,
               coverColorId: snap.coverColorId ?? b.coverColorId,
-              photoCrops: snap.photoCrops,
+              /**
+               * Recadrages : état vivant, pas `snap`. L’instantané n’est réécrit qu’au
+               * chargement et au changement de photo — il ignore les recadrages faits
+               * depuis, et les écraserait au retour (l’autosave 800 ms est par ailleurs
+               * annulée au démontage si on sort juste après un pinch).
+               */
+              photoCrops: Object.keys(photoCrops).length > 0 ? photoCrops : undefined,
             });
           }
           setFeedBooksHydrationSnapshot(listBooksFromSqliteSync());
@@ -2264,6 +2272,7 @@ export default function BookPreviewScreen() {
               ? `editor:${bookSnapshot?.coverPhotoUrl ?? coverPhotoUrl ?? ''}:${coverEpoch}`
               : undefined
           }
+          coverPhotoBusy={page.type === 'cover' ? coverApplying : undefined}
           onRequestCoverPhoto={page.type === 'cover' ? openCoverPicker : undefined}
           inlineCropConfig={{
             dpiMetaByKey: cropDpiMetaByKey,
@@ -2304,6 +2313,7 @@ export default function BookPreviewScreen() {
       bookSnapshot?.coverPhotoUrl,
       coverPhotoUrl,
       coverEpoch,
+      coverApplying,
       familyChildren,
     ]
   );
@@ -2350,6 +2360,7 @@ export default function BookPreviewScreen() {
         return;
       }
       try {
+        setCoverApplying(true);
         coverApplySeqRef.current += 1;
         const applied = await applyBookCoverFromUri({
           bookId,
@@ -2409,6 +2420,8 @@ export default function BookPreviewScreen() {
           return;
         }
         Alert.alert('Petit Cœur', e instanceof Error ? e.message : 'Impossible de changer la couverture.');
+      } finally {
+        setCoverApplying(false);
       }
     },
     [bookId, child?.id, prefetchCropDpiMeta]

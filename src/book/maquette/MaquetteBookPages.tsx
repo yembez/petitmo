@@ -1,4 +1,4 @@
-import { memo, useMemo, useRef, type ReactNode } from 'react';
+import { memo, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,7 @@ import type { PhotoCrop } from '@/src/book/photoCrop';
 import { bookPhotoCropImageRect } from '@/utils/bookPhotoCropLayout';
 import BookPagePhotoFrame from '@/components/BookPagePhotoFrame';
 import CoverPageSpineOverlay from '@/components/CoverPageSpineOverlay';
+import BookPhotoLoadingOverlay from '@/components/BookPhotoLoadingOverlay';
 import { clampMediaBookCaption } from '@/lib/mediaBookCaption';
 import type { BookMaquetteTypography } from '@/constants/bookMaquetteTypography';
 import { MEMORY_TEXT_FONT_FALLBACK } from '@/constants/memoryTextFont';
@@ -531,6 +532,7 @@ function CroppedPhotoDisplay({
   imgPxH,
   /** Clé stable (ex. cover) — évite un flash blanc quand l’URI change (sign / heal). */
   imageRecyclingKey,
+  onLoadEnd,
 }: {
   uri: string;
   width: number;
@@ -540,6 +542,7 @@ function CroppedPhotoDisplay({
   imgPxW?: number;
   imgPxH?: number;
   imageRecyclingKey?: string;
+  onLoadEnd?: () => void;
 }) {
   const recycleKey = imageRecyclingKey?.trim() || uri;
   /** Une fois en layout aspect, on y reste (sinon fill→aspect = bandeau blanc). */
@@ -567,6 +570,7 @@ function CroppedPhotoDisplay({
           priority="high"
           style={{ position: 'absolute', width: rect.width, height: rect.height, left: rect.left, top: rect.top }}
           contentFit="fill"
+          onLoadEnd={onLoadEnd}
         />
       </View>
     );
@@ -587,6 +591,7 @@ function CroppedPhotoDisplay({
           { transform: [{ translateX: x }, { translateY: y }, { scale: s }] },
         ]}
         contentFit="cover"
+        onLoadEnd={onLoadEnd}
       />
     </View>
   );
@@ -751,6 +756,8 @@ type Props = {
   coverPhotoImgPxH?: number;
   /** Force le remontage visuel après changement de couverture. */
   coverPhotoRenderKey?: string;
+  /** Import de la nouvelle couverture en cours — affiche la roue discrète sur le cadre. */
+  coverPhotoBusy?: boolean;
   /** Ouvre le sélecteur de couverture. */
   onRequestCoverPhoto?: () => void;
   /** Recadrage in-place (éditeur livre) : pinch/pan dans le cadre de la page. */
@@ -789,6 +796,7 @@ function MaquetteBookPages(props: Props) {
     coverPhotoImgPxW,
     coverPhotoImgPxH,
     coverPhotoRenderKey,
+    coverPhotoBusy,
     onRequestCoverPhoto,
     inlineCropConfig,
     chapterDisplayTitle,
@@ -842,6 +850,7 @@ function MaquetteBookPages(props: Props) {
           coverPhotoImgPxH={coverPhotoImgPxH}
           coverPhotoRenderKey={coverPhotoRenderKey}
           coverColorId={coverColorId}
+          coverPhotoBusy={coverPhotoBusy}
           onPressCoverPhoto={onRequestCoverPhoto}
           inlineCropConfig={inlineCropConfig}
           onPressTitle={onRequestTextEdit}
@@ -1026,6 +1035,7 @@ function MaquetteCover({
   coverPhotoImgPxH,
   coverPhotoRenderKey,
   coverColorId,
+  coverPhotoBusy,
   onPressCoverPhoto,
   inlineCropConfig,
   onPressTitle,
@@ -1045,6 +1055,8 @@ function MaquetteCover({
   coverPhotoImgPxH?: number;
   coverPhotoRenderKey?: string;
   coverColorId?: string | null;
+  /** Import de la nouvelle couverture en cours (copie sandbox + dims) — action utilisatrice. */
+  coverPhotoBusy?: boolean;
   inlineCropConfig?: InlineCropConfig;
   onPressTitle: () => void;
 }) {
@@ -1071,6 +1083,15 @@ function MaquetteCover({
   /** Recadrage persisté : layout aspect. Sinon fill cadre (évite écrasement si dims sticky obsolètes). */
   const coverUseCroppedLayout = !!coverPhotoCrop && coverHasDims;
 
+  const [coverLoadedKey, setCoverLoadedKey] = useState<string | null>(null);
+  const handleCoverLoadEnd = () => setCoverLoadedKey(recycleKey);
+  /**
+   * La branche recadrage inline (`BookPagePhotoFrame`) n’expose pas d’événement de
+   * chargement, mais elle n’est atteinte qu’une fois les dims connues : la photo est
+   * alors déjà décodée, il n’y a rien à signaler.
+   */
+  const coverPhotoLoading = !!photoUri && !coverUseInlineCrop && coverLoadedKey !== recycleKey;
+
   const coverImageEl = photoUri ? (
     coverUseCroppedLayout ? (
       <CroppedPhotoDisplay
@@ -1082,6 +1103,7 @@ function MaquetteCover({
         imgPxW={coverImgPxW}
         imgPxH={coverImgPxH}
         imageRecyclingKey={recycleKey}
+        onLoadEnd={handleCoverLoadEnd}
       />
     ) : (
       <ExpoImage
@@ -1092,6 +1114,7 @@ function MaquetteCover({
         priority="high"
         style={StyleSheet.absoluteFillObject}
         contentFit="cover"
+        onLoadEnd={handleCoverLoadEnd}
       />
     )
   ) : null;
@@ -1155,6 +1178,7 @@ function MaquetteCover({
         ]}
       >
         {photoBlock}
+        <BookPhotoLoadingOverlay visible={!!coverPhotoBusy || coverPhotoLoading} />
       </View>
       <View
         style={[

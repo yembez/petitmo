@@ -2058,7 +2058,12 @@ export async function restoreBooksFromSupabaseIfPremium(): Promise<void> {
         : null;
     const coverColorId = remoteCoverColorId ?? local?.coverColorId ?? null;
     const rotations = safeRecordNumber(row.rotations);
-    const photoCrops = safePhotoCrops(row.photo_crops);
+    /**
+     * Remote sans crops (backup debounce pas encore passé, payload legacy) : garder le
+     * local. Même garde que `coverColorId` — un restore de fond ne défait pas un
+     * recadrage que l’utilisatrice vient de faire.
+     */
+    const photoCrops = safePhotoCrops(row.photo_crops) ?? local?.photoCrops ?? null;
     const textEdits = safeTextEdits(row.text_edits);
     const chapterTitle = typeof row.chapter_title === 'string' ? row.chapter_title : null;
 
