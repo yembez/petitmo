@@ -19,6 +19,7 @@ import {
   COVER_PHOTO_INSET_MM,
   COVER_PHOTO_TOP_MM,
   COVER_TEXT_GAP_MM,
+  DEFAULT_BOOK_COVER_COLOR_ID,
   parseBookCoverColorId,
   type BookCoverColorId,
 } from '@/constants/bookCoverColors';
@@ -36,7 +37,9 @@ export type BookCoverThumbnailProps = {
   imageHeaders?: Record<string, string>;
   /** Clé stable expo-image (ex. id livre) — évite re-décodage au retour sur l’onglet. */
   imageRecyclingKey?: string;
+  /** Serif du livre (`@/constants/bookSerifFont`) — parité maquette ↔ PDF. */
   titleFontFamily?: string;
+  periodFontFamily?: string;
 };
 
 function resolveTheme(
@@ -51,7 +54,7 @@ function resolveTheme(
     return bookCoverThemeForId(parseBookCoverColorId(colorTheme));
   }
   if (colorTheme && typeof colorTheme === 'object') return colorTheme;
-  return bookCoverThemeForId('white');
+  return bookCoverThemeForId(DEFAULT_BOOK_COVER_COLOR_ID);
 }
 
 function BookCoverThumbnail({
@@ -64,9 +67,9 @@ function BookCoverThumbnail({
   imageHeaders,
   imageRecyclingKey,
   titleFontFamily,
+  periodFontFamily,
 }: BookCoverThumbnailProps) {
   const theme = resolveTheme(colorTheme, coverColorId);
-  const garamondIt = titleFontFamily;
 
   const faceW = BOOK_COVER_THUMB_WIDTH;
   const faceH = BOOK_COVER_THUMB_HEIGHT;
@@ -143,14 +146,21 @@ function BookCoverThumbnail({
             style={[
               styles.coverTitle,
               { color: theme.ink },
-              garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
+              titleFontFamily ? { fontFamily: titleFontFamily } : { fontStyle: 'italic' },
             ]}
             numberOfLines={2}
           >
             {coverTitle}
           </Text>
           {dateLabel.trim() ? (
-            <Text style={[styles.coverDate, { color: theme.muted }]} numberOfLines={1}>
+            <Text
+              style={[
+                styles.coverDate,
+                { color: theme.muted },
+                periodFontFamily ? { fontFamily: periodFontFamily } : null,
+              ]}
+              numberOfLines={1}
+            >
               {dateLabel.trim()}
             </Text>
           ) : null}

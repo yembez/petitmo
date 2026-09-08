@@ -94,7 +94,12 @@ import { bookCoverPeriodLabelForBook } from '@/utils/bookCoverPeriodLabel';
 import { normalizeMemoryMediaUriForDisplay } from '@/utils/memoryPhotos';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { useAppLanguage } from '@/hooks/useAppLanguage';
-import { useFonts, DMSans_400Regular_Italic } from '@expo-google-fonts/dm-sans';
+import { useFonts } from '@expo-google-fonts/dm-sans';
+import {
+  BOOK_SERIF_FONT_FAMILY,
+  BOOK_SERIF_FONT_SOURCES,
+  BOOK_SERIF_ITALIC_FONT_FAMILY,
+} from '@/constants/bookSerifFont';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
 import { rememberLocalPrintOrder } from '@/lib/printOrdersCache';
 import { isDeviceStorageFullError } from '@/utils/deviceStorageFull';
@@ -229,8 +234,9 @@ export default function BookOrderScreen() {
   const { t } = useAppTranslation('common');
   const lang = useAppLanguage();
   const { dm500, dm600, dm700 } = useDmSansFamilyFlowFonts();
-  const [coverFontsLoaded] = useFonts({ DMSans_400Regular_Italic });
-  const coverTitleFontFamily = coverFontsLoaded ? 'DMSans_400Regular_Italic' : undefined;
+  const [coverFontsLoaded] = useFonts({ ...BOOK_SERIF_FONT_SOURCES });
+  const coverTitleFontFamily = coverFontsLoaded ? BOOK_SERIF_ITALIC_FONT_FAMILY : undefined;
+  const coverPeriodFontFamily = coverFontsLoaded ? BOOK_SERIF_FONT_FAMILY : undefined;
   const params = useLocalSearchParams<{
     bookId?: string;
     childId?: string;
@@ -1160,6 +1166,7 @@ export default function BookOrderScreen() {
                     coverColorId={book?.coverColorId}
                     imageRecyclingKey={`order-cover-${bookId}-${book?.coverPhotoUrl ?? ''}-${coverCropKey}-${book?.coverColorId ?? ''}`}
                     titleFontFamily={coverTitleFontFamily}
+                    periodFontFamily={coverPeriodFontFamily}
                   />
                 </View>
               </View>

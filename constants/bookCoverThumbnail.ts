@@ -14,14 +14,7 @@ export const BOOK_COVER_THUMB_HEIGHT = BOOK_COVER_THUMB_WIDTH / BOOK_PAGE_RATIO;
 /** @deprecated Prefer layout mm in `bookCoverColors` — ratio cadre photo / page. */
 export const BOOK_COVER_PHOTO_HEIGHT_RATIO = COVER_PHOTO_H_RATIO;
 
-export const BOOK_COVER_THEME_DEFAULT: BookCoverColorTheme = {
-  paper: '#EBE8E7',
-  ink: '#1C1C1E',
-  muted: '#6B7280',
-  line: 'rgba(28,28,30,0.18)',
-  placeholder: '#E0DCDA',
-};
-
+/** Carte « Créer un livre » — habillage de l’état vide, pas une couleur de couverture. */
 export const BOOK_COVER_THEME_WARM: BookCoverColorTheme = {
   paper: '#DFD5CB',
   ink: '#1C1C1E',

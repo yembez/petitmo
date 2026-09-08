@@ -444,10 +444,6 @@ export function pdfChapterTitleStyle(pageWidthPx: number): { fontSize: number } 
   return { fontSize: Math.max(MIN_FS, pdfPtToPreviewPx(22, pageWidthPx)) };
 }
 
-export function pdfChapterSubStyle(pageWidthPx: number): { fontSize: number } {
-  return { fontSize: Math.max(MIN_FS, pdfPtToPreviewPx(9, pageWidthPx)) };
-}
-
 export function pdfCoverTitleStyle(pageWidthPx: number): { fontSize: number } {
   return { fontSize: Math.max(MIN_FS, pdfPtToPreviewPx(22, pageWidthPx)) };
 }

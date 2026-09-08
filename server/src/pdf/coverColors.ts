@@ -13,7 +13,7 @@ export const BOOK_COVER_COLOR_IDS = [
 
 export type BookCoverColorId = (typeof BOOK_COVER_COLOR_IDS)[number];
 
-export const DEFAULT_BOOK_COVER_COLOR_ID: BookCoverColorId = 'white';
+export const DEFAULT_BOOK_COVER_COLOR_ID: BookCoverColorId = 'charcoal';
 
 export type CoverColorTheme = {
   id: BookCoverColorId;
@@ -84,7 +84,7 @@ export function parseBookCoverColorId(raw: unknown): BookCoverColorId {
 }
 
 export function bookCoverThemeForId(id: unknown): CoverColorTheme {
-  return BY_ID.get(parseBookCoverColorId(id)) ?? SWATCHES[0]!;
+  return BY_ID.get(parseBookCoverColorId(id)) ?? BY_ID.get(DEFAULT_BOOK_COVER_COLOR_ID)!;
 }
 
 export const COVER_PHOTO_INSET_MM = 26;

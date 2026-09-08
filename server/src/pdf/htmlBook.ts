@@ -262,13 +262,13 @@ function pageCover(
 </div>`;
 }
 
-function pageChapter(month: string, chapterNum: number, chapterTitle: string, pageNum: number): string {
+/** Parité aperçu : le livre n’a qu’une page d’ouverture, donc pas de numéro de chapitre. */
+function pageChapter(month: string, chapterTitle: string, pageNum: number): string {
   return `<div class="page chapter">
   <div class="chapter-inner">
     <div class="chapter-month">${esc(monthCaps(month))}</div>
     <div class="chapter-title">${esc(chapterTitle)}</div>
     <div class="chapter-rule"></div>
-    <div class="chapter-sub">Chapitre ${chapterNum}</div>
   </div>
   <div class="folio">${pageNum}</div>
 </div>`;
@@ -657,7 +657,7 @@ function renderPage(page: BookPageServer, input: BuildBookHtmlInput, pageNum: nu
         coverColorId,
       );
     case 'chapter':
-      return pageChapter(page.month ?? '', page.chapterNum ?? 0, chapterTitle, pageNum);
+      return pageChapter(page.month ?? '', chapterTitle, pageNum);
     case 'photo-full':
     case 'photo-note':
     case 'quote':
@@ -825,7 +825,7 @@ function buildHtmlDocument(
 <title>${esc(title)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;1,400&amp;display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;1,400&amp;family=EB+Garamond:ital,wght@0,400;1,400&amp;display=swap" rel="stylesheet" />
 <style>
 
 * { margin:0; padding:0; box-sizing:border-box;
@@ -894,18 +894,10 @@ body.print-bleed .inner {
   font-size:13pt; line-height:1.4; color:#1C1C1E;
 }
 .body {
-  font-family:'EB Garamond',serif; font-style:italic;
+  font-family:'DM Sans',sans-serif; font-style:italic;
   font-size:11pt; line-height:1.65; color:#1C1C1E; text-align:justify;
 }
 .body p { margin:0 0 6pt; }
-.memory-text {
-  font-family:'Roboto',sans-serif;
-  font-style:normal;
-  font-weight:400;
-  font-size:11.25pt;
-  line-height:1.588;
-  text-align:justify;
-}
 .folio {
   position:absolute; bottom:8mm; left:0; right:0;
   text-align:center; font-family:'DM Sans',sans-serif; font-size:7pt; color:#C7C7CC;
@@ -929,9 +921,9 @@ body.print-bleed .inner {
   box-sizing:border-box;
 }
 .cover-title {
-  font-family:'DM Sans',sans-serif; font-style:italic; font-size:22pt;
+  font-family:'EB Garamond',serif; font-style:italic; font-size:22pt;
 }
-.cover-period { font-family:'DM Sans',sans-serif; font-size:11pt; margin-top:5pt; }
+.cover-period { font-family:'EB Garamond',serif; font-size:11pt; margin-top:5pt; }
 .cover-hairline { height:.3pt; margin-top:10pt; }
 
 .chapter-inner {
@@ -948,7 +940,6 @@ body.print-bleed .chapter-inner {
   font-family:'EB Garamond',serif; font-style:italic; font-size:22pt; color:#1C1C1E; margin-top:8pt;
 }
 .chapter-rule { width:20mm; height:.3pt; background:rgba(0,0,0,.08); margin-top:14pt; }
-.chapter-sub { font-family:'DM Sans',sans-serif; font-size:9pt; color:#AEAEB2; margin-top:10pt; }
 
 .photo-full-stack { flex-direction:column; }
 .pf-image {
@@ -1093,7 +1084,7 @@ body.print-bleed .bleed-x {
 .quote-mid-dropcap { justify-content:center; }
 .quote-mid-titled { justify-content:center; }
 .text-memory-editorial {
-  font-family:'EB Garamond',serif;
+  font-family:'DM Sans',sans-serif;
   font-style:normal;
   font-weight:400;
   color:#1C1C1E;
@@ -1103,7 +1094,7 @@ body.print-bleed .bleed-x {
   flex-shrink:0;
 }
 .text-memory-title {
-  font-family:'EB Garamond',serif;
+  font-family:'DM Sans',sans-serif;
   font-style:normal;
   font-weight:400;
   color:#1C1C1E;
@@ -1149,7 +1140,7 @@ body.print-bleed .bleed-x {
   text-align:right; flex:1; min-width:0;
 }
 .quote-mark {
-  font-family:'EB Garamond',serif; font-style:italic; font-weight:400;
+  font-family:'DM Sans',sans-serif; font-style:italic; font-weight:400;
   font-size:52pt; color:#6B8F7E; line-height:1; margin-bottom:4mm;
   text-align:center; align-self:center;
 }
@@ -1192,7 +1183,7 @@ body.print-bleed .bleed-x {
 .quote-dropcap-body .dropcap-p:last-child { margin-bottom:0; }
 .text-dropcap {
   float:left;
-  font-family:'EB Garamond',serif;
+  font-family:'DM Sans',sans-serif;
   font-weight:400;
   line-height:.82;
   margin-right:3pt;
@@ -1254,7 +1245,7 @@ body.print-bleed .bleed-x {
 .media-qr-caption {
   flex:1;
   min-width:0;
-  font-family:'EB Garamond',serif;
+  font-family:'DM Sans',sans-serif;
   font-style:normal;
   font-weight:400;
   font-size:14pt;

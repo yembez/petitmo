@@ -11,7 +11,8 @@
     "dev": "tsx watch src/index.ts",
     "worker:once": "tsx src/worker/runOnce.ts",
     "typecheck": "tsc --noEmit",
-    "test:crop": "tsx --test src/pdf/bookPhotoCropLayout.test.ts"
+    "test:crop": "tsx --test src/pdf/bookPhotoCropLayout.test.ts",
+    "test:fonts": "tsx --test src/pdf/htmlBookFonts.test.ts"
   },
   "engines": {
     "node": ">=20"

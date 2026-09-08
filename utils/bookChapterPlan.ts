@@ -46,115 +46,49 @@ function singleMonthLabel(group: BookChapterMonthGroup): string {
 }
 
 /**
- * Libellé fusionné pour un ou plusieurs mois consécutifs.
+ * Période couverte par le livre, bornes seules — les mois intermédiaires ne sont pas
+ * énumérés : un livre sur un an tiendrait sinon sur trois lignes de page de titre.
+ *
  * - Un seul mois : « avril 2025 »
- * - Plusieurs mois, même année : « janvier · février · mars 2025 »
- * - Changement d’année : « décembre 2024 · janvier 2025 »
+ * - Même année : « janvier – mars 2025 »
+ * - Changement d’année : « décembre 2024 – février 2025 »
  */
 export function formatBookChapterLabel(groups: BookChapterMonthGroup[]): string {
   if (groups.length === 0) return '';
-  if (groups.length === 1) return singleMonthLabel(groups[0]!);
+  const first = groups[0]!;
+  const last = groups[groups.length - 1]!;
+  if (groups.length === 1) return singleMonthLabel(first);
 
-  const years = new Set(groups.map(g => g.year));
-  if (years.size === 1) {
-    const monthParts = groups.map(g => monthNameFr(new Date(g.memories[0]!.created_at)));
-    return `${monthParts.join(' · ')} ${groups[0]!.year}`;
+  const firstMonth = monthNameFr(new Date(first.memories[0]!.created_at));
+  const lastMonth = monthNameFr(new Date(last.memories[0]!.created_at));
+  if (first.year === last.year) {
+    return `${firstMonth} – ${lastMonth} ${first.year}`;
   }
-
-  return groups
-    .map(g => {
-      const d = new Date(g.memories[0]!.created_at);
-      return `${monthNameFr(d)} ${d.getFullYear()}`;
-    })
-    .join(' · ');
-}
-
-function assignChapterIds(groups: BookChapterMonthGroup[]): number[] {
-  const isAnchor = groups.map(g => g.memories.length >= 2);
-  const chapterIds = new Array<number>(groups.length).fill(-1);
-  const leadingSparse: number[] = [];
-  let nextChapterId = 0;
-  let lastAnchorIdx = -1;
-
-  for (let i = 0; i < groups.length; i++) {
-    if (isAnchor[i]) {
-      const chapterId = nextChapterId++;
-      chapterIds[i] = chapterId;
-      for (const sparseIdx of leadingSparse) {
-        chapterIds[sparseIdx] = chapterId;
-      }
-      leadingSparse.length = 0;
-      lastAnchorIdx = i;
-      continue;
-    }
-
-    if (lastAnchorIdx >= 0) {
-      chapterIds[i] = chapterIds[lastAnchorIdx]!;
-    } else {
-      leadingSparse.push(i);
-    }
-  }
-
-  return chapterIds;
-}
-
-function buildPlansFromAssignments(
-  groups: BookChapterMonthGroup[],
-  chapterIds: number[],
-): BookChapterPlan[] {
-  const plans: BookChapterPlan[] = [];
-  let currentId = -1;
-  let currentGroups: BookChapterMonthGroup[] = [];
-
-  const flush = () => {
-    if (currentGroups.length === 0) return;
-    const memories = currentGroups.flatMap(g => g.memories);
-    plans.push({
-      label: formatBookChapterLabel(currentGroups),
-      memories,
-    });
-    currentGroups = [];
-  };
-
-  for (let i = 0; i < groups.length; i++) {
-    const cid = chapterIds[i]!;
-    if (cid !== currentId) {
-      flush();
-      currentId = cid;
-    }
-    currentGroups.push(groups[i]!);
-  }
-  flush();
-
-  return plans;
+  return `${firstMonth} ${first.year} – ${lastMonth} ${last.year}`;
 }
 
 /**
- * Planifie les chapitres du livre à partir des souvenirs inclus.
+ * Page d’ouverture du livre — **une seule**, quel que soit l’ordre des pages.
  *
- * Règles :
- * - 0 ou 1 souvenir → aucune page chapitre
- * - Mois avec ≥ 2 souvenirs → ancre (nouveau chapitre ou extension)
- * - Mois avec 1 souvenir → fusion dans l’ancre précédente, ou la prochaine en tête de livre
- * - Tous les mois à 1 souvenir → un seul chapitre fusionné
+ * Il n’y a plus de chapitrage par mois. Un découpage daté ne survit pas à une
+ * réorganisation manuelle : les mois n’y sont plus contigus, un même mois retomberait
+ * dans deux chapitres et les périodes se chevaucheraient. Surtout, le nombre de pages
+ * imprimées dépendrait alors de l’ordre choisi — inacceptable puisqu’il détermine le prix.
+ * Une page d’ouverture unique reste vraie et donne un compte de pages stable.
+ *
+ * 0 ou 1 souvenir → aucune page d’ouverture.
  */
 export function planBookChapters(memories: Memory[]): BookChapterPlan[] {
-  const sorted = sortMemoriesChronologically(memories);
-  if (sorted.length <= 1) return [];
+  if (memories.length <= 1) return [];
 
-  const groups = groupMemoriesByCalendarMonth(sorted);
+  // Chronologie utilisée pour la seule période affichée ; l’ancrage suit l’ordre du livre.
+  const groups = groupMemoriesByCalendarMonth(sortMemoriesChronologically(memories));
   if (groups.length === 0) return [];
 
-  const hasAnchor = groups.some(g => g.memories.length >= 2);
-  if (!hasAnchor) {
-    return [{ label: formatBookChapterLabel(groups), memories: sorted }];
-  }
-
-  const chapterIds = assignChapterIds(groups);
-  return buildPlansFromAssignments(groups, chapterIds);
+  return [{ label: formatBookChapterLabel(groups), memories: [...memories] }];
 }
 
-/** Premier souvenir de chaque chapitre → métadonnées page chapitre. */
+/** Premier souvenir du livre → métadonnées de la page d’ouverture. */
 export function bookChapterStarts(
   plans: BookChapterPlan[],
 ): Map<string, { label: string; chapterNum: number }> {

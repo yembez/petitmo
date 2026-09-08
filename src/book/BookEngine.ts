@@ -18,10 +18,63 @@ export type BookPage =
 /** Une entrée livre (= une page contenu), éventuellement une photo d’album précise. */
 export type BookPageMemorySpec = { memory: Memory; photoRef?: string };
 
-/** Pages paire/impaire face à face dans un spread (hors couverture seule). */
-function isSpreadFacingWithPreviousPage(pageNum: number): boolean {
-  const prev = pageNum - 1;
-  return prev >= 2 && prev % 2 === 0;
+/**
+ * Index de la page qui fait face dans la même double page, `-1` si la page est seule.
+ * Appariement identique à l’écran : couverture seule à droite, puis (2,3), (4,5)…,
+ * quatrième de couverture seule à gauche.
+ */
+function facingPageIndex(pages: BookPage[], index: number): number {
+  const pageNum = index + 1;
+  if (pageNum < 2) return -1;
+  const facing = pageNum % 2 === 0 ? index + 1 : index - 1;
+  if (facing < 1 || facing >= pages.length) return -1;
+  if (pages[facing]!.type === 'back-cover') return -1;
+  return facing;
+}
+
+/** Page montrant une photo avec marges : elle appelle une pleine page en face. */
+function isBorderedPhotoPage(page: BookPage): boolean {
+  return page.type === 'photo-note' || page.type === 'audio' || page.type === 'video';
+}
+
+/**
+ * Pleine page (`FP`) ou photo à marges (`M`), décidé **sur la double page** : ce qui compte
+ * est la page d’en face, pas la précédente. Une photo qui fait face à une page bordée
+ * (petit mot illustré, audio, vidéo) passe en pleine page, même si la double page
+ * précédente en contenait déjà une — la répétition d’une double page à l’autre ne se voit
+ * pas, deux pages bordées côte à côte si.
+ *
+ * Deuxième passe séparée : décider la variante demande de connaître la page suivante quand
+ * la photo ouvre la double page, ce qu’une passe unique ne permet pas. L’insertion de la
+ * page d’ouverture ne dépendant pas des variantes, la pagination est déjà figée ici.
+ *
+ * Quand la page d’en face ne tranche pas (page de titre, petit mot texte, page seule),
+ * on garde l’alternance de séquence historique, pour la variété.
+ */
+function assignPhotoFullVariants(pages: BookPage[]): void {
+  let lastWasFP = false;
+
+  for (let i = 0; i < pages.length; i++) {
+    const page = pages[i]!;
+    if (page.type !== 'photo-full') {
+      if (isBorderedPhotoPage(page)) lastWasFP = false;
+      continue;
+    }
+
+    const facing = facingPageIndex(pages, i);
+    const facingPage = facing >= 0 ? pages[facing]! : null;
+
+    if (facingPage && isBorderedPhotoPage(facingPage)) {
+      page.variant = 'FP';
+    } else if (facingPage?.type === 'photo-full' && facing < i) {
+      // Page de gauche déjà décidée : la droite la complète.
+      page.variant = facingPage.variant === 'FP' ? 'M' : 'FP';
+    } else {
+      page.variant = lastWasFP ? 'M' : 'FP';
+    }
+
+    lastWasFP = page.variant === 'FP';
+  }
 }
 
 function resolutionFromThumbnailUrl(url: string | null): { width: number; height: number } | undefined {
@@ -65,24 +118,6 @@ function memoryToPage(memory: Memory): BookPage {
   }
 }
 
-function assignPhotoFullVariant(
-  pages: BookPage[],
-  lastWasFP: boolean
-): { variant: PhotoFullVariant; lastWasFP: boolean } {
-  let variant: PhotoFullVariant = lastWasFP ? 'M' : 'FP';
-  const nextPageNum = pages.length + 1;
-  const prevPage = pages[pages.length - 1];
-  if (
-    variant === 'FP' &&
-    isSpreadFacingWithPreviousPage(nextPageNum) &&
-    prevPage?.type === 'photo-full' &&
-    prevPage.variant === 'FP'
-  ) {
-    variant = 'M';
-  }
-  return { variant, lastWasFP: variant === 'FP' };
-}
-
 function toPageSpecs(input: Memory[] | BookPageMemorySpec[]): BookPageMemorySpec[] {
   if (input.length === 0) return [];
   const first = input[0] as Memory | BookPageMemorySpec;
@@ -92,17 +127,32 @@ function toPageSpecs(input: Memory[] | BookPageMemorySpec[]): BookPageMemorySpec
   return (input as Memory[]).map(memory => ({ memory }));
 }
 
-export function buildBookPages(child: Child, memories: Memory[] | BookPageMemorySpec[]): BookPage[] {
+export type BuildBookPagesOptions = {
+  /**
+   * Livre réorganisé à la main (`Book.pageOrderMode === 'manual'`) : respecter l’ordre
+   * reçu au lieu de retrier par `created_at`. Défaut `false` — les livres jamais
+   * réorganisés gardent exactement le comportement chronologique d’origine.
+   */
+  preserveOrder?: boolean;
+};
+
+export function buildBookPages(
+  child: Child,
+  memories: Memory[] | BookPageMemorySpec[],
+  opts?: BuildBookPagesOptions,
+): BookPage[] {
   const specs = toPageSpecs(memories);
-  const sorted = [...specs].sort(
-    (a, b) => new Date(a.memory.created_at).getTime() - new Date(b.memory.created_at).getTime(),
-  );
+  const preserveOrder = opts?.preserveOrder === true;
+  const sorted = preserveOrder
+    ? specs
+    : [...specs].sort(
+        (a, b) => new Date(a.memory.created_at).getTime() - new Date(b.memory.created_at).getTime(),
+      );
 
   const pages: BookPage[] = [{ type: 'cover', child }];
   const chapterPlans = planBookChapters(sorted.map(s => s.memory));
   const chapterStarts = bookChapterStarts(chapterPlans);
   const chapterEmitted = new Set<string>();
-  let lastWasFP = false;
 
   for (const { memory, photoRef } of sorted) {
     const chapterStart = chapterStarts.get(memory.id);
@@ -117,22 +167,17 @@ export function buildBookPages(child: Child, memories: Memory[] | BookPageMemory
 
     const page = memoryToPage(memory);
     const ref = photoRef?.trim() || undefined;
-    if (page.type === 'photo-full') {
-      const assigned = assignPhotoFullVariant(pages, lastWasFP);
-      lastWasFP = assigned.lastWasFP;
-      pages.push({ ...page, variant: assigned.variant, ...(ref ? { photoRef: ref } : {}) });
-    } else if (page.type === 'photo-note') {
-      lastWasFP = false;
-      pages.push({ ...page, ...(ref ? { photoRef: ref } : {}) });
-    } else {
-      if (page.type === 'audio' || page.type === 'video') {
-        lastWasFP = false;
-      }
-      pages.push(page);
-    }
+    // Seules les pages photo portent un slot d’album.
+    pages.push(
+      ref && (page.type === 'photo-full' || page.type === 'photo-note')
+        ? { ...page, photoRef: ref }
+        : page,
+    );
   }
 
   pages.push({ type: 'back-cover' });
+
+  assignPhotoFullVariants(pages);
 
   return pages;
 }

@@ -20,7 +20,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Plus } from 'lucide-react-native';
 import { Inter_500Medium, Inter_700Bold } from '@expo-google-fonts/inter';
-import { useFonts, DMSans_400Regular_Italic } from '@expo-google-fonts/dm-sans';
+import { useFonts } from '@expo-google-fonts/dm-sans';
+import {
+  BOOK_SERIF_FONT_FAMILY,
+  BOOK_SERIF_FONT_SOURCES,
+  BOOK_SERIF_ITALIC_FONT_FAMILY,
+} from '@/constants/bookSerifFont';
 import { RectButton, Swipeable, TouchableOpacity as GestureTouchableOpacity } from 'react-native-gesture-handler';
 import { scale, verticalScale } from '@/utils/responsive';
 import { THEME } from '@/constants/theme';
@@ -73,6 +78,7 @@ const BOOK_SWIPE_DELETE_WIDTH = scale(96);
 type BookListRowProps = {
   book: Book;
   coverTitleFontFamily?: string;
+  coverPeriodFontFamily?: string;
   listTitleFontFamily?: string;
   listMetaFontFamily?: string;
   onOpen: (book: Book) => void;
@@ -93,6 +99,7 @@ function coverCropsEqual(
 
 function bookListRowPropsEqual(prev: BookListRowProps, next: BookListRowProps): boolean {
   if (prev.coverTitleFontFamily !== next.coverTitleFontFamily) return false;
+  if (prev.coverPeriodFontFamily !== next.coverPeriodFontFamily) return false;
   if (prev.listTitleFontFamily !== next.listTitleFontFamily) return false;
   if (prev.listMetaFontFamily !== next.listMetaFontFamily) return false;
   if (
@@ -119,6 +126,7 @@ function bookListRowPropsEqual(prev: BookListRowProps, next: BookListRowProps): 
 const BookListRow = memo(function BookListRow({
   book,
   coverTitleFontFamily,
+  coverPeriodFontFamily,
   listTitleFontFamily,
   listMetaFontFamily,
   onOpen,
@@ -195,6 +203,7 @@ const BookListRow = memo(function BookListRow({
             coverColorId={coverColorId}
             imageRecyclingKey={`book-cover-${book.id}-${book.coverPhotoUrl ?? ''}-${coverUri ?? ''}-${coverCropKey}-${coverColorId}`}
             titleFontFamily={coverTitleFontFamily}
+            periodFontFamily={coverPeriodFontFamily}
           />
           <View style={styles.rowText}>
             <Text
@@ -278,11 +287,12 @@ function LivresScreen() {
   const booksSigRef = useRef(booksListVisualSignature(books));
 
   const [listFontsLoaded] = useFonts({
-    DMSans_400Regular_Italic,
     Inter_500Medium,
     Inter_700Bold,
+    ...BOOK_SERIF_FONT_SOURCES,
   });
-  const coverTitleFontFamily = listFontsLoaded ? 'DMSans_400Regular_Italic' : undefined;
+  const coverTitleFontFamily = listFontsLoaded ? BOOK_SERIF_ITALIC_FONT_FAMILY : undefined;
+  const coverPeriodFontFamily = listFontsLoaded ? BOOK_SERIF_FONT_FAMILY : undefined;
   const listTitleFontFamily = listFontsLoaded ? 'Inter_700Bold' : undefined;
   const listMetaFontFamily = listFontsLoaded ? 'Inter_500Medium' : undefined;
 
@@ -435,6 +445,7 @@ function LivresScreen() {
       <BookListRow
         book={item}
         coverTitleFontFamily={coverTitleFontFamily}
+        coverPeriodFontFamily={coverPeriodFontFamily}
         listTitleFontFamily={listTitleFontFamily}
         listMetaFontFamily={listMetaFontFamily}
         onOpen={openBook}
@@ -444,6 +455,7 @@ function LivresScreen() {
     ),
     [
       coverTitleFontFamily,
+      coverPeriodFontFamily,
       listTitleFontFamily,
       listMetaFontFamily,
       openBook,

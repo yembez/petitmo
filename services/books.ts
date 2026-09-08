@@ -246,6 +246,14 @@ export type Book = {
    * Source de vérité des pages contenu (ordre). Même memoryId + photoRefs distincts = N pages.
    */
   pageEntries?: BookPageEntry[];
+  /**
+   * `manual` = l’ordre de `pageEntries` fait foi, l’utilisatrice a réorganisé le livre.
+   * `null` / absent = ordre chronologique (`created_at`), recalculé à l’affichage.
+   *
+   * Le basculement est déclenché par le premier déplacement et fige la séquence
+   * affichée à cet instant ; `resetBookPageOrderToChronological` fait le retour.
+   */
+  pageOrderMode?: 'manual' | null;
   /** URL de la photo de couverture (sinon fallback photo enfant / souvenirs). */
   coverPhotoUrl?: string | null;
   /** Couleur fond couverture (`white` | `cream` | `olive` | `navy` | `charcoal` | `black`). */
@@ -575,6 +583,7 @@ function normalizeBook(raw: unknown): Book | null {
     memoryIds: derived.memoryIds,
     memoryPhotoRefs: derived.memoryPhotoRefs,
     pageEntries: resolvedEntries,
+    pageOrderMode: (r as { pageOrderMode?: unknown }).pageOrderMode === 'manual' ? 'manual' : null,
     coverPhotoUrl,
     coverColorId,
     rotations: Object.keys(rotations).length > 0 ? rotations : undefined,
@@ -612,6 +621,7 @@ async function writeAll(books: Book[]): Promise<void> {
       memoryIds: normalized.memoryIds,
       memoryPhotoRefs: normalized.memoryPhotoRefs,
       pageEntries: normalized.pageEntries,
+      pageOrderMode: normalized.pageOrderMode ?? null,
       coverPhotoUrl: normalized.coverPhotoUrl ?? null,
       coverColorId: normalized.coverColorId ?? null,
       rotations: normalized.rotations,
@@ -1456,6 +1466,7 @@ export async function upsertBook(next: Book): Promise<void> {
     memoryIds: normalized.memoryIds,
     memoryPhotoRefs: normalized.memoryPhotoRefs,
     pageEntries: normalized.pageEntries,
+    pageOrderMode: normalized.pageOrderMode ?? null,
     coverPhotoUrl: normalized.coverPhotoUrl ?? null,
     coverColorId: normalized.coverColorId ?? null,
     rotations: normalized.rotations,
@@ -1537,6 +1548,101 @@ export function bookPageEntries(book: Book): BookPageEntry[] {
   );
 }
 
+/** True si l’utilisatrice a réorganisé le livre (l’ordre de `pageEntries` fait foi). */
+export function isBookPageOrderManual(book: Book): boolean {
+  return book.pageOrderMode === 'manual';
+}
+
+/**
+ * Pages contenu **dans l’ordre affiché** — miroir exact de `buildBookPages` :
+ * séquence de `pageEntries` en manuel, tri `created_at` sinon. Les entrées dont le
+ * souvenir a disparu en local restent en fin de liste pour ne pas être perdues.
+ */
+export function bookDisplayPageEntries(book: Book): BookPageEntry[] {
+  const entries = bookPageEntries(book);
+  if (isBookPageOrderManual(book) || entries.length <= 1) return entries;
+
+  const dated: { entry: BookPageEntry; at: number }[] = [];
+  const undated: BookPageEntry[] = [];
+  for (const entry of entries) {
+    const memory = getLocalMemoryById(entry.memoryId.trim());
+    if (!memory) {
+      undated.push(entry);
+      continue;
+    }
+    dated.push({ entry, at: new Date(memory.created_at).getTime() });
+  }
+  // `sort` est stable : deux souvenirs de même date gardent l’ordre de `pageEntries`.
+  dated.sort((a, b) => a.at - b.at);
+  return [...dated.map(d => d.entry), ...undated];
+}
+
+/**
+ * Applique un nouvel ordre des pages contenu, donné par la liste complète des clés
+ * (`bookPageEntryKey`). Commiter la permutation entière plutôt qu’un couple d’indices
+ * rend l’opération idempotente et vérifiable.
+ *
+ * Premier réordonnancement d’un livre chronologique : la séquence affichée est figée
+ * telle quelle, puis le livre bascule en `manual` — rien ne saute à l’écran hormis la
+ * page déplacée.
+ *
+ * Écrit SQLite immédiatement (source d’affichage) ; le push cloud reste débouncé.
+ * Renvoie le livre à jour, ou `null` si l’ordre est inchangé ou invalide.
+ */
+export async function applyBookPageOrder(
+  bookId: string,
+  orderedKeys: readonly string[],
+): Promise<Book | null> {
+  const book = await getBook(bookId);
+  if (!book) return null;
+
+  const current = bookDisplayPageEntries(book);
+  if (current.length === 0) return null;
+
+  /**
+   * Garde-fou : un réordonnancement ne crée, ne perd ni ne duplique jamais une page.
+   * On refuse en bloc plutôt que de réparer — un ordre partiel corromprait le livre.
+   */
+  const byKey = new Map<string, BookPageEntry>();
+  for (const entry of current) byKey.set(bookPageEntryKey(entry), entry);
+  if (orderedKeys.length !== current.length) return null;
+
+  const next: BookPageEntry[] = [];
+  const seen = new Set<string>();
+  for (const key of orderedKeys) {
+    const entry = byKey.get(key);
+    if (!entry || seen.has(key)) {
+      if (__DEV__) console.warn('[books] ordre refusé : clé inconnue ou dupliquée', key);
+      return null;
+    }
+    seen.add(key);
+    next.push(entry);
+  }
+
+  const unchanged = next.every((e, i) => bookPageEntryKey(e) === bookPageEntryKey(current[i]!));
+  if (unchanged && isBookPageOrderManual(book)) return null;
+
+  const updated: Book = { ...book, pageEntries: next, pageOrderMode: 'manual' };
+  await upsertBook(updated);
+  notifyBooksUpdated();
+  return (await getBook(bookId)) ?? updated;
+}
+
+/**
+ * Sortie de secours : revient à l’ordre chronologique. Sans ça, un déplacement
+ * accidentel serait irréversible.
+ */
+export async function resetBookPageOrderToChronological(bookId: string): Promise<Book | null> {
+  const book = await getBook(bookId);
+  if (!book || !isBookPageOrderManual(book)) return null;
+
+  const chronological = bookDisplayPageEntries({ ...book, pageOrderMode: null });
+  const updated: Book = { ...book, pageEntries: chronological, pageOrderMode: null };
+  await upsertBook(updated);
+  notifyBooksUpdated();
+  return (await getBook(bookId)) ?? updated;
+}
+
 /**
  * Compteur catalogue Gelato pour la liste Livres — même chiffre que spread / éditeur
  * (`formatGelatoPrintPageCountLabel`), pas le nombre de souvenirs.
@@ -1567,7 +1673,9 @@ export function formatBookListGelatoPageCountLabel(book: Book): string {
     );
   }
 
-  return formatGelatoPrintPageCountLabel(buildBookPages(child, specs));
+  return formatGelatoPrintPageCountLabel(
+    buildBookPages(child, specs, { preserveOrder: book.pageOrderMode === 'manual' }),
+  );
 }
 
 /** True si le souvenir (memoryId) a au moins une page. */
@@ -1820,6 +1928,7 @@ export async function backupBooksToSupabaseIfPremium(): Promise<void> {
     updated_at: b.updatedAt,
     memory_ids: b.memoryIds,
     page_entries: b.pageEntries ?? null,
+    page_order_mode: b.pageOrderMode ?? null,
     memory_photo_refs: b.memoryPhotoRefs ?? null,
     cover_photo_url: coverPhotoUrlForCloudBackup(b),
     cover_color_id: b.coverColorId ?? null,
@@ -1837,12 +1946,18 @@ export async function backupBooksToSupabaseIfPremium(): Promise<void> {
    * Repli progressif si une migration manque en prod : ne retirer que le strict nécessaire,
    * sinon un simple `cover_color_id` absent ferait aussi perdre `page_entries` dans le cloud.
    */
-  const withoutColor = payload.map(({ cover_color_id: _cc, ...rest }) => rest);
+  const withoutOrderMode = payload.map(({ page_order_mode: _pom, ...rest }) => rest);
+  const { error: noOrderModeErr } = await booksTable().upsert(withoutOrderMode, {
+    onConflict: 'id',
+  });
+  if (!noOrderModeErr) return;
+
+  const withoutColor = withoutOrderMode.map(({ cover_color_id: _cc, ...rest }) => rest);
   const { error: noColorErr } = await booksTable().upsert(withoutColor, { onConflict: 'id' });
   if (!noColorErr) return;
 
-  const legacy = payload.map(
-    ({ page_entries: _pe, memory_photo_refs: _mr, cover_color_id: _cc, ...rest }) => rest,
+  const legacy = withoutColor.map(
+    ({ page_entries: _pe, memory_photo_refs: _mr, ...rest }) => rest,
   );
   await booksTable().upsert(legacy, { onConflict: 'id' });
 }
@@ -1980,10 +2095,19 @@ export async function restoreBooksFromSupabaseIfPremium(): Promise<void> {
 
   let { data, error } = await booksTable()
     .select(
-      'id, user_id, title, created_at, updated_at, memory_ids, page_entries, memory_photo_refs, cover_photo_url, cover_color_id, rotations, photo_crops, text_edits, chapter_title'
+      'id, user_id, title, created_at, updated_at, memory_ids, page_entries, page_order_mode, memory_photo_refs, cover_photo_url, cover_color_id, rotations, photo_crops, text_edits, chapter_title'
     )
     .eq('user_id', userId)
     .order('updated_at', { ascending: false });
+
+  if (error) {
+    ({ data, error } = await booksTable()
+      .select(
+        'id, user_id, title, created_at, updated_at, memory_ids, page_entries, memory_photo_refs, cover_photo_url, cover_color_id, rotations, photo_crops, text_edits, chapter_title'
+      )
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false }));
+  }
 
   if (error) {
     ({ data, error } = await booksTable()
@@ -2072,9 +2196,25 @@ export async function restoreBooksFromSupabaseIfPremium(): Promise<void> {
     const localPageEntries = local?.pageEntries ?? [];
     const localMemoryPhotoRefs = local?.memoryPhotoRefs;
 
+    const remoteOrderMode = row.page_order_mode === 'manual' ? 'manual' : null;
+    /** Remote muet sur le mode (colonne absente, backup pas encore passé) : garder le local. */
+    const pageOrderMode = remoteOrderMode ?? local?.pageOrderMode ?? null;
+    /**
+     * Livre réorganisé à la main : l’ordre local prime tant que le remote n’apporte pas
+     * de pages en plus. Sinon un pull arrivé avant le backup debounce (2,5 s) rejouerait
+     * l’ordre chronologique par-dessus la réorganisation qu’on vient de faire.
+     * Remote strictement plus riche = ajout depuis un autre appareil : la complétude
+     * des pages passe devant l’ordre.
+     */
+    const keepLocalManualOrder =
+      pageOrderMode === 'manual' &&
+      localPageEntries.length > 0 &&
+      localPageEntries.length >= remotePageEntries.length;
+
     // Jamais écraser des pageEntries APPEND locales plus riches par un remote sans pages.
-    const pageEntries =
-      remotePageEntries.length > 0
+    const pageEntries = keepLocalManualOrder
+      ? localPageEntries
+      : remotePageEntries.length > 0
         ? localPageEntries.length > remotePageEntries.length
           ? localPageEntries
           : remotePageEntries
@@ -2092,6 +2232,7 @@ export async function restoreBooksFromSupabaseIfPremium(): Promise<void> {
       createdAt,
       memoryIds,
       pageEntries,
+      pageOrderMode,
       memoryPhotoRefs,
       coverPhotoUrl,
       coverColorId,

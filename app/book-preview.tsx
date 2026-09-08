@@ -29,8 +29,10 @@ import {
 import { Image as ExpoImage } from 'expo-image';
 import { useFonts, DMSans_400Regular, DMSans_400Regular_Italic, DMSans_500Medium, DMSans_600SemiBold, DMSans_700Bold } from '@expo-google-fonts/dm-sans';
 import { buildBookMaquetteTypography } from '@/constants/bookMaquetteTypography';
+import { BOOK_SERIF_FONT_SOURCES } from '@/constants/bookSerifFont';
 import { BookSpreadSlide } from '@/components/BookSpreadSlide';
 import { BookPortraitSpreadRow } from '@/components/BookPortraitSpreadRow';
+import BookReorderGrid, { type BookReorderSlot } from '@/components/BookReorderGrid';
 import {
   gelatoTrimPagePx,
   computePortraitBrowseLayout,
@@ -124,6 +126,10 @@ import {
   resolveBookCoverEditorUri,
   resolveBookCoverPrintUri,
   bookPageEntries,
+  bookPageEntryKey,
+  applyBookPageOrder,
+  resetBookPageOrderToChronological,
+  isBookPageOrderManual,
   upsertBook,
   notifyBooksUpdated,
   flushBooksCloudBackupNow,
@@ -201,6 +207,18 @@ const MAX_BOOK_SELECTION_KEYS = 80;
  * `pageNum` = index absolu 1-based (nav) ; `folio` = numéro intérieur Gelato (affichage).
  */
 type PageRow = { page: BookPage; pageNum: number; folio: number | null };
+
+/**
+ * Clé stable d’une case du mode Réorganiser. Une page contenu porte sa clé d’entrée —
+ * la même que le service de réordonnancement, pour que rien ne puisse diverger de ce qui
+ * sera persisté ; une page figée (couverture, chapitre, quatrième) est indexée par son rang.
+ */
+function reorderSlotKey(row: PageRow): string {
+  const { page } = row;
+  if (!('memory' in page)) return `fixed::${row.pageNum}`;
+  const photoRef = 'photoRef' in page ? page.photoRef : undefined;
+  return bookPageEntryKey({ memoryId: page.memory.id, photoRef });
+}
 
 type SpreadRow = {
   kind: 'spread';
@@ -379,6 +397,7 @@ export default function BookPreviewScreen() {
     DMSans_500Medium,
     DMSans_600SemiBold,
     DMSans_700Bold,
+    ...BOOK_SERIF_FONT_SOURCES,
   });
   const maquetteTypography = useMemo(
     () => buildBookMaquetteTypography(fontsLoaded),
@@ -439,6 +458,12 @@ export default function BookPreviewScreen() {
   const [coverEpoch, setCoverEpoch] = useState(0);
   /** Import couverture en cours (copie sandbox + dims) — roue discrète sur le cadre. */
   const [coverApplying, setCoverApplying] = useState(false);
+  /**
+   * Mode Réorganiser (portrait) : grille de tuiles déplaçables à la place du spread.
+   * Mode explicite — le pincement de recadrage et le tap-pour-éditer sont hors-jeu
+   * pendant ce temps, ce qui évite tout conflit de gestes.
+   */
+  const [reorderMode, setReorderMode] = useState(false);
   const [coverColorId, setCoverColorId] = useState(
     parseBookCoverColorId(localSnapshot?.book?.coverColorId),
   );
@@ -507,6 +532,7 @@ export default function BookPreviewScreen() {
     if (!child) return [];
     // Source de vérité : pageEntries (APPEND multi-photos même souvenir).
     const byId = new Map(bookMemories.map(m => [m.id, m]));
+    const preserveOrder = bookSnapshot?.pageOrderMode === 'manual';
     if (bookSnapshot) {
       const specs = [];
       for (const e of bookPageEntries(bookSnapshot)) {
@@ -515,9 +541,9 @@ export default function BookPreviewScreen() {
         const photoRef = e.photoRef?.trim();
         specs.push(photoRef ? { memory: m, photoRef } : { memory: m });
       }
-      if (specs.length > 0) return buildBookPages(child, specs);
+      if (specs.length > 0) return buildBookPages(child, specs, { preserveOrder });
     }
-    return buildBookPages(child, bookMemories);
+    return buildBookPages(child, bookMemories, { preserveOrder });
   }, [child, bookMemories, bookSnapshot]);
 
   /** Compteur aligné Gelato (hors cover/back-cover, pair) — pas `pages.length`. */
@@ -550,6 +576,13 @@ export default function BookPreviewScreen() {
       })),
     [pages]
   );
+
+  /** Page de maquette par clé de case — folio du mode Réorganiser et rendu fidèle. */
+  const reorderPageRowByKey = useMemo(() => {
+    const map = new Map<string, PageRow>();
+    for (const row of pageRows) map.set(reorderSlotKey(row), row);
+    return map;
+  }, [pageRows]);
 
   const isLandscape = screenWidth > screenHeight;
 
@@ -606,6 +639,78 @@ export default function BookPreviewScreen() {
 
     return out;
   }, [pageRows]);
+
+  /**
+   * Cases du mode Réorganiser : le **même pavage** que le spread portrait, pages figées
+   * comprises (couverture, « Notre histoire », quatrième). Les afficher donne la vraie vue
+   * du livre ; seules les pages de souvenirs sont saisissables.
+   */
+  const reorderSlots = useMemo<BookReorderSlot[]>(() => {
+    const memoryById = new Map(bookMemories.map(m => [m.id, m]));
+    const out: BookReorderSlot[] = [];
+
+    spreadRows.forEach((spread, row) => {
+      const push = (pageRow: PageRow | null, side: 'left' | 'right') => {
+        if (!pageRow) return;
+        const { page, folio } = pageRow;
+        if (!('memory' in page)) {
+          out.push({
+            key: reorderSlotKey(pageRow),
+            movable: false,
+            folio,
+            row,
+            side,
+            kind:
+              page.type === 'cover' ? 'cover' : page.type === 'chapter' ? 'chapter' : 'back-cover',
+            imageUri: null,
+            text: null,
+          });
+          return;
+        }
+
+        const memory = memoryById.get(page.memory.id) ?? page.memory;
+        const kind: BookReorderSlot['kind'] =
+          memory.type === 'text'
+            ? 'text'
+            : memory.type === 'voice'
+              ? 'audio'
+              : memory.type === 'video'
+                ? 'video'
+                : 'photo';
+        const photoRef = photoRefFromBookPage(page, memory.id, bookSnapshot?.memoryPhotoRefs);
+        const imageUri =
+          kind === 'photo'
+            ? getPhotoUriForBookMaquetteDisplay(memory, photoRef).trim() || null
+            : kind === 'audio'
+              ? getVoiceCoverUriForBookEditorDisplay(memory).trim() || null
+              : kind === 'video'
+                ? peekSyncBookVideoPosterDisplayUri(memory).trim() || null
+                : null;
+
+        out.push({
+          key: reorderSlotKey(pageRow),
+          movable: true,
+          folio,
+          row,
+          side,
+          kind,
+          imageUri,
+          text: memory.content ?? null,
+        });
+      };
+
+      push(spread.left, 'left');
+      push(spread.right, 'right');
+    });
+
+    return out;
+  }, [bookMemories, bookSnapshot?.memoryPhotoRefs, spreadRows]);
+
+  /** Une seule page déplaçable : rien à réorganiser. */
+  const reorderMovableCount = useMemo(
+    () => reorderSlots.reduce((n, s) => (s.movable ? n + 1 : n), 0),
+    [reorderSlots],
+  );
 
   const totalSlides = isLandscape ? spreadRows.length : pageRows.length;
 
@@ -999,7 +1104,9 @@ export default function BookPreviewScreen() {
               })
               .filter((x): x is { memory: Memory; photoRef?: string } => x != null)
           : picked.map(memory => ({ memory }));
-      const builtPages = buildBookPages(ch, pageSpecs);
+      const builtPages = buildBookPages(ch, pageSpecs, {
+        preserveOrder: bookForHeal?.pageOrderMode === 'manual',
+      });
       if (picked.some(m => m.type === 'voice' || m.type === 'video')) {
         void (async () => {
           const t0 =
@@ -2548,6 +2655,117 @@ export default function BookPreviewScreen() {
     [openEditor],
   );
 
+  /** Le paysage n’a pas la barre du bas : sans ça, on resterait coincé dans le mode. */
+  useEffect(() => {
+    if (isLandscape && reorderMode) setReorderMode(false);
+  }, [isLandscape, reorderMode]);
+
+  /**
+   * Rendu fidèle d’une case : la maquette réelle, en lecture seule (pas de recadrage
+   * inline, pas d’édition de texte — le mode Réorganiser ne sert qu’à déplacer).
+   * Mêmes props qu’en lecture (`BookBrowseLeaf`), couverture comprise.
+   */
+  const renderReorderSlotContent = useCallback(
+    (slot: BookReorderSlot, width: number, height: number): ReactElement | null => {
+      const row = reorderPageRowByKey.get(slot.key);
+      if (!row || !child) return null;
+      const { page, folio } = row;
+      const isCover = page.type === 'cover';
+      const m = memoryForMaquette(page, merge);
+      const dpi = m ? cropDpiMetaByKey[m.id] : undefined;
+      const cropped =
+        page.type === 'photo-full' ||
+        page.type === 'photo-note' ||
+        page.type === 'audio' ||
+        page.type === 'video';
+
+      return (
+        <MaquetteBookPages
+          page={page}
+          pageNum={folio ?? 0}
+          width={width}
+          height={height}
+          child={child}
+          familyChildren={familyChildren}
+          memory={m}
+          memoryPhotoRef={photoRefFromBookPage(page, m?.id, bookSnapshot?.memoryPhotoRefs)}
+          rotation={m ? rotations[m.id] ?? 0 : 0}
+          photoCrop={m && cropped ? photoCrops[m.id] : undefined}
+          photoImgPxW={dpi?.imgPxW}
+          photoImgPxH={dpi?.imgPxH}
+          truncated={false}
+          coverYearLabel={coverYearLabel}
+          coverDisplayTitle={isCover ? (coverTitleLine ?? `Journal de ${child.name}`) : undefined}
+          coverPhotoUri={isCover ? coverPhotoBrowseUri : null}
+          coverColorId={isCover ? coverColorId : undefined}
+          coverPhotoCrop={photoCrops.cover}
+          coverPhotoImgPxW={isCover ? cropDpiMetaByKey.cover?.imgPxW : undefined}
+          coverPhotoImgPxH={isCover ? cropDpiMetaByKey.cover?.imgPxH : undefined}
+          coverPhotoRenderKey={
+            isCover ? `reorder:${coverPhotoBrowseUri ?? ''}:${bookMediaRevision}` : undefined
+          }
+          chapterDisplayTitle={page.type === 'chapter' ? (chapterTitleLine ?? undefined) : undefined}
+          onRotate={() => {}}
+          onRequestTextEdit={() => {}}
+          qrUrl={qrPreviewUrlForMemory(m?.id, qrTokensByMemoryId)}
+          typography={maquetteTypography}
+          perfContext="reorder-grid"
+        />
+      );
+    },
+    [
+      bookMediaRevision,
+      bookSnapshot?.memoryPhotoRefs,
+      chapterTitleLine,
+      child,
+      coverColorId,
+      coverPhotoBrowseUri,
+      coverTitleLine,
+      coverYearLabel,
+      cropDpiMetaByKey,
+      familyChildren,
+      maquetteTypography,
+      merge,
+      photoCrops,
+      qrTokensByMemoryId,
+      reorderPageRowByKey,
+      rotations,
+    ],
+  );
+
+  /** Dépôt d’une page : SQLite tout de suite, push cloud débouncé (aucune attente réseau). */
+  const handleReorderPages = useCallback(
+    (orderedKeys: string[]) => {
+      if (!bookId) return;
+      void (async () => {
+        const updated = await applyBookPageOrder(bookId, orderedKeys);
+        if (updated) setBookSnapshot(updated);
+      })();
+    },
+    [bookId],
+  );
+
+  const handleResetPageOrder = useCallback(() => {
+    if (!bookId) return;
+    Alert.alert(
+      'Revenir à l’ordre chronologique ?',
+      'Les pages seront reclassées par date. Ta réorganisation sera perdue.',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Reclasser',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              const updated = await resetBookPageOrderToChronological(bookId);
+              if (updated) setBookSnapshot(updated);
+            })();
+          },
+        },
+      ],
+    );
+  }, [bookId]);
+
   const onPortraitViewableItemsChanged = useRef(
     ({
       viewableItems,
@@ -3466,7 +3684,6 @@ export default function BookPreviewScreen() {
             <Pressable
               onPress={unlockAndGoToFavorisForAdd}
               hitSlop={12}
-              delayPressIn={0}
               style={({ pressed }) => [styles.headerCtaOutline, pressed && { opacity: 0.85 }]}
               accessibilityRole="button"
               accessibilityLabel="Ajouter des souvenirs depuis les favoris"
@@ -3512,7 +3729,16 @@ export default function BookPreviewScreen() {
       ) : null}
 
 
-      {isLandscape ? (
+      {!isLandscape && reorderMode ? (
+        <BookReorderGrid
+          slots={reorderSlots}
+          onReorder={handleReorderPages}
+          coverColorId={coverColorId}
+          renderContent={renderReorderSlotContent}
+          folioFont={dm400}
+          bottomInset={BOTTOM_H}
+        />
+      ) : isLandscape ? (
         <FlatList
           ref={listRef}
           data={spreadRows}
@@ -3567,22 +3793,77 @@ export default function BookPreviewScreen() {
 
       {!isLandscape && bookId ? (
         <View style={styles.browseAddBar}>
-          <Pressable
-            onPress={unlockAndGoToFavorisForAdd}
-            delayPressIn={0}
-            style={({ pressed }) => [styles.headerCtaOutline, pressed && { opacity: 0.85 }]}
-            accessibilityRole="button"
-            accessibilityLabel="Ajouter des souvenirs depuis les favoris"
-          >
-            <Text
-              style={[
-                styles.headerCtaTextDark,
-                dm700 ? { fontFamily: dm700, fontWeight: '400' } : { fontWeight: '600' },
-              ]}
-            >
-              Ajouter
-            </Text>
-          </Pressable>
+          {reorderMode ? (
+            <>
+              {bookSnapshot && isBookPageOrderManual(bookSnapshot) ? (
+                <Pressable
+                  onPress={handleResetPageOrder}
+                  style={({ pressed }) => [styles.headerCtaOutline, pressed && { opacity: 0.85 }]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Revenir à l’ordre chronologique"
+                >
+                  <Text
+                    style={[
+                      styles.headerCtaTextDark,
+                      dm700 ? { fontFamily: dm700, fontWeight: '400' } : { fontWeight: '600' },
+                    ]}
+                  >
+                    Ordre par date
+                  </Text>
+                </Pressable>
+              ) : null}
+              <Pressable
+                onPress={() => setReorderMode(false)}
+                style={({ pressed }) => [styles.headerCtaOutline, pressed && { opacity: 0.85 }]}
+                accessibilityRole="button"
+                accessibilityLabel="Terminer la réorganisation"
+              >
+                <Text
+                  style={[
+                    styles.headerCtaTextDark,
+                    dm700 ? { fontFamily: dm700, fontWeight: '400' } : { fontWeight: '600' },
+                  ]}
+                >
+                  Terminer
+                </Text>
+              </Pressable>
+            </>
+          ) : (
+            <>
+              <Pressable
+                onPress={unlockAndGoToFavorisForAdd}
+                style={({ pressed }) => [styles.headerCtaOutline, pressed && { opacity: 0.85 }]}
+                accessibilityRole="button"
+                accessibilityLabel="Ajouter des souvenirs depuis les favoris"
+              >
+                <Text
+                  style={[
+                    styles.headerCtaTextDark,
+                    dm700 ? { fontFamily: dm700, fontWeight: '400' } : { fontWeight: '600' },
+                  ]}
+                >
+                  Ajouter
+                </Text>
+              </Pressable>
+              {reorderMovableCount > 1 ? (
+                <Pressable
+                  onPress={() => setReorderMode(true)}
+                  style={({ pressed }) => [styles.headerCtaOutline, pressed && { opacity: 0.85 }]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Réorganiser les pages du livre"
+                >
+                  <Text
+                    style={[
+                      styles.headerCtaTextDark,
+                      dm700 ? { fontFamily: dm700, fontWeight: '400' } : { fontWeight: '600' },
+                    ]}
+                  >
+                    Réorganiser
+                  </Text>
+                </Pressable>
+              ) : null}
+            </>
+          )}
         </View>
       ) : null}
 
@@ -4019,7 +4300,10 @@ const styles = StyleSheet.create({
   },
   browseAddBar: {
     flexShrink: 0,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
     backgroundColor: BROWSE_BG,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: THEME.familyFlowLine,

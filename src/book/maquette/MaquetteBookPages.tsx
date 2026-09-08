@@ -41,7 +41,6 @@ import {
 } from '@/src/book/quoteFitLevel';
 import {
   pdfChapterMonthStyle,
-  pdfChapterSubStyle,
   pdfChapterTitleStyle,
   pdfCoverPeriodStyle,
   pdfCoverTitleStyle,
@@ -827,6 +826,8 @@ function MaquetteBookPages(props: Props) {
   const dmItalic = typography.dmItalic;
   const garamondIt = typography.garamondIt;
   const garamond = typography.garamond;
+  const serif = typography.serif;
+  const serifItalic = typography.serifItalic;
   const memoryTextFont = typography.memoryTextFont;
 
   const pad = Math.min(28, width * 0.06);
@@ -840,8 +841,8 @@ function MaquetteBookPages(props: Props) {
           width={width}
           height={height}
           typoScale={typoScale}
-          dm400={dm400}
-          garamondIt={garamondIt}
+          serif={serif}
+          serifItalic={serifItalic}
           bookYearLabel={coverYearLabel}
           titleLine={coverDisplayTitle ?? `Journal de ${page.child.name}`}
           coverPhotoUri={coverPhotoUri ?? null}
@@ -878,22 +879,13 @@ function MaquetteBookPages(props: Props) {
                 styles.chapterTitle,
                 pdfChapterTitleStyle(width),
                 { marginTop: pdfMmToPreviewPxH(8, height) },
-                garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
+                serifItalic ? { fontFamily: serifItalic } : { fontStyle: 'italic' },
               ]}
             >
               {chapterDisplayTitle ?? 'Notre histoire'}
             </Text>
+            {/* Le livre n’a qu’une page d’ouverture : numéroter un chapitre unique n’a pas de sens. */}
             <View style={[styles.chapterLine, { marginTop: pdfMmToPreviewPxH(14, height), width: pdfMmToPreviewPxW(20, width) }]} />
-            <Text
-              style={[
-                styles.chapterSub,
-                pdfChapterSubStyle(width),
-                { marginTop: pdfMmToPreviewPxH(10, height) },
-                dm400 && { fontFamily: dm400 },
-              ]}
-            >
-              Chapitre {page.chapterNum}
-            </Text>
           </Pressable>
           <Folio n={pageNum} dm400={dm400} pageWidthPx={width} pageHeightPx={height} />
         </View>
@@ -998,7 +990,7 @@ function MaquetteBookPages(props: Props) {
               style={[
                 styles.backLine1,
                 { fontSize: pdfPtToPreviewPx(13, width), lineHeight: pdfPtToPreviewPx(13 * 1.4, width) },
-                garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
+                serifItalic ? { fontFamily: serifItalic } : { fontStyle: 'italic' },
               ]}
             >
               Chaque moment compte.
@@ -1025,8 +1017,8 @@ function MaquetteCover({
   width,
   height,
   typoScale,
-  dm400,
-  garamondIt,
+  serif,
+  serifItalic,
   bookYearLabel,
   titleLine,
   coverPhotoUri,
@@ -1044,8 +1036,8 @@ function MaquetteCover({
   width: number;
   height: number;
   typoScale: number;
-  dm400?: string;
-  garamondIt?: string;
+  serif?: string;
+  serifItalic?: string;
   bookYearLabel: string;
   titleLine: string;
   coverPhotoUri: string | null;
@@ -1196,7 +1188,7 @@ function MaquetteCover({
               styles.coverTitle,
               pdfCoverTitleStyle(width),
               { color: theme.ink },
-              garamondIt ? { fontFamily: garamondIt } : { fontStyle: 'italic' },
+              serifItalic ? { fontFamily: serifItalic } : { fontStyle: 'italic' },
             ]}
           >
             {titleLine}
@@ -1207,7 +1199,7 @@ function MaquetteCover({
             styles.coverYears,
             pdfCoverPeriodStyle(width),
             { color: theme.muted },
-            dm400 && { fontFamily: dm400 },
+            serif ? { fontFamily: serif } : null,
           ]}
         >
           {periodLine}
@@ -2202,11 +2194,6 @@ const styles = StyleSheet.create({
     width: 56,
     height: StyleSheet.hairlineWidth,
     backgroundColor: LINE,
-  },
-  chapterSub: {
-    marginTop: 16,
-    fontSize: 12,
-    color: MUTED,
   },
   photoImgWrap: {
     width: '100%',
