@@ -65,6 +65,15 @@ export function immersiveViewerItemKey(item: ImmersiveViewerItem): string {
     : item.memory.id;
 }
 
+/** `memory.id` depuis une clé viewer (souvenir ou page album). */
+export function memoryIdFromImmersiveViewerItemKey(itemKey: string | null | undefined): string | null {
+  const key = itemKey?.trim() ?? '';
+  if (!key) return null;
+  const albumSep = key.indexOf('-album-');
+  if (albumSep > 0) return key.slice(0, albumSep);
+  return key;
+}
+
 export function memoryFromImmersiveViewerItem(item: ImmersiveViewerItem): Memory {
   return item.memory;
 }

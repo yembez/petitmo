@@ -6,12 +6,11 @@ import {
   Pressable,
   ActivityIndicator,
   Platform,
-  Animated,
+  Animated as RNAnimated,
 } from 'react-native';
 import { Image } from 'expo-image';
 import {
   Pencil,
-  Heart,
   Play,
   Trash2,
   ImagePlus,
@@ -23,6 +22,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type Dispatch,
@@ -31,10 +31,21 @@ import {
   type RefObject,
 } from 'react';
 import { THEME } from "@/constants/theme";
+import { MOTION_FEED_VIDEO_POSTER_MS } from '@/constants/motion';
 import { scale, verticalScale } from "@/utils/responsive";
+import { FavoriteHeartButton } from '@/components/FavoriteHeartButton';
+import MotionPressable from '@/components/MotionPressable';
 import { ICON_SIZES } from "@/constants/sizes";
 import {
+  MOTION_PRESS_FILL_ANNOTATE,
+  MOTION_PRESS_IN_ANNOTATE_MS,
+  MOTION_PRESS_OPACITY_DIP_ANNOTATE,
+  MOTION_PRESS_SCALE_ANNOTATE,
+  MOTION_EASE,
+} from '@/constants/motion';
+import {
   FEED_CAPTION_SCROLL_MAX_H,
+  FEED_POST_CARD_RADIUS,
   FEED_TEXT_POST_SCROLL_MAX_H,
   TEXT_POST_CARD_INSET,
 } from '@/constants/feedLayout';
@@ -52,15 +63,21 @@ import {
 import { useFeedPhotoDisplayUrls } from '@/hooks/useFeedPhotoDisplayUrls';
 import { useFeedVideoPlaybackUri } from '@/hooks/useFeedVideoPlaybackUri';
 import { useFeedVideoPosterDisplayUrl } from '@/hooks/useFeedVideoPosterDisplayUrl';
-import { useExpoAvShouldPlay } from '@/hooks/useExpoAvShouldPlay';
+import { useVideoShouldPlay } from '@/hooks/useVideoShouldPlay';
 import { normalizeVideoPlaybackUri } from '@/utils/videoMediaUri';
+import { PetitmoVideoView } from '@/components/PetitmoVideoView';
+import {
+  useSharedVideoPlayer,
+  useIsVideoKeepAlive,
+} from '@/lib/videoPlayerPool';
+import { notifyFeedVideoFirstFrame } from '@/lib/feedVideoReturnHandoff';
 import { clampAudioBookAnnotation } from '@/lib/audioBookAnnotation';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { FeedMediaPrepOverlay } from '@/components/FeedMediaPrepOverlay';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { shareMemory } from '@/services/shareMemory';
-import { Video, ResizeMode, type AVPlaybackStatus } from 'expo-av';
 import { Swipeable, RectButton } from "react-native-gesture-handler";
+import Reanimated, { FadeOut } from 'react-native-reanimated';
 import {
   FeedAgeOverlay,
   FeedPostMetaOverlay,
@@ -87,8 +104,17 @@ import {
   useMemoryEditorialBoldFont,
 } from '@/contexts/MemoryTextFontContext';
 import { ensurePlaybackAudioForListening } from '@/lib/playbackAudioMode';
-import { useIsFeedVideoAutoplay } from '@/lib/feedAutoplayStore';
+import { useIsFeedVideoAutoplay, useIsFeedVideoOnScreen } from '@/lib/feedAutoplayStore';
 import { loadedFontStyle } from '@/utils/loadedFontStyle';
+import {
+  measureViewInWindow,
+  type ImmersiveLaunchArgs,
+  type ImmersiveSharedOrigin,
+} from '@/utils/immersiveSharedElement';
+import {
+  registerFeedImmersiveHost,
+  unregisterFeedImmersiveHost,
+} from '@/utils/feedImmersiveHostRegistry';
 
 /** Icônes d’action (hors favori couleur charte) */
 const ACTION_ICON_INK = '#0A0A0A';
@@ -104,6 +130,8 @@ const FEED_SWIPEABLE_AXIS_LOCK = {
 /** Taille unique des icônes dans le fil (actions + overlays). */
 /** Icônes d’action sous le post — taille et trait unifiés (crayon, photo, cœur). */
 const FEED_POST_ACTION_ICON_PX = scale(20);
+/** Cœur favori plus grand que crayon / share ; trait calé sur `FEED_POST_ACTION_STROKE`. */
+const FEED_FAVORITE_HEART_ICON_PX = scale(28);
 const FEED_POST_ACTION_STROKE = 2.05;
 
 /** Une ligne « envoi en cours » (même liste que les souvenirs → pas de saut de header FlatList). */
@@ -129,7 +157,7 @@ type FilMemoryRowProps = {
   handlePickVoiceCover: (m: Memory) => void | Promise<void>;
   handleDeleteMemory: (m: Memory) => void;
   swipeRefs: MutableRefObject<Map<string, Swipeable | null>>;
-  immersiveLaunchRef: RefObject<(memoryId: string, albumPhotoIndex?: number) => void>;
+  immersiveLaunchRef: RefObject<(args: ImmersiveLaunchArgs) => void>;
   /** Import non finalisé : pas de favori / swipe / actions. */
   isOptimisticFeedPending?: boolean;
   /** Libellé sous la roue (lot multi-photos, etc.). */
@@ -147,6 +175,7 @@ function filMemoryRowDataPropsEqual(prev: FilMemoryRowProps, next: FilMemoryRowP
   if (filMemoryLiteKey(prev.memory) !== filMemoryLiteKey(next.memory)) return false;
   return true;
 }
+
 const PendingFeedUploadCard = memo(function PendingFeedUploadCard({
   p,
   feedLocationFilledFontFamily,
@@ -176,18 +205,18 @@ const PendingFeedUploadCard = memo(function PendingFeedUploadCard({
               feedLocationFilledFontFamily={feedLocationFilledFontFamily}
             />
             {isVideo ? (
-              preview0 ? (
+              preview0 || p.previewPosterUri ? (
                 <View style={[styles.mediaCard, styles.videoBody, styles.videoMediaCard]}>
-                  <Video
-                    source={{ uri: preview0 }}
-                    style={styles.photoImage}
-                    videoStyle={styles.feedInlineVideoNativeBg}
-                    resizeMode={ResizeMode.COVER}
-                    shouldPlay={false}
-                    isLooping={false}
-                    isMuted
-                    useNativeControls={false}
-                  />
+                  {p.previewPosterUri?.trim() ? (
+                    <Image
+                      source={{ uri: p.previewPosterUri.trim() }}
+                      style={styles.photoImage}
+                      contentFit="cover"
+                      cachePolicy="memory-disk"
+                    />
+                  ) : (
+                    <View style={[styles.photoImage, { backgroundColor: '#000000' }]} />
+                  )}
                   <View style={[styles.playOverlay, styles.videoPlayIconAboveTap]} pointerEvents="none">
                     <View style={styles.playButton}>
                       <Play size={ICON_SIZES.sm} color="#FFFFFF" fill="#FFFFFF" strokeWidth={0} />
@@ -243,7 +272,10 @@ function FilMemoryRow({
 }: FilMemoryRowProps) {
   const { t } = useAppTranslation('common');
   const [shareBusy, setShareBusy] = useState(false);
-  const isFeedVideoAutoplay = useIsFeedVideoAutoplay(memory.id);
+  const isFeedVideoAutoplay = useIsFeedVideoAutoplay(
+    memory.type === 'video' ? memory.id : null,
+  );
+  const isFeedVideoOnScreen = useIsFeedVideoOnScreen(memory.id);
   const memoryEditorialFont = useMemoryEditorialFont();
   const memoryEditorialBoldFont = useMemoryEditorialBoldFont();
   const photoUrls = useFeedPhotoDisplayUrls(memory);
@@ -284,80 +316,292 @@ function FilMemoryRow({
   const locationLabelRaw = memory.location?.trim() || '';
   const locationCore = locationLabelRaw.replace(/\s*\([^)]*\)\s*$/, '').trim();
   const locationLabel = locationCore ? `à ${locationCore}` : '';
+  /** Pending : autoplay + immersif OK dès que l’URI locale existe (trim photothèque). */
   const canAutoplayVideoInline =
-    isFeedVideoAutoplay && memory.type === 'video' && !!videoPlaybackUri.trim();
+    isFeedVideoAutoplay &&
+    memory.type === 'video' &&
+    !!videoPlaybackUri.trim();
+  const canOpenImmersiveWhilePending =
+    memory.type === 'video' && !!videoPlaybackUri.trim();
 
   const [feedInlineVideoSoundOn, setFeedInlineVideoSoundOn] = useState(false);
   const [feedInlineVideoDisplayReady, setFeedInlineVideoDisplayReady] = useState(false);
   /** Poster au-dessus de la vidéo : fondu 1→0 une fois la vidéo décodée (évite le « saut » thumbnail → frame). */
-  const feedInlinePosterFade = useRef(new Animated.Value(1)).current;
-  const feedInlineVideoReveal = useRef(new Animated.Value(0)).current;
-  const feedInlineVideoRef = useRef<Video | null>(null);
-  /** Swipe « supprimer » : ne pas ouvrir l’immersif au relâchement du doigt. */
-  const suppressImmersivePressRef = useRef(false);
-  useExpoAvShouldPlay(feedInlineVideoRef, canAutoplayVideoInline, videoPlaybackUri, {
-    restartFromBeginningOnPlay: true,
-  });
-
-  /** `setAudioModeAsync` / `isMuted` peuvent interrompre expo-av — mute impératif + reprise lecture. */
+  const feedInlinePosterFade = useRef(new RNAnimated.Value(1)).current;
+  const feedInlineVideoReveal = useRef(new RNAnimated.Value(0)).current;
+  const viewerHoldsVideo = useIsVideoKeepAlive(
+    memory.type === 'video' ? memory.id : null,
+  );
+  /** Garde le lecteur (sans rembobiner) le temps que l’autoplay fil se ré-accroche. */
+  const [handoffKeepPlayer, setHandoffKeepPlayer] = useState(false);
+  /** Garde la VideoView le temps du fondu vers le poster (sortie de zone autoplay). */
+  const [keepPlayerForPosterFade, setKeepPlayerForPosterFade] = useState(false);
+  const wasAutoplayingRef = useRef(false);
+  const feedInlineVideoDisplayReadyRef = useRef(false);
+  feedInlineVideoDisplayReadyRef.current = feedInlineVideoDisplayReady;
   useEffect(() => {
-    const player = feedInlineVideoRef.current;
-    if (!canAutoplayVideoInline) {
-      if (player) void player.setIsMutedAsync(true).catch(() => {});
+    if (viewerHoldsVideo) setHandoffKeepPlayer(true);
+  }, [viewerHoldsVideo]);
+  useEffect(() => {
+    if (!handoffKeepPlayer || viewerHoldsVideo) return;
+    if (canAutoplayVideoInline) {
+      setHandoffKeepPlayer(false);
       return;
     }
-    if (!player) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        if (feedInlineVideoSoundOn) {
-          await ensurePlaybackAudioForListening();
-        }
-        if (cancelled) return;
-        await player.setIsMutedAsync(!feedInlineVideoSoundOn);
-        if (cancelled) return;
-        const status = await player.getStatusAsync();
-        if (status.isLoaded && !status.isPlaying) {
-          await player.playAsync();
-        }
-      } catch {
-        /* source pas prête */
-      }
-    })();
-    return () => {
-      cancelled = true;
-      void player.setIsMutedAsync(true).catch(() => {});
-    };
-  }, [canAutoplayVideoInline, feedInlineVideoSoundOn]);
+    /** Plus long : laisse FlatList re-déclarer la vignette visible sans rembobiner. */
+    const timer = setTimeout(() => setHandoffKeepPlayer(false), 1200);
+    return () => clearTimeout(timer);
+  }, [handoffKeepPlayer, viewerHoldsVideo, canAutoplayVideoInline]);
+  const sharedVideoPlayer = useSharedVideoPlayer(
+    memory.type === 'video' &&
+      videoPlaybackUri.trim() &&
+      (canAutoplayVideoInline ||
+        viewerHoldsVideo ||
+        handoffKeepPlayer ||
+        keepPlayerForPosterFade)
+      ? memory.id
+      : null,
+    videoPlaybackUri,
+  );
+  /** Swipe « supprimer » : ne pas ouvrir l’immersif au relâchement du doigt. */
+  const suppressImmersivePressRef = useRef(false);
+  const videoImmersiveHostRef = useRef<View>(null);
+  const voiceImmersiveHostRef = useRef<View>(null);
 
   useEffect(() => {
+    if (memory.type !== 'video') return;
+    const uri = videoPosterUri.trim() || videoPlaybackUri.trim();
+    if (!uri) return;
+    const key = memory.id;
+    registerFeedImmersiveHost(key, {
+      getView: () => videoImmersiveHostRef.current,
+      uri,
+      cornerRadius: FEED_POST_CARD_RADIUS,
+    });
+    return () => unregisterFeedImmersiveHost(key);
+  }, [memory.id, memory.type, videoPosterUri, videoPlaybackUri]);
+
+  useEffect(() => {
+    if (memory.type !== 'voice' || !hasVoiceCover) return;
+    const uri = voiceCoverDisplayUri.trim();
+    if (!uri) return;
+    const key = memory.id;
+    registerFeedImmersiveHost(key, {
+      getView: () => voiceImmersiveHostRef.current,
+      uri,
+      cornerRadius: FEED_POST_CARD_RADIUS,
+    });
+    return () => unregisterFeedImmersiveHost(key);
+  }, [memory.id, memory.type, hasVoiceCover, voiceCoverDisplayUri]);
+  useVideoShouldPlay(sharedVideoPlayer, canAutoplayVideoInline && !viewerHoldsVideo, {
+    /**
+     * Rembobiner seulement si la carte a vraiment quitté l’écran.
+     * Au retour immersif, l’autoplay peut flasher « off » une frame : ne pas
+     * remettre à t=0 alors que la vignette est toujours là.
+     */
+    restartFromBeginningOnPlay: !isFeedVideoOnScreen,
+    skipPause: viewerHoldsVideo || handoffKeepPlayer,
+  });
+
+  useEffect(() => {
+    if (!sharedVideoPlayer) return;
+    if (canAutoplayVideoInline && feedInlineVideoSoundOn && !viewerHoldsVideo) {
+      void ensurePlaybackAudioForListening();
+      sharedVideoPlayer.muted = false;
+      return;
+    }
+    if (!viewerHoldsVideo) sharedVideoPlayer.muted = true;
+  }, [sharedVideoPlayer, canAutoplayVideoInline, feedInlineVideoSoundOn, viewerHoldsVideo]);
+
+  const wasViewerHoldingRef = useRef(false);
+  /**
+   * Retour immersif : masquer le JPEG dès l’ouverture (synchrone au paint).
+   * Un `useEffect` après coup laisse 1+ frames de poster opaque sous le fade.
+   */
+  const [suppressPosterAfterImmersive, setSuppressPosterAfterImmersive] = useState(false);
+  const suppressPosterAfterImmersiveRef = useRef(false);
+  suppressPosterAfterImmersiveRef.current = suppressPosterAfterImmersive;
+
+  /** Masque immédiat — pas d’attente d’effet. */
+  const hideFeedVideoPoster =
+    viewerHoldsVideo || handoffKeepPlayer || suppressPosterAfterImmersive;
+
+  useLayoutEffect(() => {
+    if (!viewerHoldsVideo) return;
+    wasViewerHoldingRef.current = true;
+    setSuppressPosterAfterImmersive(true);
+    feedInlinePosterFade.setValue(0);
+    setFeedInlineVideoDisplayReady(false);
+  }, [viewerHoldsVideo, feedInlinePosterFade]);
+
+  useEffect(() => {
+    if (viewerHoldsVideo) return;
+    if (!wasViewerHoldingRef.current || !sharedVideoPlayer || !videoPlaybackUri.trim()) return;
+    wasViewerHoldingRef.current = false;
+    setSuppressPosterAfterImmersive(true);
+    feedInlinePosterFade.setValue(0);
+    feedInlineVideoReveal.setValue(1);
+    setFeedInlineVideoDisplayReady(false);
+    try {
+      sharedVideoPlayer.play();
+    } catch {
+      /* lecteur libéré */
+    }
+    /**
+     * Pas de `reattachVideoPlayer` ici : le `replace` Android force un flash noir
+     * alors que le buffer est déjà chaud depuis l’immersif. La VideoView fil
+     * reprend le flux ; `onFirstFrameRender` notifie le viewer.
+     */
+  }, [
+    sharedVideoPlayer,
+    viewerHoldsVideo,
+    videoPlaybackUri,
+    feedInlinePosterFade,
+    feedInlineVideoReveal,
+  ]);
+
+  useEffect(() => {
+    /**
+     * Reset autoplay « froid » seulement (jamais joué / déjà fondu).
+     * Ne pas snaper le poster si on est en fondu de sortie ou retour immersif.
+     */
+    if (
+      canAutoplayVideoInline ||
+      viewerHoldsVideo ||
+      handoffKeepPlayer ||
+      keepPlayerForPosterFade ||
+      suppressPosterAfterImmersiveRef.current
+    ) {
+      return;
+    }
     setFeedInlineVideoSoundOn(false);
     setFeedInlineVideoDisplayReady(false);
     feedInlinePosterFade.setValue(1);
     feedInlineVideoReveal.setValue(0);
-    // Reset seulement si la source visuelle change — pas au swap pending→id (même URI).
-  }, [canAutoplayVideoInline, videoPlaybackUri, feedInlinePosterFade, feedInlineVideoReveal]);
+  }, [
+    canAutoplayVideoInline,
+    videoPlaybackUri,
+    viewerHoldsVideo,
+    handoffKeepPlayer,
+    keepPlayerForPosterFade,
+    feedInlinePosterFade,
+    feedInlineVideoReveal,
+  ]);
+
+  /**
+   * Sortie de zone autoplay : fondu poster par-dessus la dernière frame,
+   * puis démontage de la VideoView (évite le cut net).
+   */
+  useEffect(() => {
+    if (canAutoplayVideoInline) {
+      wasAutoplayingRef.current = true;
+      setKeepPlayerForPosterFade(false);
+      return;
+    }
+    if (!wasAutoplayingRef.current) return;
+    wasAutoplayingRef.current = false;
+
+    if (viewerHoldsVideo || suppressPosterAfterImmersiveRef.current) {
+      setKeepPlayerForPosterFade(false);
+      return;
+    }
+
+    const hadVisibleVideo = feedInlineVideoDisplayReadyRef.current;
+    const hasPoster = !!videoPosterUri.trim();
+
+    if (hadVisibleVideo && hasPoster) {
+      setKeepPlayerForPosterFade(true);
+      setFeedInlineVideoSoundOn(false);
+      const anim = RNAnimated.timing(feedInlinePosterFade, {
+        toValue: 1,
+        duration: MOTION_FEED_VIDEO_POSTER_MS,
+        useNativeDriver: true,
+      });
+      anim.start(({ finished }) => {
+        if (!finished) return;
+        setKeepPlayerForPosterFade(false);
+        setFeedInlineVideoDisplayReady(false);
+        feedInlineVideoReveal.setValue(0);
+      });
+      return () => {
+        anim.stop();
+        /** `stop()` → finished=false : sans ça le décodeur reste acquis. */
+        setKeepPlayerForPosterFade(false);
+      };
+    }
+
+    if (hadVisibleVideo && !hasPoster) {
+      setKeepPlayerForPosterFade(true);
+      setFeedInlineVideoSoundOn(false);
+      const anim = RNAnimated.timing(feedInlineVideoReveal, {
+        toValue: 0,
+        duration: MOTION_FEED_VIDEO_POSTER_MS,
+        useNativeDriver: true,
+      });
+      anim.start(({ finished }) => {
+        if (!finished) return;
+        setKeepPlayerForPosterFade(false);
+        setFeedInlineVideoDisplayReady(false);
+        feedInlinePosterFade.setValue(1);
+      });
+      return () => {
+        anim.stop();
+        setKeepPlayerForPosterFade(false);
+      };
+    }
+
+    setKeepPlayerForPosterFade(false);
+    setFeedInlineVideoSoundOn(false);
+    setFeedInlineVideoDisplayReady(false);
+    feedInlinePosterFade.setValue(1);
+    feedInlineVideoReveal.setValue(0);
+  }, [
+    canAutoplayVideoInline,
+    viewerHoldsVideo,
+    videoPosterUri,
+    feedInlinePosterFade,
+    feedInlineVideoReveal,
+  ]);
+
+  useEffect(() => {
+    if (!suppressPosterAfterImmersive) return;
+    /** Filet : si pas de 1ʳᵉ frame, réautoriser le poster (lecture morte). */
+    const timer = setTimeout(() => {
+      feedInlinePosterFade.setValue(1);
+      setSuppressPosterAfterImmersive(false);
+    }, 1800);
+    return () => clearTimeout(timer);
+  }, [suppressPosterAfterImmersive, feedInlinePosterFade]);
 
   useEffect(() => {
     if (!feedInlineVideoDisplayReady || !canAutoplayVideoInline) return;
-    const hasPoster = !!videoPosterUri.trim();
-    if (hasPoster) {
-      Animated.timing(feedInlinePosterFade, {
-        toValue: 0,
-        duration: 280,
-        useNativeDriver: true,
-      }).start();
-    } else {
-      Animated.timing(feedInlineVideoReveal, {
-        toValue: 1,
-        duration: 280,
-        useNativeDriver: true,
-      }).start();
+    const fromImmersive = suppressPosterAfterImmersiveRef.current;
+    if (fromImmersive) {
+      feedInlinePosterFade.setValue(0);
+      feedInlineVideoReveal.setValue(1);
+      /** Garder le masque plus longtemps que le crossfade hero (~160 ms). */
+      const t = setTimeout(() => setSuppressPosterAfterImmersive(false), 320);
+      return () => clearTimeout(t);
     }
+    const hasPoster = !!videoPosterUri.trim();
+    const anim = hasPoster
+      ? RNAnimated.timing(feedInlinePosterFade, {
+          toValue: 0,
+          duration: MOTION_FEED_VIDEO_POSTER_MS,
+          useNativeDriver: true,
+        })
+      : RNAnimated.timing(feedInlineVideoReveal, {
+          toValue: 1,
+          duration: MOTION_FEED_VIDEO_POSTER_MS,
+          useNativeDriver: true,
+        });
+    anim.start();
+    return () => anim.stop();
   }, [
     feedInlineVideoDisplayReady,
     canAutoplayVideoInline,
     videoPosterUri,
+    suppressPosterAfterImmersive,
     feedInlinePosterFade,
     feedInlineVideoReveal,
   ]);
@@ -380,13 +624,31 @@ function FilMemoryRow({
     }, 200);
   }, []);
 
-  const launchImmersive = (albumPhotoIndex = 0) => {
-    if (isOptimisticFeedPending) return;
+  const launchImmersive = (args?: {
+    albumPhotoIndex?: number;
+    origin?: ImmersiveSharedOrigin | null;
+    uri?: string | null;
+    cornerRadius?: number;
+  }) => {
+    if (isOptimisticFeedPending && !canOpenImmersiveWhilePending) return;
     if (suppressImmersivePressRef.current) {
       suppressImmersivePressRef.current = false;
       return;
     }
-    immersiveLaunchRef.current(memory.id, albumPhotoIndex);
+    immersiveLaunchRef.current({
+      memoryId: memory.id,
+      albumPhotoIndex: args?.albumPhotoIndex ?? 0,
+      origin: args?.origin,
+      uri: args?.uri,
+      cornerRadius: args?.cornerRadius,
+    });
+  };
+
+  /** Média pleine largeur en haut de carte : coins hauts arrondis comme le post. */
+  const launchImmersiveFromHost = (host: View | null, uri?: string | null) => {
+    measureViewInWindow(host, origin => {
+      launchImmersive({ origin, uri, cornerRadius: FEED_POST_CARD_RADIUS });
+    });
   };
 
   const handleShareMemory = useCallback(() => {
@@ -402,12 +664,15 @@ function FilMemoryRow({
     }).finally(() => setShareBusy(false));
   }, [isOptimisticFeedPending, memory, shareBusy, t]);
 
-  const skipImmersive = isOptimisticFeedPending;
+  const skipImmersive = isOptimisticFeedPending && !canOpenImmersiveWhilePending;
 
   const feedPhotoFavorited =
     memory.type === 'photo' && isFeedMultiPhotoAlbum(memory)
       ? !!memory.is_favorite || isAlbumFullyFavorited(memory)
       : !!memory.is_favorite;
+
+  const rowFavorite =
+    memory.type === 'photo' ? feedPhotoFavorited : !!memory.is_favorite;
 
   const isMediaPost =
     memory.type === 'photo' || memory.type === 'video' || memory.type === 'voice';
@@ -521,7 +786,15 @@ function FilMemoryRow({
                   )
                 }
                 onPhotoImmersive={
-                  !isOptimisticFeedPending && photoUrls.length > 0 ? launchImmersive : undefined
+                  !isOptimisticFeedPending && photoUrls.length > 0
+                    ? ({ index, origin, uri, cornerRadius }) =>
+                        launchImmersive({
+                          albumPhotoIndex: index,
+                          origin,
+                          uri,
+                          cornerRadius,
+                        })
+                    : undefined
                 }
                 memoryForFavoriteVariants={memory}
               />
@@ -548,7 +821,14 @@ function FilMemoryRow({
             <View style={{ position: 'relative' }}>
               {mediaMetaOverlay}
               <Pressable
-                onPress={launchImmersive}
+                ref={videoImmersiveHostRef}
+                collapsable={false}
+                onPress={() =>
+                  launchImmersiveFromHost(
+                    videoImmersiveHostRef.current,
+                    videoPosterUri.trim() || videoPlaybackUri.trim() || null,
+                  )
+                }
                 disabled={skipImmersive}
                 accessibilityRole="button"
                 accessibilityLabel="Ouvrir en plein écran"
@@ -559,74 +839,67 @@ function FilMemoryRow({
                       <View
                         style={[
                           StyleSheet.absoluteFillObject,
-                          { backgroundColor: '#000000', zIndex: 0 },
+                          {
+                            /**
+                             * Retour immersif : pas de sous-couche noire (flash).
+                             * Autoplay froid : noir OK sous le poster / la 1ʳᵉ frame.
+                             */
+                            backgroundColor: hideFeedVideoPoster ? 'transparent' : '#000000',
+                            zIndex: 0,
+                          },
                         ]}
                         pointerEvents="none"
                       />
-                      <Animated.View
+                      <RNAnimated.View
                         style={[
                           StyleSheet.absoluteFillObject,
                           {
-                            opacity: videoPosterUri.trim()
-                              ? 1
-                              : feedInlineVideoReveal,
+                            opacity: hideFeedVideoPoster ? feedInlineVideoReveal : videoPosterUri.trim() ? 1 : feedInlineVideoReveal,
                             zIndex: 1,
-                            backgroundColor: '#000000',
+                            backgroundColor: hideFeedVideoPoster ? 'transparent' : '#000000',
                           },
                         ]}
                         pointerEvents="none"
                       >
-                        <Video
-                          ref={feedInlineVideoRef}
-                          source={{ uri: videoPlaybackUri }}
-                          style={StyleSheet.absoluteFillObject}
-                          videoStyle={styles.feedInlineVideoNativeBg}
-                          resizeMode={ResizeMode.COVER}
-                          shouldPlay={false}
-                          isLooping={canAutoplayVideoInline}
-                          isMuted={!canAutoplayVideoInline || !feedInlineVideoSoundOn}
-                          useNativeControls={false}
-                          onReadyForDisplay={() => {
-                            setFeedInlineVideoDisplayReady(prev => prev || true);
-                          }}
-                          onPlaybackStatusUpdate={(status: AVPlaybackStatus) => {
-                            if (!status.isLoaded) return;
-                            if (
-                              status.isPlaying ||
-                              (typeof status.positionMillis === 'number' &&
-                                status.positionMillis > 40)
-                            ) {
+                        {sharedVideoPlayer && !viewerHoldsVideo ? (
+                          <PetitmoVideoView
+                            player={sharedVideoPlayer}
+                            style={StyleSheet.absoluteFillObject}
+                            onFirstFrameRender={() => {
                               setFeedInlineVideoDisplayReady(prev => prev || true);
-                            }
-                          }}
-                        />
-                      </Animated.View>
-                      {videoPosterUri.trim() ? (
-                        canAutoplayVideoInline ? (
-                          <Animated.View
-                            style={[
-                              StyleSheet.absoluteFillObject,
-                              { opacity: feedInlinePosterFade, zIndex: 2 },
-                            ]}
-                            pointerEvents="none"
-                          >
-                            <Image
-                              source={{ uri: videoPosterUri }}
-                              style={StyleSheet.absoluteFillObject}
-                              contentFit="cover"
-                              cachePolicy="memory-disk"
-                              recyclingKey={`poster-${memory.id}`}
-                            />
-                          </Animated.View>
-                        ) : (
+                              notifyFeedVideoFirstFrame(memory.id);
+                            }}
+                          />
+                        ) : null}
+                      </RNAnimated.View>
+                      {videoPosterUri.trim() && !hideFeedVideoPoster ? (
+                        <RNAnimated.View
+                          style={[
+                            StyleSheet.absoluteFillObject,
+                            {
+                              /**
+                               * Toujours le fade animé si on a une URI de lecture :
+                               * la branche `Image` opaque s’affichait dès que
+                               * `canAutoplay` était false au retour.
+                               */
+                              opacity: videoPlaybackUri.trim()
+                                ? feedInlinePosterFade
+                                : canAutoplayVideoInline
+                                  ? feedInlinePosterFade
+                                  : 1,
+                              zIndex: 2,
+                            },
+                          ]}
+                          pointerEvents="none"
+                        >
                           <Image
                             source={{ uri: videoPosterUri }}
-                            style={[StyleSheet.absoluteFillObject, { zIndex: 2 }]}
+                            style={StyleSheet.absoluteFillObject}
                             contentFit="cover"
                             cachePolicy="memory-disk"
                             recyclingKey={`poster-${memory.id}`}
                           />
-                        )
+                        </RNAnimated.View>
                       ) : null}
                       {/** Roue seulement si aucun visuel local (pas de poster / preview). */}
                       {isOptimisticFeedPending &&
@@ -688,7 +961,14 @@ function FilMemoryRow({
             <View style={{ position: 'relative' }}>
               {mediaMetaOverlay}
             <Pressable
-              onPress={launchImmersive}
+              ref={voiceImmersiveHostRef}
+              collapsable={false}
+              onPress={() =>
+                launchImmersiveFromHost(
+                  voiceImmersiveHostRef.current,
+                  hasVoiceCover ? voiceCoverDisplayUri : null,
+                )
+              }
               disabled={skipImmersive}
               accessibilityRole="button"
               accessibilityLabel="Ouvrir en plein écran"
@@ -820,10 +1100,15 @@ function FilMemoryRow({
             memory.type === 'photo' ||
             memory.type === 'video' ||
             memory.type === 'voice' ? (
-              <TouchableOpacity
+              <MotionPressable
                 style={styles.feedPencilDiscCta}
                 onPress={() => handleEditMemory(memory)}
-                activeOpacity={0.75}
+                haptic="medium"
+                pressScale={MOTION_PRESS_SCALE_ANNOTATE}
+                pressOpacityDip={MOTION_PRESS_OPACITY_DIP_ANNOTATE}
+                pressInMs={MOTION_PRESS_IN_ANNOTATE_MS}
+                pressFillFrom={THEME.feedPencilDiscCtaBackground}
+                pressFill={MOTION_PRESS_FILL_ANNOTATE}
                 accessibilityRole="button"
                 accessibilityLabel={
                   memory.type === 'text'
@@ -832,19 +1117,20 @@ function FilMemoryRow({
                       ? 'Modifier'
                       : 'Annoter'
                 }
+                hitSlop={10}
               >
                 <Pencil
                   size={FEED_POST_ACTION_ICON_PX}
                   color={ACTION_ICON_INK}
                   strokeWidth={FEED_POST_ACTION_STROKE}
                 />
-              </TouchableOpacity>
+              </MotionPressable>
             ) : null}
 
             {memory.type === 'text' && !skipImmersive ? (
               <TouchableOpacity
                 style={styles.feedPencilDiscCta}
-                onPress={launchImmersive}
+                onPress={() => launchImmersive()}
                 activeOpacity={0.75}
                 accessibilityRole="button"
                 accessibilityLabel="Ouvrir en plein écran"
@@ -883,13 +1169,13 @@ function FilMemoryRow({
 
           <View style={styles.postActionsRight}>
             {!isOptimisticFeedPending ? (
-              <TouchableOpacity
+              <MotionPressable
                 style={styles.feedPencilDiscCta}
                 onPress={handleShareMemory}
-                activeOpacity={0.75}
                 disabled={shareBusy}
                 accessibilityRole="button"
                 accessibilityLabel={t('fil.share.a11y')}
+                hitSlop={8}
               >
                 {shareBusy ? (
                   <ActivityIndicator size="small" color={ACTION_ICON_INK} />
@@ -900,35 +1186,22 @@ function FilMemoryRow({
                     strokeWidth={FEED_POST_ACTION_STROKE}
                   />
                 )}
-              </TouchableOpacity>
+              </MotionPressable>
             ) : null}
 
-            <TouchableOpacity
+            <FavoriteHeartButton
+              favored={rowFavorite}
+              onPress={() => void toggleFavorite(memory.id)}
+              size={FEED_FAVORITE_HEART_ICON_PX}
+              strokeColor={ACTION_ICON_INK}
+              strokeWidth={FEED_POST_ACTION_STROKE}
+              fillColor={THEME.feedFavoriteTerracotta}
+              halo="terracotta"
               style={[
                 styles.feedFavoriteDiscCta,
-                (memory.type === 'photo' ? feedPhotoFavorited : !!memory.is_favorite) &&
-                  styles.feedFavoriteDiscCtaActive,
+                rowFavorite && styles.feedFavoriteDiscCtaActive,
               ]}
-              onPress={() => void toggleFavorite(memory.id)}
-              activeOpacity={0.75}
-              accessibilityRole="button"
-              accessibilityLabel="Favori"
-            >
-              <Heart
-                size={FEED_POST_ACTION_ICON_PX}
-                color={
-                  (memory.type === 'photo' ? feedPhotoFavorited : !!memory.is_favorite)
-                    ? THEME.feedFavoriteTerracotta
-                    : ACTION_ICON_INK
-                }
-                strokeWidth={FEED_POST_ACTION_STROKE}
-                fill={
-                  (memory.type === 'photo' ? feedPhotoFavorited : !!memory.is_favorite)
-                    ? THEME.feedFavoriteTerracotta
-                    : 'none'
-                }
-              />
-            </TouchableOpacity>
+            />
           </View>
         </View>
       </View>
@@ -937,7 +1210,10 @@ function FilMemoryRow({
   );
 
   return (
-    <View style={[styles.feedRowRoot, memoryIndex > 0 && styles.feedRowSpacingTop]}>
+    <Reanimated.View
+      style={[styles.feedRowRoot, memoryIndex > 0 && styles.feedRowSpacingTop]}
+      exiting={FadeOut.duration(180).easing(MOTION_EASE.exit)}
+    >
       <Swipeable
         ref={(r) => {
           if (r) swipeRefs.current.set(memory.id, r);
@@ -970,7 +1246,7 @@ function FilMemoryRow({
       >
         {postCard}
       </Swipeable>
-    </View>
+    </Reanimated.View>
   );
 }
 

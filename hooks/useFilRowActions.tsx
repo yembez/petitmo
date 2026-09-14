@@ -11,9 +11,18 @@ import {
 } from '@/services/media';
 import { Swipeable } from 'react-native-gesture-handler';
 import type { Memory } from '@/utils/feedHelpers';
-import { notifyFilNewestMemoryRemoved } from '@/services/feedScrollRestore';
 
-export function useFilRowActions(setMemories: Dispatch<SetStateAction<Memory[]>>) {
+export type FilRowActionsScrollBridge = {
+  /** Offset Y courant du FlatList (avant retrait). */
+  getScrollOffset: () => number;
+  /** Re-pin après retrait des data (évite le saut FlatList). */
+  pinScrollOffset: (y: number) => void;
+};
+
+export function useFilRowActions(
+  setMemories: Dispatch<SetStateAction<Memory[]>>,
+  scrollBridge?: FilRowActionsScrollBridge,
+) {
   const router = useRouter();
   const swipeRefs = useRef<Map<string, Swipeable | null>>(new Map());
   const [editModalVisible, setEditModalVisible] = useState(false);
@@ -21,6 +30,8 @@ export function useFilRowActions(setMemories: Dispatch<SetStateAction<Memory[]>>
   const [editLocationModalVisible, setEditLocationModalVisible] = useState(false);
   const [editingLocationMemory, setEditingLocationMemory] = useState<Memory | null>(null);
   const [uploadingVoiceCoverId, setUploadingVoiceCoverId] = useState<string | null>(null);
+  const scrollBridgeRef = useRef(scrollBridge);
+  scrollBridgeRef.current = scrollBridge;
 
   const handleEditMemory = useCallback((memory: Memory) => {
     if (memory.id.startsWith('pending_')) return;
@@ -123,19 +134,19 @@ export function useFilRowActions(setMemories: Dispatch<SetStateAction<Memory[]>>
         {
           text: 'Supprimer',
           style: 'destructive',
-          onPress: async () => {
+          onPress: () => {
             swipeRefs.current.get(memory.id)?.close();
             const id = memory.id;
-            setMemories(prev => {
-              if (prev[0]?.id === id) notifyFilNewestMemoryRemoved();
-              return prev.filter(m => m.id !== id);
-            });
-            await deleteMemory(id);
+            const y = Math.max(0, scrollBridgeRef.current?.getScrollOffset() ?? 0);
+            // Pin d’abord, puis retire — LinearTransition sur Animated.FlatList anime la remontée.
+            scrollBridgeRef.current?.pinScrollOffset(y);
+            setMemories(prev => prev.filter(m => m.id !== id));
+            void deleteMemory(id);
           },
         },
       ]);
     },
-    [setMemories]
+    [setMemories],
   );
 
   const closeEditModal = useCallback(() => {

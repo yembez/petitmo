@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,8 @@ import {
   Alert,
   type LayoutChangeEvent,
 } from 'react-native';
-import { Video, ResizeMode, type AVPlaybackStatus } from 'expo-av';
+import { useVideoPlayer, type VideoPlayer } from 'expo-video';
+import { PetitmoVideoView } from '@/components/PetitmoVideoView';
 import { X, Play, Pause } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Memory } from '@/types/local';
@@ -40,7 +41,7 @@ function sleep(ms: number): Promise<void> {
 export function BookVideoPosterPickerModal({ visible, memory, onClose, onSaved }: Props) {
   const { t } = useAppTranslation('common');
   const insets = useSafeAreaInsets();
-  const videoRef = useRef<Video>(null);
+  const playerRef = useRef<VideoPlayer | null>(null);
   const trackWidthRef = useRef(0);
   const scrubbingRef = useRef(false);
   const seekRafRef = useRef<number | null>(null);
@@ -68,7 +69,11 @@ export function BookVideoPosterPickerModal({ visible, memory, onClose, onSaved }
     const ms = pendingSeekMsRef.current;
     pendingSeekMsRef.current = null;
     if (ms == null) return;
-    void videoRef.current?.setPositionAsync(ms).catch(() => {});
+    try {
+      if (playerRef.current) playerRef.current.currentTime = ms / 1000;
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   const scheduleSeek = useCallback(
@@ -106,7 +111,11 @@ export function BookVideoPosterPickerModal({ visible, memory, onClose, onSaved }
         cancelAnimationFrame(seekRafRef.current);
         seekRafRef.current = null;
       }
-      void videoRef.current?.pauseAsync().catch(() => {});
+      try {
+        playerRef.current?.pause();
+      } catch {
+        /* ignore */
+      }
     };
   }, [visible, memory?.id, memory?.type, memoryDurationMs]);
 
@@ -132,7 +141,11 @@ export function BookVideoPosterPickerModal({ visible, memory, onClose, onSaved }
           if (savingRef.current) return;
           scrubbingRef.current = true;
           setIsPlaying(false);
-          void videoRef.current?.pauseAsync().catch(() => {});
+          try {
+            playerRef.current?.pause();
+          } catch {
+            /* ignore */
+          }
           applySeek(e.nativeEvent.locationX);
         },
         onPanResponderMove: e => {
@@ -151,29 +164,22 @@ export function BookVideoPosterPickerModal({ visible, memory, onClose, onSaved }
     [applySeek, flushPendingSeek],
   );
 
-  const onPlaybackStatusUpdate = useCallback((status: AVPlaybackStatus) => {
-    if (!status.isLoaded) return;
-    if (typeof status.durationMillis === 'number' && status.durationMillis > 0) {
-      setDurationMillis(status.durationMillis);
-    }
-    if (!scrubbingRef.current && typeof status.positionMillis === 'number') {
-      positionMillisRef.current = status.positionMillis;
-      setPositionMillis(status.positionMillis);
-    }
-    setIsPlaying(!!status.isPlaying);
-    if (status.isLoaded) {
-      setVideoReady(true);
-    }
-  }, []);
-
   const togglePlay = useCallback(() => {
     if (!videoReady || savingRef.current) return;
     if (isPlaying) {
-      void videoRef.current?.pauseAsync().catch(() => {});
+      try {
+        playerRef.current?.pause();
+      } catch {
+        /* ignore */
+      }
       setIsPlaying(false);
       return;
     }
-    void videoRef.current?.playAsync().catch(() => {});
+    try {
+      playerRef.current?.play();
+    } catch {
+      /* ignore */
+    }
     setIsPlaying(true);
   }, [isPlaying, videoReady]);
 
@@ -192,23 +198,28 @@ export function BookVideoPosterPickerModal({ visible, memory, onClose, onSaved }
     const uriForExtract = videoUri.trim();
     try {
       flushPendingSeek();
-      await videoRef.current?.pauseAsync().catch(() => {});
+      try {
+        playerRef.current?.pause();
+      } catch {
+        /* ignore */
+      }
       setIsPlaying(false);
 
-      const status = await videoRef.current?.getStatusAsync().catch(() => null);
-      const exactMs =
-        status && status.isLoaded && typeof status.positionMillis === 'number'
-          ? status.positionMillis
-          : positionMillisRef.current;
+      const exactMs = playerRef.current
+        ? Math.round(playerRef.current.currentTime * 1000)
+        : positionMillisRef.current;
 
-      await videoRef.current?.setPositionAsync(exactMs).catch(() => {});
+      try {
+        if (playerRef.current) playerRef.current.currentTime = exactMs / 1000;
+      } catch {
+        /* ignore */
+      }
       positionMillisRef.current = exactMs;
       setPositionMillis(exactMs);
       // Laisse le decodeur se poser sur la frame choisie.
       await sleep(180);
 
-      // Libère AVPlayer avant expo-video-thumbnails (sinon échecs aléatoires iOS).
-      await videoRef.current?.unloadAsync().catch(() => {});
+      // Libère le lecteur avant expo-video-thumbnails (sinon échecs aléatoires iOS).
       setPlayerMounted(false);
       setVideoReady(false);
       await sleep(120);
@@ -229,7 +240,11 @@ export function BookVideoPosterPickerModal({ visible, memory, onClose, onSaved }
 
       Alert.alert(t('error'), t('book.videoPoster.saveFailed'));
       await remountPlayer(uriForExtract);
-      await videoRef.current?.setPositionAsync(exactMs).catch(() => {});
+      try {
+        if (playerRef.current) playerRef.current.currentTime = exactMs / 1000;
+      } catch {
+        /* ignore */
+      }
     } catch (e) {
       console.warn('[BookVideoPosterPickerModal] handleSave', e);
       Alert.alert(t('error'), t('book.videoPoster.saveFailed'));
@@ -274,18 +289,17 @@ export function BookVideoPosterPickerModal({ visible, memory, onClose, onSaved }
 
       <Pressable style={styles.previewWrap} onPress={togglePlay} accessibilityRole="button">
         {videoUri.trim() && playerMounted ? (
-          <Video
-            ref={videoRef}
-            source={{ uri: videoUri }}
-            style={styles.previewVideo}
-            resizeMode={ResizeMode.COVER}
-            shouldPlay={isPlaying}
-            isLooping={false}
-            isMuted
-            useNativeControls={false}
-            progressUpdateIntervalMillis={33}
-            onPlaybackStatusUpdate={onPlaybackStatusUpdate}
-            onReadyForDisplay={() => setVideoReady(true)}
+          <PosterPickerPreview
+            uri={videoUri}
+            playerRef={playerRef}
+            scrubbingRef={scrubbingRef}
+            onReady={() => setVideoReady(true)}
+            onDurationMs={setDurationMillis}
+            onPositionMs={ms => {
+              positionMillisRef.current = ms;
+              setPositionMillis(ms);
+            }}
+            onPlayingChange={setIsPlaying}
           />
         ) : (
           <View style={styles.previewPlaceholder}>
@@ -359,6 +373,58 @@ export function BookVideoPosterPickerModal({ visible, memory, onClose, onSaved }
         )}
       </PetitmoPrimaryPressable>
     </View>
+  );
+}
+
+function PosterPickerPreview({
+  uri,
+  playerRef,
+  scrubbingRef,
+  onReady,
+  onDurationMs,
+  onPositionMs,
+  onPlayingChange,
+}: {
+  uri: string;
+  playerRef: MutableRefObject<VideoPlayer | null>;
+  scrubbingRef: MutableRefObject<boolean>;
+  onReady: () => void;
+  onDurationMs: (ms: number) => void;
+  onPositionMs: (ms: number) => void;
+  onPlayingChange: (playing: boolean) => void;
+}) {
+  const player = useVideoPlayer(uri, instance => {
+    instance.loop = false;
+    instance.muted = true;
+    instance.timeUpdateEventInterval = 0.033;
+  });
+  playerRef.current = player;
+
+  useEffect(() => {
+    const loadSub = player.addListener('sourceLoad', ({ duration }) => {
+      if (duration > 0) onDurationMs(Math.round(duration * 1000));
+      onReady();
+    });
+    const timeSub = player.addListener('timeUpdate', ({ currentTime }) => {
+      if (!scrubbingRef.current) onPositionMs(Math.round(currentTime * 1000));
+    });
+    const playSub = player.addListener('playingChange', ({ isPlaying }) => {
+      onPlayingChange(isPlaying);
+    });
+    return () => {
+      loadSub.remove();
+      timeSub.remove();
+      playSub.remove();
+    };
+  }, [player, onDurationMs, onPlayingChange, onPositionMs, onReady, scrubbingRef]);
+
+  return (
+    <PetitmoVideoView
+      player={player}
+      contentFit="cover"
+      style={styles.previewVideo}
+      onFirstFrameRender={onReady}
+    />
   );
 }
 

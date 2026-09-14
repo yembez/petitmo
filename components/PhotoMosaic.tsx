@@ -1,9 +1,29 @@
-import { useCallback, type ReactNode } from 'react';
-import { View, Text, StyleSheet, useWindowDimensions, Pressable } from 'react-native';
+import { useCallback, useEffect, useRef, type ReactNode } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  useWindowDimensions,
+  Pressable,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 import { Image } from 'expo-image';
-import { MEDIA_CARD_INSET, MEDIA_CARD_RADIUS } from '@/constants/feedLayout';
+import {
+  FEED_POST_CARD_RADIUS,
+  MEDIA_CARD_INSET,
+  MEDIA_CARD_RADIUS,
+} from '@/constants/feedLayout';
 import { scale } from '@/utils/responsive';
 import type { Memory } from '@/types/local';
+import {
+  measureViewInWindow,
+  type ImmersiveSharedOrigin,
+} from '@/utils/immersiveSharedElement';
+import {
+  registerFeedImmersiveHost,
+  unregisterFeedImmersiveHost,
+} from '@/utils/feedImmersiveHostRegistry';
 
 const GAP = scale(3);
 
@@ -14,11 +34,74 @@ type Props = {
   favoritePhotoUrls?: string[];
   onFavoritePhotoUrlsUpdated?: (urls: string[]) => void;
   /** Au tap : ouvre le viewer immersif à l’index donné (1 ou N photos). */
-  onPhotoImmersive?: (index: number) => void;
+  onPhotoImmersive?: (args: {
+    index: number;
+    origin: ImmersiveSharedOrigin | null;
+    uri: string;
+    cornerRadius: number;
+  }) => void;
   /** @deprecated Utiliser `onPhotoImmersive`. */
   onSinglePhotoImmersive?: () => void;
   memoryForFavoriteVariants?: Memory | null;
 };
+
+function mosaicImmersiveKey(
+  memoryId: string | undefined,
+  index: number,
+  album: boolean,
+): string | null {
+  if (!memoryId?.trim()) return null;
+  return album ? `${memoryId}-album-${index}` : memoryId;
+}
+
+function MosaicTapCell({
+  style,
+  uri,
+  index,
+  immersiveKey,
+  cornerRadius,
+  onOpen,
+  accessibilityLabel,
+  children,
+}: {
+  style?: StyleProp<ViewStyle>;
+  uri: string;
+  index: number;
+  immersiveKey: string | null;
+  cornerRadius: number;
+  onOpen: (index: number, origin: ImmersiveSharedOrigin | null, uri: string) => void;
+  accessibilityLabel?: string;
+  children: ReactNode;
+}) {
+  const ref = useRef<View>(null);
+
+  useEffect(() => {
+    if (!immersiveKey) return;
+    registerFeedImmersiveHost(immersiveKey, {
+      getView: () => ref.current,
+      uri,
+      cornerRadius,
+    });
+    return () => unregisterFeedImmersiveHost(immersiveKey);
+  }, [immersiveKey, uri, cornerRadius]);
+
+  return (
+    <Pressable
+      ref={ref}
+      collapsable={false}
+      style={style}
+      accessibilityRole="image"
+      accessibilityLabel={accessibilityLabel ?? 'Ouvrir la photo en grand'}
+      onPress={() => {
+        measureViewInWindow(ref.current, origin => {
+          onOpen(index, origin, uri);
+        });
+      }}
+    >
+      {children}
+    </Pressable>
+  );
+}
 
 /**
  * Grille type WhatsApp ; au tap → viewer immersif si `onPhotoImmersive` est fourni.
@@ -42,9 +125,15 @@ export default function PhotoMosaic({
   });
 
   const openImmersive = useCallback(
-    (index: number) => {
+    (index: number, origin: ImmersiveSharedOrigin | null, uri: string) => {
       if (onPhotoImmersive) {
-        onPhotoImmersive(index);
+        onPhotoImmersive({
+          index,
+          origin,
+          uri,
+          /** Photo unique : elle occupe le haut de la carte, donc ses coins sont arrondis. */
+          cornerRadius: n === 1 ? FEED_POST_CARD_RADIUS : 0,
+        });
         return;
       }
       if (n === 1 && onSinglePhotoImmersive) {
@@ -59,21 +148,26 @@ export default function PhotoMosaic({
   const cell = (W - GAP) / 2;
   const rowH = cell;
   const fourthOverlay = n > 4 ? n - 4 : 0;
+  const album = n > 1;
+  const cellCorner = n === 1 ? FEED_POST_CARD_RADIUS : 0;
+  const cellKey = (index: number) => mosaicImmersiveKey(memoryId, index, album);
 
-  const onPressFourthCell = () => {
-    if (n > 4) openImmersive(4);
-    else openImmersive(3);
+  const onPressFourthCell = (origin: ImmersiveSharedOrigin | null, uri: string) => {
+    if (n > 4) openImmersive(4, origin, uri);
+    else openImmersive(3, origin, uri);
   };
 
   let grid: ReactNode;
 
   if (n === 1) {
     grid = (
-      <Pressable
-        onPress={() => openImmersive(0)}
+      <MosaicTapCell
+        uri={urls[0]}
+        index={0}
+        immersiveKey={cellKey(0)}
+        cornerRadius={cellCorner}
+        onOpen={openImmersive}
         style={[styles.wrap, { borderRadius: MEDIA_CARD_RADIUS }]}
-        accessibilityRole="image"
-        accessibilityLabel="Ouvrir la photo en grand"
       >
         <Image
           source={{ uri: urls[0] }}
@@ -81,18 +175,32 @@ export default function PhotoMosaic({
           contentFit="cover"
           {...feedImageCache(0)}
         />
-      </Pressable>
+      </MosaicTapCell>
     );
   } else if (n === 2) {
     grid = (
       <View style={[styles.wrap, styles.row, { width: W, borderRadius: MEDIA_CARD_RADIUS }]}>
-        <Pressable onPress={() => openImmersive(0)} style={[styles.fill, { width: cell, height: rowH }]}>
+        <MosaicTapCell
+          uri={urls[0]}
+          index={0}
+          immersiveKey={cellKey(0)}
+          cornerRadius={cellCorner}
+          onOpen={openImmersive}
+          style={[styles.fill, { width: cell, height: rowH }]}
+        >
           <Image source={{ uri: urls[0] }} style={StyleSheet.absoluteFillObject} contentFit="cover" {...feedImageCache(0)} />
-        </Pressable>
+        </MosaicTapCell>
         <View style={{ width: GAP }} />
-        <Pressable onPress={() => openImmersive(1)} style={[styles.fill, { width: cell, height: rowH }]}>
+        <MosaicTapCell
+          uri={urls[1]}
+          index={1}
+          immersiveKey={cellKey(1)}
+          cornerRadius={cellCorner}
+          onOpen={openImmersive}
+          style={[styles.fill, { width: cell, height: rowH }]}
+        >
           <Image source={{ uri: urls[1] }} style={StyleSheet.absoluteFillObject} contentFit="cover" {...feedImageCache(1)} />
-        </Pressable>
+        </MosaicTapCell>
       </View>
     );
   } else if (n === 3) {
@@ -100,39 +208,86 @@ export default function PhotoMosaic({
     const halfH = (H - GAP) / 2;
     grid = (
       <View style={[styles.wrap, styles.row, { width: W, height: H, borderRadius: MEDIA_CARD_RADIUS }]}>
-        <Pressable onPress={() => openImmersive(0)} style={[styles.fill, { width: cell, height: H }]}>
+        <MosaicTapCell
+          uri={urls[0]}
+          index={0}
+          immersiveKey={cellKey(0)}
+          cornerRadius={cellCorner}
+          onOpen={openImmersive}
+          style={[styles.fill, { width: cell, height: H }]}
+        >
           <Image source={{ uri: urls[0] }} style={StyleSheet.absoluteFillObject} contentFit="cover" {...feedImageCache(0)} />
-        </Pressable>
+        </MosaicTapCell>
         <View style={{ width: GAP }} />
         <View style={{ width: cell, height: H }}>
-          <Pressable onPress={() => openImmersive(1)} style={[styles.fill, { width: cell, height: halfH, marginBottom: GAP }]}>
+          <MosaicTapCell
+            uri={urls[1]}
+            index={1}
+            immersiveKey={cellKey(1)}
+            cornerRadius={cellCorner}
+            onOpen={openImmersive}
+            style={[styles.fill, { width: cell, height: halfH, marginBottom: GAP }]}
+          >
             <Image source={{ uri: urls[1] }} style={StyleSheet.absoluteFillObject} contentFit="cover" {...feedImageCache(1)} />
-          </Pressable>
-          <Pressable onPress={() => openImmersive(2)} style={[styles.fill, { width: cell, height: halfH }]}>
+          </MosaicTapCell>
+          <MosaicTapCell
+            uri={urls[2]}
+            index={2}
+            immersiveKey={cellKey(2)}
+            cornerRadius={cellCorner}
+            onOpen={openImmersive}
+            style={[styles.fill, { width: cell, height: halfH }]}
+          >
             <Image source={{ uri: urls[2] }} style={StyleSheet.absoluteFillObject} contentFit="cover" {...feedImageCache(2)} />
-          </Pressable>
+          </MosaicTapCell>
         </View>
       </View>
     );
   } else {
+    const fourthIndex = n > 4 ? 4 : 3;
     grid = (
       <View style={[styles.wrap, { width: W, borderRadius: MEDIA_CARD_RADIUS }]}>
         <View style={[styles.row, { marginBottom: GAP }]}>
-          <Pressable onPress={() => openImmersive(0)} style={[styles.fill, { width: cell, height: rowH }]}>
+          <MosaicTapCell
+            uri={urls[0]}
+            index={0}
+            immersiveKey={cellKey(0)}
+            cornerRadius={cellCorner}
+            onOpen={openImmersive}
+            style={[styles.fill, { width: cell, height: rowH }]}
+          >
             <Image source={{ uri: urls[0] }} style={StyleSheet.absoluteFillObject} contentFit="cover" {...feedImageCache(0)} />
-          </Pressable>
+          </MosaicTapCell>
           <View style={{ width: GAP }} />
-          <Pressable onPress={() => openImmersive(1)} style={[styles.fill, { width: cell, height: rowH }]}>
+          <MosaicTapCell
+            uri={urls[1]}
+            index={1}
+            immersiveKey={cellKey(1)}
+            cornerRadius={cellCorner}
+            onOpen={openImmersive}
+            style={[styles.fill, { width: cell, height: rowH }]}
+          >
             <Image source={{ uri: urls[1] }} style={StyleSheet.absoluteFillObject} contentFit="cover" {...feedImageCache(1)} />
-          </Pressable>
+          </MosaicTapCell>
         </View>
         <View style={styles.row}>
-          <Pressable onPress={() => openImmersive(2)} style={[styles.fill, { width: cell, height: rowH }]}>
+          <MosaicTapCell
+            uri={urls[2]}
+            index={2}
+            immersiveKey={cellKey(2)}
+            cornerRadius={cellCorner}
+            onOpen={openImmersive}
+            style={[styles.fill, { width: cell, height: rowH }]}
+          >
             <Image source={{ uri: urls[2] }} style={StyleSheet.absoluteFillObject} contentFit="cover" {...feedImageCache(2)} />
-          </Pressable>
+          </MosaicTapCell>
           <View style={{ width: GAP }} />
-          <Pressable
-            onPress={onPressFourthCell}
+          <MosaicTapCell
+            uri={urls[3]}
+            index={fourthIndex}
+            immersiveKey={cellKey(fourthIndex)}
+            cornerRadius={cellCorner}
+            onOpen={(_index, origin, uri) => onPressFourthCell(origin, uri)}
             style={[styles.fill, { width: cell, height: rowH, position: 'relative' }]}
             accessibilityLabel={fourthOverlay > 0 ? `Voir les ${n} photos` : 'Ouvrir la photo en grand'}
           >
@@ -142,7 +297,7 @@ export default function PhotoMosaic({
                 <Text style={styles.overlayText}>+{fourthOverlay}</Text>
               </View>
             ) : null}
-          </Pressable>
+          </MosaicTapCell>
         </View>
       </View>
     );

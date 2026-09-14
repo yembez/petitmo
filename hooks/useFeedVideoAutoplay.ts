@@ -12,6 +12,11 @@ import {
 import { peekFeedBootstrapVideoUri } from '@/services/feedLocalPhotoCache';
 import { videoPlaybackCandidateFromMemory } from '@/utils/videoMediaUri';
 import { useStableViewabilityPairsMulti } from '@/hooks/useStableViewabilityPairs';
+import { isAnyVideoKeepAlive } from '@/lib/videoPlayerPool';
+import {
+  buildOptimisticMemoryForPending,
+  canRenderOptimisticPendingRow,
+} from '@/utils/feedHelpers';
 
 /** Backup après fin de scroll si la viewability n’a pas re-tiré (immédiat). */
 const FEED_SCROLL_IDLE_MS = 0;
@@ -26,7 +31,13 @@ function memoryFromFeedListItem(item: ViewToken['item']): Memory | null {
   if (!item || typeof item !== 'object') return null;
   const it = item as FeedListItem;
   if (it.rowKind === 'memory') return it.memory;
-  if (it.rowKind === 'pending' && it.row.committedMemory) return it.row.committedMemory;
+  if (it.rowKind === 'pending') {
+    if (it.row.committedMemory) return it.row.committedMemory;
+    /** Pending vidéo (trim local) : éligible autoplay avant fin sandbox/upload. */
+    if (canRenderOptimisticPendingRow(it.row)) {
+      return buildOptimisticMemoryForPending(it.row, null);
+    }
+  }
   return null;
 }
 
@@ -105,6 +116,9 @@ export function useFeedVideoAutoplay(
   }, []);
 
   const reconcileAutoplay = useCallback((allowNewPick: boolean) => {
+    /** Relais immersif : ne pas couper l’id autoplay, sinon le fil rembobine au retour. */
+    if (isAnyVideoKeepAlive()) return;
+
     const current = getFeedAutoplayActiveMemoryId();
     const onScreen = onScreenVideoIdsRef.current;
     const eligible = eligibleVideosRef.current;
@@ -122,6 +136,12 @@ export function useFeedVideoAutoplay(
 
   const onOnScreenViewableChanged = useCallback(
     (info: { viewableItems: ViewToken[]; changed: ViewToken[] }) => {
+      /**
+       * Pendant l’immersif, FlatList renvoie souvent un snapshot vide.
+       * Ne pas l’enregistrer : au retour, `reconcile` croirait la vidéo hors écran
+       * → coupe l’autoplay → pause + rembobinage t=0.
+       */
+      if (isAnyVideoKeepAlive()) return;
       onScreenVideoIdsRef.current = collectVideoIdsFromViewable(info.viewableItems);
       setFeedOnScreenVideoIds(onScreenVideoIdsRef.current);
       reconcileAutoplay(false);
@@ -132,6 +152,7 @@ export function useFeedVideoAutoplay(
   const onEligibleViewableChanged = useCallback(
     (info: { viewableItems: ViewToken[]; changed: ViewToken[] }) => {
       onPrefetchViewable(info);
+      if (isAnyVideoKeepAlive()) return;
       lastEligibleViewableRef.current = info.viewableItems;
       eligibleVideosRef.current = collectEligibleVideos(info.viewableItems);
       reconcileAutoplay(true);
@@ -164,7 +185,14 @@ export function useFeedVideoAutoplay(
   );
 
   const refreshFeedVideoAutoplay = useCallback(() => {
-    eligibleVideosRef.current = collectEligibleVideos(lastEligibleViewableRef.current);
+    if (isAnyVideoKeepAlive()) return;
+    const eligible = collectEligibleVideos(lastEligibleViewableRef.current);
+    /**
+     * Au retour immersif, FlatList peut renvoyer un snapshot vide une frame :
+     * ne pas effacer l’id encore valide, sinon lecture à t=0.
+     */
+    if (eligible.size === 0 && getFeedAutoplayActiveMemoryId()) return;
+    eligibleVideosRef.current = eligible;
     reconcileAutoplay(true);
   }, [reconcileAutoplay]);
 

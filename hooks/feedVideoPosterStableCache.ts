@@ -1,14 +1,30 @@
+import { isLikelyRasterImageUri, isLikelyVideoFileUri } from '@/utils/videoMediaUri';
+
 /** Évite les flashs au scroll : poster stabilisé par souvenir (id seul — pas `updated_at`). */
 const feedVideoPosterStableCache = new Map<string, string>();
 
-function shouldReplaceCachedPoster(_cached: string, _next: string): boolean {
-  /** Fil : une fois affiché, on ne swap jamais l’URI poster (materialisation = flash scroll). */
+function isUsableCachedPoster(u: string): boolean {
+  const t = u.trim();
+  if (!t || isLikelyVideoFileUri(t)) return false;
+  return isLikelyRasterImageUri(t);
+}
+
+function shouldReplaceCachedPoster(cached: string, next: string): boolean {
+  if (!isUsableCachedPoster(cached) && isUsableCachedPoster(next)) return true;
+  /** Fil : une fois un JPEG affiché, on ne swap pas (materialisation = flash scroll). */
   return false;
 }
 
 export function peekFeedVideoPosterStableCache(memoryId: string): string | undefined {
-  const v = feedVideoPosterStableCache.get(memoryId.trim());
-  return v?.trim() ? v : undefined;
+  const id = memoryId.trim();
+  const v = feedVideoPosterStableCache.get(id);
+  const t = v?.trim() ?? '';
+  if (!t) return undefined;
+  if (!isUsableCachedPoster(t)) {
+    feedVideoPosterStableCache.delete(id);
+    return undefined;
+  }
+  return t;
 }
 
 export function resolveFeedVideoPosterStableCache(memoryId: string, live: string): string {
@@ -23,8 +39,9 @@ export function resolveFeedVideoPosterStableCache(memoryId: string, live: string
       feedVideoPosterStableCache.set(id, next);
       return next;
     }
-    return cached;
+    if (isUsableCachedPoster(cached)) return cached;
   }
+  if (!isUsableCachedPoster(next)) return cached;
   feedVideoPosterStableCache.set(id, next);
   return next;
 }
@@ -33,7 +50,9 @@ export function resolveFeedVideoPosterStableCache(memoryId: string, live: string
 export function setFeedVideoPosterStableCache(memoryId: string, uri: string): string {
   const id = memoryId.trim();
   const next = uri.trim();
-  if (!id || !next) return peekFeedVideoPosterStableCache(id) ?? '';
+  if (!id || !next || !isUsableCachedPoster(next)) {
+    return peekFeedVideoPosterStableCache(id) ?? '';
+  }
   feedVideoPosterStableCache.set(id, next);
   return next;
 }

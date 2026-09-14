@@ -1,4 +1,5 @@
 import type { Child, Memory } from '@/types/local';
+import type { ImmersiveSharedElement } from '@/utils/immersiveSharedElement';
 
 export type MemoryViewerSessionPayload = {
   memories: Memory[];
@@ -7,6 +8,8 @@ export type MemoryViewerSessionPayload = {
   initialAlbumPhotoIndex?: number;
   /** Profils famille pour les âges (évite un chargement async vide dans le viewer). */
   familyChildren?: Child[];
+  /** Zoom depuis la vignette (Photos / Instagram) si mesurée au tap. */
+  sharedElement?: ImmersiveSharedElement | null;
 };
 
 let session: MemoryViewerSessionPayload | null = null;

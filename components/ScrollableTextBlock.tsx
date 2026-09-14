@@ -5,6 +5,14 @@ import { ScrollView } from 'react-native-gesture-handler';
 type Props = {
   children: React.ReactNode;
   maxHeight: number;
+  /**
+   * Démarre à la hauteur du contenu (1 px) au lieu du plafond.
+   * Sans ça, une ligne d’annotation occupait tout le `maxHeight` le temps
+   * de la mesure — bandeau vide énorme dans le viewer.
+   */
+  fitToContent?: boolean;
+  /** Hauteur viewport après mesure (pour dimensionner un bandeau / dégradé parent). */
+  onViewportHeightChange?: (height: number) => void;
   style?: StyleProp<ViewStyle>;
   contentContainerStyle?: StyleProp<ViewStyle>;
   showsVerticalScrollIndicator?: boolean;
@@ -23,6 +31,8 @@ type Props = {
 export function ScrollableTextBlock({
   children,
   maxHeight,
+  fitToContent = false,
+  onViewportHeightChange,
   style,
   contentContainerStyle,
   showsVerticalScrollIndicator = true,
@@ -32,7 +42,7 @@ export function ScrollableTextBlock({
   onInnerScrollUnlock,
 }: Props) {
   const scrollableRef = useRef(false);
-  const [viewportHeight, setViewportHeight] = useState(maxHeight);
+  const [viewportHeight, setViewportHeight] = useState(fitToContent ? 1 : maxHeight);
 
   const handleContentSizeChange = useCallback(
     (_w: number, contentHeight: number) => {
@@ -42,8 +52,9 @@ export function ScrollableTextBlock({
         ? maxHeight
         : Math.min(maxHeight, Math.max(1, Math.ceil(contentHeight)));
       setViewportHeight(prev => (prev === nextViewport ? prev : nextViewport));
+      onViewportHeightChange?.(nextViewport);
     },
-    [maxHeight],
+    [maxHeight, onViewportHeightChange],
   );
 
   const handleScrollBegin = useCallback(() => {

@@ -4,6 +4,7 @@ import { THEME } from '@/constants/theme';
 import { PETITMO_CTA_BORDER_WIDTH } from '@/constants/petitmoCtaStyles';
 import { FONT_SIZES } from '@/constants/sizes';
 import {
+  FEED_POST_CARD_RADIUS,
   MEDIA_CARD_INSET,
   MEDIA_CARD_RADIUS,
   TEXT_POST_CARD_INSET,
@@ -207,7 +208,7 @@ const styles = StyleSheet.create({
   postShell: {
     alignSelf: 'stretch',
     marginHorizontal: scale(8),
-    borderRadius: scale(12),
+    borderRadius: FEED_POST_CARD_RADIUS,
     backgroundColor: '#FFFFFF',
     ...Platform.select({
       ios: {
@@ -230,7 +231,7 @@ const styles = StyleSheet.create({
   },
   post: {
     backgroundColor: '#FFFFFF',
-    borderRadius: scale(12),
+    borderRadius: FEED_POST_CARD_RADIUS,
     overflow: 'hidden',
   },
   /**

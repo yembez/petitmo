@@ -15,6 +15,7 @@ import {
   type Child,
   type Memory,
 } from '@/utils/feedHelpers';
+import type { ImmersiveLaunchArgs } from '@/utils/immersiveSharedElement';
 import {
   FilMemoryRowMemo,
   PendingFeedUploadCard,
@@ -51,7 +52,7 @@ export function useFilFeedList(
   handlePickVoiceCover: (m: Memory) => void | Promise<void>,
   handleDeleteMemory: (m: Memory) => void,
   swipeRefs: MutableRefObject<Map<string, Swipeable | null>>,
-  immersiveLaunchRef: RefObject<(memoryId: string, albumPhotoIndex?: number) => void>,
+  immersiveLaunchRef: RefObject<(args: ImmersiveLaunchArgs) => void>,
 ): {
   feedData: FeedListItem[];
   renderItem: (info: { item: FeedListItem }) => ReactElement;

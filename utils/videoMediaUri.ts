@@ -18,6 +18,29 @@ export function isLikelyVideoFileUri(uri: string): boolean {
   return VIDEO_EXT_RE.test(u);
 }
 
+const RASTER_EXT_RE = /\.(jpe?g|png|webp|heic|heif|gif|bmp)$/i;
+
+/**
+ * Vignette / poster affichable par `Image` — jamais un fichier vidéo.
+ * Les URL https signées n’ont souvent pas d’extension : on les accepte
+ * sauf si le chemin ressemble à une vidéo.
+ */
+export function isLikelyRasterImageUri(uri: string): boolean {
+  const t = uri.trim();
+  if (!t || isLikelyVideoFileUri(t)) return false;
+  const path = (t.split('?')[0] ?? '').toLowerCase();
+  if (RASTER_EXT_RE.test(path)) return true;
+  if (
+    path.includes('poster.jpg') ||
+    path.includes('poster_print.jpg') ||
+    path.includes('/thumb.jpg') ||
+    path.includes('video_thumb')
+  ) {
+    return true;
+  }
+  return /^https?:\/\//i.test(t);
+}
+
 export function firstNonEmptyUri(...parts: (string | null | undefined)[]): string {
   for (const p of parts) {
     const t = typeof p === 'string' ? p.trim() : '';

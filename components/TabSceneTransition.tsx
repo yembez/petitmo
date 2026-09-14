@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { useIsFocused } from '@react-navigation/native';
+import { useNavigationState, useRoute } from '@react-navigation/native';
 import Reanimated, {
   Easing,
   useAnimatedStyle,
@@ -28,12 +28,19 @@ export default function TabSceneTransition({
   children,
   backgroundColor = TAB_TRANSITION_FADE_BG,
 }: Props) {
-  const isFocused = useIsFocused();
+  /**
+   * Onglet actif dans le tab navigator — reste vrai sous une modale (viewer immersif).
+   * `useIsFocused` refaderait la scène au retour de modale (flash header + liste).
+   */
+  const routeKey = useRoute().key;
+  const isActiveTab = useNavigationState(
+    state => state.routes[state.index]?.key === routeKey,
+  );
   const opacity = useSharedValue(1);
   const hasEnteredOnceRef = useRef(false);
 
   useEffect(() => {
-    if (!isFocused) return;
+    if (!isActiveTab) return;
 
     if (!hasEnteredOnceRef.current) {
       hasEnteredOnceRef.current = true;
@@ -46,7 +53,7 @@ export default function TabSceneTransition({
       duration: TAB_TRANSITION_DURATION_MS,
       easing: TAB_ENTER_EASING,
     });
-  }, [isFocused, opacity]);
+  }, [isActiveTab, opacity]);
 
   const sceneStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,

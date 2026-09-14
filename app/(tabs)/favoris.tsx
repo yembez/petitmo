@@ -67,8 +67,6 @@ import { requestMissingMediaDerivatives } from '@/services/media';
 import { healDeadLocalMediaPointersForMemories } from '@/services/memoryDisplayHeal';
 import FavorisVideoThumb from '@/components/feed/FavorisVideoThumb';
 import { useFeedVideoPosterDisplayUrl } from '@/hooks/useFeedVideoPosterDisplayUrl';
-import { useFeedVideoPlaybackUri } from '@/hooks/useFeedVideoPlaybackUri';
-import { normalizeVideoPlaybackUri } from '@/utils/videoMediaUri';
 import { getOrSelectFirstChild } from '@/services/children';
 import { getLocalMemoryById } from '@/lib/localDb';
 import {
@@ -743,7 +741,6 @@ const GalleryTilePicker = memo(function GalleryTilePicker({
   const { memory, thumbUrl } = item;
 
   const videoPosterUri = useFeedVideoPosterDisplayUrl(memory);
-  const videoPlaybackUri = normalizeVideoPlaybackUri(useFeedVideoPlaybackUri(memory)).trim();
   const voiceCoverRaster = useFeedRasterMediaUrl(memory, 'voice-cover');
 
   const voiceCoverRaw = memory.type === 'voice' ? voiceCoverRaster : '';
@@ -778,8 +775,7 @@ const GalleryTilePicker = memo(function GalleryTilePicker({
           ? voiceCoverUri
           : '';
 
-  const hasVideoThumb =
-    memory.type === 'video' && (!!videoPosterUri.trim() || !!videoPlaybackUri);
+  const hasVideoThumb = memory.type === 'video';
   const showRasterThumb =
     (memory.type === 'photo' && !!uri) ||
     (memory.type === 'voice' && !!uri) ||
@@ -996,7 +992,6 @@ const GalleryTile = memo(function GalleryTile({
   }
 
   const videoPosterUri = useFeedVideoPosterDisplayUrl(memory);
-  const videoPlaybackUri = normalizeVideoPlaybackUri(useFeedVideoPlaybackUri(memory)).trim();
   const voiceCoverRaster = useFeedRasterMediaUrl(memory, 'voice-cover');
 
   const voiceCoverRaw = memory.type === 'voice' ? voiceCoverRaster : '';
@@ -1029,8 +1024,7 @@ const GalleryTile = memo(function GalleryTile({
       ? (photoSigned?.trim() || (photoNeedsSign ? '' : uriRaw))
       : uriRaw;
 
-  const hasVideoThumb =
-    memory.type === 'video' && (!!videoPosterUri.trim() || !!videoPlaybackUri);
+  const hasVideoThumb = memory.type === 'video';
 
   const showRasterThumb =
     (memory.type === 'photo' && !!uri) ||

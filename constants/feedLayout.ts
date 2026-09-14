@@ -7,6 +7,9 @@ import { scale, verticalScale } from '@/utils/responsive';
 export const MEDIA_CARD_INSET = 0;
 export const MEDIA_CARD_RADIUS = 0;
 
+/** Carte post fil : le média est clippé par ce rayon en haut de carte. */
+export const FEED_POST_CARD_RADIUS = scale(12);
+
 /** Marge latérale carte texte fil — plus faible = carte plus large à l’écran. */
 export const TEXT_POST_CARD_INSET = scale(10);
 export const TEXT_POST_CARD_RADIUS = scale(12);

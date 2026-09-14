@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,8 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import { Video, ResizeMode, type AVPlaybackStatus } from 'expo-av';
+import { useVideoPlayer, type VideoPlayer } from 'expo-video';
+import { PetitmoVideoView } from '@/components/PetitmoVideoView';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X, Play, Pause } from 'lucide-react-native';
 import { THEME } from '@/constants/theme';
@@ -59,7 +60,7 @@ export function VideoTrimModal({
 }: Props) {
   const { t } = useAppTranslation('common');
   const insets = useSafeAreaInsets();
-  const videoRef = useRef<Video>(null);
+  const playerRef = useRef<VideoPlayer | null>(null);
   const trimRef = useRef<VideoTrimEditorValue>(initialTrimRange(durationSec, maxDurationSec));
   const isPlayingRef = useRef(false);
   const exportingRef = useRef(false);
@@ -91,8 +92,11 @@ export function VideoTrimModal({
     setFilmstripUris([]);
 
     return () => {
-      void videoRef.current?.stopAsync().catch(() => {});
-      void videoRef.current?.unloadAsync().catch(() => {});
+      try {
+        playerRef.current?.pause();
+      } catch {
+        /* ignore */
+      }
     };
   }, [visible, videoUri, durationSec, maxDurationSec]);
 
@@ -136,9 +140,8 @@ export function VideoTrimModal({
   }, [visible, videoReady, effectiveDurationSec, videoUri]);
 
   const seekToTrimStart = useCallback(async () => {
-    const startMs = Math.round(trimRef.current.startSec * 1000);
     try {
-      await videoRef.current?.setPositionAsync(startMs);
+      if (playerRef.current) playerRef.current.currentTime = trimRef.current.startSec;
     } catch {
       /* ignore */
     }
@@ -148,7 +151,7 @@ export function VideoTrimModal({
     isPlayingRef.current = false;
     setIsPlaying(false);
     try {
-      await videoRef.current?.pauseAsync();
+      playerRef.current?.pause();
     } catch {
       /* ignore */
     }
@@ -156,15 +159,14 @@ export function VideoTrimModal({
 
   const startPlayback = useCallback(async () => {
     if (!videoReady) return;
-    const startMs = Math.round(trimRef.current.startSec * 1000);
-    const endMs = Math.round(trimRef.current.endSec * 1000);
+    const startSec = trimRef.current.startSec;
+    const endSec = trimRef.current.endSec;
     try {
-      const status = await videoRef.current?.getStatusAsync();
-      const pos = status && 'positionMillis' in status ? status.positionMillis : 0;
-      if (pos < startMs || pos >= endMs) {
-        await videoRef.current?.setPositionAsync(startMs);
+      const pos = playerRef.current?.currentTime ?? 0;
+      if (pos < startSec || pos >= endSec) {
+        if (playerRef.current) playerRef.current.currentTime = startSec;
       }
-      await videoRef.current?.playAsync();
+      playerRef.current?.play();
       isPlayingRef.current = true;
       setIsPlaying(true);
     } catch {
@@ -180,48 +182,18 @@ export function VideoTrimModal({
     }
   }, [startPlayback, stopPlayback]);
 
-  const onPlaybackStatus = useCallback(
-    (status: AVPlaybackStatus) => {
-      if (!status.isLoaded) return;
-      if (status.durationMillis && status.durationMillis > 0) {
-        const fromPlayer = Math.max(1, Math.round(status.durationMillis / 1000));
-        setEffectiveDurationSec(prev => (prev > 0 ? Math.max(prev, fromPlayer) : fromPlayer));
-      }
-      const endMs = Math.round(trimRef.current.endSec * 1000);
-      const startMs = Math.round(trimRef.current.startSec * 1000);
-      if (status.positionMillis >= endMs - 80) {
-        void videoRef.current?.setPositionAsync(startMs).then(() => {
-          if (isPlayingRef.current) {
-            void videoRef.current?.playAsync().catch(() => {});
-          }
-        });
-      }
-      if (status.didJustFinish) {
-        void seekToTrimStart();
-        isPlayingRef.current = false;
-        setIsPlaying(false);
-      }
-    },
-    [seekToTrimStart],
-  );
-
   const handleTrimChange = useCallback(
     (next: VideoTrimEditorValue) => {
       trimRef.current = next;
       setTrim(next);
-      void (async () => {
-        try {
-          const status = await videoRef.current?.getStatusAsync();
-          const pos = status && 'positionMillis' in status ? status.positionMillis : 0;
-          const startMs = Math.round(next.startSec * 1000);
-          const endMs = Math.round(next.endSec * 1000);
-          if (pos < startMs || pos > endMs) {
-            await videoRef.current?.setPositionAsync(startMs);
-          }
-        } catch {
-          /* ignore */
+      try {
+        const pos = playerRef.current?.currentTime ?? 0;
+        if (pos < next.startSec || pos > next.endSec) {
+          if (playerRef.current) playerRef.current.currentTime = next.startSec;
         }
-      })();
+      } catch {
+        /* ignore */
+      }
     },
     [],
   );
@@ -247,7 +219,7 @@ export function VideoTrimModal({
     setIsConfirming(true);
     await stopPlayback();
     try {
-      await videoRef.current?.unloadAsync();
+      playerRef.current?.pause();
     } catch {
       /* ignore */
     }
@@ -280,18 +252,23 @@ export function VideoTrimModal({
 
         <View style={styles.previewWrap}>
           {playbackUri ? (
-            <Video
-              ref={videoRef}
-              source={{ uri: playbackUri }}
-              style={styles.previewVideo}
-              resizeMode={ResizeMode.CONTAIN}
-              shouldPlay={false}
-              isLooping={false}
-              onLoad={() => {
+            <TrimVideoPreview
+              uri={playbackUri}
+              playerRef={playerRef}
+              playingRef={isPlayingRef}
+              getTrim={() => trimRef.current}
+              onReady={() => {
                 setVideoReady(true);
                 void seekToTrimStart();
               }}
-              onPlaybackStatusUpdate={onPlaybackStatus}
+              onDurationSec={sec => {
+                setEffectiveDurationSec(prev => (prev > 0 ? Math.max(prev, sec) : sec));
+              }}
+              onPlayToEnd={() => {
+                void seekToTrimStart();
+                isPlayingRef.current = false;
+                setIsPlaying(false);
+              }}
             />
           ) : (
             <View style={styles.previewPlaceholder} />
@@ -360,6 +337,61 @@ export function VideoTrimModal({
         </View>
       </View>
     </Modal>
+  );
+}
+
+function TrimVideoPreview({
+  uri,
+  playerRef,
+  playingRef,
+  getTrim,
+  onReady,
+  onDurationSec,
+  onPlayToEnd,
+}: {
+  uri: string;
+  playerRef: MutableRefObject<VideoPlayer | null>;
+  playingRef: MutableRefObject<boolean>;
+  getTrim: () => VideoTrimEditorValue;
+  onReady: () => void;
+  onDurationSec: (sec: number) => void;
+  onPlayToEnd: () => void;
+}) {
+  const player = useVideoPlayer(uri, instance => {
+    instance.loop = false;
+    instance.timeUpdateEventInterval = 0.05;
+  });
+  playerRef.current = player;
+
+  useEffect(() => {
+    const loadSub = player.addListener('sourceLoad', ({ duration }) => {
+      if (duration > 0) onDurationSec(Math.max(1, Math.round(duration)));
+      onReady();
+      player.currentTime = getTrim().startSec;
+    });
+    const timeSub = player.addListener('timeUpdate', ({ currentTime }) => {
+      const { startSec, endSec } = getTrim();
+      if (currentTime >= endSec - 0.08) {
+        player.currentTime = startSec;
+        if (playingRef.current) player.play();
+      }
+    });
+    const endSub = player.addListener('playToEnd', () => {
+      onPlayToEnd();
+    });
+    return () => {
+      loadSub.remove();
+      timeSub.remove();
+      endSub.remove();
+    };
+  }, [player, getTrim, onDurationSec, onPlayToEnd, onReady, playingRef]);
+
+  return (
+    <PetitmoVideoView
+      player={player}
+      contentFit="contain"
+      style={styles.previewVideo}
+    />
   );
 }
 

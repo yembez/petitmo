@@ -79,7 +79,7 @@ function TabLayoutInner() {
         /** Garder Fil / Favoris montés : évite remontage + rechargement images après long séjour sur Capturer. */
         lazy: false,
         /**
-         * `freezeOnBlur` gèle Reanimated + expo-av sur les onglets inactifs au 1er montage ;
+         * `freezeOnBlur` gèle Reanimated + expo-video sur les onglets inactifs au 1er montage ;
          * au retour sur Fil / Favoris, zoom diaporama et autoplay vidéo ne repartaient plus.
          */
         freezeOnBlur: false,

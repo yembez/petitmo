@@ -8,7 +8,8 @@ import {
 } from 'react-native';
 import type { ReactNode } from 'react';
 import { BlurView } from 'expo-blur';
-import { Heart, MapPin, Volume2, VolumeX } from 'lucide-react-native';
+import { MapPin, Volume2, VolumeX } from 'lucide-react-native';
+import { FavoriteHeartButton } from '@/components/FavoriteHeartButton';
 import { THEME } from '@/constants/theme';
 import { scale } from '@/utils/responsive';
 import { styles } from '@/components/feed/feedStyles';
@@ -21,7 +22,7 @@ export function feedPhotoOverlayInk(inkOverride?: string | null): '#FFFFFF' | '#
   return '#FFFFFF';
 }
 
-const FEED_FAVORITE_HEART_PX = scale(20);
+const FEED_FAVORITE_HEART_PX = scale(28);
 
 const FEED_MEDIA_OVERLAY_BOTTOM = scale(12);
 
@@ -313,8 +314,6 @@ export function FeedPhotoFavoriteOverlay({
   bottomInset?: number;
 }) {
   void inkOverride;
-  const outlineInk = '#FFFFFF' as const;
-  const favoriteFill = THEME.feedFavoriteTerracotta;
 
   return (
     <View
@@ -324,21 +323,19 @@ export function FeedPhotoFavoriteOverlay({
       ]}
       pointerEvents="box-none"
     >
-      <TouchableOpacity
+      <FavoriteHeartButton
+        favored={isFavorite}
         onPress={onPress}
-        activeOpacity={0.75}
-        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        accessibilityRole="button"
-        accessibilityLabel={isFavorite ? 'Retirer des favoris' : 'Mettre en favori'}
-        style={[styles.feedFavoriteMediaCircle, isFavorite && styles.feedFavoriteMediaCircleActive]}
-      >
-        <Heart
-          size={FEED_FAVORITE_HEART_PX}
-          color={isFavorite ? favoriteFill : outlineInk}
-          strokeWidth={isFavorite ? 2.05 : 2.45}
-          fill={isFavorite ? favoriteFill : 'none'}
-        />
-      </TouchableOpacity>
+        size={FEED_FAVORITE_HEART_PX}
+        strokeColor="#FFFFFF"
+        strokeWidth={2.05}
+        fillColor={THEME.feedFavoriteTerracotta}
+        halo="white"
+        style={[
+          styles.feedFavoriteMediaCircle,
+          isFavorite && styles.feedFavoriteMediaCircleActive,
+        ]}
+      />
     </View>
   );
 }

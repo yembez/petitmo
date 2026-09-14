@@ -151,6 +151,15 @@ export function PendingMediaUploadsProvider({ children }: { children: React.Reac
         ]);
         router.replace('/(tabs)/fil');
 
+        /**
+         * Autoplay dès le pending : le fichier trimé (ex. 20 s gratuit) est déjà local.
+         * Attendre la fin du sandbox/upload laissait 10–30 s de cover seule.
+         */
+        if (kind === 'video' && previewUris[0]?.trim()) {
+          InteractionManager.runAfterInteractions(() => {
+            setTimeout(() => setFeedAutoplayActiveMemoryId(tempId), 280);
+          });
+        }
         if (kind === 'video' && previewUris[0]?.trim() && !previewPosterUri) {
           void extractVideoFrameJpeg(previewUris[0], {
             quality: VIDEO_POSTER_FEED_JPEG_QUALITY,
@@ -240,9 +249,11 @@ export function PendingMediaUploadsProvider({ children }: { children: React.Reac
             pendingTempId: tempId,
             previewUris,
           });
-          /** Relancer l’autoplay sur la vidéo importée (sinon reste coupé → pas de play / pas de roue). */
+          /** Relancer / basculer l’autoplay sur l’id définitif (déjà joué sous tempId). */
           if (kind === 'video' && first?.id) {
-            setFeedAutoplayActiveMemoryId(first.id);
+            InteractionManager.runAfterInteractions(() => {
+              setTimeout(() => setFeedAutoplayActiveMemoryId(first.id), 120);
+            });
           }
           if (singleRow) {
             requestAnimationFrame(() => {

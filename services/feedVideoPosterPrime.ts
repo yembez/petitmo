@@ -1,20 +1,8 @@
 import type { Memory } from '@/types/local';
-import { isDeviceLocalMediaUri, normalizeMemoryMediaUriForDisplay } from '@/utils/memoryPhotos';
-import { isSandboxUriFromForeignContainer, isLocalMediaUriReadable } from '@/utils/localMediaReadable';
-import { getSignedMediaDisplayUrl } from '@/lib/mediaSignedUrl';
-import { setFeedVideoPosterStableCache } from '@/hooks/feedVideoPosterStableCache';
 import { resolveFeedVideoPosterDisplayUri } from '@/utils/feedVideoPosterUri';
 
-function remoteVideoPosterRef(memory: Memory): string {
-  for (const u of [memory.poster_url, memory.thumbnail_url]) {
-    const t = (u ?? '').trim();
-    if (t && !isDeviceLocalMediaUri(t)) return t;
-  }
-  return '';
-}
-
 /**
- * Pré-charge les posters vidéo cloud (souvenirs pré-Petitmo+) avant le scroll.
+ * Cache les posters **déjà présents** (local / cloud). Aucune extraction de frame.
  */
 export async function primeFeedVideoPosterStableCache(
   memories: readonly Memory[],
@@ -31,7 +19,7 @@ export async function primeFeedVideoPosterStableCache(
   }
 }
 
-/** Résolution rapide pour prefetch viewability (poster cloud signé si besoin). */
+/** Prefetch viewability : JPEG existant seulement, pas de `getThumbnailAsync`. */
 export async function primeFeedVideoPosterForMemory(memory: Memory): Promise<void> {
   if (memory.type !== 'video') return;
   await resolveFeedVideoPosterDisplayUri(memory);

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { DeviceEventEmitter } from 'react-native';
 import type { Memory } from '@/types/local';
 import { peekFeedVideoPosterStableCache } from '@/hooks/feedVideoPosterStableCache';
 import {
@@ -13,11 +14,24 @@ function stickyPosterUri(prev: string, next: string): string {
 }
 
 /**
- * Poster vidéo fil — résolu une fois par souvenir, jamais démonté au scroll.
- * Chemins sandbox morts (pré-Petitmo+) ignorés ; cache session stable.
+ * Poster vidéo fil — JPEG déjà présent uniquement.
+ * Pas d’extraction de frame (conflit décodeur / expo-video).
  */
 export function useFeedVideoPosterDisplayUrl(memory: Memory): string {
   const [uri, setUri] = useState(() => peekSyncFeedVideoPosterDisplayUri(memory));
+
+  useEffect(() => {
+    if (memory.type !== 'video') return;
+    const sub = DeviceEventEmitter.addListener(
+      'petitmo:memories-updated',
+      (payload: { memoryId?: string }) => {
+        if (payload?.memoryId !== memory.id) return;
+        const cached = peekFeedVideoPosterStableCache(memory.id);
+        if (cached) setUri(prev => stickyPosterUri(prev, cached));
+      },
+    );
+    return () => sub.remove();
+  }, [memory.id, memory.type]);
 
   useEffect(() => {
     if (memory.type !== 'video') {

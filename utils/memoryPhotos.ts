@@ -7,6 +7,7 @@ import {
   isSandboxUriFromForeignContainer,
   rebaseSandboxUriToCurrentContainer,
 } from '@/utils/localMediaReadable';
+import { isLikelyRasterImageUri, isLikelyVideoFileUri } from '@/utils/videoMediaUri';
 function asTrimmedStringArray(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -695,11 +696,22 @@ export function isDeviceLocalMediaUri(u: string | null | undefined): boolean {
   );
 }
 
-/** Chemins sandbox poster fil (`poster.jpg`) — pas `poster_print.jpg`. */
+function isFeedPosterRasterUri(u: string): boolean {
+  return isLikelyRasterImageUri(u) && !isLikelyVideoFileUri(u);
+}
+
+/** Chemins sandbox poster fil (`poster.jpg`) — pas `poster_print.jpg`, pas le fichier vidéo. */
 function pickVideoPosterSandboxPath(memory: Memory): string {
   for (const u of [memory.local_thumb_path, memory.poster_url, memory.thumbnail_url]) {
     const t = (u ?? '').trim();
-    if (t && isDeviceLocalMediaUri(t) && !t.endsWith('poster_print.jpg')) return t;
+    if (
+      t &&
+      isDeviceLocalMediaUri(t) &&
+      !t.endsWith('poster_print.jpg') &&
+      isFeedPosterRasterUri(t)
+    ) {
+      return t;
+    }
   }
   return '';
 }
@@ -719,7 +731,7 @@ function pickVideoPosterPrintSandboxPath(memory: Memory): string {
 function remoteVideoPosterColumns(memory: Memory): string {
   for (const u of [memory.poster_url, memory.thumbnail_url]) {
     const t = (u ?? '').trim();
-    if (t && !isDeviceLocalMediaUri(t)) return t;
+    if (t && !isDeviceLocalMediaUri(t) && isFeedPosterRasterUri(t)) return t;
   }
   return '';
 }
@@ -742,6 +754,7 @@ export function collectVideoFeedPosterLocalUriCandidates(memory: Memory): string
   const add = (u: string | null | undefined) => {
     const t = (u ?? '').trim();
     if (!t || seen.has(t) || t.endsWith('poster_print.jpg')) return;
+    if (!isFeedPosterRasterUri(t)) return;
     seen.add(t);
     out.push(t);
   };

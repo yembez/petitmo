@@ -192,6 +192,8 @@ export function buildOptimisticMemoryForPending(p: PendingUpload, child: Child |
     is_favorite: false,
     upload_status: 'pending' as const,
     local_media_path: localFirstUri,
+    /** Même fichier : l’autoplay fil lit local_* / bootstrap, pas le cloud. */
+    local_original_path: localFirstUri,
     synced_at: null,
     location: p.locationPreview?.trim() || null,
     file_size: null,

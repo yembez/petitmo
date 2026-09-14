@@ -71,11 +71,16 @@ export function subscribeFeedOnScreenVideos(onStoreChange: () => void): () => vo
   return () => onScreenListeners.delete(onStoreChange);
 }
 
+function subscribeAutoplayNoop(): () => void {
+  return () => {};
+}
+
 /** Une seule ligne vidéo re-render quand son statut autoplay change. */
-export function useIsFeedVideoAutoplay(memoryId: string): boolean {
+export function useIsFeedVideoAutoplay(memoryId: string | null | undefined): boolean {
+  const id = memoryId?.trim() ?? '';
   return useSyncExternalStore(
-    subscribeFeedAutoplay,
-    () => getFeedAutoplayActiveMemoryId() === memoryId,
+    id ? subscribeFeedAutoplay : subscribeAutoplayNoop,
+    () => (id ? getFeedAutoplayActiveMemoryId() === id : false),
     () => false,
   );
 }

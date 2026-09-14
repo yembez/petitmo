@@ -22,6 +22,7 @@ import {
   tabBarFloatBottomPosition,
 } from '@/constants/tabBarLayout';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
+import { hapticSelection } from '@/lib/haptics';
 import { scale, verticalScale } from '@/utils/responsive';
 import { loadedFontStyle } from '@/utils/loadedFontStyle';
 import {
@@ -168,6 +169,7 @@ export default function PetitmoContextTabBar({
               canPreventDefault: true,
             });
             if (!isFocused && !event.defaultPrevented) {
+              hapticSelection();
               navigation.navigate(route.name, route.params);
             }
           };

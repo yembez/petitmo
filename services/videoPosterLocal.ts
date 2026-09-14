@@ -9,19 +9,22 @@ import {
   VIDEO_POSTER_FEED_JPEG_QUALITY,
   VIDEO_POSTER_PRINT_JPEG_QUALITY,
 } from '@/lib/limits';
-import { resolveReadableVideoPlaybackUri } from '@/utils/videoMediaUri';
+import { isLikelyRasterImageUri, isLikelyVideoFileUri, resolveReadableVideoPlaybackUri } from '@/utils/videoMediaUri';
 import {
   collectVideoFeedPosterLocalUriCandidates,
   getBookVideoPosterDisplayUri,
 } from '@/utils/memoryPhotos';
 import {
   isLocalMediaUriReadable,
+  isSandboxUriFromForeignContainer,
   pickFirstReadableLocalMediaUri,
 } from '@/utils/localMediaReadable';
 import {
   invalidateBookVideoPosterStableCache,
   setBookVideoPosterStableCache,
 } from '@/hooks/bookVideoPosterStableCache';
+import { setFeedVideoPosterStableCache } from '@/hooks/feedVideoPosterStableCache';
+import { isVideoDecoderBusy } from '@/lib/videoPlayerPool';
 
 /** Long côté mini pour considérer le print « cible livre » (parité photos 3200 px). */
 const PRINT_TARGET_MIN_LONG_SIDE = Math.floor(MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH * 0.9);
@@ -299,7 +302,78 @@ function commitPosterMemory(next: Memory): Memory {
     (next.local_poster_print_path ?? '').trim() ||
     (next.poster_url ?? '').trim();
   if (displayUri) setBookVideoPosterStableCache(next.id, displayUri);
+  const feedUri = (next.local_thumb_path ?? next.poster_url ?? next.thumbnail_url ?? '').trim();
+  if (feedUri && isLikelyRasterImageUri(feedUri) && !isLikelyVideoFileUri(feedUri)) {
+    setFeedVideoPosterStableCache(next.id, feedUri);
+  }
   DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId: next.id });
+  return next;
+}
+
+const feedPosterInflight = new Map<string, Promise<Memory | null>>();
+
+async function pickReadableFeedPosterJpeg(memory: Memory): Promise<string | null> {
+  for (const u of collectVideoFeedPosterLocalUriCandidates(memory)) {
+    const t = u.trim();
+    if (!t || isLikelyVideoFileUri(t) || !isLikelyRasterImageUri(t)) continue;
+    if (isSandboxUriFromForeignContainer(t)) continue;
+    if (await isLocalMediaUriReadable(t)) return t;
+  }
+  return null;
+}
+
+/**
+ * Garantit un `poster.jpg` fil (première frame) — léger, pas le print 3200 px.
+ * Répare les souvenirs legacy sans vignette, ou dont le « poster » est le fichier vidéo.
+ */
+async function ensureVideoFeedPosterForMemoryOnce(memoryId: string): Promise<Memory | null> {
+  const id = memoryId.trim();
+  const cur = getLocalMemoryById(id);
+  if (!cur || cur.type !== 'video') return cur;
+  if (Platform.OS === 'web') return cur;
+
+  const existing = await pickReadableFeedPosterJpeg(cur);
+  if (existing) {
+    const stored = (cur.local_thumb_path ?? cur.poster_url ?? cur.thumbnail_url ?? '').trim();
+    if (
+      stored &&
+      isLikelyRasterImageUri(stored) &&
+      !isLikelyVideoFileUri(stored) &&
+      (await isLocalMediaUriReadable(stored))
+    ) {
+      return cur;
+    }
+    return commitPosterMemory(applyPosterFields(cur, { feedPath: existing }));
+  }
+
+  const videoUri = await resolveReadableVideoPlaybackUri(cur);
+  if (!videoUri) return cur;
+  /** Ne jamais extraire une frame tant qu’expo-video tient un décodeur (fil / immersif). */
+  if (isVideoDecoderBusy()) return cur;
+
+  const { feedPath } = await persistVideoPosterFiles({
+    memoryId: id,
+    videoUri,
+    timeMs: 0,
+    writeFeed: true,
+    writePrint: false,
+    quality: VIDEO_POSTER_FEED_JPEG_QUALITY,
+  });
+  if (!feedPath) return cur;
+  return commitPosterMemory(applyPosterFields(cur, { feedPath }));
+}
+
+export async function ensureVideoFeedPosterForMemory(
+  memoryId: string,
+): Promise<Memory | null> {
+  const id = memoryId.trim();
+  if (!id) return null;
+  const pending = feedPosterInflight.get(id);
+  if (pending) return pending;
+  const next = ensureVideoFeedPosterForMemoryOnce(id).finally(() => {
+    feedPosterInflight.delete(id);
+  });
+  feedPosterInflight.set(id, next);
   return next;
 }
 

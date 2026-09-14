@@ -1,11 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import { Video, ResizeMode } from 'expo-av';
 import type { Memory } from '@/types/local';
 import { useFeedVideoPosterDisplayUrl } from '@/hooks/useFeedVideoPosterDisplayUrl';
-import { useFeedVideoPlaybackUri } from '@/hooks/useFeedVideoPlaybackUri';
-import { normalizeVideoPlaybackUri } from '@/utils/videoMediaUri';
 
 type Props = {
   memory: Memory;
@@ -16,15 +13,22 @@ type Props = {
 };
 
 /**
- * Vignette vidéo Favoris — parité fil : poster si dispo, sinon 1ʳᵉ frame via fichier vidéo local/cloud.
+ * Vignette vidéo Favoris : **poster seulement**.
+ * Un `useVideoPlayer` ici (1ʳᵉ frame) créait un 2ᵉ pipeline hors pool et
+ * gelait l’app — même bug que l’import dans le fil.
  */
 export default function FavorisVideoThumb({ memory, recyclingKey, posterUri, onReady }: Props) {
   const posterFromHook = useFeedVideoPosterDisplayUrl(memory);
   const poster = (posterUri ?? posterFromHook).trim();
-  const playback = normalizeVideoPlaybackUri(useFeedVideoPlaybackUri(memory)).trim();
-  const [posterFailed, setPosterFailed] = useState(false);
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
 
-  if (poster && !posterFailed) {
+  useEffect(() => {
+    if (poster) return;
+    onReadyRef.current?.();
+  }, [poster]);
+
+  if (poster) {
     return (
       <ExpoImage
         source={{ uri: poster }}
@@ -33,28 +37,16 @@ export default function FavorisVideoThumb({ memory, recyclingKey, posterUri, onR
         cachePolicy="disk"
         recyclingKey={recyclingKey}
         onLoad={() => onReady?.()}
-        onError={() => setPosterFailed(true)}
+        onError={() => onReady?.()}
       />
     );
   }
 
-  if (playback) {
-    return (
-      <View style={StyleSheet.absoluteFillObject}>
-        <Video
-          source={{ uri: playback }}
-          style={StyleSheet.absoluteFillObject}
-          videoStyle={StyleSheet.absoluteFillObject}
-          resizeMode={ResizeMode.COVER}
-          shouldPlay={false}
-          isLooping={false}
-          isMuted
-          useNativeControls={false}
-          onReadyForDisplay={() => onReady?.()}
-        />
-      </View>
-    );
-  }
-
-  return null;
+  return <View style={[StyleSheet.absoluteFillObject, styles.fallback]} />;
 }
+
+const styles = StyleSheet.create({
+  fallback: {
+    backgroundColor: '#000000',
+  },
+});

@@ -8,16 +8,15 @@ import {
   StyleSheet,
   InteractionManager,
   DeviceEventEmitter,
-  type StyleProp,
-  type ViewStyle,
-  type ViewProps,
 } from 'react-native';
+import Animated, { LinearTransition } from 'react-native-reanimated';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import { Plus } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useState, useCallback, useMemo, useRef, useEffect, type ReactNode } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { scale, verticalScale } from '@/utils/responsive';
+import { MOTION_EASE } from '@/constants/motion';
 import EditTextModal from '@/components/EditTextModal';
 import { feedMemoryTextEditPreviewVariant } from '@/utils/memoryTextEditStyles';
 import { bookLineBudgetForMemoryType, bookCharsPerLineForMemoryType } from '@/utils/textLimits';
@@ -40,15 +39,28 @@ import SettingsHeaderButton from '@/components/SettingsHeaderButton';
 import type { FeedListItem } from '@/components/feed/FilMemoryRow';
 import { peekSilentInitialFilLoadArmed } from '@/services/feedAfterImportFlags';
 import { setMemoryViewerSession } from '@/services/memoryViewerSession';
+import { claimVideoKeepAlive, isAnyVideoKeepAlive } from '@/lib/videoPlayerPool';
+import {
+  buildImmersiveViewerItems,
+  immersiveViewerItemKey,
+  resolveImmersiveViewerInitialIndex,
+} from '@/utils/immersiveViewerItems';
+import {
+  isUsableSharedOrigin,
+  type ImmersiveLaunchArgs,
+} from '@/utils/immersiveSharedElement';
 import {
   consumeFeedScrollIntent,
-  setFeedScrollRestoreOffset,
-  PETITMO_FIL_NEWEST_REMOVED,
+  PETITMO_FIL_APPLY_SCROLL_INTENT,
   type FeedScrollIntent,
 } from '@/services/feedScrollRestore';
 import { useFocusEffect } from '@react-navigation/native';
 import { getTimingNudge, markNudgeSeen, recordInstallDate } from '@/lib/paywallTiming';
-import type { Child } from '@/types/local';
+import type { Child, Memory } from '@/types/local';
+import {
+  buildOptimisticMemoryForPending,
+  canRenderOptimisticPendingRow,
+} from '@/utils/feedHelpers';
 import TabSceneTransition from '@/components/TabSceneTransition';
 
 function FilScreen() {
@@ -57,6 +69,12 @@ function FilScreen() {
   const { pending: pendingUploads } = usePendingMediaUploads();
   const insets = useSafeAreaInsets();
   const [timingNudge, setTimingNudge] = useState<'DAY_30' | 'DAY_60' | null>(null);
+  const listRef = useRef<FlatList<FeedListItem> | null>(null);
+  const feedScrollOffsetRef = useRef(0);
+  /** Après delete : re-pin cet offset (évite le saut FlatList). */
+  const pendingPinOffsetRef = useRef<number | null>(null);
+  const pendingScrollIntentRef = useRef<FeedScrollIntent | null>(null);
+  const [feedListOpacity, setFeedListOpacity] = useState(1);
   const {
     memories,
     setMemories,
@@ -67,6 +85,14 @@ function FilScreen() {
     onRefresh,
     memoryFlatListKeyByIdRef,
   } = useFeedData(pendingUploads);
+
+  const getFeedScrollOffset = useCallback(() => feedScrollOffsetRef.current, []);
+  const pinFeedScrollOffset = useCallback((y: number) => {
+    const next = Math.max(0, y);
+    pendingPinOffsetRef.current = next;
+    feedScrollOffsetRef.current = next;
+    listRef.current?.scrollToOffset({ offset: next, animated: false });
+  }, []);
 
   const {
     swipeRefs,
@@ -83,7 +109,10 @@ function FilScreen() {
     handleDeleteMemory,
     closeEditModal,
     closeEditLocationModal,
-  } = useFilRowActions(setMemories);
+  } = useFilRowActions(setMemories, {
+    getScrollOffset: getFeedScrollOffset,
+    pinScrollOffset: pinFeedScrollOffset,
+  });
 
   const { onViewableItemsChanged: onPrefetchViewable } = usePrefetchMemories();
   const {
@@ -99,21 +128,77 @@ function FilScreen() {
     },
     [router],
   );
-  const listRef = useRef<FlatList<FeedListItem> | null>(null);
-  const feedScrollOffsetRef = useRef(0);
-  const pendingScrollIntentRef = useRef<FeedScrollIntent | null>(null);
-  const [feedListOpacity, setFeedListOpacity] = useState(1);
-  const immersiveLaunchRef = useRef<(memoryId: string, albumPhotoIndex?: number) => void>(() => {});
-  immersiveLaunchRef.current = (memoryId: string, albumPhotoIndex = 0) => {
-    const memoryIndex = memories.findIndex(m => m.id === memoryId);
-    if (memoryIndex < 0) return;
-    setFeedScrollRestoreOffset(feedScrollOffsetRef.current);
-    suspendFeedInlineVideo();
+  const immersiveLaunchRef = useRef<(args: ImmersiveLaunchArgs) => void>(() => {});
+  immersiveLaunchRef.current = ({
+    memoryId,
+    albumPhotoIndex = 0,
+    origin,
+    uri,
+    cornerRadius = 0,
+  }: ImmersiveLaunchArgs) => {
+    let sessionMemories: Memory[] = memories;
+    let memoryIndex = memories.findIndex(m => m.id === memoryId);
+
+    /**
+     * Vidéo encore en pending (`pending_*`) : pas encore dans `memories`.
+     * On injecte le souvenir optimiste / committed pour ouvrir l’immersif tout de suite.
+     */
+    if (memoryIndex < 0) {
+      const pending = pendingUploads.find(
+        p =>
+          p.tempId === memoryId ||
+          p.committedMemory?.id === memoryId,
+      );
+      if (!pending || pending.kind !== 'video') return;
+      const pendingMem =
+        pending.committedMemory ??
+        (canRenderOptimisticPendingRow(pending)
+          ? buildOptimisticMemoryForPending(pending, child)
+          : null);
+      if (!pendingMem) return;
+      if (pending.committedMemory) {
+        memoryIndex = memories.findIndex(m => m.id === pending.committedMemory!.id);
+        if (memoryIndex < 0) {
+          sessionMemories = [pendingMem, ...memories];
+          memoryIndex = 0;
+        }
+      } else {
+        sessionMemories = [pendingMem, ...memories];
+        memoryIndex = 0;
+      }
+    }
+
+    /**
+     * Photo / texte : on coupe l’autoplay. Vidéo : le même lecteur passe au viewer,
+     * donc on ne le suspend pas — on le revendique.
+     */
+    const openedMemory = sessionMemories[memoryIndex];
+    if (openedMemory?.type === 'video') {
+      claimVideoKeepAlive(openedMemory.id);
+    } else {
+      suspendFeedInlineVideo();
+    }
+    const flatIdx = resolveImmersiveViewerInitialIndex(
+      sessionMemories,
+      memoryIndex,
+      albumPhotoIndex,
+    );
+    const opened = buildImmersiveViewerItems(sessionMemories)[flatIdx];
+    const sharedUri = uri?.trim() ?? '';
     setMemoryViewerSession({
-      memories,
+      memories: sessionMemories,
       initialIndex: memoryIndex,
       initialAlbumPhotoIndex: albumPhotoIndex,
       familyChildren,
+      sharedElement:
+        isUsableSharedOrigin(origin) && sharedUri
+          ? {
+              origin,
+              uri: sharedUri,
+              openedItemKey: opened ? immersiveViewerItemKey(opened) : '',
+              cornerRadius,
+            }
+          : null,
     });
     router.push({
       pathname: '/memory-viewer',
@@ -128,13 +213,9 @@ function FilScreen() {
     feedLocationPlaceholderFontFamily,
   } = useFeedMetaFonts();
 
-  const renderFilListCell = useCallback(
-    (props: { style?: StyleProp<ViewStyle>; children: ReactNode; onLayout?: ViewProps['onLayout'] }) => (
-      <View style={[props.style, styles.feedListCell]} onLayout={props.onLayout}>
-        {props.children}
-      </View>
-    ),
-    []
+  const renderFilListCellStyle = useMemo(
+    () => ({ overflow: 'visible' as const }),
+    [],
   );
 
   const { feedData, renderItem } = useFilFeedList(
@@ -179,6 +260,7 @@ function FilScreen() {
   const onFeedScrollStopped = useCallback(() => {
     onFeedScrollIdle();
   }, [onFeedScrollIdle]);
+
   const keyExtractor = useCallback(
     (item: FeedListItem) =>
       item.rowKind === 'pending'
@@ -193,6 +275,7 @@ function FilScreen() {
 
     if (intent.type === 'snapToKey') {
       const key = intent.key;
+      const animated = intent.animated === true;
       const index = feedData.findIndex(item =>
         item.rowKind === 'pending'
           ? item.row.tempId === key || item.row.committedMemory?.id === key
@@ -201,11 +284,11 @@ function FilScreen() {
       );
       if (index >= 0) {
         try {
-          listRef.current.scrollToIndex({ index, animated: false, viewPosition: 0 });
+          listRef.current.scrollToIndex({ index, animated, viewPosition: 0 });
         } catch {
-          listRef.current.scrollToOffset({ offset: 0, animated: false });
+          listRef.current.scrollToOffset({ offset: 0, animated });
         }
-      } else {
+      } else if (!animated) {
         listRef.current.scrollToOffset({ offset: 0, animated: false });
       }
       pendingScrollIntentRef.current = null;
@@ -222,6 +305,18 @@ function FilScreen() {
   }, [feedData, memoryFlatListKeyByIdRef]);
 
   const onFeedContentSizeChange = useCallback(() => {
+    const pinY = pendingPinOffsetRef.current;
+    if (pinY != null) {
+      listRef.current?.scrollToOffset({ offset: pinY, animated: false });
+      feedScrollOffsetRef.current = pinY;
+      // Laisser un frame pour le layout FlatList, puis relâcher le pin.
+      requestAnimationFrame(() => {
+        if (pendingPinOffsetRef.current !== pinY) return;
+        listRef.current?.scrollToOffset({ offset: pinY, animated: false });
+        pendingPinOffsetRef.current = null;
+      });
+      return;
+    }
     if (pendingScrollIntentRef.current) {
       applyPendingFeedScrollIntent();
     }
@@ -233,7 +328,12 @@ function FilScreen() {
       let scrollTask: { cancel: () => void } | undefined;
       if (intent) {
         pendingScrollIntentRef.current = intent;
-        setFeedListOpacity(0);
+        const softScroll =
+          intent.type === 'snapToKey' && intent.animated === true;
+        /** Retour immersif : fil visible + glissement — pas de flash opacity. */
+        if (!softScroll) {
+          setFeedListOpacity(0);
+        }
         scrollTask = InteractionManager.runAfterInteractions(() => {
           applyPendingFeedScrollIntent();
         });
@@ -260,22 +360,31 @@ function FilScreen() {
       return () => {
         cancelAnimationFrame(viewabilityFrame);
         scrollTask?.cancel();
-        suspendFeedInlineVideo();
+        /** Relais immersif : le lecteur doit continuer, pas s’arrêter au blur du fil. */
+        if (!isAnyVideoKeepAlive()) suspendFeedInlineVideo();
       };
     }, [router, applyPendingFeedScrollIntent, refreshFeedVideoAutoplay, suspendFeedInlineVideo]),
   );
 
+  /**
+   * Immersif = transparentModal : le fil reste focused → pas de re-entrée useFocusEffect.
+   * On applique l’intent dès qu’il est armé (retour viewer / import).
+   */
   useEffect(() => {
-    const sub = DeviceEventEmitter.addListener(PETITMO_FIL_NEWEST_REMOVED, () => {
-      const snapTop = () => {
-        listRef.current?.scrollToOffset({ offset: 0, animated: false });
-        feedScrollOffsetRef.current = 0;
-      };
-      snapTop();
-      requestAnimationFrame(snapTop);
+    const sub = DeviceEventEmitter.addListener(PETITMO_FIL_APPLY_SCROLL_INTENT, () => {
+      const intent = consumeFeedScrollIntent();
+      if (!intent) return;
+      pendingScrollIntentRef.current = intent;
+      const softScroll = intent.type === 'snapToKey' && intent.animated === true;
+      if (!softScroll) {
+        setFeedListOpacity(0);
+      }
+      InteractionManager.runAfterInteractions(() => {
+        applyPendingFeedScrollIntent();
+      });
     });
     return () => sub.remove();
-  }, []);
+  }, [applyPendingFeedScrollIntent]);
 
   useEffect(() => {
     if (feedListOpacity !== 0) return;
@@ -288,6 +397,7 @@ function FilScreen() {
 
   /** Import / replace vers le fil déjà actif : le focus ne repasse pas, on consomme l’intent au changement de données. */
   useEffect(() => {
+    if (pendingPinOffsetRef.current != null) return;
     if (pendingScrollIntentRef.current) {
       applyPendingFeedScrollIntent();
       return;
@@ -345,12 +455,13 @@ function FilScreen() {
         />
       </View>
       <View style={[styles.feedViewport, { opacity: feedListOpacity }]}>
-        <FlatList<FeedListItem>
+        <Animated.FlatList<FeedListItem>
           ref={listRef}
           data={feedData}
           keyExtractor={keyExtractor}
           renderItem={renderItem}
-          CellRendererComponent={renderFilListCell}
+          CellRendererComponentStyle={renderFilListCellStyle}
+          itemLayoutAnimation={LinearTransition.duration(320).easing(MOTION_EASE.sheet)}
           viewabilityConfigCallbackPairs={feedViewabilityPairs}
           onScroll={onFeedScroll}
           onScrollBeginDrag={onFeedScrollActive}
@@ -398,13 +509,16 @@ function FilScreen() {
             ) : null
           }
           removeClippedSubviews={false}
-          // Ancre le contenu visible quand des cellules au-dessus du viewport se re-mesurent
-          // (virtualisation, hauteurs variables sans getItemLayout).
-          // autoscrollToTopThreshold : si on est en haut, rester en haut (ex. suppression du dernier souvenir).
-          maintainVisibleContentPosition={{
-            minIndexForVisible: 0,
-            autoscrollToTopThreshold: Math.round(verticalScale(80)),
-          }}
+          // MVC seulement pendant les uploads (prepends). Au repos : off —
+          // sinon delete / re-mesure → saut en bas (bug Fabric).
+          maintainVisibleContentPosition={
+            pendingUploads.length > 0
+              ? {
+                  minIndexForVisible: 0,
+                  autoscrollToTopThreshold: Math.round(verticalScale(80)),
+                }
+              : undefined
+          }
           initialNumToRender={6}
           // Lots plus petits + fenêtre plus étroite : chaque FilMemoryRow est lourd (Swipeable,
           // mosaïque, overlays, éventuel <Video>) — monter 4 lignes d'un coup gelait le JS pendant le scroll.

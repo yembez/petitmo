@@ -14,11 +14,18 @@ const PLAY = scale(50);
 const STACK = scale(104);
 /** Fil sans vignette : disque play compact, aligné sur l’onde. */
 const PLAY_FEED = scale(44);
+/** Immersif / défaut : SVG dense. */
 const BAR_COUNT = 42;
+/**
+ * Fil : moins de barres + `View` (pas SVG) — le montage SVG+onLayout
+ * saccadait le scroll surtout sur vocal + cover.
+ */
+const FEED_BAR_COUNT = 28;
 /** Demi-hauteur de l’onde (barres centrées sur l’axe) */
 const WAVE_HALF = scale(18);
 /** Onde en lecture (portion déjà jouée) — rouge charte */
 const WAVE_PLAYING = THEME.brandPrimary;
+const WAVE_IDLE = BRAND_ACTION_GRADIENT[0];
 const RING = 'rgba(253, 119, 100, 0.28)';
 const BAR_GAP = scale(2);
 
@@ -153,9 +160,11 @@ export default function AudioPlayer({
       }),
     []
   );
+  const feedBarHeights = useMemo(() => barHeights.slice(0, FEED_BAR_COUNT), [barHeights]);
 
   const [waveW, setWaveW] = useState(0);
   const compact = compactPlayWave && variant !== 'feedRow';
+  const isFeedWave = variant === 'coverBottom' || variant === 'feedRow';
   const waveHalf =
     variant === 'feedRow' ? scale(12) : compact ? WAVE_HALF / 2 : WAVE_HALF;
   const waveH = waveHalf * 2;
@@ -422,13 +431,36 @@ export default function AudioPlayer({
     </View>
   );
 
-  const waveformEl = (
+  const waveformEl = isFeedWave ? (
     <View
       style={[
         styles.waveform,
-        (variant === 'coverBottom' || variant === 'feedRow') && styles.waveformCover,
+        styles.waveformCover,
+        styles.waveformFeedBars,
         { height: waveH },
       ]}
+    >
+      {feedBarHeights.map((amp, i) => {
+        const h = Math.max(scale(3), amp * maxBarH);
+        const isPlayed =
+          isPlaying && displayFrac > 0 && (i + 1) / FEED_BAR_COUNT <= displayFrac;
+        return (
+          <View
+            key={i}
+            style={[
+              styles.feedBar,
+              {
+                height: h,
+                backgroundColor: isPlayed ? WAVE_PLAYING : WAVE_IDLE,
+              },
+            ]}
+          />
+        );
+      })}
+    </View>
+  ) : (
+    <View
+      style={[styles.waveform, { height: waveH }]}
       onLayout={e => setWaveW(Math.max(0, Math.floor(e.nativeEvent.layout.width)))}
     >
       {waveW > 1 && barW > 0 ? (
@@ -436,7 +468,7 @@ export default function AudioPlayer({
           <Defs>
             <SvgLinearGradient id={waveGradId} x1="0" y1="0" x2="1" y2="0">
               <Stop offset="0" stopColor={BRAND_ACTION_GRADIENT[0]} />
-              <Stop offset="1" stopColor={BRAND_ACTION_GRADIENT[1]} />
+              <Stop offset="1" stopColor={BRAND_ACTION_GRADIENT[BRAND_ACTION_GRADIENT.length - 1]} />
             </SvgLinearGradient>
           </Defs>
           {barHeights.map((amp, i) => {
@@ -650,6 +682,17 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     marginBottom: 0,
+  },
+  /** Onde fil : barres flex native (pas de SVG / pas de 2ᵉ paint onLayout). */
+  waveformFeedBars: {
+    gap: scale(1.5),
+    paddingHorizontal: 0,
+  },
+  feedBar: {
+    flex: 1,
+    alignSelf: 'center',
+    borderRadius: scale(1.5),
+    minWidth: scale(2),
   },
   timeRow: {
     flexDirection: 'row',

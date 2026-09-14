@@ -17,7 +17,7 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BookOpen, Check, ChevronLeft, Pencil, Plus, X } from 'lucide-react-native';
-import { Video, ResizeMode } from 'expo-av';
+import { VideoView, useVideoPlayer } from 'expo-video';
 import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
 import { useFocusEffect } from '@react-navigation/native';
 import { scale, verticalScale } from '@/utils/responsive';
@@ -407,13 +407,7 @@ export default function MemoryViewScreen() {
             {memory.type === 'video' && (!!videoPlaybackUri || !!videoPosterUri) && (
               <View style={[styles.mediaCard, styles.videoBody]}>
                 {isPlayingVideo && !!videoPlaybackUri ? (
-                  <Video
-                    source={{ uri: videoPlaybackUri }}
-                    style={{ width: '100%', height: '100%' }}
-                    useNativeControls
-                    resizeMode={ResizeMode.CONTAIN}
-                    shouldPlay
-                  />
+                  <MemoryViewVideo uri={videoPlaybackUri} />
                 ) : videoPosterUri ? (
                   <Image
                     source={{ uri: videoPosterUri }}
@@ -730,6 +724,25 @@ export default function MemoryViewScreen() {
         </KeyboardAvoidingView>
       </Modal>
     </View>
+  );
+}
+
+/**
+ * Lecture avec contrôles natifs. Monté seulement à la demande de lecture, donc le
+ * lecteur naît et meurt avec la vue — pas de partage attendu sur cet écran.
+ */
+function MemoryViewVideo({ uri }: { uri: string }) {
+  const player = useVideoPlayer(uri, instance => {
+    instance.play();
+  });
+
+  return (
+    <VideoView
+      player={player}
+      style={{ width: '100%', height: '100%' }}
+      contentFit="contain"
+      nativeControls
+    />
   );
 }
 
