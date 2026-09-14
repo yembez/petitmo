@@ -21,14 +21,13 @@ export type BookPageMemorySpec = { memory: Memory; photoRef?: string };
 /**
  * Index de la page qui fait face dans la même double page, `-1` si la page est seule.
  * Appariement identique à l’écran : couverture seule à droite, puis (2,3), (4,5)…,
- * quatrième de couverture seule à gauche.
+ * quatrième de couverture comprise.
  */
 function facingPageIndex(pages: BookPage[], index: number): number {
   const pageNum = index + 1;
   if (pageNum < 2) return -1;
   const facing = pageNum % 2 === 0 ? index + 1 : index - 1;
   if (facing < 1 || facing >= pages.length) return -1;
-  if (pages[facing]!.type === 'back-cover') return -1;
   return facing;
 }
 

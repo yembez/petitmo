@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, memo } from 'react';
+import { useCallback, useEffect, useRef, useState, memo, type ReactNode } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import {
   DeviceEventEmitter,
   InteractionManager,
 } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -31,6 +32,7 @@ import { scale, verticalScale } from '@/utils/responsive';
 import { THEME } from '@/constants/theme';
 import BookCoverThumbnail from '@/components/BookCoverThumbnail';
 import BookCoverColorSwatches from '@/components/BookCoverColorSwatches';
+import MotionPressable, { useMotionPressScale } from '@/components/MotionPressable';
 import SettingsHeaderButton from '@/components/SettingsHeaderButton';
 import {
   parseBookCoverColorId,
@@ -188,11 +190,8 @@ const BookListRow = memo(function BookListRow({
       )}
     >
       <View style={styles.row}>
-        <GestureTouchableOpacity
-          style={styles.rowOpen}
-          activeOpacity={0.92}
+        <BookRowOpenPressable
           onPress={handleRowPress}
-          accessibilityRole="button"
           accessibilityLabel={`Livre ${book.title}`}
         >
           <BookCoverThumbnail
@@ -229,7 +228,7 @@ const BookListRow = memo(function BookListRow({
             </Text>
           </View>
           <Text style={styles.chevron}>→</Text>
-        </GestureTouchableOpacity>
+        </BookRowOpenPressable>
         <View style={styles.swatchesSlot}>
           <BookCoverColorSwatches
             compact
@@ -242,6 +241,32 @@ const BookListRow = memo(function BookListRow({
   );
 }, bookListRowPropsEqual);
 
+/** Press spring sur la zone ouverture — RNGH pour cohabiter avec le swipe supprimer. */
+function BookRowOpenPressable({
+  onPress,
+  accessibilityLabel,
+  children,
+}: {
+  onPress: () => void;
+  accessibilityLabel: string;
+  children: ReactNode;
+}) {
+  const { animStyle, onPressIn, onPressOut } = useMotionPressScale();
+  return (
+    <GestureTouchableOpacity
+      style={styles.rowOpen}
+      activeOpacity={1}
+      onPress={onPress}
+      onPressIn={onPressIn}
+      onPressOut={onPressOut}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+    >
+      <Animated.View style={[styles.rowOpenInner, animStyle]}>{children}</Animated.View>
+    </GestureTouchableOpacity>
+  );
+}
+
 function CreateBookListTile({
   titleFontFamily,
   onPress,
@@ -251,9 +276,8 @@ function CreateBookListTile({
 }) {
   const { t } = useAppTranslation('common');
   return (
-    <TouchableOpacity
+    <MotionPressable
       style={[styles.row, styles.rowOpen]}
-      activeOpacity={0.92}
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={t('book.createTile.a11y')}
@@ -272,7 +296,7 @@ function CreateBookListTile({
           {t('book.createTile.title')}
         </Text>
       </View>
-    </TouchableOpacity>
+    </MotionPressable>
   );
 }
 
@@ -675,6 +699,12 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(0,0,0,0.08)',
   },
   rowOpen: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: scale(14),
+  },
+  rowOpenInner: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: scale(14),

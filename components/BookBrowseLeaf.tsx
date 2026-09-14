@@ -26,6 +26,7 @@ export type BookBrowseLeafProps = {
   coverColorId?: string | null;
   coverTitleLine: string | null;
   chapterTitleLine: string | null;
+  backCoverTaglineLine: string | null;
   coverPhotoBrowseUri: string | null;
   cropDpiMetaCover?: { imgPxW: number; imgPxH: number };
   photoCrops: Record<string, PhotoCrop>;
@@ -52,6 +53,7 @@ function BookBrowseLeafInner({
   coverColorId,
   coverTitleLine,
   chapterTitleLine,
+  backCoverTaglineLine,
   coverPhotoBrowseUri,
   cropDpiMetaCover,
   photoCrops,
@@ -138,6 +140,9 @@ function BookBrowseLeafInner({
                 : undefined
             }
             chapterDisplayTitle={row.page.type === 'chapter' ? (chapterTitleLine ?? undefined) : undefined}
+            backCoverDisplayTagline={
+              row.page.type === 'back-cover' ? (backCoverTaglineLine ?? undefined) : undefined
+            }
             onRotate={() => {}}
             onRequestTextEdit={handlePress}
             qrUrl={qrUrl}

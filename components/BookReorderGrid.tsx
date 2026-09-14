@@ -554,8 +554,10 @@ function BookReorderGridInner({
     }
     const out: { row: number; variant: 'pair' | 'cover-solo' }[] = [];
     for (const [row, list] of perRow) {
-      if (list.length >= 2) out.push({ row, variant: 'pair' });
-      else if (list[0]?.kind === 'cover') out.push({ row, variant: 'cover-solo' });
+      // Seul le plat de couverture se rend livre fermé ; une page de fin restée seule
+      // garde le carton ouvert, comme dans le spread.
+      if (list.length === 1 && list[0]?.kind === 'cover') out.push({ row, variant: 'cover-solo' });
+      else out.push({ row, variant: 'pair' });
     }
     return out;
   }, [slots]);

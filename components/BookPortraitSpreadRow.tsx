@@ -36,6 +36,7 @@ export type BookPortraitSpreadRowProps = {
   coverColorId?: string | null;
   coverTitleLine: string | null;
   chapterTitleLine: string | null;
+  backCoverTaglineLine: string | null;
   coverPhotoBrowseUri: string | null;
   cropDpiMetaCover?: { imgPxW: number; imgPxH: number };
   cropDpiMetaByKey?: Record<string, { imgPxW: number; imgPxH: number }>;
@@ -62,6 +63,7 @@ function BookPortraitSpreadRowInner({
   coverColorId,
   coverTitleLine,
   chapterTitleLine,
+  backCoverTaglineLine,
   coverPhotoBrowseUri,
   cropDpiMetaCover,
   cropDpiMetaByKey,
@@ -81,7 +83,14 @@ function BookPortraitSpreadRowInner({
   const rightPage = item.right?.pageNum;
   bookPortraitPerfRender('BookPortraitSpreadRow', { spreadIndex, leftPage, rightPage });
 
-  const isPair = Boolean(item.left && item.right);
+  const only = item.left && item.right ? null : (item.left ?? item.right);
+  /** Plat de couverture : le seul cas rendu livre fermé. */
+  const isClosedCover = only?.page.type === 'cover';
+  /**
+   * Livre ouvert : une paire, mais aussi une page de fin restée seule (quatrième quand la
+   * parité ne lui donne pas de vis-à-vis). Sans ça elle sortait nue, sans carton ni reliure.
+   */
+  const isOpenSpread = Boolean(item.left || item.right) && !isClosedCover;
   const coverTheme = useMemo(() => bookCoverThemeForId(coverColorId), [coverColorId]);
 
   const renderLeaf = (row: PageRow) => {
@@ -99,6 +108,7 @@ function BookPortraitSpreadRowInner({
         coverColorId={coverColorId}
         coverTitleLine={coverTitleLine}
         chapterTitleLine={chapterTitleLine}
+        backCoverTaglineLine={backCoverTaglineLine}
         coverPhotoBrowseUri={coverPhotoBrowseUri}
         cropDpiMetaCover={cropDpiMetaCover}
         photoCrops={photoCrops}
@@ -123,10 +133,11 @@ function BookPortraitSpreadRowInner({
     );
   };
 
-  if (isPair) {
+  if (isOpenSpread) {
     return (
       <View style={styles.browseRow}>
-        <View style={styles.browsePairWrap}>
+        {/* Largeur figée à la double page : une page seule reste alignée sur les autres rangées. */}
+        <View style={[styles.browsePairWrap, { width: pageW * 2 }]}>
           {/**
            * Plan couverture derrière les pages seulement (pas les folios).
            * Déborde dans le padding latéral / l’espace folio pour simuler le carton ouvert.
@@ -176,42 +187,37 @@ function BookPortraitSpreadRowInner({
     );
   }
 
-  const only = item.left ?? item.right;
   if (!only) return <View style={styles.browseRow} />;
 
-  if (only.page.type === 'cover') {
-    return (
-      <View style={[styles.browseRow, styles.browseRowSingle]}>
-        <View style={styles.browsePairWrap}>
-          {/**
-           * Livre fermé : pas de liseré (un plat de couverture n’en montre pas), mais
-           * un vrai volume — deux calques d’ombre au format exact de la page.
-           * Diffusion large d’abord, contact serré ensuite : RN ne gère qu’une ombre
-           * par vue, on les empile.
-           */}
-          <View
-            pointerEvents="none"
-            style={[
-              styles.coverBoard,
-              styles.coverSoloAmbient,
-              { backgroundColor: coverTheme.paper, top: 0, left: 0, width: pageW, height: pageH },
-            ]}
-          />
-          <View
-            pointerEvents="none"
-            style={[
-              styles.coverBoard,
-              styles.coverSoloContact,
-              { backgroundColor: coverTheme.paper, top: 0, left: 0, width: pageW, height: pageH },
-            ]}
-          />
-          <View style={styles.browsePairRow}>{renderLeaf(only)}</View>
-        </View>
+  return (
+    <View style={[styles.browseRow, styles.browseRowSingle]}>
+      <View style={styles.browsePairWrap}>
+        {/**
+         * Livre fermé : pas de liseré (un plat de couverture n’en montre pas), mais
+         * un vrai volume — deux calques d’ombre au format exact de la page.
+         * Diffusion large d’abord, contact serré ensuite : RN ne gère qu’une ombre
+         * par vue, on les empile.
+         */}
+        <View
+          pointerEvents="none"
+          style={[
+            styles.coverBoard,
+            styles.coverSoloAmbient,
+            { backgroundColor: coverTheme.paper, top: 0, left: 0, width: pageW, height: pageH },
+          ]}
+        />
+        <View
+          pointerEvents="none"
+          style={[
+            styles.coverBoard,
+            styles.coverSoloContact,
+            { backgroundColor: coverTheme.paper, top: 0, left: 0, width: pageW, height: pageH },
+          ]}
+        />
+        <View style={styles.browsePairRow}>{renderLeaf(only)}</View>
       </View>
-    );
-  }
-
-  return <View style={[styles.browseRow, styles.browseRowSingle]}>{renderLeaf(only)}</View>;
+    </View>
+  );
 }
 
 function portraitRowPropsEqual(a: BookPortraitSpreadRowProps, b: BookPortraitSpreadRowProps): boolean {

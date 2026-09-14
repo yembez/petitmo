@@ -763,6 +763,8 @@ type Props = {
   inlineCropConfig?: InlineCropConfig;
   /** Texte affiché sur les pages chapitre (éditable). */
   chapterDisplayTitle?: string;
+  /** Tagline de 4e de couverture (éditable). */
+  backCoverDisplayTagline?: string;
   onRotate: () => void;
   /** Ouvre l’éditeur de texte pour la page courante (couverture ou souvenir). */
   onRequestTextEdit: () => void;
@@ -799,6 +801,7 @@ function MaquetteBookPages(props: Props) {
     onRequestCoverPhoto,
     inlineCropConfig,
     chapterDisplayTitle,
+    backCoverDisplayTagline,
     onRequestTextEdit,
     qrUrl,
     coverYearLabel,
@@ -986,15 +989,17 @@ function MaquetteBookPages(props: Props) {
       return (
         <View style={[styles.paper, { width, height }]}>
           <View style={styles.backCenter}>
-            <Text
-              style={[
-                styles.backLine1,
-                { fontSize: pdfPtToPreviewPx(13, width), lineHeight: pdfPtToPreviewPx(13 * 1.4, width) },
-                serifItalic ? { fontFamily: serifItalic } : { fontStyle: 'italic' },
-              ]}
-            >
-              Chaque moment compte.
-            </Text>
+            <Pressable onPress={onRequestTextEdit} accessibilityRole="button">
+              <Text
+                style={[
+                  styles.backLine1,
+                  { fontSize: pdfPtToPreviewPx(13, width), lineHeight: pdfPtToPreviewPx(13 * 1.4, width) },
+                  serifItalic ? { fontFamily: serifItalic } : { fontStyle: 'italic' },
+                ]}
+              >
+                {backCoverDisplayTagline ?? 'Chaque moment compte.'}
+              </Text>
+            </Pressable>
             <Text style={[styles.backLine2, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
               petit cœur · vos souvenirs pour toujours
             </Text>

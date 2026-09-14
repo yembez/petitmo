@@ -272,6 +272,8 @@ export type Book = {
   textEdits?: Record<string, { content?: string | null }>;
   /** Titre personnalisé des pages chapitre (null = « Notre histoire »). */
   chapterTitle?: string | null;
+  /** Tagline personnalisée de la 4e de couverture (null = « Chaque moment compte. »). */
+  backCoverTagline?: string | null;
 };
 
 const STORAGE_KEY = '@petitmo_books_v1';
@@ -515,6 +517,12 @@ function normalizeBook(raw: unknown): Book | null {
       ? r.chapterTitle.trim()
       : null;
 
+  const backCoverTagline =
+    typeof (r as { backCoverTagline?: unknown }).backCoverTagline === 'string' &&
+    ((r as { backCoverTagline: string }).backCoverTagline).trim().length > 0
+      ? (r as { backCoverTagline: string }).backCoverTagline.trim()
+      : null;
+
   const coverPhotoUrl =
     typeof r.coverPhotoUrl === 'string' && r.coverPhotoUrl.trim().length > 0
       ? r.coverPhotoUrl.trim()
@@ -590,6 +598,7 @@ function normalizeBook(raw: unknown): Book | null {
     photoCrops: Object.keys(photoCrops).length > 0 ? photoCrops : undefined,
     textEdits: Object.keys(textEdits).length > 0 ? textEdits : undefined,
     chapterTitle,
+    backCoverTagline,
   };
 }
 
@@ -628,6 +637,7 @@ async function writeAll(books: Book[]): Promise<void> {
       photoCrops: normalized.photoCrops,
       textEdits: normalized.textEdits,
       chapterTitle: normalized.chapterTitle ?? null,
+      backCoverTagline: normalized.backCoverTagline ?? null,
     });
   }
 }
@@ -1388,6 +1398,7 @@ export async function createBook(title?: string): Promise<Book> {
     memoryIds: book.memoryIds,
     coverPhotoUrl: null,
     chapterTitle: null,
+    backCoverTagline: null,
   });
   return book;
 }
@@ -1473,6 +1484,7 @@ export async function upsertBook(next: Book): Promise<void> {
     photoCrops: normalized.photoCrops,
     textEdits: normalized.textEdits,
     chapterTitle: normalized.chapterTitle ?? null,
+    backCoverTagline: normalized.backCoverTagline ?? null,
   });
   scheduleBooksCloudBackup();
 }
@@ -1858,6 +1870,7 @@ export async function migrateBooksFromAsyncStorageToSqliteOnce(): Promise<void> 
             photoCrops: b.photoCrops,
             textEdits: b.textEdits,
             chapterTitle: b.chapterTitle ?? null,
+            backCoverTagline: b.backCoverTagline ?? null,
           });
         }
       }
@@ -1936,6 +1949,7 @@ export async function backupBooksToSupabaseIfPremium(): Promise<void> {
     photo_crops: b.photoCrops ?? null,
     text_edits: b.textEdits ?? null,
     chapter_title: b.chapterTitle ?? null,
+    back_cover_tagline: b.backCoverTagline ?? null,
   }));
 
   // Upsert tout : robuste et idempotent.
@@ -1946,7 +1960,13 @@ export async function backupBooksToSupabaseIfPremium(): Promise<void> {
    * Repli progressif si une migration manque en prod : ne retirer que le strict nécessaire,
    * sinon un simple `cover_color_id` absent ferait aussi perdre `page_entries` dans le cloud.
    */
-  const withoutOrderMode = payload.map(({ page_order_mode: _pom, ...rest }) => rest);
+  const withoutBackTagline = payload.map(({ back_cover_tagline: _bt, ...rest }) => rest);
+  const { error: noBackTaglineErr } = await booksTable().upsert(withoutBackTagline, {
+    onConflict: 'id',
+  });
+  if (!noBackTaglineErr) return;
+
+  const withoutOrderMode = withoutBackTagline.map(({ page_order_mode: _pom, ...rest }) => rest);
   const { error: noOrderModeErr } = await booksTable().upsert(withoutOrderMode, {
     onConflict: 'id',
   });
@@ -2095,10 +2115,19 @@ export async function restoreBooksFromSupabaseIfPremium(): Promise<void> {
 
   let { data, error } = await booksTable()
     .select(
-      'id, user_id, title, created_at, updated_at, memory_ids, page_entries, page_order_mode, memory_photo_refs, cover_photo_url, cover_color_id, rotations, photo_crops, text_edits, chapter_title'
+      'id, user_id, title, created_at, updated_at, memory_ids, page_entries, page_order_mode, memory_photo_refs, cover_photo_url, cover_color_id, rotations, photo_crops, text_edits, chapter_title, back_cover_tagline'
     )
     .eq('user_id', userId)
     .order('updated_at', { ascending: false });
+
+  if (error) {
+    ({ data, error } = await booksTable()
+      .select(
+        'id, user_id, title, created_at, updated_at, memory_ids, page_entries, page_order_mode, memory_photo_refs, cover_photo_url, cover_color_id, rotations, photo_crops, text_edits, chapter_title'
+      )
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false }));
+  }
 
   if (error) {
     ({ data, error } = await booksTable()
@@ -2190,6 +2219,12 @@ export async function restoreBooksFromSupabaseIfPremium(): Promise<void> {
     const photoCrops = safePhotoCrops(row.photo_crops) ?? local?.photoCrops ?? null;
     const textEdits = safeTextEdits(row.text_edits);
     const chapterTitle = typeof row.chapter_title === 'string' ? row.chapter_title : null;
+    /** Remote muet (colonne absente / backup pas encore passé) : garder le local. */
+    const remoteBackTagline =
+      typeof row.back_cover_tagline === 'string' && row.back_cover_tagline.trim().length > 0
+        ? row.back_cover_tagline.trim()
+        : null;
+    const backCoverTagline = remoteBackTagline ?? local?.backCoverTagline ?? null;
 
     const remotePageEntries = safePageEntries(row.page_entries);
     const remoteMemoryPhotoRefs = safeMemoryPhotoRefs(row.memory_photo_refs);
@@ -2240,6 +2275,7 @@ export async function restoreBooksFromSupabaseIfPremium(): Promise<void> {
       photoCrops: photoCrops ?? undefined,
       textEdits: textEdits ?? undefined,
       chapterTitle,
+      backCoverTagline,
     });
   }
 

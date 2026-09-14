@@ -230,6 +230,7 @@ type SpreadRow = {
 type TextEditTarget =
   | { kind: 'cover'; modalTitle: string }
   | { kind: 'chapter'; modalTitle: string }
+  | { kind: 'back-cover'; modalTitle: string }
   | { kind: 'memory'; memory: Memory; modalTitle: string };
 
 
@@ -471,6 +472,9 @@ export default function BookPreviewScreen() {
   const [chapterTitleLine, setChapterTitleLine] = useState<string | null>(
     localSnapshot?.book.chapterTitle ?? null,
   );
+  const [backCoverTaglineLine, setBackCoverTaglineLine] = useState<string | null>(
+    localSnapshot?.book.backCoverTagline ?? null,
+  );
   const [textEditTarget, setTextEditTarget] = useState<TextEditTarget | null>(null);
   const [exporting, setExporting] = useState(false);
   const [allMemories, setAllMemories] = useState<Memory[]>([]);
@@ -514,6 +518,9 @@ export default function BookPreviewScreen() {
         return;
       case 'chapter':
         setTextEditTarget({ kind: 'chapter', modalTitle: 'Titre des chapitres' });
+        return;
+      case 'back-cover':
+        setTextEditTarget({ kind: 'back-cover', modalTitle: 'Texte de 4e de couverture' });
         return;
       case 'photo-full':
       case 'quote':
@@ -592,24 +599,23 @@ export default function BookPreviewScreen() {
    *
    * Règles:
    * - Couverture seule à droite (gauche vide)
-   * - Quatrième de couverture seule à gauche (droite vide)
-   * - Entre les deux: paires (2–3), (4–5), etc. (gauche=page paire, droite=page impaire suivante)
+   * - Ensuite paires (2–3), (4–5), etc. (gauche=page paire, droite=page impaire suivante)
+   *
+   * La quatrième de couverture suit la même règle que les autres pages : quand elle porte un
+   * numéro impair elle ferme la dernière double page face au dernier souvenir, comme
+   * « Notre histoire » ouvre la première face au premier souvenir. L’en exclure produisait
+   * deux pages seules empilées en fin de livre.
    */
   const spreadRows = useMemo<SpreadRow[]>(() => {
     if (pageRows.length === 0) return [];
 
     const out: SpreadRow[] = [];
-    const last = pageRows[pageRows.length - 1]!;
-    const hasBackCover = last.page.type === 'back-cover';
-    const backCover = hasBackCover ? last : null;
 
     // Cover (page 1) seule à droite
     out.push({ kind: 'spread', spreadIndex: 0, left: null, right: pageRows[0] ?? null });
 
-    // Paires au milieu, sans inclure la quatrième de couverture.
-    const endExclusive = hasBackCover ? pageRows.length - 1 : pageRows.length;
     let i = 1;
-    while (i + 1 < endExclusive) {
+    while (i + 1 < pageRows.length) {
       out.push({
         kind: 'spread',
         spreadIndex: out.length,
@@ -618,21 +624,11 @@ export default function BookPreviewScreen() {
       });
       i += 2;
     }
-    if (i < endExclusive) {
+    if (i < pageRows.length) {
       out.push({
         kind: 'spread',
         spreadIndex: out.length,
         left: pageRows[i] ?? null,
-        right: null,
-      });
-    }
-
-    // Quatrième de couverture seule à gauche
-    if (backCover) {
-      out.push({
-        kind: 'spread',
-        spreadIndex: out.length,
-        left: backCover,
         right: null,
       });
     }
@@ -1030,6 +1026,7 @@ export default function BookPreviewScreen() {
         if (b.rotations) setRotations(b.rotations);
         if (b.photoCrops) setPhotoCrops(b.photoCrops);
         if (b.chapterTitle) setChapterTitleLine(b.chapterTitle);
+        if (b.backCoverTagline) setBackCoverTaglineLine(b.backCoverTagline);
         memoryIds = new Set(b.memoryIds);
         setBookSelectionKeys(b.memoryIds);
 
@@ -1388,13 +1385,14 @@ export default function BookPreviewScreen() {
           photoCrops: hasCrops ? photoCrops : undefined,
           textEdits: undefined,
           chapterTitle: chapterTitleLine ?? undefined,
+          backCoverTagline: backCoverTaglineLine ?? undefined,
         });
       })();
     }, 800);
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [bookId, loading, rotations, photoCrops, chapterTitleLine]);
+  }, [bookId, loading, rotations, photoCrops, chapterTitleLine, backCoverTaglineLine]);
 
   const upsertPhotoCrop = useCallback(
     (key: string, next: { xPct: number; yPct: number; scale: number }) => {
@@ -1769,6 +1767,8 @@ export default function BookPreviewScreen() {
                * annulée au démontage si on sort juste après un pinch).
                */
               photoCrops: Object.keys(photoCrops).length > 0 ? photoCrops : undefined,
+              chapterTitle: chapterTitleLine ?? undefined,
+              backCoverTagline: backCoverTaglineLine ?? undefined,
             });
           }
           setFeedBooksHydrationSnapshot(listBooksFromSqliteSync());
@@ -1793,6 +1793,7 @@ export default function BookPreviewScreen() {
             coverYearLabel,
             coverColorId,
             chapterTitle: chapterTitleLine ?? 'Notre histoire',
+            backCoverTagline: backCoverTaglineLine ?? 'Chaque moment compte.',
             pages,
             rotations,
             photoCrops,
@@ -1839,6 +1840,7 @@ export default function BookPreviewScreen() {
     bookSnapshot?.coverPhotoUrl,
     bookSnapshot?.memoryPhotoRefs,
     chapterTitleLine,
+    backCoverTaglineLine,
     child,
     coverPhotoImgPxForPdf,
     coverPhotoPrintUri,
@@ -2387,6 +2389,7 @@ export default function BookPreviewScreen() {
             onZoomActiveChange: setEditorPhotoZoomed,
           }}
           chapterDisplayTitle={page.type === 'chapter' ? (chapterTitleLine ?? undefined) : undefined}
+          backCoverDisplayTagline={page.type === 'back-cover' ? (backCoverTaglineLine ?? undefined) : undefined}
           onRotate={() => {
             if (m && (page.type === 'photo-full' || page.type === 'photo-note' || page.type === 'audio')) {
               onRotateMemory(m.id);
@@ -2406,6 +2409,7 @@ export default function BookPreviewScreen() {
       coverYearLabel,
       coverColorId,
       chapterTitleLine,
+      backCoverTaglineLine,
       cropDpiMetaByKey,
       merge,
       onRotateMemory,
@@ -2605,6 +2609,7 @@ export default function BookPreviewScreen() {
           coverColorId={coverColorId}
           coverTitleLine={coverTitleLine}
           chapterTitleLine={chapterTitleLine}
+          backCoverTaglineLine={backCoverTaglineLine}
           coverPhotoBrowseUri={coverPhotoBrowseUri}
           cropDpiMetaCover={coverCropDpiMetaForBrowse}
           cropDpiMetaByKey={cropDpiMetaByKey}
@@ -2622,6 +2627,7 @@ export default function BookPreviewScreen() {
       availHLandscape,
       child,
       chapterTitleLine,
+      backCoverTaglineLine,
       coverCropDpiMetaForBrowse,
       coverPhotoBrowseUri,
       coverTitleLine,
@@ -2705,6 +2711,7 @@ export default function BookPreviewScreen() {
             isCover ? `reorder:${coverPhotoBrowseUri ?? ''}:${bookMediaRevision}` : undefined
           }
           chapterDisplayTitle={page.type === 'chapter' ? (chapterTitleLine ?? undefined) : undefined}
+          backCoverDisplayTagline={page.type === 'back-cover' ? (backCoverTaglineLine ?? undefined) : undefined}
           onRotate={() => {}}
           onRequestTextEdit={() => {}}
           qrUrl={qrPreviewUrlForMemory(m?.id, qrTokensByMemoryId)}
@@ -2717,6 +2724,7 @@ export default function BookPreviewScreen() {
       bookMediaRevision,
       bookSnapshot?.memoryPhotoRefs,
       chapterTitleLine,
+      backCoverTaglineLine,
       child,
       coverColorId,
       coverPhotoBrowseUri,
@@ -2832,6 +2840,7 @@ export default function BookPreviewScreen() {
           coverColorId={coverColorId}
           coverTitleLine={coverTitleLine}
           chapterTitleLine={chapterTitleLine}
+          backCoverTaglineLine={backCoverTaglineLine}
           coverPhotoBrowseUri={coverPhotoBrowseUri}
           cropDpiMetaCover={coverCropDpiMetaForBrowse}
           cropDpiMetaByKey={cropDpiMetaByKey}
@@ -2853,6 +2862,7 @@ export default function BookPreviewScreen() {
       browsePageW,
       child,
       chapterTitleLine,
+      backCoverTaglineLine,
       coverCropDpiMetaForBrowse,
       coverPhotoBrowseUri,
       coverTitleLine,
@@ -2974,11 +2984,14 @@ export default function BookPreviewScreen() {
     if (textEditTarget.kind === 'chapter') {
       return chapterTitleLine ?? 'Notre histoire';
     }
+    if (textEditTarget.kind === 'back-cover') {
+      return backCoverTaglineLine ?? 'Chaque moment compte.';
+    }
     if (textEditTarget.kind === 'memory') {
       return merge(textEditTarget.memory).content ?? '';
     }
     return '';
-  }, [textEditTarget, coverTitleLine, chapterTitleLine, child, merge]);
+  }, [textEditTarget, coverTitleLine, chapterTitleLine, backCoverTaglineLine, child, merge]);
 
   const editModalLineBudget = useMemo(() => {
     if (!textEditTarget || textEditTarget.kind !== 'memory') return undefined;
@@ -3004,6 +3017,8 @@ export default function BookPreviewScreen() {
         }
       } else if (textEditTarget.kind === 'chapter') {
         setChapterTitleLine(text.trim() || null);
+      } else if (textEditTarget.kind === 'back-cover') {
+        setBackCoverTaglineLine(text.trim() || null);
       } else if (textEditTarget.kind === 'memory') {
         const memoryId = textEditTarget.memory.id;
         setBookMemories(prev =>
@@ -3030,6 +3045,7 @@ export default function BookPreviewScreen() {
     if (!textEditTarget) return 'closed';
     if (textEditTarget.kind === 'cover') return 'cover';
     if (textEditTarget.kind === 'chapter') return 'chapter';
+    if (textEditTarget.kind === 'back-cover') return 'back-cover';
     return `memory-${textEditTarget.memory.id}`;
   }, [textEditTarget]);
 
@@ -3221,8 +3237,9 @@ export default function BookPreviewScreen() {
             coverPhotoImgPxH: coverPhotoImgPxForPdf?.h,
             coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
             coverYearLabel,
-      coverColorId,
+            coverColorId,
             chapterTitle: chapterTitleLine ?? 'Notre histoire',
+            backCoverTagline: backCoverTaglineLine ?? 'Chaque moment compte.',
             pages,
             rotations,
             photoCrops,
@@ -3275,6 +3292,7 @@ export default function BookPreviewScreen() {
     },
     [
       chapterTitleLine,
+      backCoverTaglineLine,
       child,
       coverTitleLine,
       coverYearLabel,
@@ -3322,6 +3340,7 @@ export default function BookPreviewScreen() {
               photoCrops: hasCrops ? photoCrops : undefined,
               textEdits: undefined,
               chapterTitle: chapterTitleLine ?? undefined,
+              backCoverTagline: backCoverTaglineLine ?? undefined,
             });
           }
         } catch (e) {
@@ -3339,8 +3358,9 @@ export default function BookPreviewScreen() {
         coverPhotoImgPxH: coverPhotoImgPxForPdf?.h,
         coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
         coverYearLabel,
-      coverColorId,
-        chapterTitle: chapterTitleLine ?? 'Notre histoire',
+            coverColorId,
+            chapterTitle: chapterTitleLine ?? 'Notre histoire',
+            backCoverTagline: backCoverTaglineLine ?? 'Chaque moment compte.',
         pages,
         rotations,
         photoCrops,
@@ -3419,6 +3439,7 @@ export default function BookPreviewScreen() {
               photoCrops: hasCrops ? photoCrops : undefined,
               textEdits: undefined,
               chapterTitle: chapterTitleLine ?? undefined,
+              backCoverTagline: backCoverTaglineLine ?? undefined,
             });
           }
         } catch (e) {
@@ -3436,8 +3457,9 @@ export default function BookPreviewScreen() {
         coverPhotoImgPxH: coverPhotoImgPxForPdf?.h,
         coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
         coverYearLabel,
-      coverColorId,
-        chapterTitle: chapterTitleLine ?? 'Notre histoire',
+            coverColorId,
+            chapterTitle: chapterTitleLine ?? 'Notre histoire',
+            backCoverTagline: backCoverTaglineLine ?? 'Chaque moment compte.',
         pages,
         rotations,
         photoCrops,
@@ -3513,8 +3535,9 @@ export default function BookPreviewScreen() {
           coverPhotoImgPxH: coverPhotoImgPxForPdf?.h,
           coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
           coverYearLabel,
-      coverColorId,
-          chapterTitle: chapterTitleLine ?? 'Notre histoire',
+            coverColorId,
+            chapterTitle: chapterTitleLine ?? 'Notre histoire',
+            backCoverTagline: backCoverTaglineLine ?? 'Chaque moment compte.',
           pages,
           rotations,
           photoCrops,
@@ -3550,6 +3573,7 @@ export default function BookPreviewScreen() {
       bookSnapshot?.memoryPhotoRefs,
       child,
       chapterTitleLine,
+      backCoverTaglineLine,
       coverPhotoPrintUri,
       coverPhotoImgPxForPdf,
       coverTitleLine,

@@ -172,11 +172,10 @@ describe('buildBookPages — pleine page vs marges sur la double page', () => {
     return { ...photoMemory(id, content, at), type };
   }
 
-  /** Doubles pages telles qu’à l’écran : couverture seule, puis (2,3), (4,5)… */
+  /** Doubles pages telles qu’à l’écran : couverture seule, puis (2,3), (4,5)…, 4e comprise. */
   function spreads(pages: BookPage[]): [BookPage, BookPage][] {
     const out: [BookPage, BookPage][] = [];
-    const end = pages[pages.length - 1]!.type === 'back-cover' ? pages.length - 1 : pages.length;
-    for (let i = 1; i + 1 < end; i += 2) out.push([pages[i]!, pages[i + 1]!]);
+    for (let i = 1; i + 1 < pages.length; i += 2) out.push([pages[i]!, pages[i + 1]!]);
     return out;
   }
 
@@ -236,5 +235,39 @@ describe('buildBookPages — pleine page vs marges sur la double page', () => {
     const ouvertures = spreads(livres[0]!).map(([left]) => variant(left));
     const deuxDeSuite = ouvertures.some((v, i) => v === 'FP' && ouvertures[i + 1] === 'FP');
     expect(deuxDeSuite).toBe(true);
+  });
+});
+
+describe('buildBookPages — fin du livre', () => {
+  function photos(n: number): Memory[] {
+    return Array.from({ length: n }, (_, i) =>
+      photoMemory(`p${i}`, 'Court', `2025-01-${String(i + 1).padStart(2, '0')}T12:00:00.000Z`),
+    );
+  }
+
+  /** Vis-à-vis dans la double page (couverture seule à droite, puis (2,3), (4,5)…). */
+  function facing(pages: BookPage[], index: number): BookPage | null {
+    const pageNum = index + 1;
+    if (pageNum < 2) return null;
+    const other = pageNum % 2 === 0 ? index + 1 : index - 1;
+    return other >= 1 && other < pages.length ? pages[other]! : null;
+  }
+
+  it('ferme la dernière double page avec la 4e face au dernier souvenir', () => {
+    // Nombre pair de souvenirs → intérieur impair (« Notre histoire » + souvenirs) → la 4e
+    // tombe sur un numéro impair et ferme la double page, au lieu de rester seule.
+    const pages = buildBookPages(child, photos(4));
+    const backIndex = pages.length - 1;
+    expect(pages[backIndex]!.type).toBe('back-cover');
+    expect(facing(pages, backIndex)).toBe(pages[backIndex - 1]);
+    expect(pages[backIndex - 1]!.type).not.toBe('back-cover');
+  });
+
+  it('garde « Notre histoire » face au premier souvenir', () => {
+    for (const n of [3, 4]) {
+      const pages = buildBookPages(child, photos(n));
+      expect(pages[1]!.type).toBe('chapter');
+      expect(facing(pages, 1)).toBe(pages[2]);
+    }
   });
 });

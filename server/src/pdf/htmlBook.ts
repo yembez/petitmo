@@ -45,6 +45,8 @@ export type BuildBookHtmlInput = {
   coverTitle: string;
   coverYearLabel: string;
   chapterTitle: string;
+  /** Tagline 4e de couverture (défaut « Chaque moment compte. »). */
+  backCoverTagline?: string | null;
   qrBaseUrl: string;
   exportMode: 'digital' | 'print';
   pages: BookPageServer[];
@@ -557,10 +559,10 @@ function pageVideo(
   return pageMediaQr('video', m, qrUrl, pageNum, rot, crop, familyChildren, cropImgPxW, cropImgPxH, printBleed);
 }
 
-function pageBackCover(): string {
+function pageBackCover(tagline: string): string {
   return `<div class="page back-cover">
   <div class="back-inner">
-    <div class="subtitle" style="color:#AEAEB2;">Chaque moment compte.</div>
+    <div class="subtitle" style="color:#AEAEB2;">${esc(tagline)}</div>
     <div class="label" style="margin-top:8pt;">petit cœur · vos souvenirs pour toujours</div>
     <div class="chapter-rule" style="margin-top:12pt;"></div>
   </div>
@@ -611,12 +613,13 @@ function pageGelatoWraparoundSpread(
     : '<div class="cover-placeholder"></div>';
 
   const spineTitle = esc(input.coverTitle.slice(0, 48));
+  const backTagline = esc((input.backCoverTagline ?? '').trim() || 'Chaque moment compte.');
 
   return `<div class="page">
   <div class="gw-canvas" style="width:${spreadWidthMm}mm;height:${spreadHeightMm}mm;background:${theme.paper};">
     <div class="gw-panel gw-back" style="left:${contentBack.leftMm}mm;top:${contentBack.topMm}mm;width:${contentBack.widthMm}mm;height:${contentBack.heightMm}mm;background:${theme.paper};">
       <div class="gw-back-inner">
-        <div class="subtitle" style="color:${theme.muted}">Chaque moment compte.</div>
+        <div class="subtitle" style="color:${theme.muted}">${backTagline}</div>
         <div class="label" style="margin-top:8pt;color:${theme.muted}">petit cœur · vos souvenirs pour toujours</div>
         <div class="chapter-rule" style="margin-top:12pt;background:${theme.line}"></div>
       </div>
@@ -643,6 +646,7 @@ function renderPage(page: BookPageServer, input: BuildBookHtmlInput, pageNum: nu
   const { child, coverTitle, coverYearLabel, chapterTitle, qrBaseUrl, coverPhotoUrl, coverPhotoImgPxW, coverPhotoImgPxH, coverColorId, memoriesById, qrTokensByMemoryId } =
     input;
   const printBleed = input.exportMode === 'print';
+  const backCoverTagline = (input.backCoverTagline ?? '').trim() || 'Chaque moment compte.';
   switch (page.type) {
     case 'cover':
       return pageCover(
@@ -737,7 +741,7 @@ function renderPage(page: BookPageServer, input: BuildBookHtmlInput, pageNum: nu
       }
     }
     case 'back-cover':
-      return pageBackCover();
+      return pageBackCover(backCoverTagline);
     default:
       return '';
   }

@@ -163,6 +163,9 @@ export function initLocalDb(): void {
     if (!bookNames.has('pageOrderMode')) {
       db.execSync(`ALTER TABLE books ADD COLUMN pageOrderMode TEXT;`)
     }
+    if (!bookNames.has('backCoverTagline')) {
+      db.execSync(`ALTER TABLE books ADD COLUMN backCoverTagline TEXT;`)
+    }
   } catch {
     /* migration douce */
   }
@@ -217,6 +220,7 @@ export type LocalBookRow = {
   photoCrops?: Record<string, { xPct: number; yPct: number; scale: number }>
   textEdits?: Record<string, { content?: string | null }>
   chapterTitle?: string | null
+  backCoverTagline?: string | null
   updatedAt: string
 }
 
@@ -295,6 +299,10 @@ function deserializeLocalBook(row: Record<string, unknown>): LocalBookRow {
     textEdits: Object.keys(textEdits).length ? textEdits : undefined,
     chapterTitle:
       typeof row.chapterTitle === 'string' && row.chapterTitle.trim().length > 0 ? (row.chapterTitle as string) : null,
+    backCoverTagline:
+      typeof row.backCoverTagline === 'string' && row.backCoverTagline.trim().length > 0
+        ? (row.backCoverTagline as string)
+        : null,
   }
 }
 
@@ -324,14 +332,16 @@ export function upsertLocalBook(book: Omit<LocalBookRow, 'updatedAt'>): void {
     book.coverColorId !== undefined ? book.coverColorId : existing?.coverColorId ?? null
   const pageOrderMode =
     book.pageOrderMode !== undefined ? book.pageOrderMode : existing?.pageOrderMode ?? null
+  const backCoverTagline =
+    book.backCoverTagline !== undefined ? book.backCoverTagline : existing?.backCoverTagline ?? null
 
   db.runSync(
     `INSERT OR REPLACE INTO books (
       id, title, createdAt, memoryIds, memoryPhotoRefs, pageEntries, pageOrderMode,
       coverPhotoUrl, coverColorId,
-      rotations, photoCrops, textEdits, chapterTitle,
+      rotations, photoCrops, textEdits, chapterTitle, backCoverTagline,
       updatedAt
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
       book.id,
       (book.title ?? '').trim() || 'Livre',
@@ -348,6 +358,7 @@ export function upsertLocalBook(book: Omit<LocalBookRow, 'updatedAt'>): void {
       book.photoCrops ? JSON.stringify(book.photoCrops) : null,
       book.textEdits ? JSON.stringify(book.textEdits) : null,
       book.chapterTitle ?? null,
+      backCoverTagline ?? null,
       now,
     ]
   )

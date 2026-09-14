@@ -1248,6 +1248,7 @@ export type GenerateBookPdfServerInput = {
   coverYearLabel: string;
   coverColorId?: string | null;
   chapterTitle: string;
+  backCoverTagline?: string | null;
   pages: BookPage[];
   rotations: Record<string, number>;
   photoCrops: Record<string, { xPct: number; yPct: number; scale: number }>;
@@ -1354,6 +1355,7 @@ export async function generateBookPdfViaServer(input: GenerateBookPdfServerInput
     coverYearLabel: input.coverYearLabel,
     coverColorId: input.coverColorId ?? null,
     chapterTitle: input.chapterTitle,
+    backCoverTagline: input.backCoverTagline ?? null,
     // QR stable public : `https://petitmo.app/m/{token}` (pas le serveur PDF).
     qrBaseUrl: publicMediaBaseUrl(),
     exportMode: input.exportMode === 'print' ? 'print' : 'digital',
@@ -1786,6 +1788,7 @@ async function generateBookPdfWithExportTicketBody(
     coverYearLabel: input.coverYearLabel,
     coverColorId: input.coverColorId ?? null,
     chapterTitle: input.chapterTitle,
+    backCoverTagline: input.backCoverTagline ?? null,
     qrBaseUrl: publicMediaBaseUrl(),
     exportMode: input.exportMode === 'print' ? 'print' : 'digital',
     pages: pagesPayload,

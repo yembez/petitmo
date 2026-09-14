@@ -64,6 +64,8 @@ export type GenerateBookPdfPayload = {
   /** Couleur fond couverture (white|cream|olive|navy|charcoal|black). */
   coverColorId?: string | null;
   chapterTitle: string;
+  /** Tagline 4e de couverture (défaut « Chaque moment compte. »). */
+  backCoverTagline?: string | null;
   qrBaseUrl: string;
   exportMode: 'digital' | 'print';
   pages: BookPageServer[];

@@ -38,6 +38,7 @@ type BookSpreadSlideProps = {
   coverColorId?: string | null;
   coverTitleLine: string | null;
   chapterTitleLine: string | null;
+  backCoverTaglineLine: string | null;
   coverPhotoBrowseUri: string | null;
   cropDpiMetaCover?: { imgPxW: number; imgPxH: number };
   cropDpiMetaByKey?: Record<string, { imgPxW: number; imgPxH: number }>;
@@ -59,6 +60,7 @@ function SpreadMaquettePage({
   coverColorId,
   coverTitleLine,
   chapterTitleLine,
+  backCoverTaglineLine,
   coverPhotoBrowseUri,
   cropDpiMetaCover,
   cropDpiMetaByKey,
@@ -78,6 +80,7 @@ function SpreadMaquettePage({
   coverColorId?: string | null;
   coverTitleLine: string | null;
   chapterTitleLine: string | null;
+  backCoverTaglineLine: string | null;
   coverPhotoBrowseUri: string | null;
   cropDpiMetaCover?: { imgPxW: number; imgPxH: number };
   cropDpiMetaByKey?: Record<string, { imgPxW: number; imgPxH: number }>;
@@ -140,6 +143,9 @@ function SpreadMaquettePage({
             : undefined
         }
         chapterDisplayTitle={row.page.type === 'chapter' ? (chapterTitleLine ?? undefined) : undefined}
+        backCoverDisplayTagline={
+          row.page.type === 'back-cover' ? (backCoverTaglineLine ?? undefined) : undefined
+        }
         onRotate={() => {}}
         onRequestTextEdit={() => onRequestTextEditForPage(row.pageNum - 1)}
         qrUrl={qrUrl}
@@ -159,6 +165,7 @@ function BookSpreadSlideInner({
   coverColorId,
   coverTitleLine,
   chapterTitleLine,
+  backCoverTaglineLine,
   coverPhotoBrowseUri,
   cropDpiMetaCover,
   cropDpiMetaByKey,
@@ -182,6 +189,7 @@ function BookSpreadSlideInner({
     coverColorId,
     coverTitleLine,
     chapterTitleLine,
+    backCoverTaglineLine,
     coverPhotoBrowseUri,
     cropDpiMetaCover,
     cropDpiMetaByKey,
