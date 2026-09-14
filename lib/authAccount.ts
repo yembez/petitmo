@@ -99,6 +99,14 @@ export async function activateCloudSyncAfterRealAuth(user: User): Promise<void> 
   await setCloudAccountKind('real');
   await syncUserTierFromSessionUser(user);
 
+  // RevenueCat : lier l’id Supabase ; entitlement actif → cache paid (webhook peut encore rattraper app_metadata).
+  try {
+    const { logInRevenueCat } = await import('@/lib/revenueCat');
+    await logInRevenueCat(user.id);
+  } catch (e) {
+    console.warn('[auth] logInRevenueCat', e);
+  }
+
   try {
     await claimLocalDataForCloudUser(user.id);
   } catch (e) {
@@ -581,6 +589,12 @@ async function signInWithGoogleWebOAuth(): Promise<AuthAccountResult> {
 }
 
 export async function signOutRealAccount(): Promise<void> {
+  try {
+    const { logOutRevenueCat } = await import('@/lib/revenueCat');
+    await logOutRevenueCat();
+  } catch (e) {
+    console.warn('[auth] logOutRevenueCat', e);
+  }
   await supabase.auth.signOut();
   rememberRealAuthUser(null);
   await Promise.all([
@@ -640,6 +654,12 @@ export async function deleteRealAccount(): Promise<{ ok: true } | { ok: false; e
   }
 
   rememberRealAuthUser(null);
+  try {
+    const { logOutRevenueCat } = await import('@/lib/revenueCat');
+    await logOutRevenueCat();
+  } catch (e) {
+    console.warn('[auth] logOutRevenueCat after delete', e);
+  }
   try {
     await supabase.auth.signOut();
   } catch (e) {

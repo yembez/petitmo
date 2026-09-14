@@ -122,6 +122,10 @@ function RootLayoutNav() {
       }
       // Mise en arrière-plan : pousser le backup livres en attente (debounce non écoulé).
       flushBooksCloudBackupNow();
+      /** Couper les décodeurs vidéo en fond (évite chaleur / ralentissement OS). */
+      void import('@/lib/videoPlayerPool').then(({ pauseAllPooledVideoPlayers }) => {
+        pauseAllPooledVideoPlayers();
+      });
     });
 
     return () => sub.remove();
@@ -158,6 +162,25 @@ function RootLayoutNav() {
 
     void initAuth();
   }, []);
+
+  /** RevenueCat : configure au boot (anonyme), puis logIn si compte produit. */
+  useEffect(() => {
+    if (!isAuthReady) return;
+    void (async () => {
+      try {
+        const { configureRevenueCat, logInRevenueCat } = await import('@/lib/revenueCat');
+        const ok = await configureRevenueCat();
+        if (!ok) return;
+        const { getRealAuthUser } = await import('@/lib/authAccount');
+        const user = await getRealAuthUser();
+        if (user?.id) {
+          await logInRevenueCat(user.id);
+        }
+      } catch (e) {
+        console.warn('[boot] revenueCat', e);
+      }
+    })();
+  }, [isAuthReady]);
 
   /** Relance OTA après auth si le fetch au boot n’a pas suffi. */
   useEffect(() => {
@@ -336,9 +359,10 @@ function RootLayoutNav() {
         <Stack.Screen
           name="memory-viewer"
           options={{
-            presentation: 'fullScreenModal',
-            animation: 'slide_from_bottom',
-            contentStyle: { flex: 1, backgroundColor: THEME.bgScreen },
+            presentation: 'transparentModal',
+            animation: 'none',
+            gestureEnabled: false,
+            contentStyle: { flex: 1, backgroundColor: 'transparent' },
           }}
         />
         <Stack.Screen name="memory-view" />

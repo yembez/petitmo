@@ -1,10 +1,9 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View,
   Text,
   StyleSheet,
   Pressable,
-  ActivityIndicator,
   Alert,
   ScrollView,
 } from 'react-native'
@@ -23,9 +22,12 @@ import {
 } from '@expo-google-fonts/dm-sans'
 import { BookOpen, ChevronRight, Cloud, Lock, X } from 'lucide-react-native'
 import PetitCoeurLogo, { PETIT_COEUR_LOGO_VIEWBOX } from '@/components/PetitCoeurLogo'
-import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable'
-import { PETITMO_CTA_SPINNER_COLOR } from '@/constants/petitmoCtaStyles'
+import PetitmoPrimaryMorphButton, {
+  type PetitmoMorphPhase,
+} from '@/components/PetitmoPrimaryMorphButton'
+import { MOTION_CTA_MORPH_DISK_PT } from '@/constants/motion'
 import { useAppTranslation } from '@/hooks/useAppTranslation'
+import { purchasePetitmoPlusPlan, restorePetitmoPlusPurchases, fetchPetitmoPlusPlanPrices } from '@/lib/revenueCat'
 import { upgradeToFullCloud } from '@/services/migration'
 import { flushPendingCloudUploadsOnce } from '@/services/pendingCloudFlush'
 import { hydrateTabScreensFromLocal } from '@/services/tabScreensHydrate'
@@ -70,9 +72,6 @@ function isSubscribeOnboarding(raw: unknown): boolean {
   const v = Array.isArray(raw) ? raw[0] : raw
   return typeof v === 'string' && v.trim() === 'subscribe'
 }
-
-/** Hero souscription hors quota souvenirs : logo + Premium (cf. AGENTS.md). */
-const PAYWALL_BRAND_LOGO_W = 190
 
 const VALID_PAYWALL_CONTEXTS = [
   'GENERAL',
@@ -172,9 +171,10 @@ const CARD = '#FFFFFF'
 const MUTED = '#6B7280'
 const LINE = 'rgba(0,0,0,0.08)'
 
-const ANNUAL_FACTURE = 49.99
-const MONTHLY = 5.99
-const ANNUAL_PER_MONTH = (ANNUAL_FACTURE / 12).toFixed(2).replace('.', ',')
+/** Repli affichage si offerings RC indisponibles (spec produit). */
+const FALLBACK_ANNUAL_FACTURE = 49.99
+const FALLBACK_MONTHLY = 5.99
+const FALLBACK_ANNUAL_PER_MONTH = (FALLBACK_ANNUAL_FACTURE / 12).toFixed(2).replace('.', ',')
 /** Spec §1 — export digital free. */
 const DIGITAL_EXPORT_PDF_EUR = 4.99
 
@@ -190,6 +190,40 @@ export default function PaywallScreen() {
   const context: PaywallContext = normalizePaywallContext(params.context)
   const returnTo = normalizePaywallReturnTo(params.returnTo)
   const fromSubscribe = isSubscribeOnboarding(params.from)
+
+  const [planPrices, setPlanPrices] = useState<{
+    monthly: string
+    yearly: string
+    yearlyPerMonth: string
+    discountLabel: string | null
+  }>(() => ({
+    monthly: `${FALLBACK_MONTHLY.toFixed(2).replace('.', ',')} €`,
+    yearly: formatEuro(FALLBACK_ANNUAL_FACTURE),
+    yearlyPerMonth: `${FALLBACK_ANNUAL_PER_MONTH} €/mois`,
+    discountLabel: '-30%',
+  }))
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const prices = await fetchPetitmoPlusPlanPrices()
+      if (cancelled || !prices) return
+      setPlanPrices({
+        monthly: prices.monthlyPriceString,
+        yearly: prices.yearlyPriceString,
+        yearlyPerMonth: prices.yearlyPerMonthString
+          ? `${prices.yearlyPerMonthString}/mois`
+          : `${FALLBACK_ANNUAL_PER_MONTH} €/mois`,
+        discountLabel:
+          prices.yearlyDiscountPercent != null && prices.yearlyDiscountPercent > 0
+            ? `-${prices.yearlyDiscountPercent}%`
+            : null,
+      })
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const continueAfterPaywall = useCallback(async () => {
     if (fromSubscribe) {
@@ -227,7 +261,10 @@ export default function PaywallScreen() {
   }
 
   const [selectedPlan, setSelectedPlan] = useState<Plan>('monthly')
-  const [isLoading, setIsLoading] = useState(false)
+  const [ctaPhase, setCtaPhase] = useState<PetitmoMorphPhase>('idle')
+  const [restoreBusy, setRestoreBusy] = useState(false)
+  const isLoading = ctaPhase !== 'idle' || restoreBusy
+  const purchaseDevReportRef = useRef<string | null>(null)
 
   const [dmLoaded] = useDmSansFonts({
     DMSans_500Medium,
@@ -240,10 +277,27 @@ export default function PaywallScreen() {
     typeof params.childName === 'string' && params.childName.trim() ? params.childName : 'ton enfant'
   const isExportDigitalPdf = context === 'EXPORT_DIGITAL_PDF'
 
+  const resetCtaIdle = useCallback(() => {
+    setCtaPhase('idle')
+  }, [])
+
   const handlePurchase = async (plan: Plan) => {
-    setIsLoading(true)
+    if (ctaPhase !== 'idle' || restoreBusy) return
+    setCtaPhase('busy')
+    purchaseDevReportRef.current = null
     try {
-      await new Promise(r => setTimeout(r, 1200))
+      const purchase = await purchasePetitmoPlusPlan(plan)
+      if (!purchase.ok) {
+        if (purchase.cancelled) {
+          setCtaPhase('idle')
+          return
+        }
+        setCtaPhase('error')
+        Alert.alert(t('error'), purchase.message)
+        return
+      }
+
+      // Paiement StoreKit confirmé → migration cloud + cache paid (déjà posé par RC).
       const report = await upgradeToFullCloud()
       await flushPendingCloudUploadsOnce()
       await AsyncStorage.setItem('petitmo_subscribed_at', new Date().toISOString())
@@ -266,35 +320,78 @@ export default function PaywallScreen() {
         if (allErrors.length > 0) {
           lines.push('', 'Erreurs :', ...allErrors.slice(0, 6))
         }
-        Alert.alert('Migration cloud (dev)', lines.join('\n'), [
-          { text: 'OK', onPress: () => void continueAfterPaywall() },
-        ])
-        return
+        purchaseDevReportRef.current = lines.join('\n')
       }
 
-      await continueAfterPaywall()
+      setCtaPhase('success')
+    } catch (e) {
+      setCtaPhase('error')
+      Alert.alert(
+        t('error'),
+        __DEV__ && e instanceof Error ? e.message : t('paywall.purchaseFailed'),
+      )
+    }
+  }
+
+  const onPurchaseSuccessHoldEnd = useCallback(() => {
+    const report = purchaseDevReportRef.current
+    purchaseDevReportRef.current = null
+    if (__DEV__ && report) {
+      Alert.alert('Migration cloud (dev)', report, [
+        { text: 'OK', onPress: () => void continueAfterPaywall() },
+      ])
+      return
+    }
+    void continueAfterPaywall()
+  }, [continueAfterPaywall])
+
+  const handleRestorePurchases = async () => {
+    if (ctaPhase !== 'idle' || restoreBusy) return
+    setRestoreBusy(true)
+    try {
+      const restored = await restorePetitmoPlusPurchases()
+      if (!restored.ok) {
+        if (!restored.cancelled) {
+          Alert.alert(t('error'), restored.message)
+        }
+        return
+      }
+      await upgradeToFullCloud()
+      await flushPendingCloudUploadsOnce()
+      await AsyncStorage.setItem('petitmo_subscribed_at', new Date().toISOString())
+      await hydrateTabScreensFromLocal()
+      Alert.alert(t('paywall.restoreSuccessTitle'), t('paywall.restoreSuccessBody'), [
+        { text: 'OK', onPress: () => void continueAfterPaywall() },
+      ])
     } catch (e) {
       Alert.alert(
-        'Erreur',
-        __DEV__ && e instanceof Error ? e.message : "Impossible de finaliser l'achat.",
+        t('error'),
+        __DEV__ && e instanceof Error ? e.message : t('paywall.restoreFailed'),
       )
     } finally {
-      setIsLoading(false)
+      setRestoreBusy(false)
     }
   }
 
   const handleDigitalExportPdfPurchase = async () => {
-    setIsLoading(true)
+    if (ctaPhase !== 'idle') return
+    setCtaPhase('busy')
     try {
       await new Promise(r => setTimeout(r, 800))
       await grantDigitalExportPurchase()
-      router.back()
-    } catch {
-      Alert.alert('Erreur', "Impossible de valider l'achat.")
-    } finally {
-      setIsLoading(false)
+      setCtaPhase('success')
+    } catch (e) {
+      setCtaPhase('error')
+      Alert.alert(
+        t('error'),
+        __DEV__ && e instanceof Error ? e.message : t('paywall.purchaseFailed'),
+      )
     }
   }
+
+  const onDigitalExportSuccessHoldEnd = useCallback(() => {
+    router.back()
+  }, [router])
 
   const dm500 = dmLoaded ? 'DMSans_500Medium' : undefined
   const dm600 = dmLoaded ? 'DMSans_600SemiBold' : undefined
@@ -306,12 +403,9 @@ export default function PaywallScreen() {
   const contentPadH = { paddingLeft: 20 + insets.left, paddingRight: 20 + insets.right }
   const heroH = Math.min(Math.round(hp(32)), Math.round(screenHeight * 0.34))
 
-  const paywallCornerLogoW = scale(88)
+  const paywallCornerLogoW = scale(126)
   const paywallCornerLogoH =
     paywallCornerLogoW * (PETIT_COEUR_LOGO_VIEWBOX.height / PETIT_COEUR_LOGO_VIEWBOX.width)
-  const paywallBrandLogoW = scale(PAYWALL_BRAND_LOGO_W)
-  const paywallBrandLogoH =
-    paywallBrandLogoW * (PETIT_COEUR_LOGO_VIEWBOX.height / PETIT_COEUR_LOGO_VIEWBOX.width)
 
   /** Heure, batterie, signal… en blanc sur le hero sombre (comme Capturer / Favoris). */
   useFocusEffect(
@@ -333,7 +427,7 @@ export default function PaywallScreen() {
       <View style={[styles.heroWrap, { height: heroH }]}>
         <Image
           source={require('@/assets/images/maman_enfant_paywall.png')}
-          style={StyleSheet.absoluteFillObject}
+          style={styles.heroImage}
           contentFit="cover"
         />
         <LinearGradient
@@ -348,21 +442,19 @@ export default function PaywallScreen() {
           style={styles.heroFade}
           pointerEvents="none"
         />
-        {showMemoryLimitHero ? (
-          <View
-            style={[styles.heroLogoBlock, { top: insets.top + 8, left: 6 + insets.left }]}
-            pointerEvents="none"
-            accessibilityRole="image"
-            accessibilityLabel={t('paywall.brandA11y')}
-          >
-            <PetitCoeurLogo
-              width={paywallCornerLogoW}
-              height={paywallCornerLogoH}
-              color="#FFFFFF"
-              shadow
-            />
-          </View>
-        ) : null}
+        <View
+          style={[styles.heroLogoBlock, { top: insets.top + 16, left: 16 + insets.left }]}
+          pointerEvents="none"
+          accessibilityRole="image"
+          accessibilityLabel={t('paywall.brandA11y')}
+        >
+          <PetitCoeurLogo
+            width={paywallCornerLogoW}
+            height={paywallCornerLogoH}
+            variant="whiteSolid"
+            shadow
+          />
+        </View>
         <Pressable
           onPress={dismissPaywall}
           style={({ pressed }) => [
@@ -383,28 +475,23 @@ export default function PaywallScreen() {
           <>
             <Text style={[styles.headline, dm700 && { fontFamily: dm700 }]}>{msg.title(childName)}</Text>
             <Text style={[styles.subline, dm500 && { fontFamily: dm500 }]}>{msg.subtitle}</Text>
-            <PetitmoPrimaryPressable
-              style={[
-                styles.primaryCta,
-                { marginTop: 24 },
-                isLoading && { opacity: 0.75, justifyContent: 'center' },
-              ]}
-              activeOpacity={0.92}
+            <PetitmoPrimaryMorphButton
+              style={[styles.primaryCta, { marginTop: 24 }]}
+              height={MOTION_CTA_MORPH_DISK_PT}
+              phase={ctaPhase}
               onPress={() => void handleDigitalExportPdfPurchase()}
               disabled={isLoading}
-              accessibilityRole="button"
+              onSuccessHoldEnd={onDigitalExportSuccessHoldEnd}
+              onErrorShakeEnd={resetCtaIdle}
+              accessibilityLabel={`Payer ${formatEuro(DIGITAL_EXPORT_PDF_EUR)}`}
             >
-              {isLoading ? (
-                <ActivityIndicator color={PETITMO_CTA_SPINNER_COLOR} />
-              ) : (
-                <View style={styles.primaryCtaInner}>
-                  <Text style={[styles.primaryCtaText, dm600 && { fontFamily: dm600 }]}>
-                    Payer {formatEuro(DIGITAL_EXPORT_PDF_EUR)}
-                  </Text>
-                  <ChevronRight size={20} color="#FFFFFF" strokeWidth={2.5} />
-                </View>
-              )}
-            </PetitmoPrimaryPressable>
+              <View style={styles.primaryCtaInner}>
+                <Text style={[styles.primaryCtaText, dm600 && { fontFamily: dm600 }]}>
+                  Payer {formatEuro(DIGITAL_EXPORT_PDF_EUR)}
+                </Text>
+                <ChevronRight size={20} color="#FFFFFF" strokeWidth={2.5} />
+              </View>
+            </PetitmoPrimaryMorphButton>
             <Pressable
               onPress={dismissPaywall}
               style={({ pressed }) => [styles.dismissCta, { marginTop: 16 }, pressed && { opacity: 0.78 }]}
@@ -430,24 +517,7 @@ export default function PaywallScreen() {
               Continue à préserver chaque moment, {'\n'}sans limite.
             </Text>
           </>
-        ) : (
-          <>
-            <View
-              style={styles.brandHeroWrap}
-              accessibilityRole="header"
-              accessibilityLabel={t('paywall.brandA11y')}
-            >
-              <PetitCoeurLogo
-                width={paywallBrandLogoW}
-                height={paywallBrandLogoH}
-                color="#1C1C1E"
-              />
-              <Text style={[styles.brandPremiumLabel, dm700 && { fontFamily: dm700 }]}>
-                {t('paywall.premiumLabel')}
-              </Text>
-            </View>
-          </>
-        )}
+        ) : null}
 
         <View style={[styles.plansRow, !showMemoryLimitHero && styles.plansRowAfterBrand]}>
           <Pressable
@@ -467,11 +537,13 @@ export default function PaywallScreen() {
               <View style={styles.planPriceBlock}>
                 <View style={styles.planNameRow}>
                   <Text style={[styles.planName, dm700 && { fontFamily: dm700 }]}>Annuel</Text>
-                  <View style={styles.planDiscountPill}>
-                    <Text style={[styles.planDiscountPillText, dm600 && { fontFamily: dm600 }]}>
-                      -30%
-                    </Text>
-                  </View>
+                  {planPrices.discountLabel ? (
+                    <View style={styles.planDiscountPill}>
+                      <Text style={[styles.planDiscountPillText, dm600 && { fontFamily: dm600 }]}>
+                        {planPrices.discountLabel}
+                      </Text>
+                    </View>
+                  ) : null}
                 </View>
                 <Text
                   style={[
@@ -480,11 +552,11 @@ export default function PaywallScreen() {
                     dm700 && { fontFamily: dm700 },
                   ]}
                 >
-                  {formatEuro(ANNUAL_FACTURE)}
+                  {planPrices.yearly}
                   <Text style={styles.planPerMoInline}>/an</Text>
                 </Text>
                 <Text style={[styles.planFine, dm500 && { fontFamily: dm500 }]}>
-                  {ANNUAL_PER_MONTH} €/mois
+                  {planPrices.yearlyPerMonth}
                 </Text>
               </View>
             </View>
@@ -513,7 +585,7 @@ export default function PaywallScreen() {
                     dm700 && { fontFamily: dm700 },
                   ]}
                 >
-                  {MONTHLY.toFixed(2).replace('.', ',')} €
+                  {planPrices.monthly}
                   <Text style={styles.planPerMoInline}>/mois</Text>
                 </Text>
               </View>
@@ -554,28 +626,35 @@ export default function PaywallScreen() {
           />
         </View>
 
-        <PetitmoPrimaryPressable
-          style={[
-            styles.primaryCta,
-            isLoading && { opacity: 0.75 },
-            isLoading && { justifyContent: 'center' },
-          ]}
-          activeOpacity={0.92}
+        <PetitmoPrimaryMorphButton
+          style={styles.primaryCta}
+          height={MOTION_CTA_MORPH_DISK_PT}
+          phase={ctaPhase}
           onPress={() => void handlePurchase(selectedPlan)}
           disabled={isLoading}
-          accessibilityRole="button"
+          onSuccessHoldEnd={onPurchaseSuccessHoldEnd}
+          onErrorShakeEnd={resetCtaIdle}
+          accessibilityLabel="S'abonner"
         >
-          {isLoading ? (
-            <ActivityIndicator color={PETITMO_CTA_SPINNER_COLOR} />
-          ) : (
-            <View style={styles.primaryCtaInner}>
-              <Text style={[styles.primaryCtaText, dm600 && { fontFamily: dm600 }]}>
-                S&apos;abonner
-              </Text>
-              <ChevronRight size={20} color="#FFFFFF" strokeWidth={2.5} />
-            </View>
-          )}
-        </PetitmoPrimaryPressable>
+          <View style={styles.primaryCtaInner}>
+            <Text style={[styles.primaryCtaText, dm600 && { fontFamily: dm600 }]}>
+              S&apos;abonner
+            </Text>
+            <ChevronRight size={20} color="#FFFFFF" strokeWidth={2.5} />
+          </View>
+        </PetitmoPrimaryMorphButton>
+
+        <Pressable
+          onPress={() => void handleRestorePurchases()}
+          disabled={isLoading}
+          style={({ pressed }) => [styles.restoreCta, pressed && { opacity: 0.78 }]}
+          accessibilityRole="button"
+          accessibilityLabel={t('paywall.restore')}
+        >
+          <Text style={[styles.restoreCtaText, dm500 && { fontFamily: dm500 }]}>
+            {t('paywall.restore')}
+          </Text>
+        </Pressable>
 
         <Pressable
           onPress={dismissPaywall}
@@ -629,6 +708,15 @@ const styles = StyleSheet.create({
     width: screenWidth,
     backgroundColor: '#E8E4DE',
     position: 'relative',
+    overflow: 'hidden',
+  },
+  /**
+   * Agrandit d’abord (overflow des deux côtés), puis décale à droite.
+   * Sinon le translateX découvre le fond à gauche.
+   */
+  heroImage: {
+    ...StyleSheet.absoluteFillObject,
+    transform: [{ scale: 1.2 }, { translateX: scale(16) }],
   },
   heroFade: {
     ...StyleSheet.absoluteFillObject,
@@ -636,6 +724,7 @@ const styles = StyleSheet.create({
   heroLogoBlock: {
     position: 'absolute',
     zIndex: 3,
+    overflow: 'visible',
   },
   heroTopFade: {
     position: 'absolute',
@@ -674,25 +763,6 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 22,
   },
-  /** Paywall générique : logo + Premium — descendu vers les cartes plan */
-  brandHeroWrap: {
-    alignSelf: 'center',
-    alignItems: 'center',
-    width: screenWidth - 48,
-    maxWidth: screenWidth - 48,
-    marginTop: verticalScale(22),
-    marginBottom: verticalScale(2),
-    gap: verticalScale(4),
-  },
-  brandPremiumLabel: {
-    textAlign: 'center',
-    fontSize: scale(11),
-    lineHeight: scale(14),
-    letterSpacing: 0.9,
-    color: '#1C1C1E',
-    fontWeight: '700',
-    textTransform: 'uppercase',
-  },
   headlineCount: {
     color: ACCENT,
   },
@@ -715,7 +785,8 @@ const styles = StyleSheet.create({
     height: verticalScale(12),
   },
   plansRowAfterBrand: {
-    marginTop: verticalScale(4),
+    /** Compense le retrait du bloc logo+Premium sous le hero. */
+    marginTop: verticalScale(18),
   },
   benefitsCard: {
     marginTop: verticalScale(12),
@@ -882,25 +953,35 @@ const styles = StyleSheet.create({
   },
   primaryCta: {
     marginTop: verticalScale(22),
-    height: 54,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 20,
+    height: MOTION_CTA_MORPH_DISK_PT,
   },
   primaryCtaInner: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    gap: 6,
+    paddingHorizontal: 12,
   },
   primaryCtaText: {
     color: THEME.captureScreenCtaForeground,
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
   },
+  restoreCta: {
+    marginTop: 10,
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+  },
+  restoreCtaText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: ACCENT,
+    textAlign: 'center',
+  },
   dismissCta: {
-    marginTop: 12,
+    marginTop: 4,
     minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
