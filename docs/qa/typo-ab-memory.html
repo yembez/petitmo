@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>A/B typo souvenirs — sans-serif basiques</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Inter:ital,wght@0,400;0,500;0,600;1,400&family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Roboto:ital,wght@0,400;1,400&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #fafaf7;
+      --ink: #1c1c1e;
+      --muted: #8e8e93;
+      --line: rgba(0,0,0,0.08);
+      --card: #ffffff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "DM Sans", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.4;
+    }
+    header {
+      padding: 28px 32px 12px;
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+    header h1 {
+      font-size: 22px;
+      font-weight: 600;
+      margin: 0 0 6px;
+      letter-spacing: -0.02em;
+    }
+    header p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      max-width: 68ch;
+    }
+    .note {
+      margin-top: 10px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .tabs {
+      display: flex;
+      gap: 8px;
+      padding: 16px 32px 0;
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+    .tabs button {
+      border: 1px solid var(--line);
+      background: var(--card);
+      color: var(--ink);
+      border-radius: 999px;
+      padding: 8px 14px;
+      font: 500 13px/1 "DM Sans", sans-serif;
+      cursor: pointer;
+    }
+    .tabs button[aria-selected="true"] {
+      background: var(--ink);
+      color: #fff;
+      border-color: var(--ink);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      padding: 20px 32px 48px;
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+    @media (max-width: 980px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+    .col {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .col-head {
+      padding: 14px 16px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .col-head .label {
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .col-head h2 {
+      margin: 4px 0 0;
+      font-size: 16px;
+      font-weight: 600;
+    }
+    .col-head .tag {
+      display: inline-block;
+      margin-top: 8px;
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: #f3f1ee;
+      color: #555;
+    }
+    .col-head .tag.rec {
+      background: #fde8f0;
+      color: #a33a66;
+    }
+    .panel { display: none; padding: 16px; flex: 1; }
+    .panel.active { display: block; }
+    .meta {
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 10px;
+      font-family: "DM Sans", sans-serif;
+    }
+    .meta strong { color: var(--ink); font-weight: 800; letter-spacing: -0.02em; }
+    .photo {
+      width: 100%;
+      aspect-ratio: 4/3;
+      background: linear-gradient(160deg, #d9cfc4 0%, #c4b5a8 45%, #b7a89c 100%);
+      border-radius: 12px;
+      position: relative;
+      overflow: hidden;
+    }
+    .photo::after {
+      content: "photo";
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      color: rgba(255,255,255,0.55);
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      font-family: "DM Sans", sans-serif;
+    }
+    .caption {
+      margin-top: 10px;
+      font-size: 15px;
+      line-height: 1.4;
+    }
+    .text-card {
+      background: #f7f5f1;
+      border-radius: 12px;
+      padding: 16px 16px 14px;
+    }
+    .text-title {
+      font-size: 17px;
+      line-height: 1.3;
+      margin: 0 0 8px;
+      font-weight: 600;
+    }
+    .text-body {
+      font-size: 15.5px;
+      line-height: 1.5;
+      margin: 0;
+      font-weight: 400;
+    }
+    .book-page {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 18px 16px 14px;
+      min-height: 280px;
+      display: flex;
+      flex-direction: column;
+    }
+    .book-banner {
+      font-size: 10px;
+      font-family: "DM Sans", sans-serif;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+    .book-photo {
+      width: 100%;
+      aspect-ratio: 1;
+      background: linear-gradient(160deg, #d9cfc4, #b7a89c);
+      border-radius: 2px;
+      margin-bottom: 12px;
+    }
+    .book-caption {
+      font-size: 13.5px;
+      line-height: 1.45;
+      flex: 1;
+    }
+    .book-text-title {
+      font-size: 17px;
+      line-height: 1.3;
+      margin: 0 0 10px;
+      font-weight: 600;
+    }
+    .book-text-body {
+      font-size: 14.5px;
+      line-height: 1.55;
+      margin: 0;
+    }
+    .book-folio {
+      margin-top: 16px;
+      font-size: 10px;
+      color: #c7c7cc;
+      font-family: "DM Sans", sans-serif;
+      text-align: center;
+    }
+
+    .v-roboto { font-family: Roboto, system-ui, sans-serif; }
+    .v-dm { font-family: "DM Sans", system-ui, sans-serif; }
+    .v-inter { font-family: Inter, system-ui, sans-serif; }
+    .v-jakarta { font-family: "Plus Jakarta Sans", system-ui, sans-serif; }
+
+    footer {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 0 32px 40px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    footer strong { color: var(--ink); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>A/B typo — sans-serif basiques</h1>
+    <p>
+      Plus de serif « print ». Trois pistes simples pour souvenirs texte + légendes,
+      identiques app et livre. Meta (date) reste en DM Sans.
+    </p>
+    <p class="note">
+      Même texte partout — juge le confort de lecture et le côté premium / moderne.
+    </p>
+  </header>
+
+  <div class="tabs" role="tablist">
+    <button type="button" role="tab" aria-selected="true" data-panel="feed">Fil (app)</button>
+    <button type="button" role="tab" aria-selected="false" data-panel="book">Livre (print)</button>
+  </div>
+
+  <div class="grid">
+    <!-- DM SANS -->
+    <section class="col">
+      <div class="col-head">
+        <div class="label">A</div>
+        <h2>DM Sans</h2>
+        <span class="tag rec">déjà dans l’app</span>
+      </div>
+
+      <div class="panel active" data-panel="feed">
+        <div class="meta"><strong>12 mars 2026</strong> · 2 ans 4 mois</div>
+        <div class="text-card">
+          <p class="text-title v-dm">Le premier jour de printemps</p>
+          <p class="text-body v-dm">
+            Ce matin tu as couru pieds nus dans l’herbe encore froide.
+            On a ri jusqu’à en avoir mal aux joues. Je veux me souvenir
+            de cette lumière exacte.
+          </p>
+        </div>
+        <div style="height:14px"></div>
+        <div class="photo"></div>
+        <p class="caption v-dm">
+          Première fois qu’elle tient toute seule sur le toboggan — regard fier, mains un peu collées.
+        </p>
+      </div>
+
+      <div class="panel" data-panel="book">
+        <div class="book-page">
+          <div class="book-banner">Photo · 12 mars 2026</div>
+          <div class="book-photo"></div>
+          <p class="book-caption v-dm">
+            Première fois qu’elle tient toute seule sur le toboggan — regard fier, mains un peu collées.
+          </p>
+          <div class="book-folio">42</div>
+        </div>
+        <div style="height:14px"></div>
+        <div class="book-page">
+          <div class="book-banner">Petits mots</div>
+          <p class="book-text-title v-dm">Le premier jour de printemps</p>
+          <p class="book-text-body v-dm">
+            Ce matin tu as couru pieds nus dans l’herbe encore froide.
+            On a ri jusqu’à en avoir mal aux joues. Je veux me souvenir
+            de cette lumière exacte.
+          </p>
+          <div class="book-folio">43</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- INTER -->
+    <section class="col">
+      <div class="col-head">
+        <div class="label">B</div>
+        <h2>Inter</h2>
+        <span class="tag">déjà meta fil</span>
+      </div>
+
+      <div class="panel active" data-panel="feed">
+        <div class="meta"><strong>12 mars 2026</strong> · 2 ans 4 mois</div>
+        <div class="text-card">
+          <p class="text-title v-inter">Le premier jour de printemps</p>
+          <p class="text-body v-inter">
+            Ce matin tu as couru pieds nus dans l’herbe encore froide.
+            On a ri jusqu’à en avoir mal aux joues. Je veux me souvenir
+            de cette lumière exacte.
+          </p>
+        </div>
+        <div style="height:14px"></div>
+        <div class="photo"></div>
+        <p class="caption v-inter">
+          Première fois qu’elle tient toute seule sur le toboggan — regard fier, mains un peu collées.
+        </p>
+      </div>
+
+      <div class="panel" data-panel="book">
+        <div class="book-page">
+          <div class="book-banner">Photo · 12 mars 2026</div>
+          <div class="book-photo"></div>
+          <p class="book-caption v-inter">
+            Première fois qu’elle tient toute seule sur le toboggan — regard fier, mains un peu collées.
+          </p>
+          <div class="book-folio">42</div>
+        </div>
+        <div style="height:14px"></div>
+        <div class="book-page">
+          <div class="book-banner">Petits mots</div>
+          <p class="book-text-title v-inter">Le premier jour de printemps</p>
+          <p class="book-text-body v-inter">
+            Ce matin tu as couru pieds nus dans l’herbe encore froide.
+            On a ri jusqu’à en avoir mal aux joues. Je veux me souvenir
+            de cette lumière exacte.
+          </p>
+          <div class="book-folio">43</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PLUS JAKARTA -->
+    <section class="col">
+      <div class="col-head">
+        <div class="label">C</div>
+        <h2>Plus Jakarta Sans</h2>
+        <span class="tag">un peu plus chaleureux</span>
+      </div>
+
+      <div class="panel active" data-panel="feed">
+        <div class="meta"><strong>12 mars 2026</strong> · 2 ans 4 mois</div>
+        <div class="text-card">
+          <p class="text-title v-jakarta">Le premier jour de printemps</p>
+          <p class="text-body v-jakarta">
+            Ce matin tu as couru pieds nus dans l’herbe encore froide.
+            On a ri jusqu’à en avoir mal aux joues. Je veux me souvenir
+            de cette lumière exacte.
+          </p>
+        </div>
+        <div style="height:14px"></div>
+        <div class="photo"></div>
+        <p class="caption v-jakarta">
+          Première fois qu’elle tient toute seule sur le toboggan — regard fier, mains un peu collées.
+        </p>
+      </div>
+
+      <div class="panel" data-panel="book">
+        <div class="book-page">
+          <div class="book-banner">Photo · 12 mars 2026</div>
+          <div class="book-photo"></div>
+          <p class="book-caption v-jakarta">
+            Première fois qu’elle tient toute seule sur le toboggan — regard fier, mains un peu collées.
+          </p>
+          <div class="book-folio">42</div>
+        </div>
+        <div style="height:14px"></div>
+        <div class="book-page">
+          <div class="book-banner">Petits mots</div>
+          <p class="book-text-title v-jakarta">Le premier jour de printemps</p>
+          <p class="book-text-body v-jakarta">
+            Ce matin tu as couru pieds nus dans l’herbe encore froide.
+            On a ri jusqu’à en avoir mal aux joues. Je veux me souvenir
+            de cette lumière exacte.
+          </p>
+          <div class="book-folio">43</div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <footer>
+    <strong>Pistes :</strong>
+    A = unifie avec l’UI (paywall, parent) · B = très neutre / tech · C = un peu plus doux, encore basique.
+    Dis-moi A, B ou C — ou une autre famille simple à tester.
+  </footer>
+
+  <script>
+    const tabs = document.querySelectorAll('.tabs button');
+    tabs.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.panel;
+        tabs.forEach((b) => b.setAttribute('aria-selected', String(b === btn)));
+        document.querySelectorAll('.panel').forEach((p) => {
+          p.classList.toggle('active', p.dataset.panel === id);
+        });
+      });
+    });
+  </script>
+</body>
+</html>

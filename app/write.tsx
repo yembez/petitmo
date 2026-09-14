@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
-  ActivityIndicator,
   DeviceEventEmitter,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -16,8 +15,15 @@ import { ChevronLeft, Mic } from 'lucide-react-native';
 import { scale, verticalScale } from '@/utils/responsive';
 import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
-import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
-import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
+import {
+  MEMORY_BODY_INPUT_FONT_SIZE,
+  MEMORY_BODY_INPUT_LINE_HEIGHT,
+} from '@/utils/memoryTextEditStyles';
+import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
+import PetitmoPrimaryMorphButton, {
+  type PetitmoMorphPhase,
+} from '@/components/PetitmoPrimaryMorphButton';
+import { MOTION_CTA_MORPH_DISK_PT } from '@/constants/motion';
 import { supabase } from '@/lib/supabase';
 import { getCachedUserMode } from '@/lib/userMode';
 import { checkMemoryLimit, invalidateMemoryLimitCache } from '@/lib/limits';
@@ -48,7 +54,7 @@ import { buildLocalTextMemory } from '@/services/localOnlyMemoryCapture';
 import { ensureMemoryUploadedForCloud } from '@/services/migration';
 import { updateMemoryText } from '@/services/media';
 import { MEMORY_EDITORIAL_FONT_FAMILY } from '@/constants/memoryTextFont';
-import { applyTextAlineasForInput, stripTextAlineas } from '@/utils/textAlineas';
+import { applyTextAlineasForInput, reconcileTextAlineasOnChange, stripTextAlineas } from '@/utils/textAlineas';
 
 type SpeechRecognitionResultLike = {
   isFinal: boolean
@@ -84,11 +90,22 @@ export default function WriteScreen() {
 
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
+  const [ctaPhase, setCtaPhase] = useState<PetitmoMorphPhase>('idle');
   const [isListening, setIsListening] = useState(false);
   const [isWebSpeechSupported, setIsWebSpeechSupported] = useState(false);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const hydratedEditIdRef = useRef<string | null>(null);
+  const pendingAfterSuccessRef = useRef<(() => void) | null>(null);
+
+  const resetCtaIdle = useCallback(() => {
+    setCtaPhase('idle');
+  }, []);
+
+  const onSaveSuccessHoldEnd = useCallback(() => {
+    const next = pendingAfterSuccessRef.current;
+    pendingAfterSuccessRef.current = null;
+    next?.();
+  }, []);
 
   useEffect(() => {
     if (!isEditing) {
@@ -206,8 +223,9 @@ export default function WriteScreen() {
   };
 
   const executeUpdate = async (textToSave: string) => {
+    if (ctaPhase !== 'idle') return;
+    setCtaPhase('busy');
     try {
-      setIsSaving(true);
       setContent(textToSave);
 
       const textTitle = title.trim() ? title.trim() : null;
@@ -223,28 +241,31 @@ export default function WriteScreen() {
         );
       }
 
-      router.back();
+      pendingAfterSuccessRef.current = () => router.back();
+      setCtaPhase('success');
     } catch (error) {
       console.error('Error updating text:', error);
+      setCtaPhase('error');
       Alert.alert(TEXT_SAVE_FAILED_ALERT_TITLE, TEXT_SAVE_FAILED_ALERT_MESSAGE);
-    } finally {
-      setIsSaving(false);
     }
   };
 
   const executeSave = async (textToSave: string) => {
+    if (ctaPhase !== 'idle') return;
+    setCtaPhase('busy');
     try {
-      setIsSaving(true);
       setContent(textToSave);
 
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
+        setCtaPhase('error');
         Alert.alert('Erreur', 'Utilisateur non authentifié');
         return;
       }
 
       const childId = await getOrSelectFirstChild();
       if (!childId) {
+        setCtaPhase('idle');
         Alert.alert('Aucun enfant trouvé', 'Crée d\'abord un profil d\'enfant');
         router.push('/create-child');
         return;
@@ -252,6 +273,7 @@ export default function WriteScreen() {
 
       const limitCheck = await checkMemoryLimit(childId, { skipRemotePull: true });
       if (!limitCheck.canCreate) {
+        setCtaPhase('idle');
         promptFreeTierLimitThenPaywall({ kind: 'memories', router, returnTo: 'fil' });
         return;
       }
@@ -273,35 +295,31 @@ export default function WriteScreen() {
         void ensureMemoryUploadedForCloud(mem);
       }
 
-      Alert.alert('Succès', 'Moment sauvegardé avec succès');
       armFeedSnapToLatestOnFocus();
-      /**
-       * write = fullScreenModal au-dessus des tabs.
-       * - `replace` → flash Capturer (onglet d’origine révélé pendant l’anim).
-       * - `navigate` depuis le modal → pile incohérente (on reste sur l’éditeur).
-       * On bascule le fil via jumpTo sous le modal, puis on dismiss.
-       */
-      selectAppTab('fil');
-      requestAnimationFrame(() => {
-        if (router.canDismiss()) {
-          router.dismiss();
-          return;
-        }
-        if (router.canGoBack()) {
-          router.back();
-          return;
-        }
-        router.replace('/(tabs)/fil');
-      });
+      pendingAfterSuccessRef.current = () => {
+        selectAppTab('fil');
+        requestAnimationFrame(() => {
+          if (router.canDismiss()) {
+            router.dismiss();
+            return;
+          }
+          if (router.canGoBack()) {
+            router.back();
+            return;
+          }
+          router.replace('/(tabs)/fil');
+        });
+      };
+      setCtaPhase('success');
     } catch (error) {
       console.error('Error saving text:', error);
+      setCtaPhase('error');
       Alert.alert(TEXT_SAVE_FAILED_ALERT_TITLE, TEXT_SAVE_FAILED_ALERT_MESSAGE);
-    } finally {
-      setIsSaving(false);
     }
   };
 
   const handleSave = async () => {
+    if (ctaPhase !== 'idle') return;
     const trimmed = stripTextAlineas(content).trim();
     const textToSave = clampText(trimmed);
     if (!textToSave) {
@@ -331,17 +349,18 @@ export default function WriteScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <ChevronLeft size={ICON_SIZES.lg} color="#3F4A5A" strokeWidth={2} />
         </TouchableOpacity>
-        <PetitmoPrimaryPressable
-          onPress={handleSave}
+        <PetitmoPrimaryMorphButton
+          onPress={() => void handleSave()}
           style={styles.saveButton}
-          disabled={isSaving}
+          height={MOTION_CTA_MORPH_DISK_PT}
+          phase={ctaPhase}
+          disabled={ctaPhase !== 'idle'}
+          onSuccessHoldEnd={onSaveSuccessHoldEnd}
+          onErrorShakeEnd={resetCtaIdle}
+          accessibilityLabel="Enregistrer"
         >
-          {isSaving ? (
-            <ActivityIndicator size="small" color={PETITMO_CTA_SPINNER_COLOR} />
-          ) : (
-            <Text style={petitmoCtaStyles.primaryText}>Enregistrer</Text>
-          )}
-        </PetitmoPrimaryPressable>
+          <Text style={petitmoCtaStyles.primaryText}>Enregistrer</Text>
+        </PetitmoPrimaryMorphButton>
       </View>
 
       <View style={styles.inputContainer}>
@@ -368,8 +387,9 @@ export default function WriteScreen() {
           value={content}
           onChangeText={t =>
             setContent(prev => {
+              const reconciled = reconcileTextAlineasOnChange(prev, t);
               const prevCanon = stripTextAlineas(prev);
-              const nextCanon = stripTextAlineas(t);
+              const nextCanon = stripTextAlineas(reconciled);
               const capped = enforceTextBookLineBudgetOnInput(
                 prevCanon,
                 applyLeadingCapitalWhenStartingText(prevCanon, nextCanon),
@@ -424,8 +444,8 @@ const styles = StyleSheet.create({
     padding: SPACING.sm,
   },
   saveButton: {
-    paddingVertical: SPACING.sm,
-    paddingHorizontal: SPACING.lg,
+    width: scale(132),
+    marginLeft: 'auto',
   },
   inputContainer: {
     flex: 1,
@@ -434,10 +454,10 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   titleInput: {
-    fontSize: FONT_SIZES.lg,
+    fontSize: scale(19),
     fontWeight: '600',
     color: '#1C1C1E',
-    lineHeight: scale(26),
+    lineHeight: scale(27),
     marginBottom: SPACING.sm,
     paddingBottom: SPACING.xs,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -445,11 +465,11 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    fontSize: FONT_SIZES.md,
+    fontSize: MEMORY_BODY_INPUT_FONT_SIZE,
     fontFamily: MEMORY_EDITORIAL_FONT_FAMILY,
     fontWeight: '400',
     color: '#000000',
-    lineHeight: scale(22),
+    lineHeight: MEMORY_BODY_INPUT_LINE_HEIGHT,
     paddingBottom: scale(80),
   },
   charCounter: {

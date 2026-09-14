@@ -13,13 +13,20 @@ export function feedMemoryTextEditPreviewVariant(memoryType: string | undefined)
   return memoryType === 'text' ? 'feed-text' : 'feed-caption';
 }
 
-const FEED_TEXT_FS = scale(17);
-const FEED_TEXT_LH = scale(22);
+const FEED_TEXT_FS = scale(18);
+const FEED_TEXT_LH = scale(24);
 const FEED_CAPTION_FS = scale(16);
 const FEED_CAPTION_LH = scale(21);
 /** Parité livre `.memory-text` (×15/16, interligne ~1,588). */
-const BOOK_BODY_FS = scale((17 * 15) / 16);
-const BOOK_BODY_LH = scale(((17 * 15) / 16) * 1.588);
+const BOOK_BODY_FS = scale((18 * 15) / 16);
+const BOOK_BODY_LH = scale(((18 * 15) / 16) * 1.588);
+
+/** Corps souvenir texte à la saisie (write + EditTextModal feed-text). */
+export const MEMORY_BODY_INPUT_FONT_SIZE = FEED_TEXT_FS;
+export const MEMORY_BODY_INPUT_LINE_HEIGHT = FEED_TEXT_LH;
+/** Annotation média à la saisie (modales). */
+export const MEMORY_CAPTION_INPUT_FONT_SIZE = FEED_CAPTION_FS;
+export const MEMORY_CAPTION_INPUT_LINE_HEIGHT = FEED_CAPTION_LH;
 
 const platformTextBreak: Pick<TextStyle, 'textBreakStrategy'> = Platform.select({
   android: { textBreakStrategy: 'highQuality' },

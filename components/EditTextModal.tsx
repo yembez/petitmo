@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -17,11 +17,18 @@ import { X, Check } from 'lucide-react-native';
 import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
 import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
-import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
+import PetitmoPrimaryMorphButton, {
+  type PetitmoMorphPhase,
+} from '@/components/PetitmoPrimaryMorphButton';
+import { MOTION_CTA_MORPH_DISK_PT } from '@/constants/motion';
 import { useMemoryTextFontScreen } from '@/hooks/useMemoryTextFontScreen';
 import {
   memoryTextEditChromeStyle,
   memoryTextEditInputStyle,
+  MEMORY_BODY_INPUT_FONT_SIZE,
+  MEMORY_BODY_INPUT_LINE_HEIGHT,
+  MEMORY_CAPTION_INPUT_FONT_SIZE,
+  MEMORY_CAPTION_INPUT_LINE_HEIGHT,
   type MemoryTextEditPreviewVariant,
 } from '@/utils/memoryTextEditStyles';
 import {
@@ -40,7 +47,7 @@ import {
 import {
   applyLeadingCapitalWhenStartingText,
 } from '@/utils/frenchTextInput';
-import { applyTextAlineasForInput, stripTextAlineas } from '@/utils/textAlineas';
+import { applyTextAlineasForInput, reconcileTextAlineasOnChange, stripTextAlineas } from '@/utils/textAlineas';
 
 const TEXT_INPUT_WEB_LANG =
   Platform.OS === 'web' ? ({ lang: 'fr-FR' } as Record<string, string>) : {};
@@ -94,10 +101,33 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
   const [fieldBody, setFieldBody] = React.useState(
     props.variant === 'title-body' ? applyTextAlineasForInput(props.initialBody) : ''
   );
+  const [ctaPhase, setCtaPhase] = useState<PetitmoMorphPhase>('idle');
+  const pendingCommitRef = React.useRef<(() => void) | null>(null);
+
+  const resetCtaIdle = useCallback(() => {
+    setCtaPhase('idle');
+  }, []);
+
+  const onSaveSuccessHoldEnd = useCallback(() => {
+    const commit = pendingCommitRef.current;
+    pendingCommitRef.current = null;
+    commit?.();
+  }, []);
+
+  const beginMorphSave = (commit: () => void) => {
+    if (ctaPhase !== 'idle') return;
+    pendingCommitRef.current = commit;
+    setCtaPhase('busy');
+    // Laisse peindre le disque avant le check (save local sync).
+    requestAnimationFrame(() => {
+      setCtaPhase('success');
+    });
+  };
 
   const applyBodyInput = (prev: string, next: string) => {
+    const reconciled = reconcileTextAlineasOnChange(prev, next);
     const prevCanon = stripTextAlineas(prev);
-    const nextCanon = stripTextAlineas(next);
+    const nextCanon = stripTextAlineas(reconciled);
     const capped = enforceTextBookLineBudgetOnInput(
       prevCanon,
       applyLeadingCapitalWhenStartingText(prevCanon, nextCanon),
@@ -108,6 +138,8 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
   };
 
   const handleSave = () => {
+    if (ctaPhase !== 'idle') return;
+
     if (props.variant === 'title-body') {
       const bodyRaw = stripTextAlineas(fieldBody).trim();
       const finalBody =
@@ -123,16 +155,20 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
           {
             text: TEXT_TRUNCATION_SAVE_LABEL,
             onPress: () => {
-              props.onSave(finalTitle, finalBody);
-              props.onClose();
+              beginMorphSave(() => {
+                props.onSave(finalTitle, finalBody);
+                props.onClose();
+              });
             },
           },
         ]);
         return;
       }
 
-      props.onSave(finalTitle, finalBody);
-      props.onClose();
+      beginMorphSave(() => {
+        props.onSave(finalTitle, finalBody);
+        props.onClose();
+      });
       return;
     }
 
@@ -148,16 +184,20 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
         {
           text: TEXT_TRUNCATION_SAVE_LABEL,
           onPress: () => {
-            props.onSave(finalText);
-            props.onClose();
+            beginMorphSave(() => {
+              props.onSave(finalText);
+              props.onClose();
+            });
           },
         },
       ]);
       return;
     }
 
-    props.onSave(finalText);
-    props.onClose();
+    beginMorphSave(() => {
+      props.onSave(finalText);
+      props.onClose();
+    });
   };
 
   const sheetTop = props.embedded ? insets.top + verticalScale(8) : insets.top + verticalScale(48);
@@ -283,7 +323,7 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
               </Text>
               <TextInput
                 {...TEXT_INPUT_WEB_LANG}
-                style={styles.input}
+                style={styles.inputBody}
                 value={fieldBody}
                 onChangeText={t => setFieldBody(prev => applyBodyInput(prev, t))}
                 placeholder="Texte…"
@@ -317,12 +357,14 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
                 value={text}
                 onChangeText={t =>
                   setText(prev =>
-                    enforceTextBookLineBudgetOnInput(
-                      prev,
-                      applyLeadingCapitalWhenStartingText(prev, t),
-                      lineBudget,
-                      charsPerLine,
-                    )
+                    useMemoryPreview
+                      ? applyBodyInput(prev, t)
+                      : enforceTextBookLineBudgetOnInput(
+                          prev,
+                          applyLeadingCapitalWhenStartingText(prev, t),
+                          lineBudget,
+                          charsPerLine,
+                        )
                   )
                 }
                 placeholder="Ajouter un texte..."
@@ -350,15 +392,21 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
         )}
       </View>
 
-      <PetitmoPrimaryPressable
-        style={styles.saveButton}
+      <PetitmoPrimaryMorphButton
+        style={[styles.saveButton, useMemoryPreview && styles.saveButtonInsetPreview]}
+        height={MOTION_CTA_MORPH_DISK_PT}
+        phase={ctaPhase}
         onPress={handleSave}
-        accessibilityRole="button"
+        disabled={ctaPhase !== 'idle'}
+        onSuccessHoldEnd={onSaveSuccessHoldEnd}
+        onErrorShakeEnd={resetCtaIdle}
         accessibilityLabel="Enregistrer"
       >
-        <Check size={ICON_SIZES.sm} color={THEME.captureScreenCtaForeground} strokeWidth={2} />
-        <Text style={petitmoCtaStyles.primaryText}>Enregistrer</Text>
-      </PetitmoPrimaryPressable>
+        <View style={styles.saveButtonInner}>
+          <Check size={ICON_SIZES.sm} color={THEME.captureScreenCtaForeground} strokeWidth={2} />
+          <Text style={petitmoCtaStyles.primaryText}>Enregistrer</Text>
+        </View>
+      </PetitmoPrimaryMorphButton>
     </View>
   );
 
@@ -498,6 +546,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     textAlignVertical: 'top',
   },
+  /** Annotation (champ unique) — 16. */
   input: {
     flex: 1,
     minHeight: scale(140),
@@ -505,7 +554,22 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(0,0,0,0.10)',
     borderRadius: scale(12),
     padding: SPACING.md,
-    fontSize: FONT_SIZES.base,
+    fontSize: MEMORY_CAPTION_INPUT_FONT_SIZE,
+    lineHeight: MEMORY_CAPTION_INPUT_LINE_HEIGHT,
+    color: THEME.textPrimary,
+    textAlignVertical: 'top',
+    backgroundColor: THEME.bg,
+  },
+  /** Corps souvenir texte (title-body plain) — 18. */
+  inputBody: {
+    flex: 1,
+    minHeight: scale(140),
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.10)',
+    borderRadius: scale(12),
+    padding: SPACING.md,
+    fontSize: MEMORY_BODY_INPUT_FONT_SIZE,
+    lineHeight: MEMORY_BODY_INPUT_LINE_HEIGHT,
     color: THEME.textPrimary,
     textAlignVertical: 'top',
     backgroundColor: THEME.bg,
@@ -515,7 +579,8 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(0,0,0,0.10)',
     borderRadius: scale(12),
     padding: SPACING.md,
-    fontSize: FONT_SIZES.base,
+    fontSize: MEMORY_BODY_INPUT_FONT_SIZE,
+    lineHeight: MEMORY_BODY_INPUT_LINE_HEIGHT,
     color: THEME.textPrimary,
     minHeight: scale(52),
     maxHeight: scale(100),
@@ -525,10 +590,10 @@ const styles = StyleSheet.create({
   /** Titre dans la carte blanche fil (parité `feedStyles.textTitle`). */
   feedTitleInCard: {
     width: '100%',
-    fontSize: scale(20),
+    fontSize: scale(19),
     fontWeight: '600',
     color: '#1C1C1E',
-    lineHeight: scale(28),
+    lineHeight: scale(27),
     marginBottom: verticalScale(12),
     padding: 0,
     textAlign: 'left',
@@ -556,11 +621,18 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   saveButton: {
-    flexDirection: 'row',
-    paddingVertical: SPACING.md,
-    gap: scale(8),
     marginTop: SPACING.sm,
-    marginHorizontal: SPACING.lg,
+    alignSelf: 'stretch',
     flexShrink: 0,
+  },
+  saveButtonInsetPreview: {
+    marginHorizontal: SPACING.lg,
+  },
+  saveButtonInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: scale(6),
+    paddingHorizontal: SPACING.sm,
   },
 });
