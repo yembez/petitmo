@@ -84,6 +84,7 @@
     "expo-symbols": "~1.0.8",
     "expo-system-ui": "~6.0.9",
     "expo-updates": "~29.0.19",
+    "expo-video": "~3.0.16",
     "expo-video-thumbnails": "~10.0.8",
     "expo-web-browser": "~15.0.10",
     "i18next": "^26.3.6",
@@ -97,6 +98,7 @@
     "react-native-color-matrix-image-filters": "^8.0.2",
     "react-native-gesture-handler": "~2.28.0",
     "react-native-image-colors": "^2.6.0",
+    "react-native-purchases": "^10.9.1",
     "react-native-qrcode-svg": "^6.3.21",
     "react-native-reanimated": "~4.1.1",
     "react-native-safe-area-context": "~5.6.0",
@@ -111,6 +113,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
+    "@resvg/resvg-js": "^2.6.2",
     "@types/react": "~19.1.10",
     "patch-package": "^8.0.1",
     "typescript": "~5.9.2",
