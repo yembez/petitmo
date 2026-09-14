@@ -473,7 +473,7 @@ export async function getChildren() {
         ? localChildren
         : localChildren.filter(c => !(c.user_id ?? '').trim());
       scheduleChildFaceBoundsBackfill(safeLocal);
-      return safeLocal;
+      return sortChildrenByBirthdateAsc(safeLocal);
     }
 
     const { data, error } = await supabase
@@ -491,7 +491,7 @@ export async function getChildren() {
         void ensureLocalChildrenSyncedToSupabase();
         scheduleChildFaceBoundsBackfill(localChildren);
       }
-      return localChildren;
+      return sortChildrenByBirthdateAsc(localChildren);
     }
 
     const mergedRemote = remoteRows.map(row => mergeRemoteChildRowWithLocal(row));
@@ -501,14 +501,14 @@ export async function getChildren() {
       void ensureLocalChildrenSyncedToSupabase();
     }
 
-    const out = [...mergedRemote, ...localOnly];
+    const out = sortChildrenByBirthdateAsc([...mergedRemote, ...localOnly]);
     scheduleChildFaceBoundsBackfill(out);
     return out;
   } catch (error) {
     console.error('Get children error:', error);
     if (localChildren.length > 0) {
       scheduleChildFaceBoundsBackfill(localChildren);
-      return localChildren;
+      return sortChildrenByBirthdateAsc(localChildren);
     }
     return [];
   }
@@ -865,8 +865,18 @@ export async function createChild(rawName: string, birthdate?: string, photoUri?
       .single();
 
     if (error) throw error;
+    if (!data) return null;
 
-    if (photoUri && data) {
+    /**
+     * Local-first : matérialiser SQLite + event **avant** toute photo.
+     * Sans ça, Capturer (lecture locale seule) ne voit l’enfant qu’après un pull
+     * cloud ultérieur — bug « sans photo = invisible au 1er focus ».
+     */
+    const localRow = withLocalChildFields(data as ChildRow);
+    upsertLocalChild(localRow);
+    notifyChildProfileUpdated(data.id, localRow);
+
+    if (photoUri) {
       try {
         const photoUrl = await uploadChildPhoto(data.id, photoUri);
         const { data: updatedChild, error: updateError } = await supabase
@@ -877,14 +887,15 @@ export async function createChild(rawName: string, birthdate?: string, photoUri?
           .single();
 
         if (!updateError && updatedChild) {
-          return updatedChild;
+          /** `uploadChildPhoto` a déjà syncé SQLite + notify ; renvoyer le local. */
+          return getLocalChild(data.id) ?? withLocalChildFields(updatedChild as ChildRow);
         }
       } catch (photoError) {
         console.error('Error uploading photo, continuing without photo:', photoError);
       }
     }
 
-    return data;
+    return getLocalChild(data.id) ?? localRow;
   } catch (error) {
     console.error('Create child error:', error);
     return null;

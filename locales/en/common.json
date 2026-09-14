@@ -3,6 +3,9 @@
   "cancel": "Cancel",
   "ok": "OK",
   "error": "Error",
+  "brand": {
+    "wordmark": "Petit cœur..."
+  },
   "auth": {
     "signupTitle": "Create your Petitmo space",
     "signupSubtitle": "Keep the memories that matter safe and find them anytime",
@@ -125,7 +128,12 @@
       "deleteFailed": "Could not delete the account right now."
     },
     "subscription": {
-      "upgradeCta": "Sweetoo Premium"
+      "upgradeCta": "Sweetoo Premium",
+      "sectionTitle": "My subscription",
+      "currentPlan": "Current plan",
+      "planPremium": "PREMIUM",
+      "manage": "Manage subscription",
+      "manageOpen": "Open"
     },
     "application": {
       "checkUpdate": "Check for update",
@@ -294,6 +302,11 @@
   },
   "paywall": {
     "premiumLabel": "Premium",
-    "brandA11y": "Petit Cœur Premium"
+    "brandA11y": "Petit Cœur Premium",
+    "purchaseFailed": "Couldn't complete the purchase.",
+    "restore": "Restore purchases",
+    "restoreSuccessTitle": "Subscription restored",
+    "restoreSuccessBody": "Petitmo+ is active again on this account.",
+    "restoreFailed": "Couldn't restore purchases."
   }
 }

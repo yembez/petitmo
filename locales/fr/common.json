@@ -3,6 +3,9 @@
   "cancel": "Annuler",
   "ok": "OK",
   "error": "Erreur",
+  "brand": {
+    "wordmark": "Petit cœur..."
+  },
   "auth": {
     "signupTitle": "Crée ton espace Petitmo",
     "signupSubtitle": "Sécurise et retrouve les souvenirs qui comptent",
@@ -125,7 +128,12 @@
       "deleteFailed": "Impossible de supprimer le compte pour le moment."
     },
     "subscription": {
-      "upgradeCta": "Petit cœur premium"
+      "upgradeCta": "Petit cœur premium",
+      "sectionTitle": "Mon abonnement",
+      "currentPlan": "Plan actuel",
+      "planPremium": "PREMIUM",
+      "manage": "Gérer mon abonnement",
+      "manageOpen": "Ouvrir"
     },
     "application": {
       "checkUpdate": "Rechercher une mise à jour",
@@ -294,6 +302,11 @@
   },
   "paywall": {
     "premiumLabel": "Premium",
-    "brandA11y": "Petit Cœur Premium"
+    "brandA11y": "Petit Cœur Premium",
+    "purchaseFailed": "Impossible de finaliser l'achat.",
+    "restore": "Restaurer les achats",
+    "restoreSuccessTitle": "Abonnement restauré",
+    "restoreSuccessBody": "Petitmo+ est de nouveau actif sur ce compte.",
+    "restoreFailed": "Impossible de restaurer les achats."
   }
 }

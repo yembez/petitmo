@@ -14,7 +14,10 @@ import {
   feedMemoriesHydrationSnapshot,
   setFeedHydrationSnapshots,
 } from '@/services/tabScreensCache';
-import { ensureVideoPosterPrintForBookMemory } from '@/services/videoPosterLocal';
+import {
+  ensureVideoFeedPosterForMemory,
+  ensureVideoPosterPrintForBookMemory,
+} from '@/services/videoPosterLocal';
 
 function safeExtFromUri(uri: string, fallback: string): string {
   const clean = uri.split('?')[0];
@@ -519,22 +522,32 @@ export async function awaitVoiceCoverPrintDerivativeForMemory(memoryId: string):
   }
 }
 
+function syncFeedSnapshotMemory(next: Memory): void {
+  const id = next.id.trim();
+  const snapIdx = feedMemoriesHydrationSnapshot.findIndex(m => m.id === id);
+  if (snapIdx < 0) return;
+  const snapMemories = [...feedMemoriesHydrationSnapshot];
+  snapMemories[snapIdx] = next;
+  setFeedHydrationSnapshots(
+    feedChildHydrationSnapshot,
+    snapMemories,
+    feedBooksHydrationSnapshot,
+  );
+}
+
+/** Génère `poster.jpg` (première frame) si absent — fil / favoris, souvenirs legacy. */
+export async function awaitVideoFeedPosterForMemory(memoryId: string): Promise<Memory | null> {
+  const next = await ensureVideoFeedPosterForMemory(memoryId);
+  if (!next) return null;
+  syncFeedSnapshotMemory(next);
+  return next;
+}
+
 /** Génère `poster.jpg` + `poster_print.jpg` HQ si absents — livre / export PDF. */
 export async function awaitVideoPosterForBookMemory(memoryId: string): Promise<Memory | null> {
   const next = await ensureVideoPosterPrintForBookMemory(memoryId);
   if (!next) return null;
-
-  const id = memoryId.trim();
-  const snapIdx = feedMemoriesHydrationSnapshot.findIndex(m => m.id === id);
-  if (snapIdx >= 0) {
-    const snapMemories = [...feedMemoriesHydrationSnapshot];
-    snapMemories[snapIdx] = next;
-    setFeedHydrationSnapshots(
-      feedChildHydrationSnapshot,
-      snapMemories,
-      feedBooksHydrationSnapshot,
-    );
-  }
+  syncFeedSnapshotMemory(next);
   return next;
 }
 

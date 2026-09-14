@@ -98,7 +98,7 @@ export default function OnboardingScreen() {
             <PetitCoeurLogo
               width={scale(200)}
               height={scale(200) * (PETIT_COEUR_LOGO_VIEWBOX.height / PETIT_COEUR_LOGO_VIEWBOX.width)}
-              color="#FFFFFF"
+              variant="whiteSolid"
             />
           </View>
 

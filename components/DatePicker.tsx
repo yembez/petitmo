@@ -187,7 +187,7 @@ const styles = StyleSheet.create({
     borderColor: THEME.familyFlowLine,
   },
   inputText: {
-    fontSize: FONT_SIZES.base,
+    fontSize: FONT_SIZES.lg,
     color: THEME.textPrimary,
   },
   placeholder: {

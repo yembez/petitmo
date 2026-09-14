@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wordmark Petit cœur… — comparaison typos</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@500;600&family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter+Tight:wght@500;600&family=Lora:wght@500;600&family=Manrope:wght@500;600;700&family=Outfit:wght@500;600&family=Plus+Jakarta+Sans:wght@500;600&family=Sora:wght@600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #fafaf7;
+      --ink: #1c1c1e;
+      --muted: #8e8e93;
+      --line: rgba(0,0,0,0.08);
+      --card: #ffffff;
+      --soft: #f4a0a0;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "DM Sans", system-ui, sans-serif;
+      background:
+        radial-gradient(1200px 500px at 10% -10%, rgba(253, 111, 159, 0.12), transparent 55%),
+        radial-gradient(900px 400px at 100% 0%, rgba(253, 125, 77, 0.1), transparent 50%),
+        var(--bg);
+      color: var(--ink);
+      line-height: 1.4;
+    }
+    header {
+      padding: 32px 28px 8px;
+      max-width: 920px;
+      margin: 0 auto;
+    }
+    header h1 {
+      font-size: 22px;
+      font-weight: 600;
+      margin: 0 0 8px;
+      letter-spacing: -0.02em;
+    }
+    header p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      max-width: 52ch;
+    }
+    .grid {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 20px 28px 48px;
+      display: grid;
+      gap: 14px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 22px 24px 20px;
+      box-shadow: 0 1px 0 rgba(255,255,255,0.7) inset;
+    }
+    .meta {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .name {
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    .tag {
+      font-size: 12px;
+      color: var(--muted);
+      text-align: right;
+    }
+    .reco {
+      display: inline-block;
+      margin-left: 8px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(253, 111, 159, 0.14);
+      color: #b84d6e;
+      font-size: 11px;
+      font-weight: 600;
+      vertical-align: middle;
+    }
+    .sample {
+      font-size: clamp(28px, 5vw, 40px);
+      line-height: 1.15;
+      letter-spacing: 0.04em;
+      color: var(--ink);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .current { border-color: rgba(253, 111, 159, 0.35); }
+    .sora { font-family: "Sora", sans-serif; font-weight: 600; }
+    .manrope { font-family: "Manrope", sans-serif; font-weight: 600; }
+    .jakarta { font-family: "Plus Jakarta Sans", sans-serif; font-weight: 600; }
+    .outfit { font-family: "Outfit", sans-serif; font-weight: 600; }
+    .dmsans { font-family: "DM Sans", sans-serif; font-weight: 500; }
+    .intertight { font-family: "Inter Tight", sans-serif; font-weight: 600; }
+    .lora { font-family: "Lora", serif; font-weight: 500; }
+    .fraunces { font-family: "Fraunces", serif; font-weight: 500; font-optical-sizing: auto; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Wordmark Capturer</h1>
+    <p>Même texte, mêmes conditions — compare le rendu de « Petit cœur... » pour choisir une typo plus classe / moderne.</p>
+  </header>
+  <div class="grid">
+    <article class="card current">
+      <div class="meta">
+        <div class="name">Sora SemiBold <span class="reco">actuel</span></div>
+        <div class="tag">géométrique · lockup d’origine</div>
+      </div>
+      <div class="sample sora">Petit cœur...</div>
+    </article>
+
+    <article class="card">
+      <div class="meta">
+        <div class="name">Manrope SemiBold <span class="reco">reco</span></div>
+        <div class="tag">moderne · déjà dans l’app</div>
+      </div>
+      <div class="sample manrope">Petit cœur...</div>
+    </article>
+
+    <article class="card">
+      <div class="meta">
+        <div class="name">Outfit SemiBold <span class="reco">reco</span></div>
+        <div class="tag">arrondi moderne · chaleureux</div>
+      </div>
+      <div class="sample outfit">Petit cœur...</div>
+    </article>
+
+    <article class="card">
+      <div class="meta">
+        <div class="name">Plus Jakarta Sans SemiBold</div>
+        <div class="tag">produit design · contemporain</div>
+      </div>
+      <div class="sample jakarta">Petit cœur...</div>
+    </article>
+
+    <article class="card">
+      <div class="meta">
+        <div class="name">DM Sans Medium</div>
+        <div class="tag">sobre · éditorial UI</div>
+      </div>
+      <div class="sample dmsans">Petit cœur...</div>
+    </article>
+
+    <article class="card">
+      <div class="meta">
+        <div class="name">Inter Tight SemiBold</div>
+        <div class="tag">compact · très actuel</div>
+      </div>
+      <div class="sample intertight">Petit cœur...</div>
+    </article>
+
+    <article class="card">
+      <div class="meta">
+        <div class="name">Lora Medium</div>
+        <div class="tag">classe · éditorial</div>
+      </div>
+      <div class="sample lora">Petit cœur...</div>
+    </article>
+
+    <article class="card">
+      <div class="meta">
+        <div class="name">Fraunces Soft Medium</div>
+        <div class="tag">signature · caractère</div>
+      </div>
+      <div class="sample fraunces">Petit cœur...</div>
+    </article>
+  </div>
+</body>
+</html>

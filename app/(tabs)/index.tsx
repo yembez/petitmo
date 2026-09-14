@@ -13,9 +13,16 @@ import {
   ScrollView,
   useWindowDimensions,
   DeviceEventEmitter,
+  Pressable,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
+import Reanimated, {
+  interpolate,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets, useSafeAreaFrame } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
@@ -27,7 +34,16 @@ import ImageImportIcon from '@/components/ImageImportIcon';
 import MicIcon from '@/components/MicIcon';
 import PenIcon from '@/components/PenIcon';
 import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
-import * as Haptics from 'expo-haptics';
+import { petitmoHaptic } from '@/lib/haptics';
+import {
+  MOTION_CAPTURE_PRESS_OPACITY_DIP,
+  MOTION_CAPTURE_PRESS_SCALE,
+  MOTION_CAPTURE_PRESS_SHADOW,
+  MOTION_CTA_MORPH_HIT_SLOP,
+  MOTION_CTA_MORPH_SHEEN,
+  MOTION_SPRING,
+  MOTION_SPRING_PHYS,
+} from '@/constants/motion';
 import { Inter_300Light_Italic, Inter_500Medium, Inter_700Bold } from '@expo-google-fonts/inter';
 import { useFonts } from 'expo-font';
 import * as Font from 'expo-font';
@@ -35,19 +51,9 @@ import { Manrope_400Regular, Manrope_700Bold } from '@expo-google-fonts/manrope'
 import { DMSans_500Medium } from '@expo-google-fonts/dm-sans';
 import TabSceneTransition from '@/components/TabSceneTransition';
 import SettingsHeaderButton from '@/components/SettingsHeaderButton';
-import PetitCoeurLogo, { PETIT_COEUR_LOGO_VIEWBOX } from '@/components/PetitCoeurLogo';
 import { loadedFontStyle } from '@/utils/loadedFontStyle';
-
-/** Tailles maquette capture (px logiques). */
-const CAPTURE_TITLE_FONT_SIZE = 18;
-const CAPTURE_TITLE_LINE_HEIGHT = 24;
-const CAPTURE_TITLE_HEART_SIZE = scale(16);
-/** Hauteur de la ligne logo / paramètres (alignés sur le bouton). */
-const CAPTURE_HEADER_ROW_H = scale(40);
-const CAPTURE_HEADER_LOGO_W = scale(122);
-const CAPTURE_HEADER_LOGO_H =
-  CAPTURE_HEADER_LOGO_W * (PETIT_COEUR_LOGO_VIEWBOX.height / PETIT_COEUR_LOGO_VIEWBOX.width);
-
+import { useAppLanguage } from '@/hooks/useAppLanguage';
+import { formatAppDate } from '@/utils/appLocale';
 import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
 import { scale, verticalScale } from '@/utils/responsive';
 import {
@@ -90,6 +96,12 @@ import {
   CHILD_PROFILE_PHOTO_ASPECT_COMPACT,
 } from '@/utils/captureHeroMetrics';
 
+/** Tailles maquette capture (px logiques). */
+const CAPTURE_TITLE_FONT_SIZE = 18;
+const CAPTURE_TITLE_LINE_HEIGHT = 24;
+const CAPTURE_TITLE_HEART_SIZE = scale(16);
+/** Hauteur de la ligne date / paramètres (alignés sur le bouton). */
+const CAPTURE_HEADER_ROW_H = scale(40);
 /** Enfants visibles pour le compte courant — jamais ceux d’un autre e-mail. */
 function listCaptureScopedChildren(): Child[] {
   const uid = peekLastRealAuthUserId();
@@ -123,21 +135,7 @@ const CAPTURE_HERO_TAGLINE = '“Avec toi, l’ordinaire devient extraordinaire.
 
 type CaptureRoute = '/write' | '/record-voice' | '/import-media';
 
-function captureCtaHaloStyle(color: string) {
-  return Platform.select({
-    ios: {
-      shadowColor: color,
-      shadowOffset: { width: 0, height: 0 },
-      shadowOpacity: 0.13,
-      shadowRadius: 10,
-    },
-    android: {
-      elevation: 3,
-      shadowColor: color,
-    },
-    default: {},
-  });
-}
+const SH = MOTION_CAPTURE_PRESS_SHADOW;
 
 /**
  * Révision photo hero — chemin local + `updated_at` (fichier souvent écrasé au même path).
@@ -226,103 +224,132 @@ function CaptureDiscCta({
   discGradient,
   discBorderColor,
   discBorderWidth = 0,
-  haloColor,
   onPress,
   labelFontFamily,
   compact = false,
   accessibilityLabel,
-  haptic = 'medium',
-  disableHalo = false,
 }: {
   label: string;
   icon: React.ReactNode;
   discColor?: string;
-  /** Dégradé TL → BR (prioritaire sur `discColor`). */
-  discGradient?: readonly [string, string];
+  /** Dégradé TL → BR (prioritaire sur `discColor`) — 2 ou 3 stops charte. */
+  discGradient?: readonly [string, string] | readonly [string, string, string];
   discBorderColor?: string;
   discBorderWidth?: number;
-  /** Teinte du halo — par défaut la couleur du disque (ou du contour si fond clair). */
-  haloColor?: string;
   onPress: () => void;
   labelFontFamily?: string;
   compact?: boolean;
   accessibilityLabel?: string;
-  haptic?: 'light' | 'medium';
-  /** Sans ombre portée / halo circulaire (ex. disque blanc « Enregistrer »). */
-  disableHalo?: boolean;
 }) {
-  const pressScale = useRef(new Animated.Value(1)).current;
   const ctaSize = compact ? CAPTURE_CTA_SIZE_COMPACT : CAPTURE_CTA_SIZE;
-  const glowColor =
-    haloColor ?? discGradient?.[1] ?? discBorderColor ?? discColor ?? '#000000';
+  const radius = ctaSize / 2;
+  const pressed = useSharedValue(0);
+  const isIOS = Platform.OS === 'ios';
 
-  const runPressIn = useCallback(() => {
-    if (Platform.OS === 'ios' || Platform.OS === 'android') {
-      void Haptics.impactAsync(
-        haptic === 'light'
-          ? Haptics.ImpactFeedbackStyle.Light
-          : Haptics.ImpactFeedbackStyle.Medium,
-      );
+  const pressShellStyle = useAnimatedStyle(() => {
+    const p = pressed.value;
+    return {
+      width: ctaSize,
+      height: ctaSize,
+      borderRadius: radius,
+      transform: [{ scale: 1 - p * (1 - MOTION_CAPTURE_PRESS_SCALE) }],
+      opacity: 1 - p * MOTION_CAPTURE_PRESS_OPACITY_DIP,
+    };
+  });
+
+  const ambientShadowStyle = useAnimatedStyle(() => {
+    const p = pressed.value;
+    if (!isIOS) {
+      return {
+        elevation: interpolate(p, [0, 1], [SH.elevation, SH.elevationPressed]),
+        borderRadius: radius,
+      };
     }
-    Animated.spring(pressScale, {
-      toValue: 0.94,
-      useNativeDriver: true,
-      friction: 6,
-      tension: 380,
-    }).start();
-  }, [haptic, pressScale]);
+    return {
+      borderRadius: radius,
+      shadowColor: SH.color,
+      shadowOffset: {
+        width: 0,
+        height: interpolate(p, [0, 1], [SH.ambient.offsetY, SH.ambientPressed.offsetY]),
+      },
+      shadowOpacity: interpolate(p, [0, 1], [SH.ambient.opacity, SH.ambientPressed.opacity]),
+      shadowRadius: interpolate(p, [0, 1], [SH.ambient.radius, SH.ambientPressed.radius]),
+    };
+  });
 
-  const runPressOut = useCallback(() => {
-    Animated.spring(pressScale, {
-      toValue: 1,
-      useNativeDriver: true,
-      friction: 5,
-      tension: 260,
-    }).start();
-  }, [pressScale]);
+  const contactShadowStyle = useAnimatedStyle(() => {
+    const p = pressed.value;
+    if (!isIOS) {
+      return { borderRadius: radius };
+    }
+    return {
+      borderRadius: radius,
+      shadowColor: SH.color,
+      shadowOffset: {
+        width: 0,
+        height: interpolate(p, [0, 1], [SH.contact.offsetY, SH.contactPressed.offsetY]),
+      },
+      shadowOpacity: interpolate(p, [0, 1], [SH.contact.opacity, SH.contactPressed.opacity]),
+      shadowRadius: interpolate(p, [0, 1], [SH.contact.radius, SH.contactPressed.radius]),
+    };
+  });
 
   return (
-    <TouchableOpacity
-      activeOpacity={1}
+    <Pressable
       onPress={onPress}
-      onPressIn={runPressIn}
-      onPressOut={runPressOut}
+      onPressIn={() => {
+        void petitmoHaptic('favorite'); // Medium — Capturer = geste primaire
+        pressed.value = withSpring(1, MOTION_SPRING_PHYS.snap);
+      }}
+      onPressOut={() => {
+        pressed.value = withSpring(0, MOTION_SPRING.standard);
+      }}
+      hitSlop={MOTION_CTA_MORPH_HIT_SLOP}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? label}
       style={styles.captureCtaTouch}
     >
-      <Animated.View
-        style={[
-          styles.captureCtaDisc,
-          {
-            width: ctaSize,
-            height: ctaSize,
-            borderRadius: ctaSize / 2,
-            backgroundColor: discGradient ? 'transparent' : discColor,
-            borderWidth: discBorderWidth,
-            borderColor: discBorderColor ?? 'transparent',
-            overflow: 'hidden',
-            transform: [{ scale: pressScale }],
-            ...(disableHalo ? {} : captureCtaHaloStyle(glowColor)),
-          },
-        ]}
-      >
-        {discGradient ? (
-          <LinearGradient
-            colors={[
-              discGradient[0],
-              discGradient[0],
-              discGradient[1],
-              discGradient[1],
+      <Reanimated.View style={[ambientShadowStyle, pressShellStyle]}>
+        <Reanimated.View
+          style={[
+            styles.captureCtaContact,
+            { width: ctaSize, height: ctaSize, borderRadius: radius },
+            contactShadowStyle,
+          ]}
+        >
+          <View
+            style={[
+              styles.captureCtaDisc,
+              {
+                width: ctaSize,
+                height: ctaSize,
+                borderRadius: radius,
+                backgroundColor: discGradient ? 'transparent' : discColor,
+                borderWidth: discBorderWidth,
+                borderColor: discBorderColor ?? 'transparent',
+                overflow: 'hidden',
+              },
             ]}
-            locations={[...CAPTURE_CTA_GRADIENT_LOCATIONS]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={StyleSheet.absoluteFillObject}
-          />
-        ) : null}
-        <View style={styles.captureCtaDiscIcon}>{icon}</View>
-      </Animated.View>
+          >
+            {discGradient ? (
+              <LinearGradient
+                colors={[
+                  discGradient[0],
+                  discGradient[0],
+                  discGradient[discGradient.length - 1],
+                  discGradient[discGradient.length - 1],
+                ]}
+                locations={[...CAPTURE_CTA_GRADIENT_LOCATIONS]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={StyleSheet.absoluteFillObject}
+              />
+            ) : null}
+            <View pointerEvents="none" style={styles.captureCtaSheen} />
+            <View style={styles.captureCtaDiscIcon}>{icon}</View>
+          </View>
+        </Reanimated.View>
+      </Reanimated.View>
       <Text
         style={[
           styles.captureCtaLabel,
@@ -333,7 +360,7 @@ function CaptureDiscCta({
       >
         {label}
       </Text>
-    </TouchableOpacity>
+    </Pressable>
   );
 }
 
@@ -344,6 +371,12 @@ function CapturerScreen() {
   const frame = useSafeAreaFrame();
   const { height: windowH } = useWindowDimensions();
 
+  const lang = useAppLanguage();
+  const todayLabel = formatAppDate(
+    new Date(),
+    { weekday: 'short', day: 'numeric', month: 'short' },
+    lang,
+  );
   const [captureFontsLoaded] = useFonts({
     Manrope_400Regular,
     Manrope_700Bold,
@@ -684,12 +717,18 @@ function CapturerScreen() {
         >
           <View style={{ paddingTop: insets.top + verticalScale(8) }}>
             <View style={styles.capturePageHeader}>
-              <View style={styles.captureHeaderLogo} pointerEvents="none">
-                <PetitCoeurLogo
-                  width={CAPTURE_HEADER_LOGO_W}
-                  height={CAPTURE_HEADER_LOGO_H}
-                  color={THEME.textPrimary}
-                />
+              <View style={styles.captureHeaderLeading} pointerEvents="none">
+                <Text
+                  style={[
+                    styles.captureHeaderDate,
+                    loadedFontStyle(captureSubtitleFont),
+                  ]}
+                  numberOfLines={1}
+                  accessibilityRole="header"
+                  accessibilityLabel={todayLabel}
+                >
+                  {todayLabel}
+                </Text>
               </View>
               <View style={styles.captureHeaderTrailing}>
                 <SettingsHeaderButton size={CAPTURE_HEADER_ROW_H} />
@@ -879,7 +918,6 @@ function CapturerScreen() {
               }
               onPress={() => handleCaptureCtaPress('/record-voice')}
               compact={compact}
-              haptic="light"
             />
             <CaptureDiscCta
               label="Écrire"
@@ -907,7 +945,6 @@ function CapturerScreen() {
               }
               onPress={() => handleCaptureCtaPress('/import-media')}
               compact={compact}
-              haptic="light"
             />
             </View>
           </View>
@@ -950,16 +987,25 @@ const styles = StyleSheet.create({
     marginBottom: verticalScale(12),
     overflow: 'visible',
   },
-  captureHeaderLogo: {
-    flexShrink: 1,
-    alignItems: 'flex-start',
+  captureHeaderLeading: {
+    flex: 1,
     justifyContent: 'center',
+    paddingRight: scale(8),
+    zIndex: 1,
+    minHeight: CAPTURE_HEADER_ROW_H,
+  },
+  captureHeaderDate: {
+    fontSize: scale(14),
+    lineHeight: scale(18),
+    color: THEME.textPrimary,
+    letterSpacing: -0.2,
+    textTransform: 'capitalize',
   },
   captureHeaderTrailing: {
-    width: CAPTURE_HEADER_ROW_H,
-    height: CAPTURE_HEADER_ROW_H,
+    flexShrink: 0,
+    minHeight: CAPTURE_HEADER_ROW_H,
     zIndex: 1,
-    alignItems: 'center',
+    alignItems: 'flex-end',
     justifyContent: 'center',
   },
   capturePhotoBleed: {
@@ -1147,9 +1193,21 @@ const styles = StyleSheet.create({
     maxWidth: CAPTURE_CTA_SIZE + scale(16),
     paddingHorizontal: scale(6),
   },
+  captureCtaContact: {
+    backgroundColor: 'transparent',
+  },
   captureCtaDisc: {
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  captureCtaSheen: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 1,
+    backgroundColor: MOTION_CTA_MORPH_SHEEN,
+    zIndex: 2,
   },
   captureCtaDiscIcon: {
     zIndex: 1,

@@ -22,7 +22,11 @@ import { scale, verticalScale } from '@/utils/responsive';
 import { SPACING, FONT_SIZES, PROFILE_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
 import { CAPTURE_CTA_IMPORT_GRADIENT } from '@/constants/captureScreenPalette';
-import { PETITMO_CTA_BORDER_RADIUS, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
+import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
+import PetitmoPrimaryMorphButton, {
+  type PetitmoMorphPhase,
+} from '@/components/PetitmoPrimaryMorphButton';
+import { MOTION_CTA_MORPH_DISK_PT } from '@/constants/motion';
 import { getLocalChild, listLocalChildren } from '@/lib/localDb';
 import {
   deleteChild,
@@ -61,6 +65,8 @@ export default function EditChildScreen() {
   const [photoUrl, setPhotoUrl] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [ctaPhase, setCtaPhase] = useState<PetitmoMorphPhase>('idle');
+  const pendingAfterSuccessRef = useRef<(() => void) | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [childrenCount, setChildrenCount] = useState(1);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
@@ -238,9 +244,11 @@ export default function EditChildScreen() {
       Alert.alert('Erreur', 'La date de naissance est requise');
       return;
     }
+    if (ctaPhase !== 'idle' || isDeleting) return;
 
     try {
       setIsSaving(true);
+      setCtaPhase('busy');
       const updates = {
         name: normalizeChildGivenName(name),
         birthdate: birthdate.trim(),
@@ -255,14 +263,26 @@ export default function EditChildScreen() {
             });
       setChild(updated);
       notifyChildProfileUpdated(updated.id, updated);
-      router.back();
+      pendingAfterSuccessRef.current = () => router.back();
+      setCtaPhase('success');
     } catch (error) {
       console.error('Error updating child:', error);
+      setCtaPhase('error');
       Alert.alert('Erreur', 'Impossible de sauvegarder les modifications');
     } finally {
       setIsSaving(false);
     }
   };
+
+  const resetCtaIdle = useCallback(() => {
+    setCtaPhase('idle');
+  }, []);
+
+  const onSaveSuccessHoldEnd = useCallback(() => {
+    const next = pendingAfterSuccessRef.current;
+    pendingAfterSuccessRef.current = null;
+    next?.();
+  }, []);
 
   const handleDelete = () => {
     if (!child || isDeleting) return;
@@ -425,36 +445,26 @@ export default function EditChildScreen() {
           </View>
         </View>
 
-        <TouchableOpacity
-          style={[
-            styles.saveButtonWrap,
-            (isSaving || isDeleting || !canSave) && petitmoCtaStyles.primaryDisabled,
-          ]}
-          onPress={handleSave}
-          disabled={isSaving || isDeleting || !canSave}
-          activeOpacity={0.88}
+        <PetitmoPrimaryMorphButton
+          style={styles.saveButtonWrap}
+          height={MOTION_CTA_MORPH_DISK_PT}
+          phase={ctaPhase}
+          onPress={() => void handleSave()}
+          disabled={isSaving || isDeleting || !canSave || ctaPhase !== 'idle'}
+          onSuccessHoldEnd={onSaveSuccessHoldEnd}
+          onErrorShakeEnd={resetCtaIdle}
+          accessibilityLabel="Enregistrer"
         >
-          <LinearGradient
-            colors={[...CAPTURE_CTA_IMPORT_GRADIENT]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={[petitmoCtaStyles.primaryFullWidth, styles.saveButtonGradient]}
+          <Text
+            style={[
+              petitmoCtaStyles.primaryText,
+              styles.saveButtonText,
+              dm600 ? { fontFamily: dm600 } : null,
+            ]}
           >
-            {isSaving ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <Text
-                style={[
-                  petitmoCtaStyles.primaryText,
-                  styles.saveButtonText,
-                  dm600 ? { fontFamily: dm600 } : null,
-                ]}
-              >
-                Enregistrer
-              </Text>
-            )}
-          </LinearGradient>
-        </TouchableOpacity>
+            Enregistrer
+          </Text>
+        </PetitmoPrimaryMorphButton>
 
         <TouchableOpacity
           style={[styles.deleteButton, (isSaving || isDeleting) && styles.deleteButtonDisabled]}
@@ -591,15 +601,15 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: FONT_SIZES.base,
-    fontWeight: '500',
-    color: THEME.textMuted,
-    marginBottom: SPACING.xs,
+    fontWeight: '600',
+    color: THEME.textPrimary,
+    marginBottom: SPACING.sm,
   },
   input: {
     backgroundColor: THEME.bg,
     borderRadius: scale(100),
     paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
+    paddingVertical: verticalScale(16),
     fontSize: FONT_SIZES.base,
     color: THEME.textPrimary,
     borderWidth: 1,
@@ -613,13 +623,6 @@ const styles = StyleSheet.create({
   },
   saveButtonWrap: {
     marginBottom: SPACING.lg,
-    borderRadius: PETITMO_CTA_BORDER_RADIUS,
-    overflow: 'hidden',
-  },
-  saveButtonGradient: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: PETITMO_CTA_BORDER_RADIUS,
   },
   saveButtonText: {
     color: '#FFFFFF',

@@ -199,6 +199,7 @@ export default function CaptureWheelMockScreen() {
         <PetitCoeurLogo
           width={scale(160)}
           height={scale(160) * (PETIT_COEUR_LOGO_VIEWBOX.height / PETIT_COEUR_LOGO_VIEWBOX.width)}
+          variant="color"
         />
         <View style={styles.headerRight}>
           <Text

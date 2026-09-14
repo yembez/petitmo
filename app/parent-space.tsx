@@ -247,7 +247,7 @@ export default function ParentSpaceScreen() {
     });
 
     void getChildren().then((list) => {
-      setChildrenState(list);
+      setChildrenState(sortChildrenByBirthdateAsc(list));
     });
   }, [pathname, refreshOrderTracking]);
 
@@ -377,24 +377,28 @@ export default function ParentSpaceScreen() {
           </TouchableOpacity>
         </Section>
 
-        <Section title="Mon abonnement" titleFontFamily={dm700}>
+        <Section title={t('parent.subscription.sectionTitle')} titleFontFamily={dm700}>
           {paid ? (
             <>
-              <StaticRow label="Plan actuel" value="Petitmo+" labelFontFamily={dm500} />
+              <StaticRow
+                label={t('parent.subscription.currentPlan')}
+                value={t('parent.subscription.planPremium')}
+                labelFontFamily={dm500}
+              />
               <TouchableOpacity
                 style={[styles.row, styles.rowBorderTop]}
                 onPress={() => void openUrl(manageSubscriptionUrl())}
                 activeOpacity={0.85}
                 accessibilityRole="button"
-                accessibilityLabel="Gérer mon abonnement"
+                accessibilityLabel={t('parent.subscription.manage')}
               >
                 <View style={styles.rowIconPlaceholder} />
                 <View style={styles.rowText}>
                   <Text style={[styles.rowLabel, dm500 ? { fontFamily: dm500 } : null]}>
-                    Gérer mon abonnement
+                    {t('parent.subscription.manage')}
                   </Text>
                 </View>
-                <Text style={styles.rowValue}>Ouvrir</Text>
+                <Text style={styles.rowValue}>{t('parent.subscription.manageOpen')}</Text>
               </TouchableOpacity>
             </>
           ) : (

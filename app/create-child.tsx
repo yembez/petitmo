@@ -168,7 +168,7 @@ export default function CreateChildScreen() {
           <PetitCoeurLogo
             width={scale(180)}
             height={scale(180) * (PETIT_COEUR_LOGO_VIEWBOX.height / PETIT_COEUR_LOGO_VIEWBOX.width)}
-            color={THEME.textPrimary}
+            variant="color"
           />
         </View>
 
@@ -198,7 +198,7 @@ export default function CreateChildScreen() {
 
         <View style={styles.formSection}>
           <View style={styles.inputGroup}>
-            <Text style={[styles.label, dm500 ? { fontFamily: dm500 } : null]}>Prénom de l'enfant</Text>
+            <Text style={[styles.label, dm600 ? { fontFamily: dm600 } : null]}>Prénom de l'enfant</Text>
             <TextInput
               style={[styles.input, dm500 ? { fontFamily: dm500 } : null]}
               value={childName}
@@ -211,7 +211,7 @@ export default function CreateChildScreen() {
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={[styles.label, dm500 ? { fontFamily: dm500 } : null]}>
+            <Text style={[styles.label, dm600 ? { fontFamily: dm600 } : null]}>
               Date de naissance
             </Text>
             <DatePicker
@@ -272,7 +272,7 @@ const styles = StyleSheet.create({
     marginBottom: verticalScale(24),
   },
   title: {
-    fontSize: FONT_SIZES.xl,
+    fontSize: FONT_SIZES.xxl,
     fontWeight: '700',
     color: THEME.textPrimary,
     textAlign: 'center',
@@ -298,13 +298,13 @@ const styles = StyleSheet.create({
     marginBottom: verticalScale(16),
   },
   addPhotoText: {
-    fontSize: FONT_SIZES.sm,
+    fontSize: FONT_SIZES.base,
     color: THEME.brandCtaOrange,
-    fontWeight: '500',
+    fontWeight: '600',
     marginBottom: verticalScale(8),
   },
   laterText: {
-    fontSize: scale(13),
+    fontSize: FONT_SIZES.sm,
     color: '#B8B2A8',
   },
   formSection: {
@@ -314,10 +314,10 @@ const styles = StyleSheet.create({
     marginBottom: verticalScale(20),
   },
   label: {
-    fontSize: scale(13),
-    color: THEME.textMuted,
-    fontWeight: '500',
-    marginBottom: verticalScale(8),
+    fontSize: FONT_SIZES.base,
+    color: THEME.textPrimary,
+    fontWeight: '600',
+    marginBottom: verticalScale(10),
   },
   input: {
     backgroundColor: THEME.bg,
@@ -325,8 +325,8 @@ const styles = StyleSheet.create({
     borderColor: THEME.familyFlowLine,
     borderRadius: scale(100),
     paddingHorizontal: SPACING.md,
-    paddingVertical: verticalScale(14),
-    fontSize: FONT_SIZES.md,
+    paddingVertical: verticalScale(16),
+    fontSize: FONT_SIZES.base,
     color: THEME.textPrimary,
     // iOS : le letterSpacing de l’écran OTP peut fuiter vers les TextInput suivants.
     letterSpacing: 0,

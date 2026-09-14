@@ -57,6 +57,13 @@ fi
 echo "→ Metro   http://$ip:$PORT"
 echo "→ iPhone  $device"
 
+# Expo + Xcode 26 : LockdowndClient plante à l’install. On passe par devicectl.
+app="$(ls -dt "$HOME"/Library/Developer/Xcode/DerivedData/Petitmo-*/Build/Products/Debug-iphoneos/Petitmo.app 2>/dev/null | head -1 || true)"
+if [ -n "$app" ]; then
+  echo "→ Install $app"
+  xcrun devicectl device install app --device "$device" "$app"
+fi
+
 xcrun devicectl device process launch \
   --device "$device" \
   --activate \

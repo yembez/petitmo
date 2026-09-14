@@ -32,8 +32,11 @@ import { Audio } from 'expo-av';
 import { scale, verticalScale } from '@/utils/responsive';
 import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
-import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
-import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
+import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
+import PetitmoPrimaryMorphButton, {
+  type PetitmoMorphPhase,
+} from '@/components/PetitmoPrimaryMorphButton';
+import { MOTION_CTA_MORPH_DISK_PT } from '@/constants/motion';
 import PermissionModal from '@/components/PermissionModal';
 import { uploadMedia } from '@/services/media';
 import { getOrSelectFirstChild } from '@/services/children';
@@ -59,6 +62,8 @@ export default function RecordVoiceScreen() {
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [showPermissionModal, setShowPermissionModal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [ctaPhase, setCtaPhase] = useState<PetitmoMorphPhase>('idle');
+  const pendingAfterSuccessRef = useRef<(() => void) | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   /** Masqué tant que le binaire natif n’inclut pas ExpoDocumentPicker (rebuild EAS). */
   const [importAvailable] = useState(() => isVoiceDocumentPickerAvailable());
@@ -531,13 +536,16 @@ export default function RecordVoiceScreen() {
 
   const saveRecording = async () => {
     if (!hasRecording || (!recordingFileUriRef.current && !recordingRef.current)) return;
+    if (ctaPhase !== 'idle') return;
 
     try {
       setIsSaving(true);
+      setCtaPhase('busy');
 
       const childId = await getOrSelectFirstChild();
       if (!childId) {
         Alert.alert('Aucun enfant trouvé', 'Crée d\'abord un profil d\'enfant');
+        setCtaPhase('idle');
         setIsSaving(false);
         router.push('/create-child');
         return;
@@ -547,6 +555,7 @@ export default function RecordVoiceScreen() {
         const voiceLimit = await checkVoiceLimit(childId, { skipRemotePull: true });
         if (!voiceLimit.canCreate) {
           promptFreeTierLimitThenPaywall({ kind: 'voices', router, returnTo: 'fil' });
+          setCtaPhase('idle');
           setIsSaving(false);
           return;
         }
@@ -555,6 +564,7 @@ export default function RecordVoiceScreen() {
       const uri = recordingFileUriRef.current ?? recordingRef.current?.getURI();
       if (!uri) {
         Alert.alert('Erreur', "Aucun enregistrement trouvé");
+        setCtaPhase('error');
         setIsSaving(false);
         return;
       }
@@ -571,10 +581,14 @@ export default function RecordVoiceScreen() {
 
       if (tier === 'free' && clipDur > FREE_TIER_VOICE_MAX_DURATION + 0.01) {
         Alert.alert('Dernière étape', 'En plan gratuit, choisis un extrait de 1 minute maximum.');
+        setCtaPhase('idle');
+        setIsSaving(false);
         return;
       }
       if (tier === 'paid' && clipDur > PAID_TIER_VOICE_MAX_DURATION + 0.01) {
         Alert.alert('Dernière étape', 'Choisis un extrait de 5 minutes maximum.');
+        setCtaPhase('idle');
+        setIsSaving(false);
         return;
       }
 
@@ -597,9 +611,13 @@ export default function RecordVoiceScreen() {
         }
       } else if (tier === 'free' && recordingDuration > FREE_TIER_VOICE_MAX_DURATION) {
         Alert.alert('Dernière étape', 'En plan gratuit, choisis un extrait de 1 minute maximum.');
+        setCtaPhase('idle');
+        setIsSaving(false);
         return;
       } else if (tier === 'paid' && recordingDuration > PAID_TIER_VOICE_MAX_DURATION) {
         Alert.alert('Dernière étape', 'Choisis un extrait de 5 minutes maximum.');
+        setCtaPhase('idle');
+        setIsSaving(false);
         return;
       }
 
@@ -613,10 +631,13 @@ export default function RecordVoiceScreen() {
       });
 
       if (result) {
-        Alert.alert('Succès', 'Souvenir sonore sauvegardé avec succès');
         armFeedSnapToLatestOnFocus();
-        router.push('/(tabs)/fil');
+        pendingAfterSuccessRef.current = () => {
+          router.push('/(tabs)/fil');
+        };
+        setCtaPhase('success');
       } else {
+        setCtaPhase('error');
         Alert.alert('Erreur', 'Impossible de sauvegarder le souvenir');
       }
     } catch (error) {
@@ -624,14 +645,26 @@ export default function RecordVoiceScreen() {
         error instanceof Error &&
         promptFreeTierLimitFromError(error.message, { router, returnTo: 'fil' })
       ) {
+        setCtaPhase('idle');
         return;
       }
       console.error('Failed to save recording:', error);
+      setCtaPhase('error');
       Alert.alert('Erreur', 'Impossible de sauvegarder le souvenir');
     } finally {
       setIsSaving(false);
     }
   };
+
+  const resetCtaIdle = useCallback(() => {
+    setCtaPhase('idle');
+  }, []);
+
+  const onSaveSuccessHoldEnd = useCallback(() => {
+    const next = pendingAfterSuccessRef.current;
+    pendingAfterSuccessRef.current = null;
+    next?.();
+  }, []);
 
   /** PHPicker : pas de demande d’accès photothèque, la sélection suffit. */
   const pickCoverImage = async () => {
@@ -767,23 +800,23 @@ export default function RecordVoiceScreen() {
             )}
           </View>
 
-          <PetitmoPrimaryPressable
-            style={[petitmoCtaStyles.primaryFullWidth, styles.saveButtonMaquette]}
+          <PetitmoPrimaryMorphButton
+            style={styles.saveButtonMaquette}
+            height={MOTION_CTA_MORPH_DISK_PT}
+            phase={ctaPhase}
             onPress={() => void saveRecording()}
-            disabled={isSaving}
-            activeOpacity={0.88}
+            disabled={isSaving || ctaPhase !== 'idle'}
+            onSuccessHoldEnd={onSaveSuccessHoldEnd}
+            onErrorShakeEnd={resetCtaIdle}
+            accessibilityLabel={t('recordVoice.save')}
           >
-            {isSaving ? (
-              <ActivityIndicator size="small" color={PETITMO_CTA_SPINNER_COLOR} />
-            ) : (
-              <>
-                <Save size={scale(22)} color={THEME.captureScreenCtaForeground} strokeWidth={2} />
-                <Text style={[petitmoCtaStyles.primaryText, styles.saveButtonMaquetteText]}>
-                  {t('recordVoice.save')}
-                </Text>
-              </>
-            )}
-          </PetitmoPrimaryPressable>
+            <View style={styles.saveButtonMaquetteInner}>
+              <Save size={scale(18)} color={THEME.captureScreenCtaForeground} strokeWidth={2} />
+              <Text style={[petitmoCtaStyles.primaryText, styles.saveButtonMaquetteText]}>
+                {t('recordVoice.save')}
+              </Text>
+            </View>
+          </PetitmoPrimaryMorphButton>
 
           <View style={styles.privacyRow}>
             <Lock size={scale(14)} color={THEME.textMuted} strokeWidth={2} />
@@ -1047,15 +1080,17 @@ const styles = StyleSheet.create({
   },
   saveButtonMaquette: {
     width: '100%',
+    marginTop: verticalScale(28),
+  },
+  saveButtonMaquetteInner: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: scale(10),
-    marginTop: verticalScale(28),
-    minHeight: scale(54),
+    gap: scale(8),
+    paddingHorizontal: SPACING.sm,
   },
   saveButtonMaquetteText: {
-    fontSize: FONT_SIZES.base,
+    fontSize: FONT_SIZES.sm,
     fontWeight: '600',
   },
   privacyRow: {
