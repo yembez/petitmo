@@ -2,6 +2,7 @@ import {
   BRAND_ACTION_ACCENT,
   BRAND_ACTION_ACCENT_RGB,
   BRAND_ACTION_GRADIENT,
+  BRAND_SPLASH_GRADIENT,
   CAPTURE_SCREEN_BG,
   CAPTURE_CTA_BORDER,
   CAPTURE_CTA_IMPORT,
@@ -20,8 +21,8 @@ const BRAND_CTA_ACCENT_RGB = BRAND_ACTION_ACCENT_RGB;
  * @deprecated orange historique — `#FC6C39` (`widget_petitmo_orange2`).
  */
 const BRAND_WIDGET_ORANGE = '#FC6C39';
-/** Fond splash natif (letterbox) — départ du dégradé `#FD6F9F` → `#FD7D4D`. */
-const BRAND_SPLASH = BRAND_ACTION_GRADIENT[0];
+/** Fond splash natif (letterbox) — départ du dégradé splash vertical. */
+const BRAND_SPLASH = BRAND_SPLASH_GRADIENT[0];
 /** Gris — CTA secondaires (paywall, livres, modales, favoris, memory-view…). */
 const BRAND_CTA_GRAY = '#51545E';
 const BRAND_CTA_GRAY_RGB = '81, 84, 94';
@@ -49,7 +50,7 @@ export const THEME = {
 
   /** Couleur de marque — CTA, cœurs favoris, paywall, spinners d’accent… */
   brandPrimary: BRAND_PRIMARY,
-  /** Fond splash letterbox natif — départ dégradé `#FD6F9F` (image = dégradé complet). */
+  /** Fond splash letterbox natif — départ dégradé rose charte (image = dégradé complet). */
   splashScreenBackground: BRAND_SPLASH,
   /** @deprecated orange historique — icône store = `widget_petitmo_gradient.png`. */
   brandWidgetOrange: BRAND_WIDGET_ORANGE,
@@ -101,7 +102,7 @@ export const THEME = {
   captureAccentYellow: BRAND_CTA_ACCENT,
   /** Fond CTA primaire app (fallback solid) — préfère `BRAND_ACTION_GRADIENT`. */
   captureScreenCtaBackground: BRAND_CTA_ACCENT,
-  /** Libellé + icône sur fond CTA primaire (dégradé rose→corail). */
+  /** Libellé + icône sur fond CTA primaire (dégradé rose→orangé). */
   captureScreenCtaForeground: '#FFFFFF',
   /** @deprecated — `captureScreenCtaBackground` */
   captureWriteCtaRose: BRAND_CTA_ACCENT,
