@@ -1,5 +1,5 @@
 /**
- * SplashAnimation — logo PETIT CŒUR sur dégradé marque.
+ * SplashAnimation — logo PETIT CŒUR blanc sur dégradé splash vertical.
  *
  * Timing :
  *   0.0 → 0.55s  — fade + scale-in doux
@@ -10,7 +10,7 @@
 import React, { useEffect } from 'react';
 import { StyleSheet, useWindowDimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BRAND_ACTION_GRADIENT } from '@/constants/captureScreenPalette';
+import { BRAND_SPLASH_GRADIENT } from '@/constants/captureScreenPalette';
 import PetitCoeurLogo, { PETIT_COEUR_LOGO_VIEWBOX } from '@/components/PetitCoeurLogo';
 import Animated, {
   useSharedValue,
@@ -28,7 +28,8 @@ interface Props {
 
 export default function SplashAnimation({ onFinished }: Props) {
   const { width: screenW } = useWindowDimensions();
-  const logoW = Math.min(screenW * 0.78, 340);
+  /** ~52 % largeur écran — aligné splash natif ; ratio géré par PetitCoeurLogo. */
+  const logoW = Math.min(screenW * 0.52, 248);
   const logoH = logoW * (PETIT_COEUR_LOGO_VIEWBOX.height / PETIT_COEUR_LOGO_VIEWBOX.width);
 
   const globalOpacity = useSharedValue(1);
@@ -54,10 +55,10 @@ export default function SplashAnimation({ onFinished }: Props) {
           duration: 400,
           easing: Easing.out(Easing.quad),
         },
-        (finished) => {
+        finished => {
           if (finished) runOnJS(onFinished)();
-        }
-      )
+        },
+      ),
     );
   }, [globalOpacity, logoOpacity, logoScale, onFinished]);
 
@@ -73,13 +74,13 @@ export default function SplashAnimation({ onFinished }: Props) {
   return (
     <Animated.View style={[styles.container, containerStyle]}>
       <LinearGradient
-        colors={[...BRAND_ACTION_GRADIENT]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
+        colors={[...BRAND_SPLASH_GRADIENT]}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
         style={StyleSheet.absoluteFillObject}
       />
       <Animated.View style={logoStyle}>
-        <PetitCoeurLogo width={logoW} height={logoH} color="#FEFBFD" />
+        <PetitCoeurLogo width={logoW} height={logoH} variant="whiteSolid" />
       </Animated.View>
     </Animated.View>
   );

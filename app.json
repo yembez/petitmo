@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Petitmo",
+    "name": "Petit Cœur",
     "slug": "petitmo",
     "version": "1.0.0",
     "runtimeVersion": "1.0.0",
@@ -10,14 +10,14 @@
       "checkAutomatically": "ON_LOAD"
     },
     "orientation": "default",
-    "icon": "./assets/images/widget_petitmo_gradient.png",
+    "icon": "./assets/images/icon_petit_coeur_heart.png",
     "scheme": "petitmo",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/Splash_petitmo_gradient.png",
       "resizeMode": "cover",
-      "backgroundColor": "#FD6F9F"
+      "backgroundColor": "#FD628D"
     },
     "locales": {
       "fr": "./locales/fr.json",
@@ -49,8 +49,8 @@
     "android": {
       "package": "com.petitmo.app",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/widget_petitmo_gradient.png",
-        "backgroundColor": "#FD6F9F"
+        "foregroundImage": "./assets/images/icon_petit_coeur_heart.png",
+        "backgroundColor": "#FD628D"
       },
       "permissions": [
         "android.permission.CAMERA",
@@ -83,6 +83,7 @@
           "microphonePermission": "Petitmo a besoin d'accéder à ton microphone pour enregistrer la voix de ton enfant."
         }
       ],
+      "expo-video",
       [
         "expo-image-picker",
         {

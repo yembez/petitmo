@@ -37,12 +37,12 @@
         </scene>
     </scenes>
     <resources>
-        <image name="SplashScreenLegacy" width="414" height="736"/>
+        <image name="SplashScreenLegacy" width="414" height="896"/>
         <systemColor name="systemBackgroundColor">
             <color white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
         </systemColor>
                                 <namedColor name="SplashScreenBackground">
-            <color alpha="1.000" blue="0.623529411764706" green="0.435294117647059" red="0.992156862745098" customColorSpace="sRGB" colorSpace="custom"/>
+            <color alpha="1.000" blue="0.552941176470588" green="0.384313725490196" red="0.992156862745098" customColorSpace="sRGB" colorSpace="custom"/>
         </namedColor>
     </resources>
 </document>
