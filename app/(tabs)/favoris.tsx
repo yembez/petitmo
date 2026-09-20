@@ -38,6 +38,7 @@ import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
 import { scale, verticalScale } from '@/utils/responsive';
 import TabSceneTransition from '@/components/TabSceneTransition';
 import { THEME } from '@/constants/theme';
+import { emptyStateStyles } from '@/constants/emptyStateStyles';
 import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import {
@@ -45,6 +46,8 @@ import {
   tabBarFloatingOverlapPad,
 } from '@/constants/tabBarLayout';
 import { SPACING, FONT_SIZES } from '@/constants/sizes';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
+import { loadedFontStyle } from '@/utils/loadedFontStyle';
 import {
   useMemoryTextFont,
   useMemoryEditorialFont,
@@ -489,7 +492,6 @@ function HeroSlideshowListHeader({
 }
 
 const INK = '#1C1C1E';
-const MUTED = '#6B7280';
 
 type FavorisFixedTopChromeProps = {
   insetTop: number;
@@ -920,7 +922,7 @@ const GalleryTilePicker = memo(function GalleryTilePicker({
           <View style={[styles.galleryPh, styles.galleryTextTile]}>
             {!!memory.text_title?.trim() ? (
               <Text
-                style={[styles.galleryTextTitle, { fontFamily: memoryEditorialBoldFont }]}
+                style={[styles.galleryTextTitle, loadedFontStyle(memoryEditorialBoldFont)]}
                 numberOfLines={2}
                 ellipsizeMode="tail"
               >
@@ -928,7 +930,7 @@ const GalleryTilePicker = memo(function GalleryTilePicker({
               </Text>
             ) : null}
             <Text
-              style={[styles.galleryTextSnippet, { fontFamily: memoryEditorialFont }]}
+              style={[styles.galleryTextSnippet, loadedFontStyle(memoryEditorialFont)]}
               numberOfLines={memory.text_title?.trim() ? 4 : 6}
             >
               {(memory.content ?? '').trim() || 'Petits mots'}
@@ -1192,7 +1194,7 @@ const GalleryTile = memo(function GalleryTile({
           <View style={[styles.galleryPh, styles.galleryTextTile]}>
             {!!memory.text_title?.trim() ? (
               <Text
-                style={[styles.galleryTextTitle, { fontFamily: memoryEditorialBoldFont }]}
+                style={[styles.galleryTextTitle, loadedFontStyle(memoryEditorialBoldFont)]}
                 numberOfLines={2}
                 ellipsizeMode="tail"
               >
@@ -1200,7 +1202,7 @@ const GalleryTile = memo(function GalleryTile({
               </Text>
             ) : null}
             <Text
-              style={[styles.galleryTextSnippet, { fontFamily: memoryEditorialFont }]}
+              style={[styles.galleryTextSnippet, loadedFontStyle(memoryEditorialFont)]}
               numberOfLines={memory.text_title?.trim() ? 4 : 6}
             >
               {(memory.content ?? '').trim() || 'Petits mots'}
@@ -1248,6 +1250,7 @@ export const FavorisScreen = memo(function FavorisScreen({
   bookAddModalBookId?: string;
   onBookAddClose?: (result?: { didAdd?: boolean }) => void;
 } = {}) {
+  const { t } = useAppTranslation('common');
   const router = useRouter();
   const isTabFocused = useIsFocused();
   const [ctaFontLoaded] = useFonts({ DMSans_700Bold });
@@ -1817,16 +1820,18 @@ export const FavorisScreen = memo(function FavorisScreen({
         </View>
       ) : !hasChild ? (
         <View style={[styles.centered, styles.noChildPad]}>
-          <Text style={styles.noChildTitle}>Aucun profil enfant</Text>
-          <Text style={styles.noChildSub}>
-            Crée un profil pour enregistrer des souvenirs et des favoris.
+          <Text style={emptyStateStyles.title}>{t('favoris.noChild.title')}</Text>
+          <Text style={[emptyStateStyles.subtitle, styles.noChildSubGap]}>
+            {t('favoris.noChild.subtitle')}
           </Text>
           <PetitmoPrimaryPressable
             style={styles.noChildCta}
             onPress={() => router.push('/create-child')}
             activeOpacity={0.85}
           >
-            <Text style={[petitmoCtaStyles.primaryText, styles.noChildCtaText]}>Créer un profil</Text>
+            <Text style={[petitmoCtaStyles.primaryText, styles.noChildCtaText]}>
+              {t('favoris.noChild.cta')}
+            </Text>
           </PetitmoPrimaryPressable>
         </View>
       ) : (
@@ -1837,12 +1842,20 @@ export const FavorisScreen = memo(function FavorisScreen({
           ]}
         >
           {galleryItems.length === 0 ? (
-            <View style={[styles.emptyBox, { flex: 1, margin: SPACING.md }]}>
-              <BookOpen size={scale(40)} color="#D1D5DB" strokeWidth={2} />
-              <Text style={styles.emptyTitle}>Aucun favori pour le moment</Text>
-              <Text style={styles.emptySub}>
-                Ajoute des souvenirs en favoris depuis le fil ou depuis un album.
-              </Text>
+            <View
+              style={[emptyStateStyles.container, styles.emptyFill]}
+              accessibilityLabel={t('favoris.empty.a11y')}
+            >
+              <View style={emptyStateStyles.iconDisc} accessibilityElementsHidden>
+                <Heart
+                  size={scale(34)}
+                  color={THEME.brandPrimary}
+                  fill="none"
+                  strokeWidth={2}
+                />
+              </View>
+              <Text style={emptyStateStyles.title}>{t('favoris.empty.title')}</Text>
+              <Text style={emptyStateStyles.subtitle}>{t('favoris.empty.subtitle')}</Text>
             </View>
           ) : (
             <View style={styles.galleryShell}>
@@ -2054,28 +2067,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
     paddingTop: 0,
   },
-  emptyBox: {
+  emptyFill: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: THEME.surfaceCard,
-    borderRadius: scale(12),
-    padding: SPACING.xl,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.08)',
-    gap: verticalScale(14),
-  },
-  emptyTitle: {
-    fontSize: FONT_SIZES.lg,
-    fontWeight: '600',
-    color: MUTED,
-    textAlign: 'center',
-  },
-  emptySub: {
-    fontSize: FONT_SIZES.md,
-    color: MUTED,
-    textAlign: 'center',
-    lineHeight: scale(22),
   },
   gallery: {
     flex: 1,
@@ -2367,7 +2360,6 @@ const styles = StyleSheet.create({
   galleryTextTitle: {
     fontSize: scale(12),
     lineHeight: scale(15),
-    fontWeight: '700',
     color: INK,
     textAlign: 'center',
     marginBottom: verticalScale(4),
@@ -2432,18 +2424,7 @@ const styles = StyleSheet.create({
   noChildPad: {
     paddingHorizontal: SPACING.lg,
   },
-  noChildTitle: {
-    fontSize: FONT_SIZES.lg,
-    fontWeight: '700',
-    color: INK,
-    marginBottom: verticalScale(8),
-    textAlign: 'center',
-  },
-  noChildSub: {
-    fontSize: FONT_SIZES.md,
-    color: MUTED,
-    textAlign: 'center',
-    lineHeight: scale(22),
+  noChildSubGap: {
     marginBottom: verticalScale(20),
   },
   noChildCta: {

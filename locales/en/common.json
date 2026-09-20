@@ -27,6 +27,14 @@
     "forgotNeedEmail": "Enter your email address first.",
     "forgotSentTitle": "Email sent",
     "forgotSentBody": "If an account exists for this address, you will receive a reset link.",
+    "resetTitle": "New password",
+    "resetSubtitle": "Choose a password to get back into your space.",
+    "resetPasswordConfirm": "Confirm password",
+    "resetCta": "Save password",
+    "resetSuccessTitle": "Password updated",
+    "resetSuccessBody": "You’re signed in. Welcome back.",
+    "resetMismatch": "The two passwords don’t match.",
+    "resetLinkInvalid": "Invalid or expired reset link. Request a new email.",
     "confirmEmailTitle": "Check your inbox",
     "confirmEmailBody": "Email confirmation may be required depending on configuration. You can sign in afterwards.",
     "otpTitle": "One last quick check",
@@ -82,15 +90,15 @@
     "photosBody": "To import photos and videos",
     "notifsTitle": "Notifications",
     "notifsBody": "For useful reminders, no spam",
-    "hint": "Enable what you need to get started",
+    "hint": "Nothing is on by default — flip a switch to allow access.",
     "continueCta": "Continue",
     "skip": "Later",
     "deniedTitle": "Permission denied",
-    "photosDeniedBody": "You can enable it later in your phone Settings.",
-    "notifsDeniedBody": "You can enable it later in your phone Settings.",
+    "photosDeniedBody": "You can enable it later in phone Settings, or from Parent space.",
+    "notifsDeniedBody": "You can enable it later in phone Settings, or from Parent space.",
     "notifsUnavailableBody": "Notifications need an app rebuild. You can enable them after updating.",
-    "revokeTitle": "Turn off in Settings",
-    "revokeBody": "To remove this access, open your phone Settings.",
+    "photosNeedEnableBody": "You chose “Later” for the photo library. Enable it now, or later in Parent space → Application.",
+    "enableNow": "Enable",
     "openSettings": "Open Settings"
   },
   "parent": {
@@ -101,7 +109,6 @@
       "contactCta": "Contact us",
       "contactTitle": "Contact us",
       "reportTitle": "Report a problem",
-      "subtitle": "Your message goes to the Petitmo team. Your account email is filled in — you can change it if needed.",
       "emailLabel": "Your email",
       "emailPlaceholder": "you@email.com",
       "messageLabel": "Message",
@@ -128,18 +135,27 @@
       "deleteFailed": "Could not delete the account right now."
     },
     "subscription": {
-      "upgradeCta": "Sweetoo Premium",
+      "upgradeCta": "Subscribe to Petit Cœur",
       "sectionTitle": "My subscription",
       "currentPlan": "Current plan",
-      "planPremium": "PREMIUM",
+      "planPremium": "Petit Cœur subscription",
       "manage": "Manage subscription",
-      "manageOpen": "Open"
+      "manageOpen": "Open",
+      "billingIssueTitle": "Payment didn’t go through",
+      "billingIssueBody": "Payment didn’t work for this month. Update your payment method soon so you can keep using Petit Cœur.",
+      "billingIssueCta": "Update payment"
     },
     "application": {
       "checkUpdate": "Check for update",
       "versionPrefix": "Version {{label}}",
       "enableNotifications": "Enable notifications",
       "enableNotificationsHint": "Shows the iOS prompt (needed to appear in Settings)",
+      "enablePhotos": "Enable photo library",
+      "enablePhotosHint": "To import photos and videos (profile, Capture, books)",
+      "photosGrantedTitle": "Photo library enabled",
+      "photosGrantedBody": "You can now import photos and videos.",
+      "photosDeniedTitle": "Photo library denied",
+      "photosDeniedBody": "Open iOS Settings to allow Petit Cœur, then come back here.",
       "notificationsGrantedTitle": "Notifications enabled",
       "notificationsGrantedBody": "You can now copy the push token for a test.",
       "notificationsDeniedTitle": "Notifications denied",
@@ -170,13 +186,39 @@
     },
     "freeTierLimit": {
       "later": "Later",
-      "ctaPlus": "Go Petitmo+",
+      "ctaPlus": "Go Petit Cœur",
       "memoriesTitle": "Memory limit reached",
-      "memoriesBody": "You’ve reached the free plan limit of {{count}} memories. Upgrade to Petitmo+ to add more.",
+      "memoriesBody": "You’ve reached the free plan limit of {{count}} memories. Reactivate Petit Cœur to add more.",
       "videosTitle": "Video limit reached",
-      "videosBody": "You’ve used all {{count}} free-plan videos. Upgrade to Petitmo+ to add another.",
+      "videosBody": "You’ve used all {{count}} free-plan videos. Reactivate Petit Cœur to add another.",
       "voicesTitle": "Audio limit reached",
-      "voicesBody": "You’ve used all {{count}} free-plan audio memories. Upgrade to Petitmo+ to add more."
+      "voicesBody": "You’ve used all {{count}} free-plan audio memories. Reactivate Petit Cœur to add more.",
+      "captureLockedTitle": "Adding memories is paused",
+      "captureLockedBody": "Your subscription has ended: you can still view and share all your memories. Reactivate Petit Cœur to capture new ones."
+    }
+  },
+  "import": {
+    "batchLayout": {
+      "title": "How should they appear?",
+      "subtitle": "You selected {{count}} photos. Group them in one memory or create one post per photo.",
+      "singleTitle": "All in one post",
+      "singleSub": "Every photo in the same memory",
+      "singleA11y": "All photos in a single post",
+      "separateTitle": "One photo per post",
+      "separateSub": "{{count}} separate memories in the feed",
+      "separateA11y": "One photo per post"
+    }
+  },
+  "favoris": {
+    "empty": {
+      "title": "No favorites yet",
+      "subtitle": "Heart memories from the feed or from an album.",
+      "a11y": "No favorites"
+    },
+    "noChild": {
+      "title": "No child profile",
+      "subtitle": "Create a profile to save memories and favorites.",
+      "cta": "Create a profile"
     }
   },
   "fil": {
@@ -201,6 +243,10 @@
     "favorites": "Favorites",
     "books": "Books",
     "settings": "Settings"
+  },
+  "write": {
+    "emptyTitle": "One little note?",
+    "emptyBody": "Even a single sentence is enough to keep this moment."
   },
   "book": {
     "createTile": {
@@ -306,7 +352,9 @@
     "purchaseFailed": "Couldn't complete the purchase.",
     "restore": "Restore purchases",
     "restoreSuccessTitle": "Subscription restored",
-    "restoreSuccessBody": "Petitmo+ is active again on this account.",
-    "restoreFailed": "Couldn't restore purchases."
+    "restoreSuccessBody": "Your Petit Cœur subscription is active again on this account.",
+    "restoreFailed": "Couldn't restore purchases.",
+    "legalTerms": "Terms of Use",
+    "legalPrivacy": "Privacy Policy"
   }
 }

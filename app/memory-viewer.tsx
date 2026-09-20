@@ -8,6 +8,8 @@ import {
   PanResponder,
   Animated,
   useWindowDimensions,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   type ViewToken,
   Platform,
   Alert,
@@ -54,6 +56,7 @@ import { extractMediaBucketPath } from '@/lib/mediaSignedUrl';
 import { formatDateLong, formatDuration } from '@/utils/date';
 import { formatFamilyAgesLine, sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 import { useFeedMetaFonts } from '@/hooks/useFeedMetaFonts';
+import { loadedFontStyle } from '@/utils/loadedFontStyle';
 import { useFeedVideoPlaybackUri } from '@/hooks/useFeedVideoPlaybackUri';
 import { useVideoShouldPlay } from '@/hooks/useVideoShouldPlay';
 import { getCachedFeedVideoPlaybackUri } from '@/hooks/feedVideoPlaybackUriCache';
@@ -509,6 +512,34 @@ function MemoryViewerScreenInner() {
   const openedItemKeyRef = useRef(sharedElement?.openedItemKey ?? null);
   const visibleItemKeyRef = useRef(visibleItemKey);
   visibleItemKeyRef.current = visibleItemKey;
+  /** Offset pager — source de vérité à la fermeture (viewability peut rester sur l’item d’ouverture). */
+  const pagerOffsetYRef = useRef(initialIndex * windowH);
+  const viewerItemsRef = useRef<ImmersiveViewerItem[]>([]);
+  const itemHeightRef = useRef(windowH);
+  itemHeightRef.current = windowH;
+
+  /**
+   * Recalcule la page visible depuis l’offset (pagingEnabled).
+   * Sans ça, un swipe + fermeture ramène le fil sur le 1er souvenir ouvert.
+   */
+  const syncVisibleItemKeyFromPager = useCallback((): string | null => {
+    const items = viewerItemsRef.current;
+    const h = itemHeightRef.current;
+    let key = visibleItemKeyRef.current;
+    if (items.length > 0 && h > 0) {
+      const index = Math.max(
+        0,
+        Math.min(items.length - 1, Math.round(pagerOffsetYRef.current / h)),
+      );
+      const item = items[index];
+      if (item) {
+        key = immersiveViewerItemKey(item);
+        visibleItemKeyRef.current = key;
+        setVisibleItemKey(prev => (prev === key ? prev : key));
+      }
+    }
+    return key;
+  }, []);
   const interactionReadyRef = useRef(interactionReady);
   interactionReadyRef.current = interactionReady;
   const windowSizeRef = useRef({ w: windowW, h: windowH });
@@ -540,14 +571,15 @@ function MemoryViewerScreenInner() {
   const leaveViewer = useCallback(() => {
     clearDismissSafetyTimer();
     setPhotoZoomActive(false);
-    /** Retour fil : se placer sur le souvenir actuellement affiché (pas le haut de liste). */
-    const memId = memoryIdFromImmersiveViewerItemKey(visibleItemKeyRef.current);
+    /** Retour fil : souvenir de la page pager actuelle (pas celui d’ouverture). */
+    const visibleKey = syncVisibleItemKeyFromPager();
+    const memId = memoryIdFromImmersiveViewerItemKey(visibleKey);
     if (memId) {
       armFeedSnapToKeyOnFocus(memId, { animated: true });
     }
     clearMemoryViewerSession();
     safeRouterBack(router, '/(tabs)');
-  }, [clearDismissSafetyTimer, router]);
+  }, [clearDismissSafetyTimer, router, syncVisibleItemKeyFromPager]);
 
   const armDismissSafety = useCallback(() => {
     clearDismissSafetyTimer();
@@ -780,7 +812,7 @@ function MemoryViewerScreenInner() {
       });
     };
 
-    const visibleKey = visibleItemKeyRef.current;
+    const visibleKey = syncVisibleItemKeyFromPager();
     const bootKey = bootOpenedItemKeyRef.current;
     const currentShared = sharedElementRef.current;
 
@@ -835,6 +867,7 @@ function MemoryViewerScreenInner() {
     hideCaptionChrome,
     leaveViewer,
     finishVideoReturnCrossfade,
+    syncVisibleItemKeyFromPager,
   ]);
 
   useEffect(
@@ -983,6 +1016,7 @@ function MemoryViewerScreenInner() {
   );
 
   const viewerItems = useMemo(() => buildImmersiveViewerItems(memories), [memories]);
+  viewerItemsRef.current = viewerItems;
 
   useEffect(() => {
     if (!boot?.memories.length) {
@@ -1040,7 +1074,10 @@ function MemoryViewerScreenInner() {
       const next = Math.max(0, Math.min(viewerItems.length - 1, index));
       const item = viewerItems[next];
       if (!item) return;
-      setVisibleItemKey(immersiveViewerItemKey(item));
+      const key = immersiveViewerItemKey(item);
+      setVisibleItemKey(key);
+      visibleItemKeyRef.current = key;
+      pagerOffsetYRef.current = next * itemHeightRef.current;
       listRef.current?.scrollToIndex({ index: next, animated: true });
     },
     [viewerItems],
@@ -1087,12 +1124,41 @@ function MemoryViewerScreenInner() {
   const itemHeight = windowH;
 
   const onViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken[] }) => {
-    const item = viewableItems[0]?.item as ImmersiveViewerItem | undefined;
-    setVisibleItemKey(item ? immersiveViewerItemKey(item) : null);
+    /** Ne pas effacer la clé si la liste est vide un instant (seuil / recycle). */
+    if (viewableItems.length === 0) return;
+    let best = viewableItems[0];
+    for (let i = 1; i < viewableItems.length; i++) {
+      const cur = viewableItems[i];
+      const bestPct = best?.percentVisible ?? 0;
+      const curPct = cur?.percentVisible ?? 0;
+      if (curPct > bestPct || (curPct === bestPct && (cur?.index ?? 0) > (best?.index ?? 0))) {
+        best = cur;
+      }
+    }
+    const item = best?.item as ImmersiveViewerItem | undefined;
+    if (!item) return;
+    const key = immersiveViewerItemKey(item);
+    visibleItemKeyRef.current = key;
+    setVisibleItemKey(key);
+    if (typeof best?.index === 'number' && best.index >= 0) {
+      pagerOffsetYRef.current = best.index * itemHeightRef.current;
+    }
   }, []);
 
+  const onPagerScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    pagerOffsetYRef.current = e.nativeEvent.contentOffset.y;
+  }, []);
+
+  const onPagerMomentumScrollEnd = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      pagerOffsetYRef.current = e.nativeEvent.contentOffset.y;
+      syncVisibleItemKeyFromPager();
+    },
+    [syncVisibleItemKeyFromPager],
+  );
+
   const immersiveViewabilityConfig = useMemo(
-    () => ({ itemVisiblePercentThreshold: 85 }),
+    () => ({ itemVisiblePercentThreshold: 55 }),
     [],
   );
   const immersiveViewabilityPairs = useStableViewabilityPairs(
@@ -1297,14 +1363,19 @@ function MemoryViewerScreenInner() {
                 initialScrollIndex={initialIndex}
                 getItemLayout={getItemLayout}
                 viewabilityConfigCallbackPairs={immersiveViewabilityPairs}
+                onScroll={onPagerScroll}
+                onMomentumScrollEnd={onPagerMomentumScrollEnd}
+                scrollEventThrottle={16}
                 removeClippedSubviews
                 // Pages voisines montées après le zoom : sinon leur rendu le hache.
                 windowSize={interactionReady ? 3 : 1}
                 maxToRenderPerBatch={interactionReady ? 2 : 1}
                 initialNumToRender={1}
                 onScrollToIndexFailed={({ index }) => {
+                  const offset = index * itemHeight;
+                  pagerOffsetYRef.current = offset;
                   listRef.current?.scrollToOffset({
-                    offset: index * itemHeight,
+                    offset,
                     animated: false,
                   });
                 }}
@@ -1489,7 +1560,7 @@ function ImmersivePage({
       <Text
         style={[
           mediaChrome ? styles.metaDateOnMedia : styles.metaDateOnText,
-          feedDateFontFamily ? { fontFamily: feedDateFontFamily } : styles.metaDateSystem,
+          loadedFontStyle(feedDateFontFamily) ?? styles.metaDateSystem,
         ]}
         numberOfLines={1}
       >
@@ -1500,7 +1571,7 @@ function ImmersivePage({
         <Text
           style={[
             mediaChrome ? styles.metaAgeOnMedia : styles.metaAgeOnText,
-            feedAgeFontFamily ? { fontFamily: feedAgeFontFamily } : styles.metaAgeSystem,
+            loadedFontStyle(feedAgeFontFamily) ?? styles.metaAgeSystem,
           ]}
           numberOfLines={2}
         >
@@ -1697,7 +1768,7 @@ function ImmersivePage({
                         key={idx}
                         style={[
                           styles.captionOnMediaText,
-                          { fontFamily: memoryEditorialFont },
+                          loadedFontStyle(memoryEditorialFont),
                           idx > 0 && { marginTop: verticalScale(8) },
                         ]}
                         {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
@@ -2241,7 +2312,7 @@ function ImmersiveText({
                 style={[
                   feedStyles.textTitle,
                   styles.immersiveTextCentered,
-                  { fontFamily: memoryEditorialBoldFont },
+                  loadedFontStyle(memoryEditorialBoldFont),
                 ]}
                 accessibilityRole="header"
                 {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
@@ -2254,7 +2325,7 @@ function ImmersiveText({
                 key={idx}
                 style={[
                   feedStyles.textContent,
-                  { fontFamily: memoryEditorialFont },
+                  loadedFontStyle(memoryEditorialFont),
                   idx > 0 && feedStyles.textBookParagraphSpacing,
                 ]}
                 {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}

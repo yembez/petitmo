@@ -137,6 +137,8 @@ const FEED_POST_ACTION_STROKE = 2.05;
 /** Une ligne « envoi en cours » (même liste que les souvenirs → pas de saut de header FlatList). */
 export type FeedListItem =
   | { rowKind: 'pending'; row: PendingUpload }
+  /** Emplacements restants d’un lot « une photo par post » — points d’attente. */
+  | { rowKind: 'batchSlot'; parentTempId: string; slotIndex: number }
   | { rowKind: 'memory'; memory: Memory };
 
 type FilMemoryRowProps = {
@@ -244,6 +246,31 @@ const PendingFeedUploadCard = memo(function PendingFeedUploadCard({
           </View>
         </View>
       </View>
+      </View>
+    </View>
+  );
+});
+
+/**
+ * Carte d’attente pour une photo d’un lot « une photo par post » pas encore prête.
+ * Trois points — pas de preview (la 1ʳᵉ / en cours est sur la carte `pending`).
+ */
+const BatchFeedSlotCard = memo(function BatchFeedSlotCard({
+  label,
+}: {
+  label: string;
+}) {
+  return (
+    <View style={styles.postShell}>
+      <View style={styles.post}>
+        <View style={styles.postMain}>
+          <View style={styles.postBody}>
+            <View style={{ position: 'relative' }}>
+              <View style={[styles.mediaCard, styles.photoPlaceholder]} />
+              <FeedMediaPrepOverlay compact prominent blockTouches label={label} />
+            </View>
+          </View>
+        </View>
       </View>
     </View>
   );
@@ -1038,7 +1065,7 @@ function FilMemoryRow({
             >
               {!!memory.text_title?.trim() && (
                 <Text
-                  style={[styles.textTitle, { fontFamily: memoryEditorialBoldFont }]}
+                  style={[styles.textTitle, loadedFontStyle(memoryEditorialBoldFont)]}
                   {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
                 >
                   {memory.text_title.trim()}
@@ -1053,7 +1080,7 @@ function FilMemoryRow({
                     key={idx}
                     style={[
                       styles.textContent,
-                      { fontFamily: memoryEditorialFont },
+                      loadedFontStyle(memoryEditorialFont),
                       idx > 0 && styles.textBookParagraphSpacing,
                     ]}
                     {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
@@ -1075,7 +1102,7 @@ function FilMemoryRow({
                   key={idx}
                   style={[
                     styles.captionAnnotation,
-                    { fontFamily: memoryEditorialFont },
+                    loadedFontStyle(memoryEditorialFont),
                     idx > 0 && styles.textBookParagraphSpacing,
                   ]}
                   {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
@@ -1252,4 +1279,4 @@ function FilMemoryRow({
 
 const FilMemoryRowMemo = memo(FilMemoryRow, filMemoryRowDataPropsEqual);
 
-export { FilMemoryRowMemo, PendingFeedUploadCard };
+export { FilMemoryRowMemo, PendingFeedUploadCard, BatchFeedSlotCard };

@@ -19,6 +19,7 @@ import type { ImmersiveLaunchArgs } from '@/utils/immersiveSharedElement';
 import {
   FilMemoryRowMemo,
   PendingFeedUploadCard,
+  BatchFeedSlotCard,
   type FeedListItem,
 } from '@/components/feed/FilMemoryRow';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
@@ -33,6 +34,14 @@ function pendingPrepLabelFor(
     return t('mediaPrep.addingPhotos', { done, total });
   }
   return t('mediaPrep.addingPhoto');
+}
+
+/** Emplacements encore à peindre : total − déjà faits − la carte `pending` (1ʳᵉ / en cours). */
+function batchSlotCount(p: PendingUpload): number {
+  const total = p.batchTotal ?? 0;
+  if (total <= 1 || p.status === 'error') return 0;
+  const done = Math.min(Math.max(0, p.batchDone ?? 0), total);
+  return Math.max(0, total - done - 1);
 }
 
 export function useFilFeedList(
@@ -82,11 +91,22 @@ export function useFilFeedList(
         row.committedMemory?.inserted_at?.trim() ||
         // Pending en cours : tie-break récent pour ne pas remonter au-dessus d’un jumeau date.
         new Date().toISOString();
+      const tMs = new Date(iso).getTime();
+      const insMs = new Date(insIso).getTime();
       ranked.push({
-        t: new Date(iso).getTime(),
-        ins: new Date(insIso).getTime(),
+        t: tMs,
+        ins: insMs,
         item: { rowKind: 'pending', row },
       });
+      const slots = batchSlotCount(row);
+      for (let i = 0; i < slots; i++) {
+        ranked.push({
+          t: tMs,
+          // Légèrement plus « vieux » que le pending pour rester juste en dessous.
+          ins: insMs - (i + 1),
+          item: { rowKind: 'batchSlot', parentTempId: row.tempId, slotIndex: i },
+        });
+      }
     }
 
     for (const memory of memories) {
@@ -154,6 +174,9 @@ export function useFilFeedList(
 
   const renderItem = useCallback(
     ({ item }: { item: FeedListItem }) => {
+      if (item.rowKind === 'batchSlot') {
+        return <BatchFeedSlotCard label={t('mediaPrep.addingPhoto')} />;
+      }
       if (item.rowKind === 'pending') {
         const committed = item.row.committedMemory;
         const prepLabel = pendingPrepLabelFor(item.row, t);

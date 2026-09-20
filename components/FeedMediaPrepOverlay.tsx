@@ -1,6 +1,7 @@
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { THEME } from '@/constants/theme';
 import { scale, verticalScale } from '@/utils/responsive';
+import { FeedLoadingDots } from '@/components/FeedLoadingDots';
 
 /**
  * Voyant d’attente pour une opération **média utilisateur** sans visuel local encore
@@ -10,7 +11,7 @@ import { scale, verticalScale } from '@/utils/responsive';
 export function FeedMediaPrepOverlay({
   label,
   compact = false,
-  /** Roue plus visible (ex. attente play vidéo sur poster). */
+  /** Attente plus marquée (ex. play vidéo sur poster). */
   prominent = false,
   /** Bloque les taps sous l’overlay (carte pending non cliquable). */
   blockTouches = false,
@@ -21,7 +22,7 @@ export function FeedMediaPrepOverlay({
   prominent?: boolean;
   blockTouches?: boolean;
 }) {
-  const spinnerColor = compact ? '#FFFFFF' : THEME.accent;
+  const dotsColor = compact ? '#FFFFFF' : THEME.textPrimary;
   const labelColor = compact ? '#FFFFFF' : THEME.textPrimary;
   return (
     <View
@@ -34,7 +35,7 @@ export function FeedMediaPrepOverlay({
       accessibilityRole="progressbar"
       accessibilityLabel={label.trim() || 'Chargement'}
     >
-      <ActivityIndicator size={prominent || !compact ? 'large' : 'small'} color={spinnerColor} />
+      <FeedLoadingDots color={dotsColor} />
       {label.trim() ? (
         <Text style={[styles.label, compact && styles.labelCompact, { color: labelColor }]}>
           {label}
@@ -69,7 +70,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: scale(24),
   },
   labelCompact: {
-    marginTop: verticalScale(8),
+    marginTop: verticalScale(10),
     fontSize: scale(13),
     fontWeight: '500',
   },

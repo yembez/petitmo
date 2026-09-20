@@ -30,8 +30,9 @@ import { useFeedMetaFonts } from '@/hooks/useFeedMetaFonts';
 import { useFilRowActions } from '@/hooks/useFilRowActions';
 import { styles } from '@/components/feed/feedStyles';
 import { THEME } from '@/constants/theme';
+import { emptyStateStyles } from '@/constants/emptyStateStyles';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
-import { PETITMO_CTA_BORDER_WIDTH, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
+import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
 import { FeedHeader } from '@/components/feed/FeedHeader';
@@ -265,7 +266,9 @@ function FilScreen() {
     (item: FeedListItem) =>
       item.rowKind === 'pending'
         ? item.row.tempId
-        : memoryFlatListKeyByIdRef.current.get(item.memory.id) ?? item.memory.id,
+        : item.rowKind === 'batchSlot'
+          ? `${item.parentTempId}:slot:${item.slotIndex}`
+          : memoryFlatListKeyByIdRef.current.get(item.memory.id) ?? item.memory.id,
     [memoryFlatListKeyByIdRef],
   );
 
@@ -279,8 +282,10 @@ function FilScreen() {
       const index = feedData.findIndex(item =>
         item.rowKind === 'pending'
           ? item.row.tempId === key || item.row.committedMemory?.id === key
-          : item.memory.id === key ||
-            memoryFlatListKeyByIdRef.current.get(item.memory.id) === key,
+          : item.rowKind === 'batchSlot'
+            ? item.parentTempId === key
+            : item.memory.id === key ||
+              memoryFlatListKeyByIdRef.current.get(item.memory.id) === key,
       );
       if (index >= 0) {
         try {
@@ -488,9 +493,9 @@ function FilScreen() {
           }
           ListEmptyComponent={
             feedData.length === 0 ? (
-              <View style={[styles.emptyContainer, { minHeight: verticalScale(420) }]}>
+              <View style={[emptyStateStyles.container, { minHeight: verticalScale(420) }]}>
                 <TouchableOpacity
-                  style={localStyles.emptyPlusDisc}
+                  style={emptyStateStyles.iconDisc}
                   activeOpacity={0.85}
                   onPress={() => router.navigate('/(tabs)')}
                   accessibilityRole="button"
@@ -503,8 +508,8 @@ function FilScreen() {
                     strokeWidth={2}
                   />
                 </TouchableOpacity>
-                <Text style={localStyles.emptyTitle}>{t('fil.empty.title')}</Text>
-                <Text style={localStyles.emptySubtitle}>{t('fil.empty.subtitle')}</Text>
+                <Text style={emptyStateStyles.title}>{t('fil.empty.title')}</Text>
+                <Text style={emptyStateStyles.subtitle}>{t('fil.empty.subtitle')}</Text>
               </View>
             ) : null
           }
@@ -581,33 +586,7 @@ export default function FilScreenTab() {
   );
 }
 
-const EMPTY_PLUS_DISC = scale(76);
-
 const localStyles = StyleSheet.create({
-  /** Même disque contour « + » que l’onglet Capturer, en grand format. */
-  emptyPlusDisc: {
-    width: EMPTY_PLUS_DISC,
-    height: EMPTY_PLUS_DISC,
-    borderRadius: EMPTY_PLUS_DISC / 2,
-    borderWidth: PETITMO_CTA_BORDER_WIDTH,
-    borderColor: THEME.captureCtaBorderColor,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: verticalScale(22),
-  },
-  emptyTitle: {
-    fontSize: scale(20),
-    fontWeight: '600',
-    color: THEME.textPrimary,
-    textAlign: 'center',
-    marginBottom: verticalScale(10),
-  },
-  emptySubtitle: {
-    fontSize: scale(16),
-    lineHeight: scale(23),
-    color: THEME.textMuted,
-    textAlign: 'center',
-  },
   nudgeBanner: {
     position: 'absolute',
     left: 20,

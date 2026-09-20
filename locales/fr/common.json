@@ -27,6 +27,14 @@
     "forgotNeedEmail": "Indique d’abord ton adresse e-mail.",
     "forgotSentTitle": "E-mail envoyé",
     "forgotSentBody": "Si un compte existe pour cette adresse, tu recevras un lien pour réinitialiser ton mot de passe.",
+    "resetTitle": "Nouveau mot de passe",
+    "resetSubtitle": "Choisis un mot de passe pour retrouver ton espace.",
+    "resetPasswordConfirm": "Confirmer le mot de passe",
+    "resetCta": "Enregistrer le mot de passe",
+    "resetSuccessTitle": "Mot de passe mis à jour",
+    "resetSuccessBody": "Tu es connectée. Bienvenue.",
+    "resetMismatch": "Les deux mots de passe ne correspondent pas.",
+    "resetLinkInvalid": "Lien de réinitialisation invalide ou expiré. Redemande un e-mail.",
     "confirmEmailTitle": "Vérifie ta boîte mail",
     "confirmEmailBody": "Un e-mail de confirmation peut être requis selon la configuration. Tu pourras te connecter ensuite.",
     "otpTitle": "Encore une petite vérification",
@@ -82,15 +90,15 @@
     "photosBody": "Pour importer photos et vidéos",
     "notifsTitle": "Notifications",
     "notifsBody": "Pour les rappels utiles, sans spam",
-    "hint": "Active ce dont tu as besoin pour commencer",
+    "hint": "Rien n’est activé par défaut — touche un interrupteur pour autoriser.",
     "continueCta": "Continuer",
     "skip": "Plus tard",
     "deniedTitle": "Permission refusée",
-    "photosDeniedBody": "Tu pourras l’activer plus tard dans les Réglages du téléphone.",
-    "notifsDeniedBody": "Tu pourras l’activer plus tard dans les Réglages du téléphone.",
+    "photosDeniedBody": "Tu pourras l’activer plus tard dans les Réglages du téléphone, ou depuis Espace parent.",
+    "notifsDeniedBody": "Tu pourras l’activer plus tard dans les Réglages du téléphone, ou depuis Espace parent.",
     "notifsUnavailableBody": "Les notifications nécessitent une mise à jour de l’app (rebuild). Tu pourras les activer ensuite.",
-    "revokeTitle": "Désactiver dans Réglages",
-    "revokeBody": "Pour retirer cet accès, ouvre les Réglages de ton téléphone.",
+    "photosNeedEnableBody": "Tu as choisi « Plus tard » pour la photothèque. Active-la maintenant, ou plus tard dans Espace parent → Application.",
+    "enableNow": "Activer",
     "openSettings": "Ouvrir Réglages"
   },
   "parent": {
@@ -101,7 +109,6 @@
       "contactCta": "Nous contacter",
       "contactTitle": "Nous contacter",
       "reportTitle": "Signaler un problème",
-      "subtitle": "Ton message arrive à l’équipe Petitmo. L’e-mail de ton compte est déjà indiqué — tu peux le changer si besoin.",
       "emailLabel": "Ton e-mail",
       "emailPlaceholder": "toi@email.com",
       "messageLabel": "Message",
@@ -128,18 +135,27 @@
       "deleteFailed": "Impossible de supprimer le compte pour le moment."
     },
     "subscription": {
-      "upgradeCta": "Petit cœur premium",
+      "upgradeCta": "S’abonner à Petit Cœur",
       "sectionTitle": "Mon abonnement",
       "currentPlan": "Plan actuel",
-      "planPremium": "PREMIUM",
+      "planPremium": "Abonnement Petit Cœur",
       "manage": "Gérer mon abonnement",
-      "manageOpen": "Ouvrir"
+      "manageOpen": "Ouvrir",
+      "billingIssueTitle": "Paiement non abouti",
+      "billingIssueBody": "Le paiement n’a pas fonctionné pour ce mois-ci. Mets à jour ton moyen de paiement rapidement pour pouvoir continuer à utiliser Petit Cœur.",
+      "billingIssueCta": "Mettre à jour le paiement"
     },
     "application": {
       "checkUpdate": "Rechercher une mise à jour",
       "versionPrefix": "Version {{label}}",
       "enableNotifications": "Activer les notifications",
       "enableNotificationsHint": "Affiche la demande iOS (nécessaire pour apparaître dans Réglages)",
+      "enablePhotos": "Activer la photothèque",
+      "enablePhotosHint": "Pour importer photos et vidéos (profil, Capturer, livres)",
+      "photosGrantedTitle": "Photothèque activée",
+      "photosGrantedBody": "Tu peux maintenant importer des photos et vidéos.",
+      "photosDeniedTitle": "Photothèque refusée",
+      "photosDeniedBody": "Ouvre les Réglages iOS pour autoriser Petit Cœur, puis reviens ici.",
       "notificationsGrantedTitle": "Notifications activées",
       "notificationsGrantedBody": "Tu peux maintenant copier le token push pour un test.",
       "notificationsDeniedTitle": "Notifications refusées",
@@ -170,13 +186,39 @@
     },
     "freeTierLimit": {
       "later": "Plus tard",
-      "ctaPlus": "Passer à Petitmo+",
+      "ctaPlus": "Passer à Petit Cœur",
       "memoriesTitle": "Limite de souvenirs atteinte",
-      "memoriesBody": "Tu as atteint la limite de {{count}} souvenirs du plan gratuit. Pour en ajouter d’autres, passe à Petitmo+.",
+      "memoriesBody": "Tu as atteint la limite de {{count}} souvenirs du plan gratuit. Pour en ajouter d’autres, réactive ton abonnement Petit Cœur.",
       "videosTitle": "Limite de vidéos atteinte",
-      "videosBody": "Tu as déjà utilisé tes {{count}} vidéos du plan gratuit. Pour en ajouter une nouvelle, passe à Petitmo+.",
+      "videosBody": "Tu as déjà utilisé tes {{count}} vidéos du plan gratuit. Pour en ajouter une nouvelle, réactive ton abonnement Petit Cœur.",
       "voicesTitle": "Limite d’audios atteinte",
-      "voicesBody": "Tu as déjà utilisé tes {{count}} souvenirs audio du plan gratuit. Pour en ajouter, passe à Petitmo+."
+      "voicesBody": "Tu as déjà utilisé tes {{count}} souvenirs audio du plan gratuit. Pour en ajouter, réactive ton abonnement Petit Cœur.",
+      "captureLockedTitle": "Ajout de souvenirs en pause",
+      "captureLockedBody": "Ton abonnement est terminé : tu peux toujours revoir et partager tous tes souvenirs. Pour en capturer de nouveaux, réactive ton abonnement Petit Cœur."
+    }
+  },
+  "import": {
+    "batchLayout": {
+      "title": "Comment les afficher ?",
+      "subtitle": "Tu as sélectionné {{count}} photos. Tu peux les regrouper dans un seul souvenir ou créer un post par photo.",
+      "singleTitle": "Toutes dans un seul post",
+      "singleSub": "Toutes les photos dans le même souvenir",
+      "singleA11y": "Toutes les photos dans un seul post",
+      "separateTitle": "Une photo par post",
+      "separateSub": "{{count}} souvenirs séparés dans le fil",
+      "separateA11y": "Une photo par post"
+    }
+  },
+  "favoris": {
+    "empty": {
+      "title": "Aucun favori pour le moment",
+      "subtitle": "Ajoute des souvenirs en favoris depuis le fil ou depuis un album.",
+      "a11y": "Aucun favori"
+    },
+    "noChild": {
+      "title": "Aucun profil enfant",
+      "subtitle": "Crée un profil pour enregistrer des souvenirs et des favoris.",
+      "cta": "Créer un profil"
     }
   },
   "fil": {
@@ -201,6 +243,10 @@
     "favorites": "Favoris",
     "books": "Livres",
     "settings": "Paramètres"
+  },
+  "write": {
+    "emptyTitle": "Encore un petit mot ?",
+    "emptyBody": "Même une phrase suffit pour garder ce moment."
   },
   "book": {
     "createTile": {
@@ -306,7 +352,9 @@
     "purchaseFailed": "Impossible de finaliser l'achat.",
     "restore": "Restaurer les achats",
     "restoreSuccessTitle": "Abonnement restauré",
-    "restoreSuccessBody": "Petitmo+ est de nouveau actif sur ce compte.",
-    "restoreFailed": "Impossible de restaurer les achats."
+    "restoreSuccessBody": "Ton abonnement Petit Cœur est de nouveau actif sur ce compte.",
+    "restoreFailed": "Impossible de restaurer les achats.",
+    "legalTerms": "Conditions d’utilisation",
+    "legalPrivacy": "Confidentialité"
   }
 }
