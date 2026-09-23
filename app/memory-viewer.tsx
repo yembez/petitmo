@@ -561,6 +561,8 @@ function MemoryViewerScreenInner() {
 
   /** Si le spring dismiss est annulé, leaveViewer / release ne tournaient jamais. */
   const dismissSafetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Snap déjà armé au début du dismiss (swipe) — éviter un 2ᵉ arm dans leaveViewer. */
+  const dismissSnapArmedRef = useRef(false);
 
   const clearDismissSafetyTimer = useCallback(() => {
     if (!dismissSafetyTimerRef.current) return;
@@ -573,14 +575,17 @@ function MemoryViewerScreenInner() {
     setPhotoZoomActive(false);
     /**
      * Retour fil : souvenir de la page pager actuelle (pas celui d’ouverture).
-     * `animated: false` + apply sync côté fil — sinon InteractionManager attend
-     * la fin du spring et on voit d’abord le souvenir d’ouverture, puis le scroll.
+     * Si le dismiss swipe a déjà armé le snap, ne pas réarmer (sinon 2ᵉ
+     * applyImmersiveSnapHidden → flash / course avec le 1ᵉ).
      */
-    const visibleKey = syncVisibleItemKeyFromPager();
-    const memId = memoryIdFromImmersiveViewerItemKey(visibleKey);
-    if (memId) {
-      armFeedSnapToKeyOnFocus(memId, { animated: false });
+    if (!dismissSnapArmedRef.current) {
+      const visibleKey = syncVisibleItemKeyFromPager();
+      const memId = memoryIdFromImmersiveViewerItemKey(visibleKey);
+      if (memId) {
+        armFeedSnapToKeyOnFocus(memId, { animated: false });
+      }
     }
+    dismissSnapArmedRef.current = false;
     clearMemoryViewerSession();
     safeRouterBack(router, '/(tabs)');
   }, [clearDismissSafetyTimer, router, syncVisibleItemKeyFromPager]);
@@ -828,6 +833,7 @@ function MemoryViewerScreenInner() {
     /** Après swipe : scroller le fil sous le modal, re-mesurer la vignette, même shrink. */
     const memId = memoryIdFromImmersiveViewerItemKey(visibleKey);
     if (memId && visibleKey) {
+      dismissSnapArmedRef.current = true;
       armFeedSnapToKeyOnFocus(memId, { animated: false });
       const tryMeasure = (attempt: number) => {
         measureFeedImmersiveHost(visibleKey, measured => {
@@ -835,20 +841,20 @@ function MemoryViewerScreenInner() {
             runSharedDismiss(measured);
             return;
           }
-          if (attempt < 4) {
-            setTimeout(() => tryMeasure(attempt + 1), 48);
+          if (attempt < 5) {
+            setTimeout(() => tryMeasure(attempt + 1), 56);
             return;
           }
           runFadeDismiss();
         });
       };
       /**
-       * Laisser le fil masquer + `scrollToIndex` (2 frames + layout) avant de mesurer
+       * Attendre le snap fil (opacity 0 + scrollToIndex ~140ms) avant de mesurer
        * la vignette cible — sinon on mesure encore la carte d’ouverture.
        */
       setTimeout(() => {
         requestAnimationFrame(() => tryMeasure(0));
-      }, 64);
+      }, 160);
       return;
     }
 

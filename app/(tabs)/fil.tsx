@@ -76,6 +76,9 @@ function FilScreen() {
   const pendingPinOffsetRef = useRef<number | null>(null);
   const pendingScrollIntentRef = useRef<FeedScrollIntent | null>(null);
   const [feedListOpacity, setFeedListOpacity] = useState(1);
+  /** Empêche `onContentSizeChange` de révéler le fil au milieu d’un snap immersif. */
+  const immersiveSnapInFlightRef = useRef(false);
+  const immersiveRevealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const {
     memories,
     setMemories,
@@ -317,17 +320,28 @@ function FilScreen() {
   }, [feedData, memoryFlatListKeyByIdRef]);
 
   /**
-   * Retour immersif : masquer le fil → scroller (plusieurs essais layout) → révéler.
-   * Sans le masque, FlatList montre encore le souvenir d’ouverture le temps que
-   * `scrollToIndex` prenne effet (symptôme « flash puis replace »).
+   * Retour immersif : rester opaque=0 jusqu’à ce que le scroll ait eu le temps
+   * de se poser. Sinon `onContentSizeChange` / 2 rAF révèlent trop tôt → flash
+   * du souvenir d’ouverture (souvent dès le 2ᵉ aller-retour).
    */
   const applyImmersiveSnapHidden = useCallback(() => {
+    immersiveSnapInFlightRef.current = true;
+    if (immersiveRevealTimerRef.current) {
+      clearTimeout(immersiveRevealTimerRef.current);
+      immersiveRevealTimerRef.current = null;
+    }
     setFeedListOpacity(0);
-    applyPendingFeedScrollIntent({ reveal: false });
+    const tick = () => applyPendingFeedScrollIntent({ reveal: false });
+    tick();
     requestAnimationFrame(() => {
-      applyPendingFeedScrollIntent({ reveal: false });
+      tick();
       requestAnimationFrame(() => {
-        applyPendingFeedScrollIntent({ reveal: true });
+        tick();
+        immersiveRevealTimerRef.current = setTimeout(() => {
+          applyPendingFeedScrollIntent({ reveal: true });
+          immersiveSnapInFlightRef.current = false;
+          immersiveRevealTimerRef.current = null;
+        }, 140);
       });
     });
   }, [applyPendingFeedScrollIntent]);
@@ -346,7 +360,8 @@ function FilScreen() {
       return;
     }
     if (pendingScrollIntentRef.current) {
-      applyPendingFeedScrollIntent();
+      /** Jamais `reveal: true` ici pendant un snap immersif (sinon flash ouverture). */
+      applyPendingFeedScrollIntent({ reveal: !immersiveSnapInFlightRef.current });
     }
   }, [applyPendingFeedScrollIntent]);
 
@@ -438,8 +453,9 @@ function FilScreen() {
     if (feedListOpacity !== 0) return;
     const fallback = setTimeout(() => {
       pendingScrollIntentRef.current = null;
+      immersiveSnapInFlightRef.current = false;
       setFeedListOpacity(1);
-    }, 500);
+    }, immersiveSnapInFlightRef.current ? 900 : 500);
     return () => clearTimeout(fallback);
   }, [feedListOpacity]);
 
@@ -523,6 +539,11 @@ function FilScreen() {
               offset: Math.max(0, info.averageItemLength * info.index),
               animated: false,
             });
+            if (immersiveSnapInFlightRef.current && pendingScrollIntentRef.current) {
+              requestAnimationFrame(() => {
+                applyPendingFeedScrollIntent({ reveal: false });
+              });
+            }
           }}
           bounces={false}
           overScrollMode="never"
