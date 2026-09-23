@@ -27,16 +27,12 @@ import { scale, verticalScale } from '@/utils/responsive';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
 import {
-  getNotificationsGranted,
-  getPhotoLibraryGranted,
   isNotificationsModuleAvailable,
   requestNotificationsAccess,
   requestPhotoLibraryAccess,
 } from '@/lib/onboardingPermissions';
-import {
-  hasSeenOnboardingPermissions,
-  markOnboardingPermissionsSeen,
-} from '@/lib/onboardingPermissionsSeen';
+import { setMediaLibraryOptIn } from '@/lib/mediaLibraryOptIn';
+import { markOnboardingPermissionsSeen } from '@/lib/onboardingPermissionsSeen';
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
 import { replaceAfterOnboardingPermissions } from '@/utils/onboardingPermissionsRoute';
 import { hydrateTabScreensFromSqliteSync } from '@/services/tabScreensHydrate';
@@ -56,18 +52,25 @@ export default function OnboardingPermissionsScreen() {
   useEffect(() => {
     void (async () => {
       const uid = peekLastRealAuthUserId();
-      if (await hasSeenOnboardingPermissions(uid)) {
-        replaceAfterOnboardingPermissions(router);
+      const { resolvePostAuthOnboardingPath } = await import(
+        '@/utils/onboardingPermissionsRoute'
+      );
+      const path = await resolvePostAuthOnboardingPath(uid);
+      if (path !== '/onboarding-permissions') {
+        if (path === '/(tabs)') {
+          hydrateTabScreensFromSqliteSync();
+        }
+        router.replace(path);
         return;
       }
-      const [photos, notifs, notifsOk] = await Promise.all([
-        getPhotoLibraryGranted(),
-        getNotificationsGranted(),
-        isNotificationsModuleAvailable(),
-      ]);
-      setPhotosOn(photos);
-      setNotifsOn(notifs);
-      setNotifsAvailable(notifsOk);
+      /**
+       * Opt-in style Dear You : toggles **toujours OFF** à l’arrivée.
+       * Les grants iOS sont par **app** (pas par compte) — les relire ici
+       * cochait ON sur un « nouveau compte » si un test précédent avait déjà autorisé.
+       */
+      setPhotosOn(false);
+      setNotifsOn(false);
+      setNotifsAvailable(await isNotificationsModuleAvailable());
       setReady(true);
     })();
   }, [router]);
@@ -85,31 +88,24 @@ export default function OnboardingPermissionsScreen() {
   }, [busy, router]);
 
   const onTogglePhotos = useCallback(async (next: boolean) => {
-    if (next) {
-      const granted = await requestPhotoLibraryAccess();
-      setPhotosOn(granted);
-      if (!granted) {
-        Alert.alert(t('permissions.deniedTitle'), t('permissions.photosDeniedBody'), [
-          { text: t('cancel'), style: 'cancel' },
-          {
-            text: t('permissions.openSettings'),
-            onPress: () => void Linking.openSettings(),
-          },
-        ]);
-      }
+    if (!next) {
+      // Intention d’écran seulement — révoquer vraiment = Réglages iOS (pas forcé ici).
+      setPhotosOn(false);
+      void setMediaLibraryOptIn(false, peekLastRealAuthUserId());
       return;
     }
-    if (await getPhotoLibraryGranted()) {
-      Alert.alert(t('permissions.revokeTitle'), t('permissions.revokeBody'), [
+    const granted = await requestPhotoLibraryAccess();
+    setPhotosOn(granted);
+    if (granted) {
+      await setMediaLibraryOptIn(true, peekLastRealAuthUserId());
+    } else {
+      Alert.alert(t('permissions.deniedTitle'), t('permissions.photosDeniedBody'), [
         { text: t('cancel'), style: 'cancel' },
         {
           text: t('permissions.openSettings'),
           onPress: () => void Linking.openSettings(),
         },
       ]);
-      setPhotosOn(true);
-    } else {
-      setPhotosOn(false);
     }
   }, [t]);
 
@@ -119,33 +115,22 @@ export default function OnboardingPermissionsScreen() {
       Alert.alert(t('permissions.deniedTitle'), t('permissions.notifsUnavailableBody'));
       return;
     }
-    if (next) {
-      const granted = await requestNotificationsAccess();
-      setNotifsOn(granted);
-      if (granted) {
-        void import('@/services/registerPushToken').then(m => m.registerPushTokenInBackground());
-      } else {
-        Alert.alert(t('permissions.deniedTitle'), t('permissions.notifsDeniedBody'), [
-          { text: t('cancel'), style: 'cancel' },
-          {
-            text: t('permissions.openSettings'),
-            onPress: () => void Linking.openSettings(),
-          },
-        ]);
-      }
+    if (!next) {
+      setNotifsOn(false);
       return;
     }
-    if (await getNotificationsGranted()) {
-      Alert.alert(t('permissions.revokeTitle'), t('permissions.revokeBody'), [
+    const granted = await requestNotificationsAccess();
+    setNotifsOn(granted);
+    if (granted) {
+      void import('@/services/registerPushToken').then(m => m.registerPushTokenInBackground());
+    } else {
+      Alert.alert(t('permissions.deniedTitle'), t('permissions.notifsDeniedBody'), [
         { text: t('cancel'), style: 'cancel' },
         {
           text: t('permissions.openSettings'),
           onPress: () => void Linking.openSettings(),
         },
       ]);
-      setNotifsOn(true);
-    } else {
-      setNotifsOn(false);
     }
   }, [notifsAvailable, t]);
 

@@ -99,7 +99,11 @@
     "notifsUnavailableBody": "Les notifications nécessitent une mise à jour de l’app (rebuild). Tu pourras les activer ensuite.",
     "photosNeedEnableBody": "Tu as choisi « Plus tard » pour la photothèque. Active-la maintenant, ou plus tard dans Espace parent → Application.",
     "enableNow": "Activer",
-    "openSettings": "Ouvrir Réglages"
+    "openSettings": "Ouvrir Réglages",
+    "locationTitle": "Le lieu de vos souvenirs",
+    "locationBody": "Pour te rappeler où vous étiez — à la maison, en balade, en voyage.",
+    "locationAuthorize": "Autoriser",
+    "locationLater": "Plus tard"
   },
   "parent": {
     "report": {

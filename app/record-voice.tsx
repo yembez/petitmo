@@ -14,6 +14,7 @@ import {
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
+import { leaveCaptureFlowScreen } from '@/utils/leaveCaptureFlowScreen';
 import {
   ChevronLeft,
   Mic,
@@ -41,9 +42,16 @@ import PermissionModal from '@/components/PermissionModal';
 import { uploadMedia } from '@/services/media';
 import { getOrSelectFirstChild } from '@/services/children';
 import { armFeedSnapToLatestOnFocus } from '@/services/feedScrollRestore';
+import {
+  enrichMemoryLocationInBackground,
+  markLocationSoftPromptDeferred,
+  requestForegroundLocationPermission,
+  resolveCurrentPlaceLabelSilent,
+  shouldShowLocationSoftPrompt,
+} from '@/lib/memoryLocation';
 import { getUserTier } from '@/lib/userTier';
-import { FREE_TIER_VOICE_MAX_DURATION, PAID_TIER_VOICE_MAX_DURATION, checkMemoryLimit, checkVoiceLimit } from '@/lib/limits';
-import { promptFreeTierLimitThenPaywall, promptFreeTierLimitFromError } from '@/utils/freeTierLimitGate';
+import { FREE_TIER_VOICE_MAX_DURATION, PAID_TIER_VOICE_MAX_DURATION, checkMemoryLimit } from '@/lib/limits';
+import { promptFreeTierLimitThenPaywall, promptFreeTierLimitFromError, freeTierLimitKindFromCheck } from '@/utils/freeTierLimitGate';
 import { isAudioTrimAvailable, trimAudioToLocalFile } from '@/services/audioTrim';
 import { AudioTrimEditor } from '@/components/AudioTrimEditor';
 import { isVoiceDocumentPickerAvailable } from '@/services/voiceImport';
@@ -61,9 +69,12 @@ export default function RecordVoiceScreen() {
   const [tier, setTier] = useState<'free' | 'paid'>('free');
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [showPermissionModal, setShowPermissionModal] = useState(false);
+  const [showLocationModal, setShowLocationModal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [ctaPhase, setCtaPhase] = useState<PetitmoMorphPhase>('idle');
   const pendingAfterSuccessRef = useRef<(() => void) | null>(null);
+  const pendingSaveAfterLocationRef = useRef<(() => void) | null>(null);
+  const locationForNextSaveRef = useRef<string | null | undefined>(undefined);
   const [isImporting, setIsImporting] = useState(false);
   /** Masqué tant que le binaire natif n’inclut pas ExpoDocumentPicker (rebuild EAS). */
   const [importAvailable] = useState(() => isVoiceDocumentPickerAvailable());
@@ -159,12 +170,7 @@ export default function RecordVoiceScreen() {
     if (tier === 'free') {
       const memLimit = await checkMemoryLimit(childId, { skipRemotePull: true });
       if (!memLimit.canCreate) {
-        promptFreeTierLimitThenPaywall({ kind: 'memories', router, returnTo: 'fil' });
-        return null;
-      }
-      const voiceLimit = await checkVoiceLimit(childId, { skipRemotePull: true });
-      if (!voiceLimit.canCreate) {
-        promptFreeTierLimitThenPaywall({ kind: 'voices', router, returnTo: 'fil' });
+        promptFreeTierLimitThenPaywall({ kind: freeTierLimitKindFromCheck(memLimit), router, returnTo: 'fil' });
         return null;
       }
     }
@@ -538,6 +544,20 @@ export default function RecordVoiceScreen() {
     if (!hasRecording || (!recordingFileUriRef.current && !recordingRef.current)) return;
     if (ctaPhase !== 'idle') return;
 
+    if (await shouldShowLocationSoftPrompt()) {
+      pendingSaveAfterLocationRef.current = () => {
+        void saveRecordingAfterLocationReady();
+      };
+      setShowLocationModal(true);
+      return;
+    }
+
+    await saveRecordingAfterLocationReady();
+  };
+
+  const saveRecordingAfterLocationReady = async () => {
+    if (!hasRecording || (!recordingFileUriRef.current && !recordingRef.current)) return;
+
     try {
       setIsSaving(true);
       setCtaPhase('busy');
@@ -552,9 +572,9 @@ export default function RecordVoiceScreen() {
       }
 
       if (tier === 'free') {
-        const voiceLimit = await checkVoiceLimit(childId, { skipRemotePull: true });
-        if (!voiceLimit.canCreate) {
-          promptFreeTierLimitThenPaywall({ kind: 'voices', router, returnTo: 'fil' });
+        const memLimit = await checkMemoryLimit(childId, { skipRemotePull: true });
+        if (!memLimit.canCreate) {
+          promptFreeTierLimitThenPaywall({ kind: freeTierLimitKindFromCheck(memLimit), router, returnTo: 'fil' });
           setCtaPhase('idle');
           setIsSaving(false);
           return;
@@ -621,6 +641,12 @@ export default function RecordVoiceScreen() {
         return;
       }
 
+      const locationOverride =
+        locationForNextSaveRef.current !== undefined
+          ? locationForNextSaveRef.current
+          : await resolveCurrentPlaceLabelSilent({ timeoutMs: 10000 });
+      locationForNextSaveRef.current = undefined;
+
       const result = await uploadMedia({
         uri: finalUri,
         type: 'voice',
@@ -628,9 +654,13 @@ export default function RecordVoiceScreen() {
         duration: finalDuration,
         voiceCoverUri: coverUri,
         voicePlaybackStartSec,
+        locationOverride: locationOverride ?? null,
       });
 
       if (result) {
+        if (!result.location?.trim()) {
+          void enrichMemoryLocationInBackground(result.id);
+        }
         armFeedSnapToLatestOnFocus();
         pendingAfterSuccessRef.current = () => {
           router.push('/(tabs)/fil');
@@ -656,6 +686,36 @@ export default function RecordVoiceScreen() {
     }
   };
 
+  const onLocationAuthorize = useCallback(() => {
+    setShowLocationModal(false);
+    void (async () => {
+      const granted = await requestForegroundLocationPermission();
+      let label: string | null = null;
+      if (granted) {
+        label = await resolveCurrentPlaceLabelSilent({ timeoutMs: 12000 });
+        if (!label) {
+          await new Promise<void>(r => setTimeout(r, 800));
+          label = await resolveCurrentPlaceLabelSilent({ timeoutMs: 12000 });
+        }
+      }
+      locationForNextSaveRef.current = label;
+      const next = pendingSaveAfterLocationRef.current;
+      pendingSaveAfterLocationRef.current = null;
+      next?.();
+    })();
+  }, []);
+
+  const onLocationLater = useCallback(() => {
+    setShowLocationModal(false);
+    void (async () => {
+      await markLocationSoftPromptDeferred();
+      locationForNextSaveRef.current = null;
+      const next = pendingSaveAfterLocationRef.current;
+      pendingSaveAfterLocationRef.current = null;
+      next?.();
+    })();
+  }, []);
+
   const resetCtaIdle = useCallback(() => {
     setCtaPhase('idle');
   }, []);
@@ -666,9 +726,12 @@ export default function RecordVoiceScreen() {
     next?.();
   }, []);
 
-  /** PHPicker : pas de demande d’accès photothèque, la sélection suffit. */
+  /** Opt-in compte + demande iOS si besoin. */
   const pickCoverImage = async () => {
     try {
+      const { ensureMediaLibraryPickerAllowed } = await import('@/lib/mediaLibraryOptIn');
+      if (!(await ensureMediaLibraryPickerAllowed())) return;
+
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
         quality: 0.85,
@@ -705,9 +768,18 @@ export default function RecordVoiceScreen() {
         onRequestPermission={() => void handleRequestPermission()}
         onCancel={handleCancelPermission}
       />
+      <PermissionModal
+        visible={showLocationModal}
+        type="location"
+        onRequestPermission={onLocationAuthorize}
+        onCancel={onLocationLater}
+      />
 
       <View style={[styles.header, showPostRecordFooter && styles.headerTight]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity
+          onPress={() => leaveCaptureFlowScreen(router)}
+          style={styles.backButton}
+        >
           <ChevronLeft size={ICON_SIZES.lg} color="#3F4A5A" strokeWidth={2} />
         </TouchableOpacity>
       </View>

@@ -42,6 +42,7 @@
         "NSCameraUsageDescription": "Petitmo a besoin d'accéder à ta caméra pour capturer des photos et vidéos de vos moments précieux.",
         "NSMicrophoneUsageDescription": "Petitmo a besoin d'accéder à ton microphone pour enregistrer la voix de ton enfant.",
         "NSPhotoLibraryUsageDescription": "Petitmo a besoin d'accéder à vos photos pour importer des souvenirs existants.",
+        "NSLocationWhenInUseUsageDescription": "Petit Cœur utilise ta position pour indiquer le lieu de vos souvenirs audio et textes — uniquement quand tu en crées, et pour afficher une ville sur le fil.",
         "ITSAppUsesNonExemptEncryption": false,
         "EXDefaultScreenOrientationMask": "UIInterfaceOrientationMaskAllButUpsideDown"
       }
@@ -88,6 +89,12 @@
         "expo-image-picker",
         {
           "photosPermission": "Petitmo a besoin d'accéder à vos photos pour importer des souvenirs existants."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Petit Cœur utilise ta position pour indiquer le lieu de vos souvenirs audio et textes — uniquement quand tu en crées, et pour afficher une ville sur le fil."
         }
       ],
       "expo-document-picker",

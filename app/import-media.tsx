@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   Alert,
   ActivityIndicator,
+  InteractionManager,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ChevronLeft } from 'lucide-react-native';
@@ -18,15 +19,17 @@ import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import ImportBatchLayoutModal from '@/components/ImportBatchLayoutModal';
 import { FeedMediaPrepOverlay } from '@/components/FeedMediaPrepOverlay';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
+import { safeRouterBack } from '@/utils/safeRouterBack';
 import { uploadMedia, uploadPhotoAlbum } from '@/services/media';
 import { usePendingMediaUploads } from '@/contexts/PendingMediaUploadsContext';
 import { getOrSelectFirstChild } from '@/services/children';
 import { IMPORT_PHOTO_PICKER_OPTS } from '@/constants/importPicker';
+import { IMPORT_MULTI_PHOTO_ALBUM_ENABLED } from '@/constants/featureFlags';
 import { buildImportMetadataFromPickerAsset } from '@/utils/mediaExif';
 import { getUserTier } from '@/lib/userTier';
 import { checkMemoryLimit, checkVideoLimit, FREE_TIER_VIDEO_MAX_DURATION, PAID_TIER_VIDEO_MAX_DURATION } from '@/lib/limits';
 import { mediaDurationToSeconds } from '@/utils/mediaDuration';
-import { promptFreeTierLimitThenPaywall } from '@/utils/freeTierLimitGate';
+import { promptFreeTierLimitThenPaywall, freeTierLimitKindFromCheck } from '@/utils/freeTierLimitGate';
 import { IMPORT_DUPLICATE_ASSET } from '@/lib/importDuplicate';
 import {
   buildAlbumImportFingerprintFromAssets,
@@ -113,7 +116,9 @@ async function importSeparatePhotosWithConcurrency(
           duplicateSkipped += 1;
         } else if (
           e instanceof Error &&
-          (e.message === 'LIMIT_REACHED' || e.message === 'VIDEO_LIMIT_REACHED')
+          (e.message === 'LIMIT_REACHED' ||
+            e.message === 'CAPTURE_LOCKED' ||
+            e.message === 'VIDEO_LIMIT_REACHED')
         ) {
           limitReached = true;
           return;
@@ -161,7 +166,7 @@ export default function ImportMediaScreen() {
   const [pickAttemptFinished, setPickAttemptFinished] = useState(false);
   /** Dès validation galerie : plus de roue sur cet écran (elle restait car `pickAttemptFinished` restait false). */
   const [navigatingToFeed, setNavigatingToFeed] = useState(false);
-  /** Plusieurs photos : choix album vs un post par photo (modale). */
+  /** Plusieurs photos : choix album vs un post par photo (modale) — v1 : flag off, pas de modale. */
   const [batchChoice, setBatchChoice] = useState<{
     assets: ImagePicker.ImagePickerAsset[];
     preview: ImportStickerPreview;
@@ -177,6 +182,18 @@ export default function ImportMediaScreen() {
   /** 0 = pas de plafond picker (gratuit : on gère le message 20 s après sélection). */
   const videoMaxDurationRef = useRef(0);
   const isFreeTierRef = useRef(true);
+
+  /**
+   * Pas de `dismiss()` ici : l’écran n’est plus un modal, et `dismiss()` après
+   * Écrire (fullScreenModal) / picker natif laissait parfois une couche qui
+   * mangeait tous les taps Capturer.
+   * Attendre la fin des interactions (fermeture PHPicker) avant de pop.
+   */
+  const leaveImportScreen = useCallback(() => {
+    InteractionManager.runAfterInteractions(() => {
+      safeRouterBack(router, '/(tabs)');
+    });
+  }, [router]);
 
   useEffect(() => {
     void getUserTier().then(tier => {
@@ -195,7 +212,7 @@ export default function ImportMediaScreen() {
       assets: ImagePicker.ImagePickerAsset[],
       kind: 'photo' | 'video',
       preview?: ImportStickerPreview | null,
-      photoBatchLayout: 'album' | 'separate' = 'album'
+      photoBatchLayout: 'album' | 'separate' = 'separate'
     ) => {
       try {
         setNavigatingToFeed(true);
@@ -222,7 +239,9 @@ export default function ImportMediaScreen() {
               const childIdForVideo = await getOrSelectFirstChild();
               if (!childIdForVideo) throw new Error('NO_CHILD');
               const memLimit = await checkMemoryLimit(childIdForVideo, { force: true });
-              if (!memLimit.canCreate) throw new Error('LIMIT_REACHED');
+              if (!memLimit.canCreate) {
+                throw new Error(memLimit.reason === 'capture_locked' ? 'CAPTURE_LOCKED' : 'LIMIT_REACHED');
+              }
               const videoLimitCheck = await checkVideoLimit(childIdForVideo);
               if (!videoLimitCheck.canCreate) throw new Error('VIDEO_LIMIT_REACHED');
               const meta = await buildImportMetadataFromPickerAsset(pickedAsset, { isVideo: true });
@@ -279,7 +298,7 @@ export default function ImportMediaScreen() {
           if (left === 0) {
             router.replace('/(tabs)/fil');
             promptFreeTierLimitThenPaywall({
-              kind: 'memories',
+              kind: freeTierLimitKindFromCheck(limitCheck),
               router,
               replace: true,
               returnTo: 'fil',
@@ -288,7 +307,7 @@ export default function ImportMediaScreen() {
           }
           Alert.alert(
             'Limite gratuite',
-            `Il reste ${left} emplacement${left > 1 ? 's' : ''} pour ce profil. Réduis ta sélection, ou choisis « Un seul post » pour ne créer qu’un souvenir.`
+            `Il reste ${left} emplacement${left > 1 ? 's' : ''} pour ce profil. Réduis ta sélection, ou choisis « Toutes dans un seul post » pour ne créer qu’un souvenir.`
           );
           return;
         }
@@ -297,7 +316,7 @@ export default function ImportMediaScreen() {
           setNavigatingToFeed(false);
           router.replace('/(tabs)/fil');
           promptFreeTierLimitThenPaywall({
-            kind: 'memories',
+            kind: freeTierLimitKindFromCheck(limitCheck),
             router,
             replace: true,
             returnTo: 'fil',
@@ -385,6 +404,7 @@ export default function ImportMediaScreen() {
         }
 
         if (kind === 'photo' && assets.length > 1 && photoBatchLayout === 'album') {
+          /** Conservé pour `IMPORT_MULTI_PHOTO_ALBUM_ENABLED` (v future). */
           const first = assets[0];
           const uris = assets.map(a => a.uri);
           startBackgroundUploadNavigateToFeed({
@@ -498,7 +518,7 @@ export default function ImportMediaScreen() {
               if (!memLimit.canCreate) {
                 router.replace('/(tabs)/fil');
                 promptFreeTierLimitThenPaywall({
-                  kind: 'memories',
+                  kind: freeTierLimitKindFromCheck(memLimit),
                   router,
                   replace: true,
                   returnTo: 'fil',
@@ -561,6 +581,18 @@ export default function ImportMediaScreen() {
         }
 
         if (assets.length > 1) {
+          /**
+           * V1 : toujours un post par photo (multi-sélection OK).
+           * Album + modale : `IMPORT_MULTI_PHOTO_ALBUM_ENABLED` (sous le coude).
+           */
+          if (!IMPORT_MULTI_PHOTO_ALBUM_ENABLED) {
+            const meta = await buildImportMetadataFromPickerAsset(assets[0], { isVideo: false });
+            commitSelection(assets, 'photo', {
+              capturedAtIso: meta.capturedAtIso ?? null,
+              locationLabel: meta.locationLabel ?? null,
+            }, 'separate');
+            return 'committed';
+          }
           /** Modale immédiatement — pas d’attente EXIF (évite le flash « Ouvrir photos… »). */
           setBatchChoice({
             assets,
@@ -598,6 +630,11 @@ export default function ImportMediaScreen() {
 
   const pickFromLibrary = useCallback(async (): Promise<PickResult> => {
     try {
+      const { ensureMediaLibraryPickerAllowed } = await import('@/lib/mediaLibraryOptIn');
+      if (!(await ensureMediaLibraryPickerAllowed())) {
+        return 'cancelled';
+      }
+
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images', 'videos'],
         ...IMPORT_PHOTO_PICKER_OPTS,
@@ -624,10 +661,8 @@ export default function ImportMediaScreen() {
 
   /**
    * Ouvre la galerie dès le montage — ou consomme un partage iOS (Share Extension).
-   *
-   * Aucune demande d’autorisation photothèque : `launchImageLibraryAsync` passe par le
-   * sélecteur système (PHPicker) qui n’expose que les médias choisis. Demander l’accès
-   * ajouterait une boîte iOS inutile avant la grille de photos.
+   * Opt-in compte requis (`ensureMediaLibraryPickerAllowed`) : PHPicker ne demande
+   * pas iOS tout seul, d’où le bug « Plus tard » puis accès quand même.
    */
   useEffect(() => {
     if (autoGalleryLaunchedRef.current) return;
@@ -639,7 +674,7 @@ export default function ImportMediaScreen() {
         if (shared?.length) {
           const res = await processPickedAssets(shared);
           if (res === 'cancelled' || res === 'not_committed') {
-            router.back();
+            leaveImportScreen();
             return;
           }
           if (res === 'left') return;
@@ -650,7 +685,7 @@ export default function ImportMediaScreen() {
 
         const res = await pickFromLibrary();
         if (res === 'cancelled') {
-          router.back();
+          leaveImportScreen();
           return;
         }
         /** Quota : déjà `replace` fil + Alert — ne pas afficher « Ouvrir photos et vidéos ». */
@@ -664,9 +699,9 @@ export default function ImportMediaScreen() {
         Alert.alert('Erreur', 'Impossible d’ouvrir la bibliothèque média.');
       }
     })();
-  }, [pickFromLibrary, processPickedAssets, router]);
+  }, [pickFromLibrary, processPickedAssets, leaveImportScreen]);
 
-  const batchLayoutModalEl = (
+  const batchLayoutModalEl = IMPORT_MULTI_PHOTO_ALBUM_ENABLED ? (
     <ImportBatchLayoutModal
       visible={batchChoice != null}
       count={batchChoice?.assets.length ?? 0}
@@ -687,7 +722,7 @@ export default function ImportMediaScreen() {
         setPickAttemptFinished(true);
       }}
     />
-  );
+  ) : null;
 
   const videoTrimModalEl = (
     <VideoTrimModal
@@ -810,33 +845,35 @@ export default function ImportMediaScreen() {
       {batchLayoutModalEl}
       {videoTrimModalEl}
       <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <ChevronLeft size={ICON_SIZES.lg} color="#3F4A5A" strokeWidth={2} />
-        </TouchableOpacity>
-      </View>
+      {pickAttemptFinished ? (
+        <>
+          <View style={styles.header}>
+            <TouchableOpacity onPress={leaveImportScreen} style={styles.backButton}>
+              <ChevronLeft size={ICON_SIZES.lg} color="#3F4A5A" strokeWidth={2} />
+            </TouchableOpacity>
+          </View>
 
-      <View style={styles.content}>
-        {!pickAttemptFinished ? (
-          <View style={styles.galleryOpeningWrap}>
-            <ActivityIndicator size="large" color={THEME.accent} />
-          </View>
-        ) : (
-          <View style={styles.galleryOpeningWrap}>
-            <Text style={styles.subtitle}>
-              Aucun média sélectionné. Rouvre la bibliothèque pour choisir des photos ou une vidéo.
-            </Text>
-            <PetitmoPrimaryPressable
-              style={styles.fallbackPrimaryBtn}
-              onPress={() => void pickFromLibrary()}
-            >
-              <Text style={[petitmoCtaStyles.primaryText, styles.fallbackPrimaryText]}>
-                Ouvrir photos et vidéos
+          <View style={styles.content}>
+            <View style={styles.galleryOpeningWrap}>
+              <Text style={styles.subtitle}>
+                Aucun média sélectionné. Rouvre la bibliothèque pour choisir des photos ou une vidéo.
               </Text>
-            </PetitmoPrimaryPressable>
+              <PetitmoPrimaryPressable
+                style={styles.fallbackPrimaryBtn}
+                onPress={() => void pickFromLibrary()}
+              >
+                <Text style={[petitmoCtaStyles.primaryText, styles.fallbackPrimaryText]}>
+                  Ouvrir photos et vidéos
+                </Text>
+              </PetitmoPrimaryPressable>
+            </View>
           </View>
-        )}
-      </View>
+        </>
+      ) : (
+        <View style={styles.galleryOpeningWrap}>
+          <ActivityIndicator size="large" color={THEME.accent} />
+        </View>
+      )}
     </View>
     </>
   );

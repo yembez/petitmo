@@ -99,7 +99,11 @@
     "notifsUnavailableBody": "Notifications need an app rebuild. You can enable them after updating.",
     "photosNeedEnableBody": "You chose “Later” for the photo library. Enable it now, or later in Parent space → Application.",
     "enableNow": "Enable",
-    "openSettings": "Open Settings"
+    "openSettings": "Open Settings",
+    "locationTitle": "Where your memories happened",
+    "locationBody": "So you can remember where you were — at home, on a walk, traveling.",
+    "locationAuthorize": "Allow",
+    "locationLater": "Later"
   },
   "parent": {
     "report": {

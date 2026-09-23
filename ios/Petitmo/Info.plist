@@ -65,6 +65,8 @@
     </dict>
     <key>NSCameraUsageDescription</key>
     <string>Petitmo a besoin d'accéder à ta caméra pour capturer des photos et vidéos de vos moments précieux.</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Petit Cœur utilise ta position pour indiquer le lieu de vos souvenirs audio et textes — uniquement quand tu en crées, et pour afficher une ville sur le fil.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Petitmo a besoin d'accéder à ton microphone pour enregistrer la voix de ton enfant.</string>
     <key>NSPhotoLibraryAddUsageDescription</key>

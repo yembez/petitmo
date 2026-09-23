@@ -15,6 +15,8 @@ import { ChevronLeft, Mic } from 'lucide-react-native';
 import { scale, verticalScale } from '@/utils/responsive';
 import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
+import { leaveCaptureFlowScreen } from '@/utils/leaveCaptureFlowScreen';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
 import {
   MEMORY_BODY_INPUT_FONT_SIZE,
   MEMORY_BODY_INPUT_LINE_HEIGHT,
@@ -27,7 +29,7 @@ import { MOTION_CTA_MORPH_DISK_PT } from '@/constants/motion';
 import { supabase } from '@/lib/supabase';
 import { getCachedUserMode } from '@/lib/userMode';
 import { checkMemoryLimit, invalidateMemoryLimitCache } from '@/lib/limits';
-import { promptFreeTierLimitThenPaywall } from '@/utils/freeTierLimitGate';
+import { promptFreeTierLimitThenPaywall, freeTierLimitKindFromCheck } from '@/utils/freeTierLimitGate';
 import { getOrSelectFirstChild } from '@/services/children';
 import { armFeedSnapToLatestOnFocus } from '@/services/feedScrollRestore';
 import { selectAppTab } from '@/services/selectAppTab';
@@ -55,6 +57,14 @@ import { ensureMemoryUploadedForCloud } from '@/services/migration';
 import { updateMemoryText } from '@/services/media';
 import { MEMORY_EDITORIAL_FONT_FAMILY } from '@/constants/memoryTextFont';
 import { applyTextAlineasForInput, reconcileTextAlineasOnChange, stripTextAlineas } from '@/utils/textAlineas';
+import PermissionModal from '@/components/PermissionModal';
+import {
+  enrichMemoryLocationInBackground,
+  markLocationSoftPromptDeferred,
+  requestForegroundLocationPermission,
+  resolveCurrentPlaceLabelSilent,
+  shouldShowLocationSoftPrompt,
+} from '@/lib/memoryLocation';
 
 type SpeechRecognitionResultLike = {
   isFinal: boolean
@@ -81,6 +91,7 @@ type SpeechRecognitionCtor = new () => SpeechRecognitionLike
 
 export default function WriteScreen() {
   const router = useRouter();
+  const { t } = useAppTranslation('common');
   const params = useLocalSearchParams<{ memoryId?: string }>();
   const editMemoryId =
     typeof params.memoryId === 'string' && params.memoryId.trim()
@@ -93,9 +104,13 @@ export default function WriteScreen() {
   const [ctaPhase, setCtaPhase] = useState<PetitmoMorphPhase>('idle');
   const [isListening, setIsListening] = useState(false);
   const [isWebSpeechSupported, setIsWebSpeechSupported] = useState(false);
+  const [showLocationModal, setShowLocationModal] = useState(false);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const hydratedEditIdRef = useRef<string | null>(null);
   const pendingAfterSuccessRef = useRef<(() => void) | null>(null);
+  const pendingSaveAfterLocationRef = useRef<(() => void) | null>(null);
+  /** Lieu résolu juste après la soft modale (évite une save à location=null). */
+  const locationForNextSaveRef = useRef<string | null | undefined>(undefined);
 
   const resetCtaIdle = useCallback(() => {
     setCtaPhase('idle');
@@ -117,7 +132,7 @@ export default function WriteScreen() {
     const mem = getLocalMemoryById(editMemoryId);
     if (!mem || mem.type !== 'text') {
       Alert.alert('Erreur', 'Ce souvenir texte est introuvable.');
-      router.back();
+      leaveCaptureFlowScreen(router);
       return;
     }
 
@@ -241,7 +256,7 @@ export default function WriteScreen() {
         );
       }
 
-      pendingAfterSuccessRef.current = () => router.back();
+      pendingAfterSuccessRef.current = () => leaveCaptureFlowScreen(router);
       setCtaPhase('success');
     } catch (error) {
       console.error('Error updating text:', error);
@@ -274,22 +289,33 @@ export default function WriteScreen() {
       const limitCheck = await checkMemoryLimit(childId, { skipRemotePull: true });
       if (!limitCheck.canCreate) {
         setCtaPhase('idle');
-        promptFreeTierLimitThenPaywall({ kind: 'memories', router, returnTo: 'fil' });
+        promptFreeTierLimitThenPaywall({ kind: freeTierLimitKindFromCheck(limitCheck), router, returnTo: 'fil' });
         return;
       }
 
       const mode = await getCachedUserMode();
+      let locationLabel: string | null = null;
+      if (locationForNextSaveRef.current !== undefined) {
+        locationLabel = locationForNextSaveRef.current;
+        locationForNextSaveRef.current = undefined;
+      } else {
+        /** GPS complet (pas quick) — lastKnown manque souvent juste après Autoriser. */
+        locationLabel = await resolveCurrentPlaceLabelSilent({ timeoutMs: 10000 });
+      }
       const mem = buildLocalTextMemory({
         childId,
         userId: user.id,
         content: textToSave,
         textTitle: title.trim() ? title.trim() : null,
-        location: null,
+        location: locationLabel,
         syncStatus: mode === 'local' ? 'local' : 'pending',
       });
       upsertLocalMemory(mem);
       invalidateMemoryLimitCache(childId);
       DeviceEventEmitter.emit('petitmo:memories-inserted', { memories: [mem] });
+      if (!locationLabel) {
+        void enrichMemoryLocationInBackground(mem.id);
+      }
 
       if (mode === 'cloud') {
         void ensureMemoryUploadedForCloud(mem);
@@ -299,15 +325,7 @@ export default function WriteScreen() {
       pendingAfterSuccessRef.current = () => {
         selectAppTab('fil');
         requestAnimationFrame(() => {
-          if (router.canDismiss()) {
-            router.dismiss();
-            return;
-          }
-          if (router.canGoBack()) {
-            router.back();
-            return;
-          }
-          router.replace('/(tabs)/fil');
+          leaveCaptureFlowScreen(router);
         });
       };
       setCtaPhase('success');
@@ -323,30 +341,94 @@ export default function WriteScreen() {
     const trimmed = stripTextAlineas(content).trim();
     const textToSave = clampText(trimmed);
     if (!textToSave) {
-      Alert.alert('Erreur', 'Saisis du texte');
+      Alert.alert(t('write.emptyTitle'), t('write.emptyBody'));
       return;
     }
+
+    const runSave = () => {
+      void (isEditing ? executeUpdate(textToSave) : executeSave(textToSave));
+    };
 
     if (textToSave !== trimmed) {
       Alert.alert(TEXT_TRUNCATION_ALERT_TITLE, TEXT_TRUNCATION_ALERT_MESSAGE, [
         { text: TEXT_TRUNCATION_MODIFY_LABEL, style: 'cancel' },
         {
           text: TEXT_TRUNCATION_SAVE_LABEL,
-          onPress: () => void (isEditing ? executeUpdate(textToSave) : executeSave(textToSave)),
+          onPress: () => {
+            if (!isEditing) {
+              void (async () => {
+                if (await shouldShowLocationSoftPrompt()) {
+                  pendingSaveAfterLocationRef.current = () =>
+                    void executeSave(textToSave);
+                  setShowLocationModal(true);
+                  return;
+                }
+                void executeSave(textToSave);
+              })();
+              return;
+            }
+            runSave();
+          },
         },
       ]);
+      return;
+    }
+
+    if (!isEditing && (await shouldShowLocationSoftPrompt())) {
+      pendingSaveAfterLocationRef.current = () => void executeSave(textToSave);
+      setShowLocationModal(true);
       return;
     }
 
     await (isEditing ? executeUpdate(textToSave) : executeSave(textToSave));
   };
 
+  const onLocationAuthorize = useCallback(() => {
+    setShowLocationModal(false);
+    void (async () => {
+      /** Ne pas marquer « Plus tard » — seulement la permission OS. */
+      const granted = await requestForegroundLocationPermission();
+      let label: string | null = null;
+      if (granted) {
+        label = await resolveCurrentPlaceLabelSilent({ timeoutMs: 12000 });
+        if (!label) {
+          await new Promise<void>(r => setTimeout(r, 800));
+          label = await resolveCurrentPlaceLabelSilent({ timeoutMs: 12000 });
+        }
+      }
+      locationForNextSaveRef.current = label;
+      const next = pendingSaveAfterLocationRef.current;
+      pendingSaveAfterLocationRef.current = null;
+      next?.();
+    })();
+  }, []);
+
+  const onLocationLater = useCallback(() => {
+    setShowLocationModal(false);
+    void (async () => {
+      await markLocationSoftPromptDeferred();
+      locationForNextSaveRef.current = null;
+      const next = pendingSaveAfterLocationRef.current;
+      pendingSaveAfterLocationRef.current = null;
+      next?.();
+    })();
+  }, []);
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <PermissionModal
+        visible={showLocationModal}
+        type="location"
+        onRequestPermission={onLocationAuthorize}
+        onCancel={onLocationLater}
+      />
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity
+          onPress={() => leaveCaptureFlowScreen(router)}
+          style={styles.backButton}
+        >
           <ChevronLeft size={ICON_SIZES.lg} color="#3F4A5A" strokeWidth={2} />
         </TouchableOpacity>
         <PetitmoPrimaryMorphButton
