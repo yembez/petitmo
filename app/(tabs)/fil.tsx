@@ -272,9 +272,10 @@ function FilScreen() {
     [memoryFlatListKeyByIdRef],
   );
 
-  const applyPendingFeedScrollIntent = useCallback(() => {
+  const applyPendingFeedScrollIntent = useCallback((opts?: { reveal?: boolean }) => {
     const intent = pendingScrollIntentRef.current;
     if (!intent || !listRef.current || feedData.length === 0) return false;
+    const reveal = opts?.reveal !== false;
 
     if (intent.type === 'snapToKey') {
       const key = intent.key;
@@ -296,8 +297,14 @@ function FilScreen() {
       } else if (!animated) {
         listRef.current.scrollToOffset({ offset: 0, animated: false });
       }
-      pendingScrollIntentRef.current = null;
-      setFeedListOpacity(1);
+      /**
+       * Immersif : on garde l’intent pour les retries layout (`reveal: false`),
+       * sinon le 2ᵉ rAF ne retrouve plus la cible.
+       */
+      if (reveal) {
+        pendingScrollIntentRef.current = null;
+        setFeedListOpacity(1);
+      }
       return true;
     }
 
@@ -305,9 +312,25 @@ function FilScreen() {
     listRef.current.scrollToOffset({ offset: offsetY, animated: false });
     feedScrollOffsetRef.current = offsetY;
     pendingScrollIntentRef.current = null;
-    setFeedListOpacity(1);
+    if (reveal) setFeedListOpacity(1);
     return true;
   }, [feedData, memoryFlatListKeyByIdRef]);
+
+  /**
+   * Retour immersif : masquer le fil → scroller (plusieurs essais layout) → révéler.
+   * Sans le masque, FlatList montre encore le souvenir d’ouverture le temps que
+   * `scrollToIndex` prenne effet (symptôme « flash puis replace »).
+   */
+  const applyImmersiveSnapHidden = useCallback(() => {
+    setFeedListOpacity(0);
+    applyPendingFeedScrollIntent({ reveal: false });
+    requestAnimationFrame(() => {
+      applyPendingFeedScrollIntent({ reveal: false });
+      requestAnimationFrame(() => {
+        applyPendingFeedScrollIntent({ reveal: true });
+      });
+    });
+  }, [applyPendingFeedScrollIntent]);
 
   const onFeedContentSizeChange = useCallback(() => {
     const pinY = pendingPinOffsetRef.current;
@@ -336,8 +359,7 @@ function FilScreen() {
         const immersiveJump =
           intent.type === 'snapToKey' && intent.animated !== true;
         if (immersiveJump) {
-          /** Sous le modal / au pop : placer tout de suite, sans attendre les interactions. */
-          applyPendingFeedScrollIntent();
+          applyImmersiveSnapHidden();
         } else {
           const softScroll =
             intent.type === 'snapToKey' && intent.animated === true;
@@ -374,16 +396,21 @@ function FilScreen() {
         /** Relais immersif : le lecteur doit continuer, pas s’arrêter au blur du fil. */
         if (!isAnyVideoKeepAlive()) suspendFeedInlineVideo();
       };
-    }, [router, applyPendingFeedScrollIntent, refreshFeedVideoAutoplay, suspendFeedInlineVideo]),
+    }, [
+      router,
+      applyPendingFeedScrollIntent,
+      applyImmersiveSnapHidden,
+      refreshFeedVideoAutoplay,
+      suspendFeedInlineVideo,
+    ]),
   );
 
   /**
    * Immersif = transparentModal : le fil reste focused → pas de re-entrée useFocusEffect.
    * On applique l’intent dès qu’il est armé (retour viewer / import).
    *
-   * Retour immersif (`snapToKey` non animé) : apply **immédiat** — si on attend
-   * `InteractionManager`, le spring dismiss finit d’abord et le fil réapparaît
-   * encore sur le souvenir d’ouverture avant de sauter.
+   * Retour immersif (`snapToKey` non animé) : masquer + scroll + révéler après layout —
+   * sinon le fil réapparaît sur le souvenir d’ouverture avant de sauter.
    */
   useEffect(() => {
     const sub = DeviceEventEmitter.addListener(PETITMO_FIL_APPLY_SCROLL_INTENT, () => {
@@ -393,7 +420,7 @@ function FilScreen() {
       const immersiveJump =
         intent.type === 'snapToKey' && intent.animated !== true;
       if (immersiveJump) {
-        applyPendingFeedScrollIntent();
+        applyImmersiveSnapHidden();
         return;
       }
       const softScroll = intent.type === 'snapToKey' && intent.animated === true;
@@ -405,7 +432,7 @@ function FilScreen() {
       });
     });
     return () => sub.remove();
-  }, [applyPendingFeedScrollIntent]);
+  }, [applyPendingFeedScrollIntent, applyImmersiveSnapHidden]);
 
   useEffect(() => {
     if (feedListOpacity !== 0) return;
