@@ -333,15 +333,21 @@ function FilScreen() {
       let scrollTask: { cancel: () => void } | undefined;
       if (intent) {
         pendingScrollIntentRef.current = intent;
-        const softScroll =
-          intent.type === 'snapToKey' && intent.animated === true;
-        /** Retour immersif : fil visible + glissement — pas de flash opacity. */
-        if (!softScroll) {
-          setFeedListOpacity(0);
-        }
-        scrollTask = InteractionManager.runAfterInteractions(() => {
+        const immersiveJump =
+          intent.type === 'snapToKey' && intent.animated !== true;
+        if (immersiveJump) {
+          /** Sous le modal / au pop : placer tout de suite, sans attendre les interactions. */
           applyPendingFeedScrollIntent();
-        });
+        } else {
+          const softScroll =
+            intent.type === 'snapToKey' && intent.animated === true;
+          if (!softScroll) {
+            setFeedListOpacity(0);
+          }
+          scrollTask = InteractionManager.runAfterInteractions(() => {
+            applyPendingFeedScrollIntent();
+          });
+        }
       }
 
       const viewabilityFrame = requestAnimationFrame(() => {
@@ -374,12 +380,22 @@ function FilScreen() {
   /**
    * Immersif = transparentModal : le fil reste focused → pas de re-entrée useFocusEffect.
    * On applique l’intent dès qu’il est armé (retour viewer / import).
+   *
+   * Retour immersif (`snapToKey` non animé) : apply **immédiat** — si on attend
+   * `InteractionManager`, le spring dismiss finit d’abord et le fil réapparaît
+   * encore sur le souvenir d’ouverture avant de sauter.
    */
   useEffect(() => {
     const sub = DeviceEventEmitter.addListener(PETITMO_FIL_APPLY_SCROLL_INTENT, () => {
       const intent = consumeFeedScrollIntent();
       if (!intent) return;
       pendingScrollIntentRef.current = intent;
+      const immersiveJump =
+        intent.type === 'snapToKey' && intent.animated !== true;
+      if (immersiveJump) {
+        applyPendingFeedScrollIntent();
+        return;
+      }
       const softScroll = intent.type === 'snapToKey' && intent.animated === true;
       if (!softScroll) {
         setFeedListOpacity(0);

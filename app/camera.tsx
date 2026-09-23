@@ -14,7 +14,7 @@ import { usePendingMediaUploads } from '@/contexts/PendingMediaUploadsContext';
 import { getOrSelectFirstChild } from '@/services/children';
 import { getUserTier } from '@/lib/userTier';
 import { checkMemoryLimit, checkVideoLimit, FREE_TIER_VIDEO_MAX_DURATION } from '@/lib/limits';
-import { promptFreeTierLimitThenPaywall } from '@/utils/freeTierLimitGate';
+import { promptFreeTierLimitThenPaywall, freeTierLimitKindFromCheck } from '@/utils/freeTierLimitGate';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -157,7 +157,7 @@ export default function CameraScreen() {
           const limitCheck = await checkMemoryLimit(childId, { skipRemotePull: true });
           if (!limitCheck.canCreate) {
             setIsProcessing(false);
-            promptFreeTierLimitThenPaywall({ kind: 'memories', router, returnTo: 'fil' });
+            promptFreeTierLimitThenPaywall({ kind: freeTierLimitKindFromCheck(limitCheck), router, returnTo: 'fil' });
             return;
           }
           const localUri = photo.uri;
@@ -194,7 +194,7 @@ export default function CameraScreen() {
         }
         const memLimit = await checkMemoryLimit(childId, { skipRemotePull: true });
         if (!memLimit.canCreate) {
-          promptFreeTierLimitThenPaywall({ kind: 'memories', router, returnTo: 'fil' });
+          promptFreeTierLimitThenPaywall({ kind: freeTierLimitKindFromCheck(memLimit), router, returnTo: 'fil' });
           return;
         }
         const videoLimit = await checkVideoLimit(childId, { skipRemotePull: true });
@@ -267,7 +267,7 @@ export default function CameraScreen() {
       setRecordingTime(0);
       const limitCheck = await checkMemoryLimit(childId, { skipRemotePull: true });
       if (!limitCheck.canCreate) {
-        promptFreeTierLimitThenPaywall({ kind: 'memories', router, returnTo: 'fil' });
+        promptFreeTierLimitThenPaywall({ kind: freeTierLimitKindFromCheck(limitCheck), router, returnTo: 'fil' });
         return;
       }
       const videoLimitCheck = await checkVideoLimit(childId, { skipRemotePull: true });

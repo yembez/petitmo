@@ -7,7 +7,6 @@ import {
   CAPTURE_CTA_BORDER,
   CAPTURE_CTA_IMPORT,
   CAPTURE_CTA_WRITE,
-  CAPTURE_TAB_ACTIVE,
 } from '@/constants/captureScreenPalette';
 
 /** Rosé charte — cœurs favoris, paywall hero neutre, marque douce. */
@@ -127,7 +126,8 @@ export const THEME = {
   /** @deprecated violet maquette initiale — conservé si besoin legacy. */
   captureMaquetteViolet: '#5B47D6',
   /** Icône + libellé onglet actif tab bar — accent Capturer. */
-  tabBarActiveTint: CAPTURE_TAB_ACTIVE,
+  /** Icône + libellé onglet actif — noir (pilule soft derrière, style Marmo). */
+  tabBarActiveTint: '#1C1C1E',
   /** Icône + libellé onglets inactifs — noir charte pour lisibilité sur fond beige. */
   tabBarInactiveTint: '#1C1C1E',
   /** Fond tab bar — beige écran Capturer (`#FEFBF7`). */
@@ -136,8 +136,8 @@ export const THEME = {
   tabBarSurface: CAPTURE_SCREEN_BG,
   /** Surfaces élevées (cartes souvenir, CTA disque blanc, pages livre à l’écran). */
   surfaceCard: '#FFFFFF',
-  /** @deprecated pastille onglet actif supprimée — teinte via `tabBarActiveTint` uniquement. */
-  tabBarActivePill: `rgba(${BRAND_CTA_ACCENT_RGB}, 0.14)`,
+  /** Pastille soft derrière l’onglet actif — gris très léger. */
+  tabBarActivePill: 'rgba(28, 28, 30, 0.045)',
   /** @deprecated anneau lavande (tab bar violette) — non utilisé sur le bandeau blanc actuel. */
   tabBarOuterRing: '#D5CEEB',
 } as const;

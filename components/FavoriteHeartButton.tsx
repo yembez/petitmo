@@ -83,6 +83,8 @@ export function FavoriteHeartButton({
 }: Props) {
   const fillProgress = useSharedValue(favored ? 1 : 0);
   const heartScale = useSharedValue(favored ? FAVORED_REST : 1);
+  /** Contour : découplé du fill — disparaît dès le pop (évite outline noir géant + rouge dedans). */
+  const strokeVisible = useSharedValue(favored ? 0 : 1);
   const haloOpacity = useSharedValue(0);
   const haloScale = useSharedValue(0.6);
   const busyRef = useRef(false);
@@ -98,6 +100,10 @@ export function FavoriteHeartButton({
       duration: favored ? FILL_MS : UNFAVORITE_MS,
       easing: Easing.linear,
     });
+    strokeVisible.value = withTiming(favored ? 0 : 1, {
+      duration: favored ? POP_UP_MS : UNFAVORITE_MS,
+      easing: Easing.out(Easing.cubic),
+    });
     /** Timing court : pas d’assignation brute (évite un pop net si sync arrive tard). */
     heartScale.value = withTiming(favored ? FAVORED_REST : 1, {
       duration: 120,
@@ -107,10 +113,15 @@ export function FavoriteHeartButton({
       haloOpacity.value = 0;
       haloScale.value = 0.6;
     }
-  }, [favored, fillProgress, heartScale, haloOpacity, haloScale]);
+  }, [favored, fillProgress, heartScale, strokeVisible, haloOpacity, haloScale]);
 
   const runAddMotion = useCallback(() => {
     fillProgress.value = withTiming(1, { duration: FILL_MS, easing: Easing.linear });
+    /** Outline off dès le 1er grossissement — pas attendre la fin du fill. */
+    strokeVisible.value = withTiming(0, {
+      duration: POP_UP_MS,
+      easing: Easing.out(Easing.cubic),
+    });
     heartScale.value = withSequence(
       withTiming(POP_PEAK, {
         duration: POP_UP_MS,
@@ -133,17 +144,21 @@ export function FavoriteHeartButton({
       duration: HALO_SCALE_MS,
       easing: MOTION_EASE.enter,
     });
-  }, [fillProgress, heartScale, halo, haloOpacity, haloScale]);
+  }, [fillProgress, heartScale, strokeVisible, halo, haloOpacity, haloScale]);
 
   const runRemoveMotion = useCallback(() => {
     fillProgress.value = withTiming(0, {
       duration: UNFAVORITE_MS,
       easing: Easing.linear,
     });
+    strokeVisible.value = withTiming(1, {
+      duration: UNFAVORITE_MS,
+      easing: Easing.linear,
+    });
     heartScale.value = withTiming(1, { duration: UNFAVORITE_MS });
     haloOpacity.value = 0;
     haloScale.value = 0.6;
-  }, [fillProgress, heartScale, haloOpacity, haloScale]);
+  }, [fillProgress, heartScale, strokeVisible, haloOpacity, haloScale]);
 
   const handlePress = useCallback(() => {
     if (busyRef.current) return;
@@ -175,9 +190,9 @@ export function FavoriteHeartButton({
     fillOpacity: fillProgress.value,
   }));
 
-  /** Contour disparaît dès que le terracotta remplit. */
+  /** Contour disparaît dès le pop d’ajout (plus lié au fill lent). */
   const strokeProps = useAnimatedProps(() => ({
-    strokeOpacity: 1 - fillProgress.value,
+    strokeOpacity: strokeVisible.value,
   }));
 
   const haloSize = Math.round(size * 2.2);

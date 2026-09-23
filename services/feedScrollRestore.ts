@@ -7,8 +7,9 @@ export type FeedScrollIntent =
   | { type: 'snapToLatest' }
   /**
    * Aligner sur une ligne (pending tempId ou memory id).
-   * `animated` : glissement visible (retour immersif) — sans flash opacity.
-   * Sinon : jump invisible (import EXIF, etc.).
+   * `animated: true` : glissement visible (rare).
+   * Défaut / `false` : jump immédiat — **obligatoire** au retour immersif
+   * (sinon le fil réaffiche d’abord le souvenir d’ouverture).
    */
   | { type: 'snapToKey'; key: string; animated?: boolean };
 

@@ -13,42 +13,27 @@ import {
   ScrollView,
   useWindowDimensions,
   DeviceEventEmitter,
-  Pressable,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
-import Reanimated, {
-  interpolate,
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring,
-} from 'react-native-reanimated';
 import { useSafeAreaInsets, useSafeAreaFrame } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { useFocusEffect, useIsFocused } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
 import { Image as ExpoImage } from 'expo-image';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Heart } from 'lucide-react-native';
+import { Heart, ImagePlus, Mic, PencilLine } from 'lucide-react-native';
 import ImageImportIcon from '@/components/ImageImportIcon';
 import MicIcon from '@/components/MicIcon';
 import PenIcon from '@/components/PenIcon';
+import CaptureDiscCtaGradient from '@/components/CaptureDiscCtaGradient';
+import CaptureDiscCtaOutline from '@/components/CaptureDiscCtaOutline';
+import CaptureCtaBrandGradientIcon from '@/components/CaptureCtaBrandGradientIcon';
 import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
-import { petitmoHaptic } from '@/lib/haptics';
-import {
-  MOTION_CAPTURE_PRESS_OPACITY_DIP,
-  MOTION_CAPTURE_PRESS_SCALE,
-  MOTION_CAPTURE_PRESS_SHADOW,
-  MOTION_CTA_MORPH_HIT_SLOP,
-  MOTION_CTA_MORPH_SHEEN,
-  MOTION_SPRING,
-  MOTION_SPRING_PHYS,
-} from '@/constants/motion';
-import { Inter_300Light_Italic, Inter_500Medium, Inter_700Bold } from '@expo-google-fonts/inter';
+import { Inter_300Light_Italic } from '@expo-google-fonts/inter';
 import { useFonts } from 'expo-font';
 import * as Font from 'expo-font';
 import { Manrope_400Regular, Manrope_700Bold } from '@expo-google-fonts/manrope';
-import { DMSans_500Medium } from '@expo-google-fonts/dm-sans';
 import TabSceneTransition from '@/components/TabSceneTransition';
 import SettingsHeaderButton from '@/components/SettingsHeaderButton';
 import { loadedFontStyle } from '@/utils/loadedFontStyle';
@@ -58,13 +43,32 @@ import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
 import { scale, verticalScale } from '@/utils/responsive';
 import {
   CAPTURE_SCREEN_BG,
+  BRAND_SPLASH_GRADIENT,
   CAPTURE_CTA_RECORD_GRADIENT,
   CAPTURE_CTA_WRITE_GRADIENT,
   CAPTURE_CTA_IMPORT_GRADIENT,
-  CAPTURE_CTA_GRADIENT_LOCATIONS,
   CAPTURE_PILL_AGE_DOT,
   CAPTURE_TITLE_HEART,
 } from '@/constants/captureScreenPalette';
+import {
+  CAPTURE_CTA_VARIANT,
+  CAPTURE_CTA_ICON_SIZE,
+  CAPTURE_CTA_ICON_SIZE_COMPACT,
+  CAPTURE_CTA_MIC_ICON_SIZE,
+  CAPTURE_CTA_MIC_ICON_SIZE_COMPACT,
+  CAPTURE_CTA_D1_ICON_STROKE,
+  CAPTURE_CTA_D2_ICON,
+  CAPTURE_CTA_D2_ICON_STROKE,
+  CAPTURE_CTA_D3_BG,
+  CAPTURE_CTA_D3_ICON,
+  CAPTURE_CTA_D3_ICON_STROKE,
+  CAPTURE_CTA_D16_BG,
+  CAPTURE_CTA_D16_ICON,
+  CAPTURE_CTA_D16_ICON_STROKE,
+  CAPTURE_CTA_D6_BG,
+  CAPTURE_CTA_D6_ICON,
+  CAPTURE_CTA_D6_ICON_STROKE,
+} from '@/constants/captureCtaVariant';
 import { THEME } from '@/constants/theme';
 import {
   ensureChildFaceBounds,
@@ -77,7 +81,7 @@ import {
 import { hydrateTabScreensFromSqliteSync } from '@/services/tabScreensHydrate';
 import type { Child } from '@/types/local';
 import { checkMemoryLimit } from '@/lib/limits';
-import { promptFreeTierLimitThenPaywall } from '@/utils/freeTierLimitGate';
+import { promptFreeTierLimitThenPaywall, freeTierLimitKindFromCheck } from '@/utils/freeTierLimitGate';
 import { getLocalChild, listLocalChildren, listLocalChildrenForUser } from '@/lib/localDb';
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
 import { useChildProfileDisplayUri } from '@/hooks/useChildProfileDisplayUri';
@@ -97,9 +101,9 @@ import {
 } from '@/utils/captureHeroMetrics';
 
 /** Tailles maquette capture (px logiques). */
-const CAPTURE_TITLE_FONT_SIZE = 18;
-const CAPTURE_TITLE_LINE_HEIGHT = 24;
-const CAPTURE_TITLE_HEART_SIZE = scale(16);
+const CAPTURE_TITLE_FONT_SIZE = 22;
+const CAPTURE_TITLE_LINE_HEIGHT = 28;
+const CAPTURE_TITLE_HEART_SIZE = scale(18);
 /** Hauteur de la ligne date / paramètres (alignés sur le bouton). */
 const CAPTURE_HEADER_ROW_H = scale(40);
 /** Enfants visibles pour le compte courant — jamais ceux d’un autre e-mail. */
@@ -123,19 +127,10 @@ const CAPTURE_PHOTO_CARD_ASPECT_COMPACT = CHILD_PROFILE_PHOTO_ASPECT_COMPACT;
 const CAPTURE_CONTENT_PADDING_H = scale(20);
 const CAPTURE_PHOTO_EDGE_PADDING_H = scale(14);
 
-const CAPTURE_CTA_SIZE = scale(78);
-const CAPTURE_CTA_SIZE_COMPACT = scale(64);
-const CAPTURE_CTA_ICON_SIZE = scale(30);
-const CAPTURE_CTA_ICON_SIZE_COMPACT = scale(26);
-const CAPTURE_CTA_MIC_ICON_SIZE = scale(34);
-const CAPTURE_CTA_MIC_ICON_SIZE_COMPACT = scale(29);
-
 /** Tagline hero photo — maquette capture. */
 const CAPTURE_HERO_TAGLINE = '“Avec toi, l’ordinaire devient extraordinaire.”';
 
 type CaptureRoute = '/write' | '/record-voice' | '/import-media';
-
-const SH = MOTION_CAPTURE_PRESS_SHADOW;
 
 /**
  * Révision photo hero — chemin local + `updated_at` (fichier souvent écrasé au même path).
@@ -217,156 +212,12 @@ function CapturePhotoGlassPill({
   );
 }
 
-function CaptureDiscCta({
-  label,
-  icon,
-  discColor,
-  discGradient,
-  discBorderColor,
-  discBorderWidth = 0,
-  onPress,
-  labelFontFamily,
-  compact = false,
-  accessibilityLabel,
-}: {
-  label: string;
-  icon: React.ReactNode;
-  discColor?: string;
-  /** Dégradé TL → BR (prioritaire sur `discColor`) — 2 ou 3 stops charte. */
-  discGradient?: readonly [string, string] | readonly [string, string, string];
-  discBorderColor?: string;
-  discBorderWidth?: number;
-  onPress: () => void;
-  labelFontFamily?: string;
-  compact?: boolean;
-  accessibilityLabel?: string;
-}) {
-  const ctaSize = compact ? CAPTURE_CTA_SIZE_COMPACT : CAPTURE_CTA_SIZE;
-  const radius = ctaSize / 2;
-  const pressed = useSharedValue(0);
-  const isIOS = Platform.OS === 'ios';
-
-  const pressShellStyle = useAnimatedStyle(() => {
-    const p = pressed.value;
-    return {
-      width: ctaSize,
-      height: ctaSize,
-      borderRadius: radius,
-      transform: [{ scale: 1 - p * (1 - MOTION_CAPTURE_PRESS_SCALE) }],
-      opacity: 1 - p * MOTION_CAPTURE_PRESS_OPACITY_DIP,
-    };
-  });
-
-  const ambientShadowStyle = useAnimatedStyle(() => {
-    const p = pressed.value;
-    if (!isIOS) {
-      return {
-        elevation: interpolate(p, [0, 1], [SH.elevation, SH.elevationPressed]),
-        borderRadius: radius,
-      };
-    }
-    return {
-      borderRadius: radius,
-      shadowColor: SH.color,
-      shadowOffset: {
-        width: 0,
-        height: interpolate(p, [0, 1], [SH.ambient.offsetY, SH.ambientPressed.offsetY]),
-      },
-      shadowOpacity: interpolate(p, [0, 1], [SH.ambient.opacity, SH.ambientPressed.opacity]),
-      shadowRadius: interpolate(p, [0, 1], [SH.ambient.radius, SH.ambientPressed.radius]),
-    };
-  });
-
-  const contactShadowStyle = useAnimatedStyle(() => {
-    const p = pressed.value;
-    if (!isIOS) {
-      return { borderRadius: radius };
-    }
-    return {
-      borderRadius: radius,
-      shadowColor: SH.color,
-      shadowOffset: {
-        width: 0,
-        height: interpolate(p, [0, 1], [SH.contact.offsetY, SH.contactPressed.offsetY]),
-      },
-      shadowOpacity: interpolate(p, [0, 1], [SH.contact.opacity, SH.contactPressed.opacity]),
-      shadowRadius: interpolate(p, [0, 1], [SH.contact.radius, SH.contactPressed.radius]),
-    };
-  });
-
-  return (
-    <Pressable
-      onPress={onPress}
-      onPressIn={() => {
-        void petitmoHaptic('favorite'); // Medium — Capturer = geste primaire
-        pressed.value = withSpring(1, MOTION_SPRING_PHYS.snap);
-      }}
-      onPressOut={() => {
-        pressed.value = withSpring(0, MOTION_SPRING.standard);
-      }}
-      hitSlop={MOTION_CTA_MORPH_HIT_SLOP}
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel ?? label}
-      style={styles.captureCtaTouch}
-    >
-      <Reanimated.View style={[ambientShadowStyle, pressShellStyle]}>
-        <Reanimated.View
-          style={[
-            styles.captureCtaContact,
-            { width: ctaSize, height: ctaSize, borderRadius: radius },
-            contactShadowStyle,
-          ]}
-        >
-          <View
-            style={[
-              styles.captureCtaDisc,
-              {
-                width: ctaSize,
-                height: ctaSize,
-                borderRadius: radius,
-                backgroundColor: discGradient ? 'transparent' : discColor,
-                borderWidth: discBorderWidth,
-                borderColor: discBorderColor ?? 'transparent',
-                overflow: 'hidden',
-              },
-            ]}
-          >
-            {discGradient ? (
-              <LinearGradient
-                colors={[
-                  discGradient[0],
-                  discGradient[0],
-                  discGradient[discGradient.length - 1],
-                  discGradient[discGradient.length - 1],
-                ]}
-                locations={[...CAPTURE_CTA_GRADIENT_LOCATIONS]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={StyleSheet.absoluteFillObject}
-              />
-            ) : null}
-            <View pointerEvents="none" style={styles.captureCtaSheen} />
-            <View style={styles.captureCtaDiscIcon}>{icon}</View>
-          </View>
-        </Reanimated.View>
-      </Reanimated.View>
-      <Text
-        style={[
-          styles.captureCtaLabel,
-          compact && styles.captureCtaLabelCompact,
-          loadedFontStyle(labelFontFamily),
-        ]}
-        numberOfLines={1}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
 function CapturerScreen() {
   const router = useRouter();
   const isTabFocused = useIsFocused();
+  /** Remonte les CTA à chaque retour focus (évite Pressable coincé après write/import/record). */
+  const [ctaEpoch, setCtaEpoch] = useState(0);
+  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const frame = useSafeAreaFrame();
   const { height: windowH } = useWindowDimensions();
@@ -380,25 +231,21 @@ function CapturerScreen() {
   const [captureFontsLoaded] = useFonts({
     Manrope_400Regular,
     Manrope_700Bold,
-    DMSans_500Medium,
     Inter_300Light_Italic,
-    Inter_500Medium,
-    Inter_700Bold,
   });
   /** Boot a déjà chargé ces faces : ne pas attendre un 2ᵉ `useFonts` (flash « ? »). */
   const captureFontsReady =
     captureFontsLoaded ||
-    (Font.isLoaded('Inter_500Medium') &&
-      Font.isLoaded('Inter_700Bold') &&
-      Font.isLoaded('Manrope_400Regular') &&
+    (Font.isLoaded('Manrope_400Regular') &&
       Font.isLoaded('Manrope_700Bold') &&
-      Font.isLoaded('DMSans_500Medium') &&
       Font.isLoaded('Inter_300Light_Italic'));
-  const captureTitleFont = captureFontsReady ? 'Inter_500Medium' : undefined;
-  const captureTitleBoldFont = captureFontsReady ? 'Inter_700Bold' : undefined;
+  /** Titre hero — police système (SF Pro sur iOS). */
+  const captureTitleFont = undefined;
+  const captureTitleBoldFont = undefined;
   const captureSubtitleFont = captureFontsReady ? 'Manrope_400Regular' : undefined;
   const capturePhotoPillNameFont = captureFontsReady ? 'Manrope_700Bold' : undefined;
-  const captureCtaLabelFont = captureFontsReady ? 'DMSans_500Medium' : undefined;
+  /** Libellés CTA — police système (SF Pro sur iOS). */
+  const captureCtaLabelFont = undefined;
   const captureTaglineFont = captureFontsReady ? 'Inter_300Light_Italic' : undefined;
   const usableH = Math.max(280, windowH);
   const layoutH = Math.min(frame.height > 1 ? frame.height : usableH, usableH);
@@ -435,6 +282,29 @@ function CapturerScreen() {
   useEffect(() => {
     setCaptureTabChildSnapshot(child);
   }, [child]);
+
+  /**
+   * Écrire est un `fullScreenModal` : Capturer peut rester « focused » dessous.
+   * On écoute le stack parent pour remonter les CTA dès que les tabs redeviennent le top.
+   */
+  const prevStackTopRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const parent = navigation.getParent();
+    if (!parent) return;
+    const unsub = parent.addListener('state', () => {
+      const state = parent.getState();
+      const topName = state?.routes?.[state.index ?? 0]?.name;
+      if (
+        topName === '(tabs)' &&
+        prevStackTopRef.current != null &&
+        prevStackTopRef.current !== '(tabs)'
+      ) {
+        setCtaEpoch(e => e + 1);
+      }
+      prevStackTopRef.current = topName;
+    });
+    return unsub;
+  }, [navigation]);
 
   useEffect(() => {
     const sub = DeviceEventEmitter.addListener(
@@ -493,7 +363,7 @@ function CapturerScreen() {
 
         const limitCheck = await checkMemoryLimit(childId, { skipRemotePull: true });
         if (!limitCheck.canCreate) {
-          promptFreeTierLimitThenPaywall({ kind: 'memories', router });
+          promptFreeTierLimitThenPaywall({ kind: freeTierLimitKindFromCheck(limitCheck), router });
           return;
         }
 
@@ -565,6 +435,7 @@ function CapturerScreen() {
   useFocusEffect(
     useCallback(() => {
       setStatusBarStyle('dark');
+      setCtaEpoch(e => e + 1);
 
       let cancelled = false;
 
@@ -894,58 +765,363 @@ function CapturerScreen() {
                   </Text>
                 </View>
               )}
-              <Text
-                style={[
-                  styles.captureSubtitle,
-                  loadedFontStyle(captureSubtitleFont),
-                ]}
-              >
-                Écris, enregistre ou importe photos et vidéos
-              </Text>
             </View>
 
-            <View style={[styles.captureCtaRow, compact && styles.captureCtaRowCompact]}>
-            <CaptureDiscCta
-              label="Enregistrer"
-              labelFontFamily={captureCtaLabelFont}
-              accessibilityLabel="Enregistrer un audio"
-              discGradient={CAPTURE_CTA_RECORD_GRADIENT}
-              icon={
-                <MicIcon
-                  size={compact ? CAPTURE_CTA_MIC_ICON_SIZE_COMPACT : CAPTURE_CTA_MIC_ICON_SIZE}
-                  color="#FFFFFF"
-                />
-              }
-              onPress={() => handleCaptureCtaPress('/record-voice')}
-              compact={compact}
-            />
-            <CaptureDiscCta
-              label="Écrire"
-              labelFontFamily={captureCtaLabelFont}
-              discGradient={CAPTURE_CTA_WRITE_GRADIENT}
-              icon={
-                <PenIcon
-                  size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
-                  color="#FFFFFF"
-                />
-              }
-              onPress={() => handleCaptureCtaPress('/write')}
-              compact={compact}
-            />
-            <CaptureDiscCta
-              label="Importer"
-              labelFontFamily={captureCtaLabelFont}
-              accessibilityLabel="Importer des photos ou vidéos"
-              discGradient={CAPTURE_CTA_IMPORT_GRADIENT}
-              icon={
-                <ImageImportIcon
-                  size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
-                  color="#FFFFFF"
-                />
-              }
-              onPress={() => handleCaptureCtaPress('/import-media')}
-              compact={compact}
-            />
+            <View style={styles.captureCtaZone}>
+              <View
+                key={`capture-cta-${ctaEpoch}`}
+                style={[styles.captureCtaRow, compact && styles.captureCtaRowCompact]}
+              >
+                {CAPTURE_CTA_VARIANT === 'd16' ? (
+                <>
+                  <CaptureDiscCtaGradient
+                    label="Enregistrer"
+                    labelFontFamily={captureCtaLabelFont}
+                    accessibilityLabel="Enregistrer un audio"
+                    discColor={CAPTURE_CTA_D16_BG}
+                    icon={
+                      <Mic
+                        size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
+                        color={CAPTURE_CTA_D16_ICON}
+                        fill="none"
+                        strokeWidth={CAPTURE_CTA_D16_ICON_STROKE}
+                      />
+                    }
+                    onPress={() => handleCaptureCtaPress('/record-voice')}
+                    compact={compact}
+                  />
+                  <CaptureDiscCtaGradient
+                    label="Écrire"
+                    labelFontFamily={captureCtaLabelFont}
+                    discColor={CAPTURE_CTA_D16_BG}
+                    icon={
+                      <PencilLine
+                        size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
+                        color={CAPTURE_CTA_D16_ICON}
+                        fill="none"
+                        strokeWidth={CAPTURE_CTA_D16_ICON_STROKE}
+                      />
+                    }
+                    onPress={() => handleCaptureCtaPress('/write')}
+                    compact={compact}
+                  />
+                  <CaptureDiscCtaGradient
+                    label="Importer"
+                    labelFontFamily={captureCtaLabelFont}
+                    accessibilityLabel="Importer des photos ou vidéos"
+                    discColor={CAPTURE_CTA_D16_BG}
+                    icon={
+                      <ImagePlus
+                        size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
+                        color={CAPTURE_CTA_D16_ICON}
+                        fill="none"
+                        strokeWidth={CAPTURE_CTA_D16_ICON_STROKE}
+                      />
+                    }
+                    onPress={() => handleCaptureCtaPress('/import-media')}
+                    compact={compact}
+                  />
+                </>
+              ) : CAPTURE_CTA_VARIANT === 'd3' ? (
+                <>
+                  <CaptureDiscCtaGradient
+                    label="Enregistrer"
+                    labelFontFamily={captureCtaLabelFont}
+                    accessibilityLabel="Enregistrer un audio"
+                    discColor={CAPTURE_CTA_D3_BG}
+                    icon={
+                      <Mic
+                        size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
+                        color={CAPTURE_CTA_D3_ICON}
+                        fill="none"
+                        strokeWidth={CAPTURE_CTA_D3_ICON_STROKE}
+                      />
+                    }
+                    onPress={() => handleCaptureCtaPress('/record-voice')}
+                    compact={compact}
+                  />
+                  <CaptureDiscCtaGradient
+                    label="Écrire"
+                    labelFontFamily={captureCtaLabelFont}
+                    discColor={CAPTURE_CTA_D3_BG}
+                    icon={
+                      <PencilLine
+                        size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
+                        color={CAPTURE_CTA_D3_ICON}
+                        fill="none"
+                        strokeWidth={CAPTURE_CTA_D3_ICON_STROKE}
+                      />
+                    }
+                    onPress={() => handleCaptureCtaPress('/write')}
+                    compact={compact}
+                  />
+                  <CaptureDiscCtaGradient
+                    label="Importer"
+                    labelFontFamily={captureCtaLabelFont}
+                    accessibilityLabel="Importer des photos ou vidéos"
+                    discColor={CAPTURE_CTA_D3_BG}
+                    icon={
+                      <ImagePlus
+                        size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
+                        color={CAPTURE_CTA_D3_ICON}
+                        fill="none"
+                        strokeWidth={CAPTURE_CTA_D3_ICON_STROKE}
+                      />
+                    }
+                    onPress={() => handleCaptureCtaPress('/import-media')}
+                    compact={compact}
+                  />
+                </>
+              ) : CAPTURE_CTA_VARIANT === 'd2' ? (
+                <>
+                  <CaptureDiscCtaGradient
+                    label="Enregistrer"
+                    labelFontFamily={captureCtaLabelFont}
+                    accessibilityLabel="Enregistrer un audio"
+                    discGradient={BRAND_SPLASH_GRADIENT}
+                    icon={
+                      <Mic
+                        size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
+                        color={CAPTURE_CTA_D2_ICON}
+                        fill="none"
+                        strokeWidth={CAPTURE_CTA_D2_ICON_STROKE}
+                      />
+                    }
+                    onPress={() => handleCaptureCtaPress('/record-voice')}
+                    compact={compact}
+                  />
+                  <CaptureDiscCtaGradient
+                    label="Écrire"
+                    labelFontFamily={captureCtaLabelFont}
+                    discGradient={BRAND_SPLASH_GRADIENT}
+                    icon={
+                      <PencilLine
+                        size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
+                        color={CAPTURE_CTA_D2_ICON}
+                        fill="none"
+                        strokeWidth={CAPTURE_CTA_D2_ICON_STROKE}
+                      />
+                    }
+                    onPress={() => handleCaptureCtaPress('/write')}
+                    compact={compact}
+                  />
+                  <CaptureDiscCtaGradient
+                    label="Importer"
+                    labelFontFamily={captureCtaLabelFont}
+                    accessibilityLabel="Importer des photos ou vidéos"
+                    discGradient={BRAND_SPLASH_GRADIENT}
+                    icon={
+                      <ImagePlus
+                        size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
+                        color={CAPTURE_CTA_D2_ICON}
+                        fill="none"
+                        strokeWidth={CAPTURE_CTA_D2_ICON_STROKE}
+                      />
+                    }
+                    onPress={() => handleCaptureCtaPress('/import-media')}
+                    compact={compact}
+                  />
+                </>
+              ) : CAPTURE_CTA_VARIANT === 'd1' ? (
+                <>
+                  <CaptureDiscCtaOutline
+                    label="Enregistrer"
+                    labelFontFamily={captureCtaLabelFont}
+                    accessibilityLabel="Enregistrer un audio"
+                    icon={
+                      <CaptureCtaBrandGradientIcon
+                        Icon={Mic}
+                        size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
+                        strokeWidth={CAPTURE_CTA_D1_ICON_STROKE}
+                      />
+                    }
+                    onPress={() => handleCaptureCtaPress('/record-voice')}
+                    compact={compact}
+                  />
+                  <CaptureDiscCtaOutline
+                    label="Écrire"
+                    labelFontFamily={captureCtaLabelFont}
+                    icon={
+                      <CaptureCtaBrandGradientIcon
+                        Icon={PencilLine}
+                        size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
+                        strokeWidth={CAPTURE_CTA_D1_ICON_STROKE}
+                      />
+                    }
+                    onPress={() => handleCaptureCtaPress('/write')}
+                    compact={compact}
+                  />
+                  <CaptureDiscCtaOutline
+                    label="Importer"
+                    labelFontFamily={captureCtaLabelFont}
+                    accessibilityLabel="Importer des photos ou vidéos"
+                    icon={
+                      <CaptureCtaBrandGradientIcon
+                        Icon={ImagePlus}
+                        size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
+                        strokeWidth={CAPTURE_CTA_D1_ICON_STROKE}
+                      />
+                    }
+                    onPress={() => handleCaptureCtaPress('/import-media')}
+                    compact={compact}
+                  />
+                </>
+              ) : CAPTURE_CTA_VARIANT === 'd6' || CAPTURE_CTA_VARIANT === 's6' ? (
+                <>
+                  <CaptureDiscCtaGradient
+                    label="Enregistrer"
+                    labelFontFamily={captureCtaLabelFont}
+                    accessibilityLabel="Enregistrer un audio"
+                    discColor={CAPTURE_CTA_D6_BG}
+                    shape={CAPTURE_CTA_VARIANT === 's6' ? 'square' : 'disc'}
+                    icon={
+                      <Mic
+                        size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
+                        color={CAPTURE_CTA_D6_ICON}
+                        fill="none"
+                        strokeWidth={CAPTURE_CTA_D6_ICON_STROKE}
+                      />
+                    }
+                    onPress={() => handleCaptureCtaPress('/record-voice')}
+                    compact={compact}
+                  />
+                  <CaptureDiscCtaGradient
+                    label="Écrire"
+                    labelFontFamily={captureCtaLabelFont}
+                    discColor={CAPTURE_CTA_D6_BG}
+                    shape={CAPTURE_CTA_VARIANT === 's6' ? 'square' : 'disc'}
+                    icon={
+                      <PencilLine
+                        size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
+                        color={CAPTURE_CTA_D6_ICON}
+                        fill="none"
+                        strokeWidth={CAPTURE_CTA_D6_ICON_STROKE}
+                      />
+                    }
+                    onPress={() => handleCaptureCtaPress('/write')}
+                    compact={compact}
+                  />
+                  <CaptureDiscCtaGradient
+                    label="Importer"
+                    labelFontFamily={captureCtaLabelFont}
+                    accessibilityLabel="Importer des photos ou vidéos"
+                    discColor={CAPTURE_CTA_D6_BG}
+                    shape={CAPTURE_CTA_VARIANT === 's6' ? 'square' : 'disc'}
+                    icon={
+                      <ImagePlus
+                        size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
+                        color={CAPTURE_CTA_D6_ICON}
+                        fill="none"
+                        strokeWidth={CAPTURE_CTA_D6_ICON_STROKE}
+                      />
+                    }
+                    onPress={() => handleCaptureCtaPress('/import-media')}
+                    compact={compact}
+                  />
+                </>
+              ) : CAPTURE_CTA_VARIANT === 'gradient' ? (
+                <>
+                  <CaptureDiscCtaGradient
+                    label="Enregistrer"
+                    labelFontFamily={captureCtaLabelFont}
+                    accessibilityLabel="Enregistrer un audio"
+                    discGradient={CAPTURE_CTA_RECORD_GRADIENT}
+                    icon={
+                      <MicIcon
+                        size={
+                          compact
+                            ? CAPTURE_CTA_MIC_ICON_SIZE_COMPACT
+                            : CAPTURE_CTA_MIC_ICON_SIZE
+                        }
+                        color="#FFFFFF"
+                      />
+                    }
+                    onPress={() => handleCaptureCtaPress('/record-voice')}
+                    compact={compact}
+                  />
+                  <CaptureDiscCtaGradient
+                    label="Écrire"
+                    labelFontFamily={captureCtaLabelFont}
+                    discGradient={CAPTURE_CTA_WRITE_GRADIENT}
+                    icon={
+                      <PenIcon
+                        size={
+                          compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE
+                        }
+                        color="#FFFFFF"
+                      />
+                    }
+                    onPress={() => handleCaptureCtaPress('/write')}
+                    compact={compact}
+                  />
+                  <CaptureDiscCtaGradient
+                    label="Importer"
+                    labelFontFamily={captureCtaLabelFont}
+                    accessibilityLabel="Importer des photos ou vidéos"
+                    discGradient={CAPTURE_CTA_IMPORT_GRADIENT}
+                    icon={
+                      <ImageImportIcon
+                        size={
+                          compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE
+                        }
+                        color="#FFFFFF"
+                      />
+                    }
+                    onPress={() => handleCaptureCtaPress('/import-media')}
+                    compact={compact}
+                  />
+                </>
+              ) : (
+                <>
+                  <CaptureDiscCtaOutline
+                    label="Enregistrer"
+                    labelFontFamily={captureCtaLabelFont}
+                    accessibilityLabel="Enregistrer un audio"
+                    icon={
+                      <MicIcon
+                        size={
+                          compact
+                            ? CAPTURE_CTA_MIC_ICON_SIZE_COMPACT
+                            : CAPTURE_CTA_MIC_ICON_SIZE
+                        }
+                        color={THEME.brandPrimary}
+                      />
+                    }
+                    onPress={() => handleCaptureCtaPress('/record-voice')}
+                    compact={compact}
+                  />
+                  <CaptureDiscCtaOutline
+                    label="Écrire"
+                    labelFontFamily={captureCtaLabelFont}
+                    icon={
+                      <PenIcon
+                        size={
+                          compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE
+                        }
+                        color={THEME.brandPrimary}
+                      />
+                    }
+                    onPress={() => handleCaptureCtaPress('/write')}
+                    compact={compact}
+                  />
+                  <CaptureDiscCtaOutline
+                    label="Importer"
+                    labelFontFamily={captureCtaLabelFont}
+                    accessibilityLabel="Importer des photos ou vidéos"
+                    icon={
+                      <ImageImportIcon
+                        size={
+                          compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE
+                        }
+                        color={THEME.brandPrimary}
+                      />
+                    }
+                    onPress={() => handleCaptureCtaPress('/import-media')}
+                    compact={compact}
+                  />
+                </>
+              )}
+              </View>
             </View>
           </View>
         </ScrollView>
@@ -1123,11 +1299,10 @@ const styles = StyleSheet.create({
     textShadowRadius: 3,
     ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
   },
-  /** Bande sous la photo : titre en haut, CTAs centrés verticalement avant la tab bar. */
+  /** Bande sous la photo : titre en haut, CTAs centrés dans le reste jusqu’à la tab bar. */
   captureLowerSection: {
     flex: 1,
     width: '100%',
-    justifyContent: 'space-between',
     paddingTop: verticalScale(6),
     minHeight: verticalScale(168),
   },
@@ -1138,6 +1313,13 @@ const styles = StyleSheet.create({
   captureContentSection: {
     width: '100%',
     alignItems: 'flex-start',
+  },
+  /** Zone titre → tab bar : centre verticalement la rangée de CTA. */
+  captureCtaZone: {
+    flex: 1,
+    width: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   captureTitle: {
     fontSize: CAPTURE_TITLE_FONT_SIZE,
@@ -1166,14 +1348,6 @@ const styles = StyleSheet.create({
     marginRight: scale(4),
     marginBottom: scale(1),
   },
-  captureSubtitle: {
-    marginTop: verticalScale(6),
-    fontSize: scale(13),
-    lineHeight: scale(18),
-    color: THEME.textMuted,
-    letterSpacing: -0.1,
-    ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
-  },
   captureCtaRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -1181,50 +1355,9 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     gap: scale(26),
     width: '100%',
-    paddingTop: verticalScale(12),
-    paddingBottom: verticalScale(4),
   },
   captureCtaRowCompact: {
     gap: scale(20),
-  },
-  captureCtaTouch: {
-    alignItems: 'center',
-    gap: verticalScale(10),
-    maxWidth: CAPTURE_CTA_SIZE + scale(16),
-    paddingHorizontal: scale(6),
-  },
-  captureCtaContact: {
-    backgroundColor: 'transparent',
-  },
-  captureCtaDisc: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  captureCtaSheen: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 1,
-    backgroundColor: MOTION_CTA_MORPH_SHEEN,
-    zIndex: 2,
-  },
-  captureCtaDiscIcon: {
-    zIndex: 1,
-  },
-  captureCtaLabel: {
-    fontSize: scale(12),
-    lineHeight: scale(14),
-    color: THEME.captureCtaLabelColor,
-    letterSpacing: 0.15,
-    textAlign: 'center',
-    maxWidth: '100%',
-    paddingHorizontal: scale(2),
-    ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
-  },
-  captureCtaLabelCompact: {
-    fontSize: scale(12),
-    lineHeight: scale(15),
   },
   heroImageClip: {
     overflow: 'hidden',

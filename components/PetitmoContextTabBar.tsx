@@ -1,10 +1,15 @@
 import type { ComponentProps } from 'react';
-import { useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { PlatformPressable } from '@react-navigation/elements';
 import type { LucideIcon } from 'lucide-react-native';
 import { BookOpenText, Heart, List, Plus } from 'lucide-react-native';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated';
 import {
   FIXED_TAB_BAR_SLOTS,
   normalizeMainTabRoute,
@@ -34,7 +39,7 @@ const TAB_ICON_SIZE = scale(24);
 const TAB_ICON_ROW_H = scale(28);
 /** Disque Capturer hors écran : un peu plus grand que la ligne d’icônes. */
 const TAB_CAPTURE_PLUS_DISC = scale(34);
-/** Contour du disque, plus épais que le liseré CTA standard pour tenir le dégradé. */
+/** Contour du disque Capturer (teinte unie = onglets inactifs). */
 const TAB_CAPTURE_RING_WIDTH = scale(2);
 /**
  * Le disque dépasse la ligne d’icônes : sans ce léger basculement, le « + »
@@ -42,7 +47,11 @@ const TAB_CAPTURE_RING_WIDTH = scale(2);
  */
 const TAB_CAPTURE_NUDGE_Y = verticalScale(2);
 const TAB_LABEL_LINE_H = scale(12);
-const TAB_ICON_LABEL_GAP = verticalScale(3);
+const TAB_ICON_LABEL_GAP = verticalScale(1);
+
+/** Zoom actif type Marmo — scale progressif icône + label. */
+const TAB_ACTIVE_SCALE = 1.12;
+const TAB_SPRING = { damping: 18, stiffness: 220, mass: 0.75 } as const;
 
 const TAB_META: Record<
   MainTabRoute,
@@ -53,6 +62,9 @@ const TAB_META: Record<
   favoris: { titleKey: 'tabs.favorites', Icon: Heart },
   livres: { titleKey: 'tabs.books', Icon: BookOpenText },
 };
+
+type SlotLayout = { x: number; y: number; width: number; height: number };
+type ContentSize = { width: number; height: number };
 
 type Props = BottomTabBarProps & {
   tabLabelFontRegular?: string;
@@ -68,7 +80,7 @@ function TabBarGlyph({
   Icon: LucideIcon;
   focused: boolean;
   color: string;
-  /** Cercle contour noir + « + » hors écran Capturer. */
+  /** Disque + « + » hors écran Capturer (même teinte que les onglets inactifs). */
   captureHighlight?: boolean;
 }) {
   if (captureHighlight) {
@@ -82,6 +94,7 @@ function TabBarGlyph({
           plusSize={TAB_ICON_SIZE}
           ringWidth={TAB_CAPTURE_RING_WIDTH}
           plusStrokeWidth={focused ? 2.25 : 2}
+          color={THEME.tabBarInactiveTint}
         />
       </View>
     );
@@ -89,18 +102,30 @@ function TabBarGlyph({
 
   return (
     <View style={styles.iconWrap}>
-      <Icon size={TAB_ICON_SIZE} color={color} fill="none" strokeWidth={focused ? 2.25 : 2} />
+      <Icon size={TAB_ICON_SIZE} color={color} fill="none" strokeWidth={focused ? 2.4 : 2} />
     </View>
   );
 }
 
-function PetitmoTabBarButton({ children, ...props }: ComponentProps<typeof PlatformPressable>) {
+function PetitmoTabBarButton({
+  children,
+  onSlotLayout,
+  ...props
+}: ComponentProps<typeof PlatformPressable> & {
+  onSlotLayout?: (layout: SlotLayout) => void;
+}) {
   const { style, 'aria-selected': isActive, ...rest } = props;
   const flatStyle = StyleSheet.flatten(style) ?? {};
   const { backgroundColor: _navBg, ...navStyle } = flatStyle;
 
   return (
-    <View style={styles.tabBarButtonSlot}>
+    <View
+      style={styles.tabBarButtonSlot}
+      onLayout={e => {
+        const { x, y, width, height } = e.nativeEvent.layout;
+        onSlotLayout?.({ x, y, width, height });
+      }}
+    >
       <PlatformPressable
         {...rest}
         aria-selected={isActive}
@@ -110,6 +135,74 @@ function PetitmoTabBarButton({ children, ...props }: ComponentProps<typeof Platf
       </PlatformPressable>
     </View>
   );
+}
+
+function TabBarItemContent({
+  focused,
+  tint,
+  label,
+  Icon,
+  captureHighlight,
+  tabLabelFontRegular,
+  tabLabelFontMedium,
+  onContentLayout,
+}: {
+  focused: boolean;
+  tint: string;
+  label: string;
+  Icon: LucideIcon;
+  captureHighlight: boolean;
+  tabLabelFontRegular?: string;
+  tabLabelFontMedium?: string;
+  onContentLayout: (size: ContentSize) => void;
+}) {
+  const progress = useSharedValue(focused ? 1 : 0);
+
+  useEffect(() => {
+    progress.value = withSpring(focused ? 1 : 0, TAB_SPRING);
+  }, [focused, progress]);
+
+  const zoomStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: 1 + progress.value * (TAB_ACTIVE_SCALE - 1) }],
+  }));
+
+  return (
+    <View
+      style={styles.tabItemFrame}
+      onLayout={e => {
+        const { width, height } = e.nativeEvent.layout;
+        onContentLayout({ width, height });
+      }}
+    >
+      <Animated.View style={[styles.tabItemZoom, zoomStyle]}>
+        <TabBarGlyph
+          Icon={Icon}
+          focused={focused}
+          color={tint}
+          captureHighlight={captureHighlight}
+        />
+        <Text
+          style={[
+            styles.tabLabel,
+            loadedFontStyle(tabLabelFontRegular) ?? { fontWeight: '400' },
+            focused
+              ? [styles.tabLabelActive, loadedFontStyle(tabLabelFontMedium) ?? { fontWeight: '500' }]
+              : null,
+            { color: tint },
+          ]}
+          numberOfLines={1}
+        >
+          {label}
+        </Text>
+      </Animated.View>
+    </View>
+  );
+}
+
+function resolveActiveSlotIndex(state: BottomTabBarProps['state']): number {
+  const activeName = normalizeMainTabRoute(state.routes[state.index]?.name);
+  const slot = FIXED_TAB_BAR_SLOTS.indexOf(activeName);
+  return slot >= 0 ? slot : 0;
 }
 
 export default function PetitmoContextTabBar({
@@ -122,6 +215,7 @@ export default function PetitmoContextTabBar({
 }: Props) {
   const { t } = useAppTranslation('common');
   const activeRoute = normalizeMainTabRoute(state.routes[state.index]?.name);
+  const activeSlotIndex = resolveActiveSlotIndex(state);
   const favorisAddToBookSessionId = useSyncExternalStore(
     subscribeFavorisAddToBookSession,
     peekFavorisAddToBookSession,
@@ -129,6 +223,57 @@ export default function PetitmoContextTabBar({
   );
   const hideTabBarForBookAddFlow =
     activeRoute === 'favoris' && favorisAddToBookSessionId != null;
+
+  const slotLayouts = useRef<(SlotLayout | null)[]>([null, null, null, null]);
+  const contentSizes = useRef<(ContentSize | null)[]>([null, null, null, null]);
+  const pillReady = useSharedValue(0);
+  const pillX = useSharedValue(0);
+  const pillY = useSharedValue(0);
+  const pillW = useSharedValue(0);
+  const pillH = useSharedValue(0);
+  const lastPillSlot = useRef<number | null>(null);
+
+  const movePillToSlot = useCallback(
+    (slotIndex: number, animated: boolean) => {
+      const slot = slotLayouts.current[slotIndex];
+      const content = contentSizes.current[slotIndex];
+      if (!slot || !content) return;
+
+      const x = slot.x + (slot.width - content.width) / 2;
+      const y = slot.y + (slot.height - content.height) / 2;
+      const { width, height } = content;
+
+      if (!animated || pillReady.value === 0) {
+        pillX.value = x;
+        pillY.value = y;
+        pillW.value = width;
+        pillH.value = height;
+        pillReady.value = 1;
+      } else {
+        pillX.value = withSpring(x, TAB_SPRING);
+        pillY.value = withSpring(y, TAB_SPRING);
+        pillW.value = withSpring(width, TAB_SPRING);
+        pillH.value = withSpring(height, TAB_SPRING);
+      }
+      lastPillSlot.current = slotIndex;
+    },
+    [pillH, pillReady, pillW, pillX, pillY],
+  );
+
+  const syncPill = useCallback(() => {
+    movePillToSlot(activeSlotIndex, lastPillSlot.current != null);
+  }, [activeSlotIndex, movePillToSlot]);
+
+  useEffect(() => {
+    syncPill();
+  }, [syncPill]);
+
+  const pillStyle = useAnimatedStyle(() => ({
+    opacity: pillReady.value,
+    transform: [{ translateX: pillX.value }, { translateY: pillY.value }],
+    width: pillW.value,
+    height: pillH.value,
+  }));
 
   if (hideTabBarForBookAddFlow) {
     return null;
@@ -151,7 +296,8 @@ export default function PetitmoContextTabBar({
       ]}
     >
       <View style={styles.tabBarRow}>
-        {FIXED_TAB_BAR_SLOTS.map(routeName => {
+        <Animated.View pointerEvents="none" style={[styles.tabActivePill, pillStyle]} />
+        {FIXED_TAB_BAR_SLOTS.map((routeName, slotIndex) => {
           const routeIndex = state.routes.findIndex(r => r.name === routeName);
           if (routeIndex < 0) return null;
 
@@ -193,24 +339,24 @@ export default function PetitmoContextTabBar({
               onPress={onPress}
               onLongPress={onLongPress}
               style={showCapturePlusHighlight ? styles.captureTabNudgeDown : undefined}
+              onSlotLayout={layout => {
+                slotLayouts.current[slotIndex] = layout;
+                syncPill();
+              }}
             >
-              <TabBarGlyph
-                Icon={meta.Icon}
+              <TabBarItemContent
                 focused={isFocused}
-                color={tint}
+                tint={tint}
+                label={label}
+                Icon={meta.Icon}
                 captureHighlight={showCapturePlusHighlight}
+                tabLabelFontRegular={tabLabelFontRegular}
+                tabLabelFontMedium={tabLabelFontMedium}
+                onContentLayout={size => {
+                  contentSizes.current[slotIndex] = size;
+                  syncPill();
+                }}
               />
-              <Text
-                style={[
-                  styles.tabLabel,
-                  loadedFontStyle(tabLabelFontRegular),
-                  isFocused ? loadedFontStyle(tabLabelFontMedium) : null,
-                  { color: tint },
-                ]}
-                numberOfLines={1}
-              >
-                {label}
-              </Text>
             </PetitmoTabBarButton>
           );
         })}
@@ -233,12 +379,14 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
+    position: 'relative',
   },
   tabBarButtonSlot: {
     flex: 1,
     minWidth: 0,
     alignItems: 'center',
     justifyContent: 'center',
+    zIndex: 1,
   },
   tabBarPressableBase: {
     width: '100%',
@@ -248,6 +396,25 @@ const styles = StyleSheet.create({
   },
   captureTabNudgeDown: {
     transform: [{ translateY: TAB_CAPTURE_NUDGE_Y }],
+  },
+  tabItemFrame: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: scale(10),
+    paddingVertical: verticalScale(7),
+    minWidth: scale(64),
+  },
+  tabActivePill: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    borderRadius: scale(16),
+    backgroundColor: THEME.tabBarActivePill,
+    zIndex: 0,
+  },
+  tabItemZoom: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   iconWrap: {
     height: TAB_ICON_ROW_H,
@@ -264,6 +431,13 @@ const styles = StyleSheet.create({
     lineHeight: TAB_LABEL_LINE_H,
     letterSpacing: 0.05,
     textAlign: 'center',
+    opacity: 0.72,
     ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
+  },
+  tabLabelActive: {
+    fontSize: scale(11),
+    lineHeight: scale(13),
+    opacity: 1,
+    letterSpacing: 0.02,
   },
 });

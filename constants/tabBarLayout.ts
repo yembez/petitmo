@@ -4,8 +4,9 @@ import { THEME } from '@/constants/theme';
 
 /**
  * Hauteur utile **icône + libellé** (zone onglets au-dessus du remplissage safe area).
+ * Inclut padding vertical de la pilule + zoom actif (~1.12).
  */
-export const TAB_BAR_CONTENT_HEIGHT = verticalScale(28 + 3 + 12);
+export const TAB_BAR_CONTENT_HEIGHT = verticalScale(28 + 1 + 12 + 7 + 7 + 4);
 
 /** Padding au-dessus des onglets. */
 export const TAB_BAR_PADDING_TOP = verticalScale(6);

@@ -53,14 +53,19 @@ export const CAPTURE_CTA_GRADIENT_LOCATIONS = [0, 0.12, 0.58, 1] as const;
 
 /** @deprecated solid — milieu dégradé Écrire (fallback / thème). */
 export const CAPTURE_CTA_WRITE = CAPTURE_CTA_WRITE_GRADIENT[1];
-/** Rose accent — cœur titre Capturer + départ disque Importer. */
+/** Rose accent — départ disque Importer (dégradé). */
 export const CAPTURE_CTA_IMPORT = CAPTURE_CTA_IMPORT_GRADIENT[0];
+/**
+ * Corail icônes CTA Capturer outline (`THEME.brandPrimary`) —
+ * cœur titre + onglet tab bar actif.
+ */
+export const CAPTURE_CTA_ICON_CORAL = '#FC5757';
 /** Cœur dans le titre Capturer. */
-export const CAPTURE_TITLE_HEART = CAPTURE_CTA_IMPORT;
+export const CAPTURE_TITLE_HEART = CAPTURE_CTA_ICON_CORAL;
 /** Point pilule âge hero. */
 export const CAPTURE_PILL_AGE_DOT = BRAND_ACTION_ACCENT;
 /** Icône + libellé onglet actif tab bar. */
-export const CAPTURE_TAB_ACTIVE = BRAND_ACTION_ACCENT;
+export const CAPTURE_TAB_ACTIVE = CAPTURE_CTA_ICON_CORAL;
 
 
 

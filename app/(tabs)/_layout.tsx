@@ -1,12 +1,11 @@
 import { useEffect } from 'react';
-import { DeviceEventEmitter } from 'react-native';
-import { useFonts, DMSans_400Regular, DMSans_500Medium, DMSans_700Bold } from '@expo-google-fonts/dm-sans';
-import * as Font from 'expo-font';
+import { DeviceEventEmitter, Easing } from 'react-native';
 import { Tabs } from 'expo-router';
 import { TabTransitionProvider, useTabTransition } from '@/contexts/TabTransitionContext';
 import { MemoryTextFontProvider } from '@/contexts/MemoryTextFontContext';
 import PetitmoContextTabBar from '@/components/PetitmoContextTabBar';
 import { THEME } from '@/constants/theme';
+import { TAB_TRANSITION_DURATION_MS } from '@/constants/tabTransition';
 import { PETITMO_SELECT_TAB, type AppTabName } from '@/services/selectAppTab';
 
 export default function TabLayout() {
@@ -43,18 +42,9 @@ function TabSelectListener({
 
 function TabLayoutInner() {
   const { setTabIndex } = useTabTransition();
-  const [tabFontsLoaded] = useFonts({
-    DMSans_400Regular,
-    DMSans_500Medium,
-    DMSans_700Bold,
-  });
-  const tabFontsReady =
-    tabFontsLoaded ||
-    (Font.isLoaded('DMSans_400Regular') &&
-      Font.isLoaded('DMSans_500Medium') &&
-      Font.isLoaded('DMSans_700Bold'));
-  const tabLabelFontRegular = tabFontsReady ? 'DMSans_400Regular' : undefined;
-  const tabLabelFontMedium = tabFontsReady ? 'DMSans_500Medium' : undefined;
+  /** Libellés tab bar — police système (SF Pro sur iOS). */
+  const tabLabelFontRegular = undefined;
+  const tabLabelFontMedium = undefined;
 
   return (
     <Tabs
@@ -83,6 +73,19 @@ function TabLayoutInner() {
          * au retour sur Fil / Favoris, zoom diaporama et autoplay vidéo ne repartaient plus.
          */
         freezeOnBlur: false,
+        /**
+         * Cross-fade natif (évite le cut sec). `detachInactiveScreens: false` limite
+         * les écrans blancs connus avec `animation: 'fade'` + react-native-screens.
+         */
+        animation: 'fade',
+        transitionSpec: {
+          animation: 'timing',
+          config: {
+            duration: TAB_TRANSITION_DURATION_MS,
+            easing: Easing.bezier(0.22, 0.61, 0.36, 1),
+          },
+        },
+        detachInactiveScreens: false,
         sceneStyle: { backgroundColor: THEME.bg },
       }}>
       <Tabs.Screen name="fil" options={{ title: 'Journal' }} />
