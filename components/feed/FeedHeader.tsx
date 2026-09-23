@@ -1,8 +1,7 @@
 import { memo, type ReactNode } from 'react';
 import { View, Text, TouchableOpacity, Platform, StyleSheet } from 'react-native';
 import { BlurView } from 'expo-blur';
-import { LinearGradient } from 'expo-linear-gradient';
-import { CAPTURE_PHOTO_BORDER_GRADIENT } from '@/constants/captureScreenPalette';
+import { CAPTURE_CTA_ICON_CORAL } from '@/constants/captureScreenPalette';
 import { calculateAge } from '@/utils/date';
 import { scale } from '@/utils/responsive';
 import type { Child } from '@/utils/feedHelpers';
@@ -33,17 +32,12 @@ function familyHeaderTitle(children: Child[]): string {
   return '';
 }
 
-/** Liseré dégradé bleu → orange, même spectre que le contour de la photo hero Capturer. */
-function AvatarGradientRing({ children }: { children: ReactNode }) {
+/** Liseré corail uni — même teinte que les icônes CTA Capturer / onglet actif. */
+function AvatarCoralRing({ children }: { children: ReactNode }) {
   return (
-    <LinearGradient
-      colors={[...CAPTURE_PHOTO_BORDER_GRADIENT]}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={styles.headerAvatarRing}
-    >
+    <View style={[styles.headerAvatarRing, { backgroundColor: CAPTURE_CTA_ICON_CORAL }]}>
       <View style={styles.headerAvatarRingInner}>{children}</View>
-    </LinearGradient>
+    </View>
   );
 }
 
@@ -64,19 +58,19 @@ function FeedHeaderAvatarStack({
         accessibilityRole="button"
         accessibilityLabel={`Modifier le profil de ${givenName}`}
       >
-        <AvatarGradientRing>
+        <AvatarCoralRing>
           <ChildAvatar
             key={`${child.id}-${child.updated_at ?? ''}-${child.local_photo_path ?? ''}`}
             child={child}
             size={HEADER_AVATAR_PX}
           />
-        </AvatarGradientRing>
+        </AvatarCoralRing>
       </TouchableOpacity>
     );
   }
 
   return (
-    <AvatarGradientRing>
+    <AvatarCoralRing>
       <View style={headerAvatarStackStyles.row}>
         {familyChildren.map((child, index) => {
           const givenName = childDisplayGivenName(child.name) || child.name.trim() || 'Enfant';
@@ -94,13 +88,17 @@ function FeedHeaderAvatarStack({
               accessibilityLabel={`Modifier le profil de ${givenName}`}
             >
               <View style={headerAvatarStackStyles.avatarBorder}>
-                <ChildAvatar child={child} size={HEADER_AVATAR_PX} />
+                <ChildAvatar
+                  key={`${child.id}-${child.updated_at ?? ''}-${child.local_photo_path ?? ''}`}
+                  child={child}
+                  size={HEADER_AVATAR_PX}
+                />
               </View>
             </TouchableOpacity>
           );
         })}
       </View>
-    </AvatarGradientRing>
+    </AvatarCoralRing>
   );
 }
 

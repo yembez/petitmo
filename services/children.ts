@@ -245,6 +245,24 @@ export async function sanitizeChildLocalAvatarIfMissing(child: LocalChild): Prom
   const lp = (child.local_photo_path ?? '').trim();
   if (!lp) return child;
 
+  /** Path croisé (`petitmo_children/{autreId}.jpg`) → clear pour retomber sur photo_url / re-cache. */
+  if (lp.includes('petitmo_children/')) {
+    const base = lp.split('?')[0]?.split('/').pop() ?? '';
+    const id = child.id.trim();
+    if (
+      id &&
+      base &&
+      !base.startsWith(`${id}.`) &&
+      base !== id &&
+      /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(base)
+    ) {
+      console.warn('[children] avatar local path croisé, nettoyage', child.id, base);
+      const next: LocalChild = { ...child, local_photo_path: null };
+      upsertLocalChild(next);
+      return next;
+    }
+  }
+
   const uri = resolveChildProfileImageUri(lp, null);
   if (!uri?.startsWith('file')) return child;
 

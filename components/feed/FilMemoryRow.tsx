@@ -186,6 +186,7 @@ const PendingFeedUploadCard = memo(function PendingFeedUploadCard({
   feedLocationFilledFontFamily?: string;
 }) {
   const isVideo = p.kind === 'video';
+  const { t } = useAppTranslation('common');
   const preview0 = p.previewUris[0];
   const dateLabel = p.capturedAtPreviewIso
     ? formatDateLong(p.capturedAtPreviewIso)
@@ -231,6 +232,14 @@ const PendingFeedUploadCard = memo(function PendingFeedUploadCard({
             ) : (
               <PhotoMosaic urls={p.previewUris} />
             )}
+            {p.status !== 'error' ? (
+              <FeedMediaPrepOverlay
+                compact
+                prominent
+                blockTouches
+                label={isVideo ? t('mediaPrep.videoReady') : t('mediaPrep.addingPhoto')}
+              />
+            ) : null}
             {p.status === 'error' && p.errorMessage ? (
               <Text
                 style={{
@@ -844,9 +853,11 @@ function FilMemoryRow({
             </View>
           )}
 
-          {memory.type === 'video' && (!!videoPlaybackUri || !!videoPosterUri) && (
+          {memory.type === 'video' &&
+            (isOptimisticFeedPending || !!videoPlaybackUri || !!videoPosterUri) && (
             <View style={{ position: 'relative' }}>
               {mediaMetaOverlay}
+              {videoPlaybackUri.trim() || videoPosterUri.trim() ? (
               <Pressable
                 ref={videoImmersiveHostRef}
                 collapsable={false}
@@ -928,17 +939,6 @@ function FilMemoryRow({
                           />
                         </RNAnimated.View>
                       ) : null}
-                      {/** Roue seulement si aucun visuel local (pas de poster / preview). */}
-                      {isOptimisticFeedPending &&
-                      !videoPosterUri.trim() &&
-                      !videoPlaybackUri.trim() ? (
-                        <FeedMediaPrepOverlay
-                          compact
-                          prominent
-                          blockTouches
-                          label={t('mediaPrep.preparing')}
-                        />
-                      ) : null}
                     </View>
                   ) : videoPosterUri ? (
                     <View style={styles.photoImage}>
@@ -951,16 +951,7 @@ function FilMemoryRow({
                       />
                     </View>
                   ) : (
-                    <View style={[styles.photoImage, { backgroundColor: '#000000' }]}>
-                      {isOptimisticFeedPending ? (
-                        <FeedMediaPrepOverlay
-                          compact
-                          prominent
-                          blockTouches
-                          label={t('mediaPrep.preparing')}
-                        />
-                      ) : null}
-                    </View>
+                    <View style={[styles.photoImage, { backgroundColor: '#000000' }]} />
                   )}
                   {!skipImmersive && !canAutoplayVideoInline ? (
                     <View style={[styles.playOverlay, styles.videoPlayIconAboveTap]} pointerEvents="none">
@@ -971,6 +962,18 @@ function FilMemoryRow({
                   ) : null}
                 </View>
               </Pressable>
+              ) : (
+                <View style={[styles.mediaCard, styles.photoPlaceholder]} />
+              )}
+              {/** Pending import : points tant que le souvenir n’est pas posé en SQLite. */}
+              {isOptimisticFeedPending ? (
+                <FeedMediaPrepOverlay
+                  compact
+                  prominent
+                  blockTouches
+                  label={pendingPrepLabel?.trim() || t('mediaPrep.videoReady')}
+                />
+              ) : null}
               <FeedVideoDurationSoundBar
                 durationLabel={
                   memory.duration ? formatDuration(memory.duration) : undefined

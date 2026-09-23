@@ -433,6 +433,31 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
     useCallback(() => {
       setStatusBarStyle('dark');
       setFamilyChildren(readFamilyChildrenFromLocal());
+      /** Sanitize paths morts / croisés pour toute la famille ; re-cache photo cloud en silence. */
+      void (async () => {
+        const all = readFamilyChildrenFromLocal();
+        let changed = false;
+        for (const c of all) {
+          try {
+            const cleaned = await refreshChildProfileFromLocal(c.id);
+            if (!cleaned) continue;
+            if (
+              (cleaned.local_photo_path ?? '').trim() !== (c.local_photo_path ?? '').trim()
+            ) {
+              changed = true;
+            }
+            if (!(cleaned.local_photo_path ?? '').trim() && (cleaned.photo_url ?? '').trim()) {
+              await ensureChildFaceBounds(cleaned, { notify: false });
+              changed = true;
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+        if (changed) {
+          setFamilyChildren(readFamilyChildrenFromLocal());
+        }
+      })();
       const childId = childRef.current?.id;
       if (childId) {
         void refreshChildProfileFromLocal(childId).then(refreshed => {

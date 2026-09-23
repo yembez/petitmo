@@ -1,5 +1,6 @@
 import type { PendingUpload } from '@/contexts/PendingMediaUploadsContext';
 import { getAllPhotoUrlsForFeed } from '@/utils/memoryPhotos';
+import { getLocalMemoryById } from '@/lib/localDb';
 
 import type { Child, Memory } from '@/types/local';
 export type { Memory, Child } from '@/types/local';
@@ -163,10 +164,14 @@ export function mergeMemoriesListPreservingVisualRowRefs(prev: Memory[], server:
     }
   }
 
+  // Local-only (pas encore sync) : on les garde.
+  // Archivés côté SQLite : volontairement hors fil — ne pas les réinjecter depuis `prev`.
   for (const p of prev) {
-    if (!mergedById.has(p.id)) {
-      mergedById.set(p.id, p);
-    }
+    if (mergedById.has(p.id)) continue;
+    const local = getLocalMemoryById(p.id);
+    if (!local) continue;
+    if (local.archived_at) continue;
+    mergedById.set(p.id, p);
   }
 
   return [...mergedById.values()].sort(compareMemoriesByEventDateDesc);

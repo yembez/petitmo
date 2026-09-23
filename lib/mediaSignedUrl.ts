@@ -178,27 +178,35 @@ export function isBareMediaBucketPath(uri: string | null | undefined): boolean {
   return !!extractMediaBucketPath(t);
 }
 
+function syncSignedMediaUrlForRaw(raw: string): string | null {
+  if (!raw) return null;
+  const peeked = peekSignedMediaDisplayUrl(raw);
+  if (peeked && !isBareMediaBucketPath(peeked)) return peeked;
+  // Attendre la signature — ne pas exposer le chemin nu (résolu → Bundle iOS).
+  if (isBareMediaBucketPath(raw)) return null;
+  return peeked ?? raw;
+}
+
 export function useSignedMediaUrl(url: string | null | undefined): string | null {
   const raw = typeof url === 'string' ? url.trim() : '';
-  const [out, setOut] = useState<string | null>(() => {
-    if (!raw) return null;
-    const peeked = peekSignedMediaDisplayUrl(raw);
-    if (peeked && !isBareMediaBucketPath(peeked)) return peeked;
-    // Attendre la signature — ne pas exposer le chemin nu (résolu → Bundle iOS).
-    if (isBareMediaBucketPath(raw)) return null;
-    return peeked ?? raw;
-  });
+  const syncOut = syncSignedMediaUrlForRaw(raw);
+  const [state, setState] = useState<{ raw: string; url: string | null }>(() => ({
+    raw,
+    url: syncOut,
+  }));
 
   useEffect(() => {
     if (!raw) {
-      setOut(null);
+      setState({ raw: '', url: null });
       return;
     }
     const cached = peekSignedMediaDisplayUrl(raw);
     if (cached && !isBareMediaBucketPath(cached)) {
-      setOut(prev => (prev === cached ? prev : cached));
+      setState({ raw, url: cached });
       return;
     }
+    // Alignement immédiat sur le nouveau raw (évite d’afficher l’URL de l’ancien path).
+    setState({ raw, url: syncSignedMediaUrlForRaw(raw) });
     let alive = true;
     if (isBookPortraitPerfEnabled()) {
       bookPortraitPerfNetwork('useSignedMediaUrl:fetch-start', {
@@ -217,15 +225,19 @@ export function useSignedMediaUrl(url: string | null | undefined): string | null
       if (!alive) return;
       // Signature échouée + chemin bucket → null (évite Bundle WARN).
       if (isBareMediaBucketPath(next)) {
-        setOut(prev => (prev == null ? prev : null));
+        setState(prev => (prev.raw === raw ? { raw, url: null } : prev));
         return;
       }
-      setOut(prev => (prev === next ? prev : next || null));
+      setState(prev =>
+        prev.raw === raw ? { raw, url: next || null } : prev,
+      );
     })();
     return () => {
       alive = false;
     };
   }, [raw]);
 
-  return out;
+  // Jamais renvoyer une URL signée liée à un autre `raw` (instance recyclée / props changées).
+  if (state.raw !== raw) return syncOut;
+  return state.url;
 }

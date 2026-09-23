@@ -28,6 +28,9 @@ function pendingPrepLabelFor(
   p: PendingUpload,
   t: (key: string, opts?: Record<string, unknown>) => string,
 ): string {
+  if (p.kind === 'video') {
+    return t('mediaPrep.videoReady');
+  }
   const total = p.batchTotal ?? 0;
   if (total > 1) {
     const done = Math.min(Math.max(0, p.batchDone ?? 0), total);

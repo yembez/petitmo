@@ -90,7 +90,10 @@ export function useFilRowActions(
       const hasAudio = !!(memory.media_url?.trim() || memory.local_media_path?.trim());
       if (!hasAudio) return;
       try {
-        /** PHPicker : pas de demande d’accès photothèque, la sélection suffit. */
+        const { ensureMediaLibraryPickerAllowed } = await import('@/lib/mediaLibraryOptIn');
+        if (!(await ensureMediaLibraryPickerAllowed())) return;
+
+        /** PHPicker après opt-in compte. */
         const result = await ImagePicker.launchImageLibraryAsync({
           mediaTypes: ['images'],
           quality: 0.85,

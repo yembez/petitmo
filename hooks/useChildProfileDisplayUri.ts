@@ -7,6 +7,7 @@ import {
 } from '@/utils/childPhotoUri';
 
 type ChildPhotoFields = {
+  id?: string | null;
   local_photo_path?: string | null;
   photo_url?: string | null;
   updated_at?: string | null;
@@ -28,45 +29,67 @@ function isSandboxOrDeviceLocalUri(uri: string): boolean {
 }
 
 /**
+ * True si le fichier sandbox semble appartenir à un **autre** enfant
+ * (`petitmo_children/{otherId}.jpg` alors que `child.id` est différent).
+ */
+function localPathBelongsToOtherChild(
+  localPhotoPath: string | null | undefined,
+  childId: string,
+): boolean {
+  const id = childId.trim();
+  const lp = (localPhotoPath ?? '').trim();
+  if (!id || !lp || !lp.includes('petitmo_children/')) return false;
+  const base = stripUriQuery(lp).split('/').pop() ?? '';
+  if (!base) return false;
+  // Attendu : `{childId}.ext` — refus si un autre UUID apparaît dans le nom.
+  if (base.startsWith(`${id}.`) || base === id) return false;
+  return /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(base);
+}
+
+/**
  * URI affichable pour la photo profil enfant (Capturer, avatar, mosaïque).
  * Local sandbox **seulement** s’il existe encore ; sinon URL Storage re-signée.
  * Évite le trou « file:// mort » après TestFlight / réinstall qui masquait `photo_url`.
  */
 export function useChildProfileDisplayUri(child: ChildPhotoFields | null | undefined): string {
+  const childId = (child?.id ?? '').trim();
+  const localRawPath = (child?.local_photo_path ?? '').trim();
+  const crossed = localPathBelongsToOtherChild(localRawPath, childId);
+
   const localDisplay =
-    resolveChildProfileImageDisplayUri(
-      child?.local_photo_path,
-      null,
-      child?.updated_at,
-    ) ?? '';
+    !crossed
+      ? resolveChildProfileImageDisplayUri(localRawPath || null, null, child?.updated_at) ?? ''
+      : '';
   const remoteRaw = (child?.photo_url ?? '').trim();
   const remoteBase = remoteRaw ? resolveChildProfileImageUri(null, remoteRaw) : null;
   const signedRemote = useSignedMediaUrl(remoteBase);
 
   const localCandidate =
     localDisplay && isSandboxOrDeviceLocalUri(localDisplay) ? localDisplay : '';
-  const [localUsable, setLocalUsable] = useState(false);
+  const localProbe = localCandidate ? stripUriQuery(localCandidate) : '';
+
+  /** `null` = pas encore vérifié pour ce probe — ne jamais réutiliser un true d’un autre path. */
+  const [verifiedProbe, setVerifiedProbe] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!localCandidate) {
-      setLocalUsable(false);
-      return;
-    }
+    setVerifiedProbe(null);
+    if (!localProbe) return;
     let cancelled = false;
-    const uri = stripUriQuery(localCandidate);
-    void getInfoAsync(uri)
+    void getInfoAsync(localProbe)
       .then(info => {
-        if (!cancelled) setLocalUsable(!!(info.exists && !info.isDirectory));
+        if (!cancelled) {
+          setVerifiedProbe(info.exists && !info.isDirectory ? localProbe : '');
+        }
       })
       .catch(() => {
-        if (!cancelled) setLocalUsable(false);
+        if (!cancelled) setVerifiedProbe('');
       });
     return () => {
       cancelled = true;
     };
-  }, [localCandidate]);
+  }, [childId, localProbe]);
 
-  if (localUsable && localCandidate) return localCandidate;
+  if (localCandidate && verifiedProbe === localProbe) return localCandidate;
 
   if (signedRemote && !isBareMediaBucketPath(signedRemote)) return signedRemote;
   if (remoteBase && !isBareMediaBucketPath(remoteBase) && /^https?:\/\//i.test(remoteBase)) {
