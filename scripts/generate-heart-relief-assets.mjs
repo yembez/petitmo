@@ -29,9 +29,9 @@ const OUT_ICON = path.join(images, 'icon_petit_coeur_heart.png');
 const STROKE_SRC = '#111318';
 const STROKE_NOIR = '#1C1C1E';
 const STROKE_WHITE = '#FFFFFF';
-/** Stroke du SVG source (viewBox 1024). */
-const STROKE_WIDTH_SRC = 9;
-const MASK_STROKE_WIDTH_SRC = 16;
+/** Stroke du SVG source (viewBox 1024) — tous les outlines héritent du groupe. */
+const STROKE_WIDTH_SRC = 17;
+const MASK_STROKE_WIDTH_SRC = 30;
 /**
  * Trait icône app : plus épais pour la lisibilité home screen.
  * Vectoriel (round joins) — pas de dilatation bitmap.
@@ -76,19 +76,23 @@ function prepareIconSvg(svgText, strokeWidth) {
     /<path\s+id="path6"[\s\S]*?\/>/,
     '',
   );
-  // Stroke du groupe principal (source = 9).
+  // Stroke du groupe principal.
   out = out.replace(
-    /(<g\b[\s\S]*?\bstroke-width=")9(")/,
+    new RegExp(`(<g\\b[\\s\\S]*?\\bstroke-width=")${STROKE_WIDTH_SRC}(")`),
     `$1${strokeWidth}$2`,
   );
-  // Stroke du masque path1 (source = 16), attribut avant ou après id.
+  // Stroke du masque path1, attribut avant ou après id.
   if (out.includes('id="path1"')) {
     out = out.replace(
-      /(id="path1"[\s\S]{0,120}?stroke-width=")16(")/,
+      new RegExp(
+        `(id="path1"[\\s\\S]{0,120}?stroke-width=")${MASK_STROKE_WIDTH_SRC}(")`,
+      ),
       `$1${maskStroke}$2`,
     );
     out = out.replace(
-      /(stroke-width=")16("[\s\S]{0,80}?id="path1")/,
+      new RegExp(
+        `(stroke-width=")${MASK_STROKE_WIDTH_SRC}("[\\s\\S]{0,80}?id="path1")`,
+      ),
       `$1${maskStroke}$2`,
     );
   }

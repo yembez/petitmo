@@ -28,14 +28,14 @@
          d="M 560 850 C 510 800 300 650 300 455 C 300 335 390 275 480 305 C 520 318 545 345 560 375 C 575 345 600 318 640 305 C 730 275 820 335 820 455 C 820 650 610 800 560 850 Z"
          fill="black"
          stroke="black"
-         stroke-width="16"
+         stroke-width="30"
          id="path1" />
     </mask>
   </defs>
   <g
      fill="none"
      stroke="#FFFFFF"
-     stroke-width="9"
+     stroke-width="17"
      stroke-linecap="round"
      stroke-linejoin="round"
      id="g5">

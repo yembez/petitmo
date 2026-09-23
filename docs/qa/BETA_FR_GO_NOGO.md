@@ -87,26 +87,23 @@ Sur **build TestFlight** (profil EAS `production` — pas le dev client) :
 
 Décision produit (2026-07-22) : la bêta doit exercer le **modèle compte + cloud**, pas le local-only anonyme.
 
-État code actuel (à revalider) :
+**État code (2026-09)** — à smoke-tester sur TestFlight :
 
-- Onboarding « J’ai déjà un compte » : **placeholder**
-- Paywall : **flux démo / IAP pas branché** (`app/paywall.tsx`)
-- Sync cloud : surtout chemin **paid** / upgrade simulé
-- Remise print code : **−10 %** paid (`lib/pricingV1.ts`) — **figé**, pas 15 %
-- Commande livre : souvent **sans encaissement** en QA
-
-Avant **bêta ouverte** :
-
-- [ ] Auth : Google / Apple / email+mdp + mot de passe oublié ; soft gate dès « Commencer » (compte → enfant)
-- [ ] Sync cloud dès le gratuit (quotas 50 / 5×20s vidéo / audio 60 s — retirer cap 5 audios dans `limits.ts`)
-- [ ] Photos : thumb + print A5 cloud ; HD local jusqu’à +
-- [ ] RevenueCat + IAP abo + webhook `subscriptionTier=paid`
-- [ ] Login « J’ai déjà un compte » + restore appareil
-- [ ] Suppression de compte in-app (exigence Apple)
-- [ ] Décision print : **A)** IAP / achat print branché, **ou** **B)** bêta « livres offerts » écrite aux testeurs
+- [x] Auth Google / Apple / email+mdp + soft gate (compte → enfant) — `app/auth.tsx`, `app/onboarding.tsx`
+- [x] Login « J’ai déjà un compte » → `/auth?mode=login` (plus un placeholder)
+- [x] Mot de passe oublié bout-en-bout (e-mail + deep link `petitmo://auth` + UI nouveau MDP) — **smoke manuel + Redirect URL Supabase**
+- [x] Sync cloud dès le gratuit (local-first) — `activateCloudSyncAfterRealAuth`
+- [x] Quotas : 50 souvenirs / 5×20 s vidéo / audio **60 s** (plus de cap **nombre** d’audios)
+- [x] Photos : thumb + print A5 cloud ; HD si `paid` — `services/media.ts`
+- [x] Remise print **−10 %** paid (`lib/pricingV1.ts`) — figé, pas 15 %
+- [x] Suppression de compte in-app (UI + Edge `delete-account` + purge Storage) — **Edge redéployée 2026-09-23** ; **smoke manuel TF encore ouvert**
+- [x] Edge `revenuecat-webhook` + lifecycle (`touch-activity`, `inactivity-sweep`) — **redéployées 2026-09-23** ; IAP store + secrets EAS encore ouverts
+- [ ] RevenueCat + IAP abo + webhook `subscriptionTier=paid` — **code + Edge prêts ; bloqué conformité Apple / offerings dashboard / secrets EAS**
+- [ ] Smoke TF : restore même e-mail + parcours 1–9
+- [ ] Décision print : **A)** Stripe checkout branché, **ou** **B)** bêta « livres offerts » écrite aux testeurs
 - [ ] Si B print : message in-app ou email (« pas de débit ») — **l’abo reste P0** même si le print est offert
 
-**Petitmo+ n’est plus optionnel** pour une bêta qui annonce le modèle cible : pas de « abo démo OK ».
+**Petitmo+ n’est plus optionnel** pour une bêta qui annonce le modèle cible : pas de « abo démo OK » une fois la conformité Apple validée.
 
 ---
 
@@ -120,6 +117,11 @@ Avant **bêta ouverte** :
 - [ ] Suivi technique : Dashboard Supabase `export_requests` (`status`, `last_error`, `printer_order_id`)
 - [ ] Retirer / confirmer inactif : `resetUserTierForTesting` et autres flags TEMP dans `_layout`
 - [ ] Build **Release** TestFlight (pas debug) ; version / build number notés
+
+### Backlog post-bêta (spec écrite, pas code)
+
+Lifecycle abo / inactivité / mails Resend : [`docs/specs/subscription-lifecycle-retention.md`](../specs/subscription-lifecycle-retention.md)  
+(grâce 2 mois → free + archive >50 ; inactivité 24 mois J−90/30/7 ; delete volontaire vs QR conservés).
 
 ### P1 Panel bêta
 
@@ -158,15 +160,16 @@ Avant **bêta ouverte** :
 [ ] Smoke print + QR audio OK
 [ ] TestFlight install frais OK (parcours 1–9)
 [ ] Gelato draft OK (interne) OU order + 1 colis OK (ouverte)
-[ ] Auth + sync gratuit + restore OK
-[ ] RevenueCat / IAP abo + subscriptionTier serveur OK
-[ ] Remise print −10 % paid affichée cohérente
-[ ] Suppression de compte in-app OK
+[x] Auth + sync gratuit (code) — smoke restore TF encore ouvert
+[ ] RevenueCat / IAP abo + subscriptionTier serveur OK (attente conformité Apple + offerings RC)
+[x] Remise print −10 % paid affichée cohérente (code)
+[x] Suppression de compte in-app (code + purge Storage + Edge déployée 2026-09-23) — smoke TF ouvert
+[x] Cap nombre audios retiré (durée 60 s conservée)
+[x] Mot de passe oublié bout-en-bout (code) — smoke + Redirect URL Supabase
 [ ] Paiement print : branché OU bêta offerte documentée
-[ ] Privacy URL OK
+[ ] Privacy URL OK (page `petitcoeur.app/#/privacy` joignable — contenu juridique à valider)
 [ ] Canal feedback OK
-[ ] Aucun TEMP / reset tier actif en build bêta
-```
+[ ] Aucun TEMP / reset tier actif en build bêta (`resetUserTierForTesting` déjà commenté)```
 
 **Si une case manque → NO-GO ouverte.**  
 **GO interne** possible avec Gelato draft + paiement offert / non encaissé, **à condition** que les testeurs le sachent.
