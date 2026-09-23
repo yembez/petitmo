@@ -4,7 +4,7 @@
  * Compte d’abord ; si intent=subscribe → paywall, puis profil enfant si besoin.
  * UI maquette : zone photo + carte frosted ; un seul scroll d’écran.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -44,25 +44,30 @@ import { scale, verticalScale } from '@/utils/responsive';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
 import {
+  completeAuthCallbackFromUrl,
   hasRealAuthAccount,
   isAppleSignInNativeAvailable,
+  isPasswordRecoveryCallback,
   requestPasswordReset,
   signInWithAppleNative,
   signInWithEmailPassword,
   signInWithGoogleOAuth,
   signUpWithEmailPassword,
+  updatePasswordAfterRecovery,
 } from '@/lib/authAccount';
+import { supabase } from '@/lib/supabase';
 import { getChildren } from '@/services/children';
 import { listLocalChildrenForUser } from '@/lib/localDb';
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
 import { hydrateTabScreensFromSqliteSync } from '@/services/tabScreensHydrate';
 import { safeRouterBack } from '@/utils/safeRouterBack';
+import { LEGAL_PRIVACY_URL, LEGAL_TERMS_URL } from '@/lib/legalUrls';
 
 type AuthMode = 'signup' | 'login';
 type AuthIntent = 'free' | 'subscribe';
+/** `reset` = deep link recovery — nouveau MDP avant d’entrer dans l’app. */
+type AuthUiPhase = 'boot' | 'auth' | 'reset';
 
-const URL_TERMS = 'https://petitmo.app/terms';
-const URL_PRIVACY = 'https://petitmo.app/privacy';
 const AUTH_BG = require('@/assets/images/auth_mother_child.jpg');
 
 /** Part de l’écran réservée aux visages + titre (carte démarre en dessous). */
@@ -100,11 +105,14 @@ export default function AuthScreen() {
   const isSubscribe = intent === 'subscribe';
 
   const [mode, setMode] = useState<AuthMode>(() => parseMode(params.mode));
+  const [uiPhase, setUiPhase] = useState<AuthUiPhase>('boot');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [passwordConfirm, setPasswordConfirm] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [appleAvailable, setAppleAvailable] = useState(false);
+  /** iOS : afficher Apple tout de suite (évite le jump Google-only → Apple+Google). */
+  const [appleAvailable, setAppleAvailable] = useState(Platform.OS === 'ios');
   /** True seulement quand on quitte déjà l’écran (session existante / post-submit) — pas au 1er paint. */
   const [leavingShell, setLeavingShell] = useState(false);
 
@@ -130,29 +138,47 @@ export default function AuthScreen() {
   }, [params.mode]);
 
   useEffect(() => {
-    void isAppleSignInNativeAvailable().then(setAppleAvailable);
+    if (Platform.OS !== 'ios') {
+      setAppleAvailable(false);
+      return;
+    }
+    let cancelled = false;
+    void isAppleSignInNativeAvailable().then(ok => {
+      if (!cancelled) setAppleAvailable(ok);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const title = isSubscribe
-    ? mode === 'signup'
-      ? t('auth.plus.signupTitle')
-      : t('auth.plus.loginTitle')
-    : mode === 'signup'
-      ? t('auth.signupTitle')
-      : t('auth.loginTitle');
-  const subtitle = isSubscribe
-    ? mode === 'signup'
-      ? t('auth.plus.signupSubtitle')
-      : t('auth.plus.loginSubtitle')
-    : mode === 'signup'
-      ? t('auth.signupSubtitle')
-      : t('auth.loginSubtitle');
+  const title =
+    uiPhase === 'reset'
+      ? t('auth.resetTitle')
+      : isSubscribe
+        ? mode === 'signup'
+          ? t('auth.plus.signupTitle')
+          : t('auth.plus.loginTitle')
+        : mode === 'signup'
+          ? t('auth.signupTitle')
+          : t('auth.loginTitle');
+  const subtitle =
+    uiPhase === 'reset'
+      ? t('auth.resetSubtitle')
+      : isSubscribe
+        ? mode === 'signup'
+          ? t('auth.plus.signupSubtitle')
+          : t('auth.plus.loginSubtitle')
+        : mode === 'signup'
+          ? t('auth.signupSubtitle')
+          : t('auth.loginSubtitle');
   const primaryCta =
-    mode === 'signup'
-      ? isSubscribe
-        ? t('auth.plus.signupCta')
-        : t('auth.signupCta')
-      : t('auth.loginCta');
+    uiPhase === 'reset'
+      ? t('auth.resetCta')
+      : mode === 'signup'
+        ? isSubscribe
+          ? t('auth.plus.signupCta')
+          : t('auth.signupCta')
+        : t('auth.loginCta');
 
   const goPaywall = useCallback(() => {
     router.replace({
@@ -173,14 +199,17 @@ export default function AuthScreen() {
         return;
       }
 
-      // Après auth réussie (e-mail / Google / Apple) : même règle.
-      // Pas d’enfant local → écran permissions puis create-child.
+      // Login / reconnexion : SQLite vide → pull enfants avant de router
+      // (sinon écran permissions rejoué alors que le compte a déjà un fil).
       if (localCount === 0) {
-        // Login : un pull cloud peut encore trouver des enfants (autre appareil).
-        if (!opts?.assumeNewAccount && mode === 'login') {
+        if (!opts?.assumeNewAccount) {
           const children = await getChildren();
-          hydrateTabScreensFromSqliteSync();
           if (children.length > 0) {
+            hydrateTabScreensFromSqliteSync();
+            const { markOnboardingPermissionsSeen } = await import(
+              '@/lib/onboardingPermissionsSeen'
+            );
+            await markOnboardingPermissionsSeen(uid);
             router.replace('/(tabs)');
             return;
           }
@@ -204,22 +233,107 @@ export default function AuthScreen() {
     [goPaywall, isSubscribe, mode, router]
   );
 
+  const finishAfterAuthRef = useRef(finishAfterAuth);
+  finishAfterAuthRef.current = finishAfterAuth;
+  const passwordRecoveryActiveRef = useRef(false);
+
   useEffect(() => {
-    void (async () => {
-      if (await hasRealAuthAccount()) {
-        // Déjà connecté : shell sombre (même fond) pendant la nav — pas de flash formulaire.
-        setLeavingShell(true);
-        await finishAfterAuth();
-        return;
+    let cancelled = false;
+    const enterReset = () => {
+      if (cancelled) return;
+      passwordRecoveryActiveRef.current = true;
+      setPassword('');
+      setPasswordConfirm('');
+      setUiPhase('reset');
+      setLeavingShell(false);
+    };
+
+    const handleCallbackUrl = async (url: string | null): Promise<boolean> => {
+      if (!url) return false;
+      // Même garde-fou que +native-intent : tokens souvent en `#…` (Supabase).
+      const normalized =
+        url.includes('#') && !url.includes('?')
+          ? url.replace('#', '?')
+          : url.includes('#') && url.includes('?')
+            ? url.replace('#', '&')
+            : url;
+      const looksRecovery = isPasswordRecoveryCallback(normalized);
+      const hasTokens =
+        normalized.includes('access_token') ||
+        normalized.includes('refresh_token') ||
+        normalized.includes('type=') ||
+        normalized.includes('code=') ||
+        normalized.includes('token_hash=');
+      if (!looksRecovery && !hasTokens) return false;
+
+      const result = await completeAuthCallbackFromUrl(normalized);
+      if (!result.ok) {
+        if (looksRecovery || url.includes('code=')) {
+          Alert.alert(t('error'), result.error || t('auth.resetLinkInvalid'));
+        }
+        return false;
       }
+      if (result.passwordRecovery || looksRecovery) {
+        enterReset();
+        return true;
+      }
+      // OAuth / confirm e-mail via deep link : entrer dans l’app.
+      if (cancelled) return true;
+      setLeavingShell(true);
+      await finishAfterAuthRef.current();
+      return true;
+    };
+
+    void (async () => {
+      try {
+        const initialUrl = await Linking.getInitialURL();
+        if (await handleCallbackUrl(initialUrl)) return;
+
+        if (passwordRecoveryActiveRef.current) return;
+
+        // getSession local — timeout court pour ne jamais rester sur uiPhase boot.
+        const accountOk = await Promise.race([
+          hasRealAuthAccount(),
+          new Promise<boolean>(resolve => setTimeout(() => resolve(false), 2000)),
+        ]);
+        if (accountOk) {
+          if (cancelled || passwordRecoveryActiveRef.current) return;
+          setLeavingShell(true);
+          await finishAfterAuthRef.current();
+          return;
+        }
+      } catch (e) {
+        console.warn('[auth] boot', e);
+      }
+      if (!cancelled && !passwordRecoveryActiveRef.current) setUiPhase('auth');
     })();
-  }, [finishAfterAuth]);
+
+    const linkSub = Linking.addEventListener('url', ({ url }) => {
+      void handleCallbackUrl(url);
+    });
+
+    const {
+      data: { subscription: authSub },
+    } = supabase.auth.onAuthStateChange(event => {
+      if (event === 'PASSWORD_RECOVERY') {
+        enterReset();
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      linkSub.remove();
+      authSub.unsubscribe();
+    };
+    // Boot une seule fois — finishAfterAuth via ref (évite de quitter l’UI reset).
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional mount-only
+  }, [t]);
 
   const run = useCallback(
     async (
       fn: () => Promise<
         | { ok: true; needsEmailConfirmation?: boolean }
-        | { ok: false; error: string }
+        | { ok: false; error: string; alreadyRegistered?: boolean }
       >
     ) => {
       if (busy || leavingShell) return;
@@ -227,7 +341,12 @@ export default function AuthScreen() {
       try {
         const result = await fn();
         if (!result.ok) {
-          Alert.alert(t('error'), result.error);
+          if (result.alreadyRegistered && mode === 'signup') {
+            setMode('login');
+            Alert.alert(t('auth.loginTitle'), result.error);
+          } else {
+            Alert.alert(t('error'), result.error);
+          }
           setBusy(false);
           return;
         }
@@ -243,7 +362,11 @@ export default function AuthScreen() {
           return;
         }
         setLeavingShell(true);
-        await finishAfterAuth({ assumeNewAccount: mode === 'signup' });
+        const reconnected =
+          'reconnectedExisting' in result && Boolean(result.reconnectedExisting);
+        await finishAfterAuth({
+          assumeNewAccount: mode === 'signup' && !reconnected,
+        });
       } catch (e) {
         console.warn('[auth] run', e);
         Alert.alert(t('error'), t('error'));
@@ -282,8 +405,36 @@ export default function AuthScreen() {
     })();
   };
 
-  // Premier paint = UI auth (fond photo). Shell plein uniquement à la sortie (OAuth / déjà connecté).
-  if (!fontsLoaded || leavingShell || busy) {
+  const onResetPasswordSubmit = () => {
+    void (async () => {
+      if (busy || leavingShell) return;
+      if (password !== passwordConfirm) {
+        Alert.alert(t('error'), t('auth.resetMismatch'));
+        return;
+      }
+      setBusy(true);
+      try {
+        const result = await updatePasswordAfterRecovery(password);
+        if (!result.ok) {
+          Alert.alert(t('error'), result.error);
+          setBusy(false);
+          return;
+        }
+        Alert.alert(t('auth.resetSuccessTitle'), t('auth.resetSuccessBody'));
+        setLeavingShell(true);
+        await finishAfterAuth({ assumeNewAccount: false });
+      } catch (e) {
+        console.warn('[auth] reset password', e);
+        Alert.alert(t('error'), t('error'));
+        setBusy(false);
+        setLeavingShell(false);
+      }
+    })();
+  };
+
+  // Shell plein : boot / navigation sortante seulement.
+  // Pendant saisie MDP (`busy`), garder le formulaire + spinner bouton — sinon hang réseau = écran mort.
+  if (!fontsLoaded || leavingShell || uiPhase === 'boot') {
     return (
       <View style={styles.shell}>
         <Image source={AUTH_BG} style={bgStyle} resizeMode="cover" />
@@ -349,7 +500,7 @@ export default function AuthScreen() {
                 {title}
               </Text>
 
-              {mode === 'signup' && !isSubscribe ? (
+              {mode === 'signup' && !isSubscribe && uiPhase !== 'reset' ? (
                 <View style={styles.badge}>
                   <Text style={[styles.badgeText, { fontFamily: dm600 }]}>
                     {t('auth.freeBadge')}
@@ -375,6 +526,73 @@ export default function AuthScreen() {
                 <BlurView intensity={42} tint="light" style={StyleSheet.absoluteFillObject} />
               ) : null}
               <View style={styles.cardInner}>
+                {uiPhase === 'reset' ? (
+                  <>
+                    <Text style={[styles.label, { fontFamily: dm700 }]}>{t('auth.password')}</Text>
+                    <View style={styles.passwordRow}>
+                      <TextInput
+                        style={[styles.input, styles.passwordInput, { fontFamily: dm500 }]}
+                        value={password}
+                        onChangeText={setPassword}
+                        secureTextEntry={!showPassword}
+                        textContentType="newPassword"
+                        autoComplete="password-new"
+                        placeholder={t('auth.passwordPlaceholder')}
+                        placeholderTextColor={THEME.textTertiary}
+                        editable={!busy}
+                      />
+                      <TouchableOpacity
+                        style={styles.eyeBtn}
+                        onPress={() => setShowPassword(v => !v)}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          showPassword ? t('auth.hidePassword') : t('auth.showPassword')
+                        }
+                        hitSlop={8}
+                      >
+                        {showPassword ? (
+                          <EyeOff size={scale(18)} color={THEME.textSecondary} />
+                        ) : (
+                          <Eye size={scale(18)} color={THEME.textSecondary} />
+                        )}
+                      </TouchableOpacity>
+                    </View>
+
+                    <Text style={[styles.label, { fontFamily: dm700 }]}>
+                      {t('auth.resetPasswordConfirm')}
+                    </Text>
+                    <TextInput
+                      style={[styles.input, { fontFamily: dm500 }]}
+                      value={passwordConfirm}
+                      onChangeText={setPasswordConfirm}
+                      secureTextEntry={!showPassword}
+                      textContentType="newPassword"
+                      autoComplete="password-new"
+                      placeholder={t('auth.passwordPlaceholder')}
+                      placeholderTextColor={THEME.textTertiary}
+                      editable={!busy}
+                    />
+                    <View style={styles.forgotSpacer} />
+
+                    <PetitmoPrimaryPressable
+                      style={styles.primaryCta}
+                      onPress={onResetPasswordSubmit}
+                      disabled={busy}
+                      activeOpacity={0.9}
+                      accessibilityRole="button"
+                      accessibilityLabel={primaryCta}
+                    >
+                      {busy ? (
+                        <ActivityIndicator color={PETITMO_CTA_SPINNER_COLOR} />
+                      ) : (
+                        <Text style={[petitmoCtaStyles.primaryText, { fontFamily: dm700 }]}>
+                          {primaryCta}
+                        </Text>
+                      )}
+                    </PetitmoPrimaryPressable>
+                  </>
+                ) : (
+                  <>
                 <View style={styles.benefitsRow}>
                   {isSubscribe ? (
                     <>
@@ -594,15 +812,17 @@ export default function AuthScreen() {
 
                 <Text style={[styles.legal, { fontFamily: dm500 }]}>
                   {t('auth.legalBefore')}
-                  <Text style={styles.legalLink} onPress={() => void openUrl(URL_TERMS)}>
+                  <Text style={styles.legalLink} onPress={() => void openUrl(LEGAL_TERMS_URL)}>
                     {t('auth.legalTerms')}
                   </Text>
                   {t('auth.legalAnd')}
-                  <Text style={styles.legalLink} onPress={() => void openUrl(URL_PRIVACY)}>
+                  <Text style={styles.legalLink} onPress={() => void openUrl(LEGAL_PRIVACY_URL)}>
                     {t('auth.legalPrivacy')}
                   </Text>
                   {t('auth.legalAfter')}
                 </Text>
+                  </>
+                )}
               </View>
             </View>
           </View>

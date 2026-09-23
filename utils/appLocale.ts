@@ -20,12 +20,26 @@ export function formatAppDate(
   return date.toLocaleDateString(appLocaleTag(lang), options);
 }
 
-/** Tarifs Petitmo V1 en EUR ; format selon la locale active. */
-export function formatAppCurrency(amountEur: number, lang: AppLanguage = DEFAULT_APP_LANGUAGE): string {
-  return new Intl.NumberFormat(appLocaleTag(lang), {
-    style: 'currency',
-    currency: 'EUR',
-  }).format(amountEur);
+/** Montant localisé ; `currency` = code ISO (EUR, USD…) — StoreKit / RC. */
+export function formatAppCurrency(
+  amount: number,
+  lang: AppLanguage = DEFAULT_APP_LANGUAGE,
+  currency = 'EUR',
+): string {
+  const code = currency.trim().toUpperCase() || 'EUR';
+  try {
+    return new Intl.NumberFormat(appLocaleTag(lang), {
+      style: 'currency',
+      currency: code,
+      currencyDisplay: 'narrowSymbol',
+    }).format(amount);
+  } catch {
+    return new Intl.NumberFormat(appLocaleTag(lang), {
+      style: 'currency',
+      currency: 'EUR',
+      currencyDisplay: 'narrowSymbol',
+    }).format(amount);
+  }
 }
 
 /** Affichage nom de pays (ISO 3166-1 alpha-2) — pas de liste traduite à la main. */

@@ -9,6 +9,7 @@ import {
   deleteLocalChild,
   deleteLocalMemory,
   getAllLocalMemories,
+  getAllLocalMemoriesIncludingArchived,
   listLocalBooks,
   listLocalChildren,
   listLocalChildrenForUser,
@@ -77,7 +78,7 @@ export function localWorkspaceConflictsWithUser(userId: string): boolean {
 export async function clearLocalAccountWorkspace(reason: string): Promise<void> {
   console.warn('[accountLocalReset] clearLocalAccountWorkspace', reason);
 
-  const memories = getAllLocalMemories();
+  const memories = getAllLocalMemoriesIncludingArchived();
   for (const memory of memories) {
     try {
       await deleteLocalMediaFiles(memory);
@@ -148,14 +149,17 @@ export async function prepareLocalWorkspaceForRealUser(userId: string): Promise<
   /**
    * Récupération post-bug « claim volant » : premier tracking, cloud du compte vide,
    * mais SQLite déjà rempli avec ce `user_id` (données d’un autre e-mail réattribuées).
+   * Jamais await réseau ici sans timeout — sinon login spinner infini.
    */
   let cloudEmptyStale = false;
   if (!switched && !foreign && !prev && listLocalChildrenForUser(uid).length > 0) {
     try {
-      const { count, error } = await supabase
-        .from('children')
-        .select('id', { count: 'exact', head: true });
-      if (!error && (count ?? 0) === 0) {
+      const probe = supabase.from('children').select('id', { count: 'exact', head: true });
+      const timed = await Promise.race([
+        Promise.resolve(probe).then(r => r),
+        new Promise<null>(resolve => setTimeout(() => resolve(null), 2000)),
+      ]);
+      if (timed && !('error' in timed && timed.error) && (timed.count ?? 0) === 0) {
         cloudEmptyStale = true;
       }
     } catch (e) {

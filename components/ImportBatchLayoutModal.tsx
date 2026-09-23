@@ -1,3 +1,7 @@
+/**
+ * Choix album (plusieurs photos / un post) vs un post par photo.
+ * Désactivé en v1 via `IMPORT_MULTI_PHOTO_ALBUM_ENABLED` — code conservé pour plus tard.
+ */
 import { View, Text, StyleSheet, Modal } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { scale, verticalScale } from '@/utils/responsive';

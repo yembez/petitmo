@@ -60,12 +60,13 @@ void SplashScreen.preventAutoHideAsync();
 
 function RootLayoutNav() {
   useFrameworkReady();
-  const [bootFontsLoaded, bootFontsError] = useFonts(APP_BOOT_FONT_SOURCES);
-  /** Erreur de charge ≠ ready : on garderait les « ? » iOS. */
-  const bootFontsReady = (bootFontsLoaded && areAppBootFontsLoaded()) || !!bootFontsError;
+  const [bootFontsLoaded] = useFonts(APP_BOOT_FONT_SOURCES);
+  /** Erreur de charge ≠ ready : on garderait les « ? » iOS si on peignait sans faces. */
+  const bootFontsReady = bootFontsLoaded && areAppBootFontsLoaded();
   const [isAuthReady, setIsAuthReady] = useState(false);
-  /** Filet auth uniquement — ne force jamais l’UI sans polices. */
+  /** Filet auth uniquement — ne force jamais l’UI sans polices (sauf timeout ci-dessous). */
   const [forceAuthReady, setForceAuthReady] = useState(false);
+  const [forceFontsReady, setForceFontsReady] = useState(false);
   const pathname = usePathname();
 
   /** Portrait partout sauf prévisualisation livre (paysage au pivot). */
@@ -174,7 +175,8 @@ function RootLayoutNav() {
         const { getRealAuthUser } = await import('@/lib/authAccount');
         const user = await getRealAuthUser();
         if (user?.id) {
-          await logInRevenueCat(user.id);
+          // Ne jamais bloquer le boot sur RC (timeouts Test Store fréquents).
+          void logInRevenueCat(user.id);
         }
       } catch (e) {
         console.warn('[boot] revenueCat', e);
@@ -249,6 +251,14 @@ function RootLayoutNav() {
             // Local d’abord ; pull cloud en fond → `memories-updated` soft si merge.
             void hydrateTabScreensFromLocal();
             void import('@/services/registerPushToken').then(m => m.registerPushTokenInBackground());
+            // Tier / captureLocked / billingIssue depuis Auth (fond, sans bloquer l’UI).
+            void import('@/lib/authAccount').then(async ({ getRealAuthUser, syncUserTierFromSessionUser }) => {
+              const u = await getRealAuthUser();
+              if (u) await syncUserTierFromSessionUser(u);
+            });
+            void import('@/services/touchAccountActivity').then(m =>
+              m.touchAccountActivityInBackground(),
+            );
           });
       }, 450);
     });
@@ -288,12 +298,12 @@ function RootLayoutNav() {
   }, [isAuthReady]);
 
   useEffect(() => {
-    if (!bootFontsReady) return;
+    if (!bootFontsReady && !forceFontsReady) return;
     if (!isAuthReady && !forceAuthReady) return;
     void SplashScreen.hideAsync();
-  }, [bootFontsReady, isAuthReady, forceAuthReady]);
+  }, [bootFontsReady, forceFontsReady, isAuthReady, forceAuthReady]);
 
-  /** Filet anti-blocage splash sur auth / OTA — les polices restent bloquantes. */
+  /** Filet anti-blocage splash : auth 6s ; polices 12s (évite hang si expo-font échoue). */
   useEffect(() => {
     const t = setTimeout(() => {
       setForceAuthReady(true);
@@ -302,7 +312,16 @@ function RootLayoutNav() {
     return () => clearTimeout(t);
   }, []);
 
-  if (!bootFontsReady || (!isAuthReady && !forceAuthReady)) {
+  useEffect(() => {
+    if (bootFontsReady) return;
+    const t = setTimeout(() => {
+      console.warn('[boot] fonts timeout — UI avec repli système (évite splash infini)');
+      setForceFontsReady(true);
+    }, 12_000);
+    return () => clearTimeout(t);
+  }, [bootFontsReady]);
+
+  if ((!bootFontsReady && !forceFontsReady) || (!isAuthReady && !forceAuthReady)) {
     return <View style={styles.bootShell} />;
   }
 
@@ -347,7 +366,18 @@ function RootLayoutNav() {
         />
         <Stack.Screen name="camera" />
         <Stack.Screen name="record-voice" />
-        <Stack.Screen name="import-media" />
+        <Stack.Screen
+          name="import-media"
+          options={{
+            /**
+             * Pas de slide depuis la droite. Pas de `transparentModal` :
+             * une couche transparente plein écran restait parfois après annulation
+             * et bloquait tous les taps Capturer.
+             */
+            animation: 'none',
+            contentStyle: { flex: 1, backgroundColor: THEME.bgScreen },
+          }}
+        />
         <Stack.Screen
           name="shareintent"
           options={{
@@ -392,6 +422,7 @@ function RootLayoutNav() {
         <Stack.Screen name="book-order-confirmation" />
         <Stack.Screen name="capture-wheel-mock" />
         <Stack.Screen name="capture-applelike-mock" />
+        <Stack.Screen name="capture-cta-icons-mock" options={{ headerShown: false }} />
         <Stack.Screen name="+not-found" />
       </Stack>
       {/** Défaut fond clair : icônes statut foncées. `auto` suivait le thème OS (icônes claires en mode sombre) alors que l’UI reste claire. */}

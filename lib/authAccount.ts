@@ -6,12 +6,24 @@ import { supabase } from '@/lib/supabase';
 import { setCloudAccountKind } from '@/lib/userMode';
 import { setUserTier, type UserTier } from '@/lib/userTier';
 import { getGoogleIosClientId, getGoogleWebClientId } from '@/lib/googleAuthConfig';
-import { prepareLocalWorkspaceForRealUser } from '@/services/accountLocalReset';
+import {
+  prepareLocalWorkspaceForRealUser,
+  setLastRealAuthUserId,
+} from '@/services/accountLocalReset';
 import { claimLocalDataForCloudUser } from '@/services/claimLocalDataForCloud';
 import { ensureSupabaseSession } from '@/lib/ensureSupabaseSession';
 import { clearSelectedChildAndCaptureSnapshot } from '@/services/children';
 
 WebBrowser.maybeCompleteAuthSession();
+
+/**
+ * Redirect e-mail Auth (reset MDP) → scheme natif uniquement.
+ * `Linking.createURL('auth')` seul renvoie souvent `exp://IP:8081/--/auth` avec Metro :
+ * Safari ouvre ça en page blanche. Allow-list Supabase : `petitmo://auth`.
+ */
+export function getPasswordResetRedirectUrl(): string {
+  return Linking.createURL('auth', { scheme: 'petitmo' });
+}
 
 const DEVICE_EMAIL_SUFFIX = '@petitmo.local';
 
@@ -42,27 +54,38 @@ function rememberRealAuthUser(user: User | null | undefined): void {
 }
 
 export type AuthAccountResult =
-  | { ok: true; user: User; session: Session | null; needsEmailConfirmation?: boolean }
-  | { ok: false; error: string };
+  | {
+      ok: true;
+      user: User;
+      session: Session | null;
+      needsEmailConfirmation?: boolean;
+      /** Compte déjà existant reconduit via signup → traiter comme login. */
+      reconnectedExisting?: boolean;
+    }
+  | { ok: false; error: string; alreadyRegistered?: boolean };
 
 export function isDeviceUserEmail(email: string | null | undefined): boolean {
   if (!email) return false;
   return email.toLowerCase().endsWith(DEVICE_EMAIL_SUFFIX);
 }
 
-/** Compte produit (Google / Apple / email), pas le device-user technique. */
+/**
+ * Compte produit (Google / Apple / email), pas le device-user technique.
+ * Lit la session **locale** (`getSession`) — jamais `getUser()` (réseau) sur un chemin UI.
+ */
 export async function getRealAuthUser(): Promise<User | null> {
-  const { data, error } = await supabase.auth.getUser();
-  if (error || !data.user) {
+  const { data, error } = await supabase.auth.getSession();
+  const user = data.session?.user;
+  if (error || !user) {
     rememberRealAuthUser(null);
     return null;
   }
-  if (isDeviceUserEmail(data.user.email)) {
+  if (isDeviceUserEmail(user.email)) {
     rememberRealAuthUser(null);
     return null;
   }
-  rememberRealAuthUser(data.user);
-  return data.user;
+  rememberRealAuthUser(user);
+  return user;
 }
 
 export async function hasRealAuthAccount(): Promise<boolean> {
@@ -78,7 +101,42 @@ export function tierFromUserAppMetadata(user: User | null | undefined): UserTier
 export async function syncUserTierFromSessionUser(user: User | null | undefined): Promise<UserTier> {
   const tier = tierFromUserAppMetadata(user);
   await setUserTier(tier);
+  try {
+    const { syncBillingIssueFromUser } = await import('@/lib/billingIssue');
+    await syncBillingIssueFromUser(user);
+  } catch (e) {
+    console.warn('[auth] syncBillingIssueFromUser', e);
+  }
+  try {
+    const { syncCaptureLockedFromUser } = await import('@/lib/captureLock');
+    await syncCaptureLockedFromUser(user);
+    const { invalidateMemoryLimitCache } = await import('@/lib/limits');
+    invalidateMemoryLimitCache();
+  } catch (e) {
+    console.warn('[auth] syncCaptureLockedFromUser', e);
+  }
+  // V1 : archives downgrade legacy → visibles (plus d’archivage à l’expiration).
+  try {
+    const { restoreLocalDowngradeArchivedMemories } = await import('@/services/memoryArchiveLocal');
+    restoreLocalDowngradeArchivedMemories();
+  } catch (e) {
+    console.warn('[auth] restoreLocalDowngradeArchivedMemories', e);
+  }
   return tier;
+}
+
+/**
+ * Marque immédiatement la session produit en mémoire (UI / peekLastRealAuthUserId)
+ * puis lance la sync en fond — **ne jamais await** depuis un chemin login/signup.
+ */
+export function scheduleCloudSyncAfterRealAuth(user: User): void {
+  if (isDeviceUserEmail(user.email)) return;
+  rememberRealAuthUser(user);
+  // Mémoire sync tout de suite (AsyncStorage en fond) — finishAfterAuth lit peek*.
+  void setLastRealAuthUserId(user.id);
+  void activateCloudSyncAfterRealAuth(user).catch(e =>
+    console.warn('[auth] activateCloudSyncAfterRealAuth', e),
+  );
 }
 
 /**
@@ -89,6 +147,8 @@ export async function activateCloudSyncAfterRealAuth(user: User): Promise<void> 
   if (isDeviceUserEmail(user.email)) return;
 
   rememberRealAuthUser(user);
+  // Idempotent si déjà posé par scheduleCloudSyncAfterRealAuth.
+  void setLastRealAuthUserId(user.id);
 
   try {
     await prepareLocalWorkspaceForRealUser(user.id);
@@ -96,29 +156,31 @@ export async function activateCloudSyncAfterRealAuth(user: User): Promise<void> 
     console.warn('[auth] prepareLocalWorkspaceForRealUser', e);
   }
 
-  await setCloudAccountKind('real');
-  await syncUserTierFromSessionUser(user);
-
-  // RevenueCat : lier l’id Supabase ; entitlement actif → cache paid (webhook peut encore rattraper app_metadata).
   try {
-    const { logInRevenueCat } = await import('@/lib/revenueCat');
-    await logInRevenueCat(user.id);
+    await setCloudAccountKind('real');
   } catch (e) {
-    console.warn('[auth] logInRevenueCat', e);
+    console.warn('[auth] setCloudAccountKind', e);
+  }
+  try {
+    await syncUserTierFromSessionUser(user);
+  } catch (e) {
+    console.warn('[auth] syncUserTierFromSessionUser', e);
   }
 
-  try {
-    await claimLocalDataForCloudUser(user.id);
-  } catch (e) {
-    console.warn('[auth] claimLocalDataForCloudUser', e);
-  }
+  // RevenueCat / claim / flush : fond uniquement — ne jamais bloquer l’UI (timeouts RC fréquents).
+  void import('@/lib/revenueCat')
+    .then(m => m.logInRevenueCat(user.id))
+    .catch(e => console.warn('[auth] logInRevenueCat', e));
 
-  try {
-    const { flushPendingCloudUploadsOnce } = await import('@/services/pendingCloudFlush');
-    void flushPendingCloudUploadsOnce();
-  } catch (e) {
-    console.warn('[auth] flushPendingCloudUploadsOnce', e);
-  }
+  void import('@/services/touchAccountActivity').then(m => m.touchAccountActivityInBackground());
+
+  void claimLocalDataForCloudUser(user.id).catch(e =>
+    console.warn('[auth] claimLocalDataForCloudUser', e),
+  );
+
+  void import('@/services/pendingCloudFlush')
+    .then(m => m.flushPendingCloudUploadsOnce())
+    .catch(e => console.warn('[auth] flushPendingCloudUploadsOnce', e));
 
   // Livres + commandes : restore cloud en fond après login (pas seulement au cold start).
   void (async () => {
@@ -185,12 +247,23 @@ export async function syncCloudAccountKindFromSession(): Promise<void> {
 /**
  * Quitte une éventuelle session device-user avant un vrai login/signup,
  * pour ne pas coller le nouveau compte à l’ancien user technique.
+ *
+ * **scope: 'local' uniquement** — `signOut()` global (défaut) appelle le serveur Auth
+ * et peut rester pendu → spinner infini après MDP / Apple / Google.
  */
 export async function clearDeviceUserSessionIfNeeded(): Promise<void> {
-  const { data } = await supabase.auth.getSession();
-  const email = data.session?.user?.email;
-  if (isDeviceUserEmail(email)) {
-    await supabase.auth.signOut();
+  try {
+    const { data } = await supabase.auth.getSession();
+    const email = data.session?.user?.email;
+    if (!isDeviceUserEmail(email)) return;
+
+    const localSignOut = supabase.auth.signOut({ scope: 'local' });
+    await Promise.race([
+      localSignOut,
+      new Promise<void>(resolve => setTimeout(resolve, 1500)),
+    ]);
+  } catch (e) {
+    console.warn('[auth] clearDeviceUserSessionIfNeeded', e);
   }
 }
 
@@ -231,15 +304,41 @@ export async function signUpWithEmailPassword(
   });
 
   if (error) {
-    return { ok: false, error: mapAuthError(error.message) };
+    const already =
+      error.message.toLowerCase().includes('user already registered') ||
+      error.message.toLowerCase().includes('already been registered');
+    return {
+      ok: false,
+      error: mapAuthError(error.message),
+      alreadyRegistered: already || undefined,
+    };
   }
   if (!data.user) {
     return { ok: false, error: 'Création de compte impossible pour le moment.' };
   }
 
+  /**
+   * Compte déjà existant (confirmé) : Supabase renvoie souvent un user « fantôme »
+   * sans session et sans identities, pour éviter l’énumération d’e-mails.
+   * → tenter une connexion avec le même mot de passe (parcours « Commencer »).
+   */
+  const identities = data.user.identities ?? [];
+  if (!data.session && identities.length === 0) {
+    const signedIn = await signInWithEmailPassword(trimmed, password);
+    if (signedIn.ok) {
+      return { ...signedIn, reconnectedExisting: true };
+    }
+    return {
+      ok: false,
+      error:
+        'Un compte existe déjà avec cet e-mail. Vérifie ton mot de passe, ou utilise « J’ai déjà un compte ».',
+      alreadyRegistered: true,
+    };
+  }
+
   const needsEmailConfirmation = !data.session;
   if (data.session?.user) {
-    await activateCloudSyncAfterRealAuth(data.session.user);
+    scheduleCloudSyncAfterRealAuth(data.session.user);
   }
 
   return {
@@ -289,7 +388,7 @@ export async function verifySignupEmailOtp(
     return { ok: false, error: 'Vérification impossible pour le moment.' };
   }
 
-  await activateCloudSyncAfterRealAuth(data.user);
+  scheduleCloudSyncAfterRealAuth(data.user);
   return { ok: true, user: data.user, session: data.session };
 }
 
@@ -339,7 +438,7 @@ export async function signInWithEmailPassword(
     return { ok: false, error: 'Connexion impossible pour le moment.' };
   }
 
-  await activateCloudSyncAfterRealAuth(data.user);
+  scheduleCloudSyncAfterRealAuth(data.user);
   return { ok: true, user: data.user, session: data.session };
 }
 
@@ -349,11 +448,184 @@ export async function requestPasswordReset(email: string): Promise<{ ok: true } 
     return { ok: false, error: 'Indique ton adresse e-mail.' };
   }
 
-  const redirectTo = Linking.createURL('auth');
+  const redirectTo = getPasswordResetRedirectUrl();
   const { error } = await supabase.auth.resetPasswordForEmail(trimmed, { redirectTo });
   if (error) {
     return { ok: false, error: mapAuthError(error.message) };
   }
+  return { ok: true };
+}
+
+/** Tokens + `type` / `code` (PKCE) / `token_hash` depuis un deep link `petitmo://auth#…` ou `?…`. */
+export function parseAuthCallbackParams(url: string): {
+  access_token: string | null;
+  refresh_token: string | null;
+  type: string | null;
+  code: string | null;
+  token_hash: string | null;
+} {
+  try {
+    // Expo Router / iOS peuvent déjà avoir converti `#` → `?` ; on parse les deux.
+    const normalized = url.includes('#') && !url.includes('?')
+      ? url.replace('#', '?')
+      : url.includes('#') && url.includes('?')
+        ? url.replace('#', '&')
+        : url;
+    const parsed = new URL(normalized);
+    const query = new URLSearchParams(parsed.search.replace(/^\?/, ''));
+    const hash = new URLSearchParams(parsed.hash.replace(/^#/, ''));
+    const pick = (key: string) => query.get(key) ?? hash.get(key);
+    return {
+      access_token: pick('access_token'),
+      refresh_token: pick('refresh_token'),
+      type: pick('type'),
+      code: pick('code'),
+      token_hash: pick('token_hash'),
+    };
+  } catch {
+    return {
+      access_token: null,
+      refresh_token: null,
+      type: null,
+      code: null,
+      token_hash: null,
+    };
+  }
+}
+
+export function isPasswordRecoveryCallback(url: string): boolean {
+  const { type, code, token_hash } = parseAuthCallbackParams(url);
+  if (type === 'recovery') return true;
+  // Lien reset PKCE : souvent `petitmo://auth?code=…` sans `type` explicite.
+  if (code && /(?:^|[/?#])auth(?:[/?#]|$)/i.test(url) && !type) return true;
+  return Boolean(token_hash && /(?:^|[/?#])auth(?:[/?#]|$)/i.test(url));
+}
+
+/**
+ * Installe la session depuis un callback deep link (recovery ou OAuth).
+ * Pour `type=recovery`, n’active pas encore la sync cloud — attendre `updatePasswordAfterRecovery`.
+ */
+export async function completeAuthCallbackFromUrl(
+  url: string,
+): Promise<
+  | { ok: true; passwordRecovery: boolean; user: User; session: Session | null }
+  | { ok: false; error: string }
+> {
+  const { access_token, refresh_token, type, code, token_hash } = parseAuthCallbackParams(url);
+
+  await clearDeviceUserSessionIfNeeded();
+
+  // PKCE (défaut supabase-js v2) : e-mail → ?code=…
+  if (code && !access_token) {
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+    if (error || !data.user) {
+      return {
+        ok: false,
+        error: error ? mapAuthError(error.message) : 'Session impossible.',
+      };
+    }
+    const passwordRecovery = type === 'recovery' || isPasswordRecoveryCallback(url);
+    if (passwordRecovery) {
+      rememberRealAuthUser(data.user);
+      await syncUserTierFromSessionUser(data.user);
+    } else {
+      scheduleCloudSyncAfterRealAuth(data.user);
+    }
+    return {
+      ok: true,
+      passwordRecovery,
+      user: data.user,
+      session: data.session,
+    };
+  }
+
+  // Template e-mail avec `{{ .TokenHash }}` → deep link sans passage Safari verify.
+  if (token_hash && !access_token) {
+    const otpType =
+      type === 'signup' || type === 'magiclink' || type === 'email'
+        ? type
+        : 'recovery';
+    const { data, error } = await supabase.auth.verifyOtp({
+      type: otpType,
+      token_hash,
+    });
+    if (error || !data.user) {
+      return {
+        ok: false,
+        error: error ? mapAuthError(error.message) : 'Session impossible.',
+      };
+    }
+    const passwordRecovery = otpType === 'recovery' || type === 'recovery';
+    if (passwordRecovery) {
+      rememberRealAuthUser(data.user);
+      await syncUserTierFromSessionUser(data.user);
+    } else {
+      scheduleCloudSyncAfterRealAuth(data.user);
+    }
+    return {
+      ok: true,
+      passwordRecovery,
+      user: data.user,
+      session: data.session,
+    };
+  }
+
+  if (!access_token || !refresh_token) {
+    return {
+      ok: false,
+      error:
+        'Lien incomplet ou expiré. Redemande un e-mail depuis l’app (ignore les anciens liens).',
+    };
+  }
+
+  const { data, error } = await supabase.auth.setSession({
+    access_token,
+    refresh_token,
+  });
+
+  if (error || !data.user) {
+    return {
+      ok: false,
+      error: error ? mapAuthError(error.message) : 'Session impossible.',
+    };
+  }
+
+  const passwordRecovery = type === 'recovery';
+  if (passwordRecovery) {
+    rememberRealAuthUser(data.user);
+    await syncUserTierFromSessionUser(data.user);
+  } else {
+    scheduleCloudSyncAfterRealAuth(data.user);
+  }
+
+  return {
+    ok: true,
+    passwordRecovery,
+    user: data.user,
+    session: data.session,
+  };
+}
+
+/** Après deep link recovery : définit le nouveau mot de passe puis active la sync. */
+export async function updatePasswordAfterRecovery(
+  password: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!password) {
+    return { ok: false, error: 'Mot de passe requis.' };
+  }
+  if (password.length < 8) {
+    return { ok: false, error: 'Le mot de passe doit contenir au moins 8 caractères.' };
+  }
+
+  const { data, error } = await supabase.auth.updateUser({ password });
+  if (error) {
+    return { ok: false, error: mapAuthError(error.message) };
+  }
+  if (!data.user || isDeviceUserEmail(data.user.email)) {
+    return { ok: false, error: 'Session de récupération invalide. Redemande un e-mail.' };
+  }
+
+  scheduleCloudSyncAfterRealAuth(data.user);
   return { ok: true };
 }
 
@@ -434,7 +706,7 @@ export async function signInWithAppleNative(): Promise<AuthAccountResult> {
     return { ok: false, error: 'Connexion Apple impossible.' };
   }
 
-  // Apple ne renvoie le nom qu’au premier consentement — le garder en metadata.
+  // Apple ne renvoie le nom qu’au premier consentement — le garder en metadata (fond).
   if (credential.fullName) {
     const parts = [
       credential.fullName.givenName,
@@ -442,17 +714,19 @@ export async function signInWithAppleNative(): Promise<AuthAccountResult> {
       credential.fullName.familyName,
     ].filter((p): p is string => Boolean(p && p.trim()));
     if (parts.length > 0) {
-      await supabase.auth.updateUser({
-        data: {
-          full_name: parts.join(' '),
-          given_name: credential.fullName.givenName ?? undefined,
-          family_name: credential.fullName.familyName ?? undefined,
-        },
-      });
+      void supabase.auth
+        .updateUser({
+          data: {
+            full_name: parts.join(' '),
+            given_name: credential.fullName.givenName ?? undefined,
+            family_name: credential.fullName.familyName ?? undefined,
+          },
+        })
+        .catch(e => console.warn('[auth] apple updateUser name', e));
     }
   }
 
-  await activateCloudSyncAfterRealAuth(data.user);
+  scheduleCloudSyncAfterRealAuth(data.user);
   return { ok: true, user: data.user, session: data.session };
 }
 
@@ -518,7 +792,7 @@ async function signInWithGoogleNative(): Promise<AuthAccountResult | null> {
       return { ok: false, error: 'Connexion Google impossible.' };
     }
 
-    await activateCloudSyncAfterRealAuth(data.user);
+    scheduleCloudSyncAfterRealAuth(data.user);
     return { ok: true, user: data.user, session: data.session };
   } catch (e: unknown) {
     const code =
@@ -584,19 +858,40 @@ async function signInWithGoogleWebOAuth(): Promise<AuthAccountResult> {
     };
   }
 
-  await activateCloudSyncAfterRealAuth(sessionData.user);
+  scheduleCloudSyncAfterRealAuth(sessionData.user);
   return { ok: true, user: sessionData.user, session: sessionData.session };
 }
 
 export async function signOutRealAccount(): Promise<void> {
   try {
     const { logOutRevenueCat } = await import('@/lib/revenueCat');
-    await logOutRevenueCat();
+    void logOutRevenueCat();
   } catch (e) {
     console.warn('[auth] logOutRevenueCat', e);
   }
-  await supabase.auth.signOut();
+  // Local d’abord (fiable hors-ligne) ; global en fond pour invalider refresh token serveur.
+  try {
+    await Promise.race([
+      supabase.auth.signOut({ scope: 'local' }),
+      new Promise<void>(resolve => setTimeout(resolve, 1500)),
+    ]);
+  } catch (e) {
+    console.warn('[auth] signOut local', e);
+  }
+  void supabase.auth.signOut({ scope: 'global' }).catch(() => {});
   rememberRealAuthUser(null);
+  try {
+    const { setCaptureLockedLocal } = await import('@/lib/captureLock');
+    await setCaptureLockedLocal(false);
+  } catch {
+    /* */
+  }
+  try {
+    const { setBillingIssueLocal } = await import('@/lib/billingIssue');
+    await setBillingIssueLocal(false);
+  } catch {
+    /* */
+  }
   await Promise.all([
     setCloudAccountKind('none'),
     setUserTier('free'),
@@ -625,13 +920,14 @@ export async function deleteRealAccount(): Promise<{ ok: true } | { ok: false; e
   const { data, error } = await supabase.functions.invoke('delete-account', {
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}` },
+    body: { mode: 'voluntary' },
   });
 
   if (error) {
     console.warn('[auth] delete-account', error);
     return {
       ok: false,
-      error: 'Impossible de supprimer le compte pour le moment. Réessaie ou écris à contact@petitmo.app.',
+      error: 'Impossible de supprimer le compte pour le moment. Réessaie ou écris à support@petitcoeur.app.',
     };
   }
   if (data && typeof data === 'object' && 'error' in data && data.error) {
@@ -646,8 +942,12 @@ export async function deleteRealAccount(): Promise<{ ok: true } | { ok: false; e
       '@/services/accountLocalReset'
     );
     const { clearOnboardingPermissionsSeen } = await import('@/lib/onboardingPermissionsSeen');
+    const { clearMediaLibraryOptIn } = await import('@/lib/mediaLibraryOptIn');
+    const { clearLocationSoftPromptSeen } = await import('@/lib/memoryLocation');
     await clearLocalAccountWorkspace('delete-account');
     await clearOnboardingPermissionsSeen(user.id);
+    await clearMediaLibraryOptIn(user.id);
+    await clearLocationSoftPromptSeen(user.id);
     await setLastRealAuthUserId(null);
   } catch (e) {
     console.warn('[auth] clearLocalAccountWorkspace after delete', e);
@@ -661,10 +961,14 @@ export async function deleteRealAccount(): Promise<{ ok: true } | { ok: false; e
     console.warn('[auth] logOutRevenueCat after delete', e);
   }
   try {
-    await supabase.auth.signOut();
+    await Promise.race([
+      supabase.auth.signOut({ scope: 'local' }),
+      new Promise<void>(resolve => setTimeout(resolve, 1500)),
+    ]);
   } catch (e) {
     console.warn('[auth] signOut after delete', e);
   }
+  void supabase.auth.signOut({ scope: 'global' }).catch(() => {});
   await Promise.all([
     setCloudAccountKind('none'),
     setUserTier('free'),

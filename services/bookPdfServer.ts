@@ -1356,7 +1356,7 @@ export async function generateBookPdfViaServer(input: GenerateBookPdfServerInput
     coverColorId: input.coverColorId ?? null,
     chapterTitle: input.chapterTitle,
     backCoverTagline: input.backCoverTagline ?? null,
-    // QR stable public : `https://petitmo.app/m/{token}` (pas le serveur PDF).
+    // QR stable public : `https://petitcoeur.app/m/{token}` (pas le serveur PDF).
     qrBaseUrl: publicMediaBaseUrl(),
     exportMode: input.exportMode === 'print' ? 'print' : 'digital',
     pages: pagesPayload,

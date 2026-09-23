@@ -2538,9 +2538,12 @@ export default function BookPreviewScreen() {
     [bookId, child?.id, prefetchCropDpiMeta]
   );
 
-  /** PHPicker : pas de demande d’accès photothèque, la sélection suffit. */
+  /** Opt-in compte + demande iOS si besoin. */
   const pickCoverFromGallery = useCallback(async () => {
     try {
+      const { ensureMediaLibraryPickerAllowed } = await import('@/lib/mediaLibraryOptIn');
+      if (!(await ensureMediaLibraryPickerAllowed())) return;
+
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
         allowsEditing: false,

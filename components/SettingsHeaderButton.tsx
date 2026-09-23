@@ -22,6 +22,12 @@ export default function SettingsHeaderButton({ size = DEFAULT_SIZE }: Props) {
       accessibilityRole="button"
       accessibilityLabel={t('tabs.settings')}
       onPress={() => router.push('/parent-space')}
+      onLongPress={
+        __DEV__
+          ? () => router.push('/capture-cta-icons-mock')
+          : undefined
+      }
+      delayLongPress={420}
       activeOpacity={0.72}
       hitSlop={8}
       style={[

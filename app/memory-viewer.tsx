@@ -571,11 +571,15 @@ function MemoryViewerScreenInner() {
   const leaveViewer = useCallback(() => {
     clearDismissSafetyTimer();
     setPhotoZoomActive(false);
-    /** Retour fil : souvenir de la page pager actuelle (pas celui d’ouverture). */
+    /**
+     * Retour fil : souvenir de la page pager actuelle (pas celui d’ouverture).
+     * `animated: false` + apply sync côté fil — sinon InteractionManager attend
+     * la fin du spring et on voit d’abord le souvenir d’ouverture, puis le scroll.
+     */
     const visibleKey = syncVisibleItemKeyFromPager();
     const memId = memoryIdFromImmersiveViewerItemKey(visibleKey);
     if (memId) {
-      armFeedSnapToKeyOnFocus(memId, { animated: true });
+      armFeedSnapToKeyOnFocus(memId, { animated: false });
     }
     clearMemoryViewerSession();
     safeRouterBack(router, '/(tabs)');

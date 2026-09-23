@@ -1,6 +1,10 @@
 /**
- * Formulaire support in-app → e-mail contact@petitmo.app + archivage SQL.
+ * Formulaire support in-app → e-mail support@petitcoeur.app + archivage SQL.
  * Secrets : RESEND_API_KEY (envoi), optionnel SUPPORT_TO_EMAIL / SUPPORT_FROM_EMAIL.
+ *
+ * Adresses produit (toutes deux routées vers la boîte fondateur) :
+ * - support@ — destination support / signalements
+ * - contact@ — expéditeur brand / transactional
  */
 import { createClient } from 'npm:@supabase/supabase-js@2.58.0';
 
@@ -10,8 +14,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey',
 };
 
-const DEFAULT_TO = 'contact@petitmo.app';
-const DEFAULT_FROM = 'Petitmo <contact@petitmo.app>';
+const DEFAULT_TO = 'support@petitcoeur.app';
+const DEFAULT_FROM = 'Petit Cœur <contact@petitcoeur.app>';
 const MIN_MESSAGE = 8;
 const MAX_MESSAGE = 8000;
 const RATE_LIMIT_MS = 30_000;
@@ -120,8 +124,8 @@ Deno.serve(async (req: Request) => {
 
   const subject =
     kind === 'report'
-      ? `[Petitmo] Signalement — ${email}`
-      : `[Petitmo] Contact — ${email}`;
+      ? `[Petit Cœur] Signalement — ${email}`
+      : `[Petit Cœur] Contact — ${email}`;
   const text = [
     `De : ${email}`,
     userId ? `Compte : ${userId}` : 'Compte : (session absente)',

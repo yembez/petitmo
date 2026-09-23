@@ -66,7 +66,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       ...(config.extra ?? {}),
       EXPO_PUBLIC_SUPABASE_URL: process.env.EXPO_PUBLIC_SUPABASE_URL,
       EXPO_PUBLIC_SUPABASE_ANON_KEY: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
-      EXPO_PUBLIC_PRIVACY_POLICY_URL: process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL,
+      EXPO_PUBLIC_PRIVACY_POLICY_URL:
+        process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL ?? 'https://petitcoeur.app/#/privacy',
       EXPO_PUBLIC_DEBUG_SUPABASE_EGRESS: process.env.EXPO_PUBLIC_DEBUG_SUPABASE_EGRESS,
       EXPO_PUBLIC_PDF_SERVER_URL: process.env.EXPO_PUBLIC_PDF_SERVER_URL,
       EXPO_PUBLIC_PUBLIC_MEDIA_BASE_URL: process.env.EXPO_PUBLIC_PUBLIC_MEDIA_BASE_URL,

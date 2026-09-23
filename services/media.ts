@@ -1604,7 +1604,7 @@ export async function uploadMedia({
   try {
     const limitCheck = await checkMemoryLimit(childId, { force: true });
     if (!limitCheck.canCreate) {
-      throw new Error('LIMIT_REACHED');
+      throw new Error(limitCheck.reason === 'capture_locked' ? 'CAPTURE_LOCKED' : 'LIMIT_REACHED');
     }
 
     if (type === 'video') {
@@ -2122,6 +2122,7 @@ export async function uploadMedia({
     if (error instanceof Error) {
       if (
         error.message === 'LIMIT_REACHED' ||
+        error.message === 'CAPTURE_LOCKED' ||
         error.message === 'VIDEO_LIMIT_REACHED' ||
         error.message === IMPORT_DUPLICATE_ASSET
       ) {
@@ -2219,7 +2220,7 @@ export async function uploadPhotoAlbum({
 
     const limitCheck = await checkMemoryLimit(childId);
     if (!limitCheck.canCreate) {
-      throw new Error('LIMIT_REACHED');
+      throw new Error(limitCheck.reason === 'capture_locked' ? 'CAPTURE_LOCKED' : 'LIMIT_REACHED');
     }
 
     throwIfImportDuplicate(childId, { importSourceFingerprint });
@@ -2279,6 +2280,7 @@ export async function uploadPhotoAlbum({
     if (error instanceof Error) {
       if (
         error.message === 'LIMIT_REACHED' ||
+        error.message === 'CAPTURE_LOCKED' ||
         error.message === 'VIDEO_LIMIT_REACHED' ||
         error.message === IMPORT_DUPLICATE_ASSET
       ) {

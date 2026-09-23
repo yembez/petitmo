@@ -4,7 +4,7 @@ export function publicMediaBaseUrl(): string {
   if (raw) return raw.replace(/\/$/, '');
   const pdf = process.env.EXPO_PUBLIC_PDF_SERVER_URL?.trim();
   if (pdf) return `${pdf.replace(/\/$/, '')}/m`;
-  return 'https://petitmo.app/m';
+  return 'https://petitcoeur.app/m';
 }
 
 export function bookQrUrlForToken(token: string): string {

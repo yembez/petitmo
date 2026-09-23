@@ -273,8 +273,8 @@ export function PendingMediaUploadsProvider({ children }: { children: React.Reac
             }
             if (
               err.message === 'LIMIT_REACHED' ||
-              err.message === 'VIDEO_LIMIT_REACHED' ||
-              err.message === 'VOICE_LIMIT_REACHED'
+              err.message === 'CAPTURE_LOCKED' ||
+              err.message === 'VIDEO_LIMIT_REACHED'
             ) {
               setPending(p => p.filter(x => x.tempId !== tempId));
               InteractionManager.runAfterInteractions(() => {

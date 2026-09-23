@@ -55,7 +55,9 @@ import {
   getNotificationsGranted,
   isNotificationsModuleAvailable,
   requestNotificationsAccess,
+  requestPhotoLibraryAccess,
 } from '@/lib/onboardingPermissions';
+import { setMediaLibraryOptIn } from '@/lib/mediaLibraryOptIn';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { useAppLanguage } from '@/hooks/useAppLanguage';
 import { formatAppCurrency, formatAppDate } from '@/utils/appLocale';
@@ -65,12 +67,15 @@ import type { PrintOrderStatus, PrintOrderSummary } from '@/lib/printOrderSummar
 import { isGenericPrintBookTitle } from '@/lib/printOrderSummary';
 import { safeRouterBack } from '@/utils/safeRouterBack';
 import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
+import { getBillingIssueCached, syncBillingIssueFromUser } from '@/lib/billingIssue';
+import { getCaptureLockedCached, peekCaptureLocked, syncCaptureLockedFromUser } from '@/lib/captureLock';
 import SupportContactModal from '@/components/SupportContactModal';
 import type { SupportMessageKind } from '@/services/supportContact';
-
-const URL_PRIVACY = 'https://petitmo.app/privacy';
-const URL_TERMS = 'https://petitmo.app/terms';
-const URL_LEGAL = 'https://petitmo.app/legal';
+import {
+  LEGAL_MENTIONS_URL,
+  LEGAL_PRIVACY_URL,
+  LEGAL_TERMS_URL,
+} from '@/lib/legalUrls';
 
 function readLocalChildrenForSettings(): Child[] {
   const uid = peekLastRealAuthUserId();
@@ -100,6 +105,8 @@ export default function ParentSpaceScreen() {
   /** Local-first : 1er paint complet (pas de pop différé « Mon compte »). */
   const [children, setChildrenState] = useState<Child[]>(() => readLocalChildrenForSettings());
   const [tier, setTierState] = useState<UserTier>(() => peekUserTier());
+  const [billingIssue, setBillingIssue] = useState(false);
+  const [captureLocked, setCaptureLocked] = useState(() => peekCaptureLocked());
   const [hasRealAccount, setHasRealAccount] = useState(() => peekHasRealAuthAccount());
   const [accountEmail, setAccountEmail] = useState(() => peekRealAuthEmail() || '—');
   const [backupStatus, setBackupStatus] = useState(() => {
@@ -165,6 +172,35 @@ export default function ParentSpaceScreen() {
     })();
   }, [t]);
 
+  const handleEnablePhotos = useCallback(() => {
+    void (async () => {
+      const granted = await requestPhotoLibraryAccess();
+      if (granted) {
+        await setMediaLibraryOptIn(true, peekLastRealAuthUserId());
+        const { markOnboardingPermissionsSeen } = await import(
+          '@/lib/onboardingPermissionsSeen'
+        );
+        await markOnboardingPermissionsSeen(peekLastRealAuthUserId());
+        Alert.alert(
+          t('parent.application.photosGrantedTitle'),
+          t('parent.application.photosGrantedBody'),
+        );
+        return;
+      }
+      Alert.alert(
+        t('parent.application.photosDeniedTitle'),
+        t('parent.application.photosDeniedBody'),
+        [
+          { text: t('cancel'), style: 'cancel' },
+          {
+            text: t('parent.application.openSettings'),
+            onPress: () => void Linking.openSettings(),
+          },
+        ],
+      );
+    })();
+  }, [t]);
+
   const handleEnableNotifications = useCallback(() => {
     void (async () => {
       if (!(await isNotificationsModuleAvailable())) {
@@ -173,6 +209,10 @@ export default function ParentSpaceScreen() {
       }
       if (await getNotificationsGranted()) {
         void registerPushTokenInBackground();
+        const { markOnboardingPermissionsSeen } = await import(
+          '@/lib/onboardingPermissionsSeen'
+        );
+        await markOnboardingPermissionsSeen(peekLastRealAuthUserId());
         Alert.alert(
           t('parent.application.notificationsGrantedTitle'),
           t('parent.application.notificationsGrantedBody'),
@@ -182,6 +222,10 @@ export default function ParentSpaceScreen() {
       const granted = await requestNotificationsAccess();
       if (granted) {
         void registerPushTokenInBackground();
+        const { markOnboardingPermissionsSeen } = await import(
+          '@/lib/onboardingPermissionsSeen'
+        );
+        await markOnboardingPermissionsSeen(peekLastRealAuthUserId());
         Alert.alert(
           t('parent.application.notificationsGrantedTitle'),
           t('parent.application.notificationsGrantedBody'),
@@ -218,6 +262,8 @@ export default function ParentSpaceScreen() {
     }
 
     void getUserTier().then(setTierState);
+    void getBillingIssueCached().then(setBillingIssue);
+    void getCaptureLockedCached().then(setCaptureLocked);
     void collectBugReportContext({
       pathname,
       sentryEnabled: isSentryEnabled(),
@@ -226,6 +272,8 @@ export default function ParentSpaceScreen() {
     void getRealAuthUser().then((realUser) => {
       setHasRealAccount(!!realUser);
       if (realUser) {
+        void syncBillingIssueFromUser(realUser).then(setBillingIssue);
+        void syncCaptureLockedFromUser(realUser).then(setCaptureLocked);
         const rawEmail =
           realUser.email ??
           (typeof realUser.user_metadata?.email === 'string' ? realUser.user_metadata.email : '') ??
@@ -243,6 +291,8 @@ export default function ParentSpaceScreen() {
         setAccountEmail('');
         setBackupStatus('');
         setOrders([]);
+        setBillingIssue(false);
+        setCaptureLocked(false);
       }
     });
 
@@ -378,6 +428,27 @@ export default function ParentSpaceScreen() {
         </Section>
 
         <Section title={t('parent.subscription.sectionTitle')} titleFontFamily={dm700}>
+          {billingIssue ? (
+            <View style={styles.billingIssueBanner}>
+              <Text style={[styles.billingIssueTitle, dm600 ? { fontFamily: dm600 } : null]}>
+                {t('parent.subscription.billingIssueTitle')}
+              </Text>
+              <Text style={[styles.billingIssueBody, dm500 ? { fontFamily: dm500 } : null]}>
+                {t('parent.subscription.billingIssueBody')}
+              </Text>
+              <TouchableOpacity
+                style={styles.billingIssueCta}
+                onPress={() => void openUrl(manageSubscriptionUrl())}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel={t('parent.subscription.billingIssueCta')}
+              >
+                <Text style={[styles.billingIssueCtaText, dm600 ? { fontFamily: dm600 } : null]}>
+                  {t('parent.subscription.billingIssueCta')}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
           {paid ? (
             <>
               <StaticRow
@@ -405,7 +476,10 @@ export default function ParentSpaceScreen() {
             <TouchableOpacity
               style={styles.row}
               onPress={() =>
-                router.push({ pathname: '/paywall', params: { context: 'GENERAL' } })
+                router.push({
+                  pathname: '/paywall',
+                  params: { context: captureLocked ? 'EX_SUBSCRIBER' : 'GENERAL' },
+                })
               }
               activeOpacity={0.85}
               accessibilityRole="button"
@@ -428,10 +502,10 @@ export default function ParentSpaceScreen() {
           <Section title={t('parent.orders.sectionTitle')} titleFontFamily={dm700}>
             {orders.length === 0 ? (
               <>
-                <Text style={[styles.emptyText, dm500 ? { fontFamily: dm500 } : null]}>
+                <Text style={[styles.emptyText, styles.bannerMatchedBody, dm500 ? { fontFamily: dm500 } : null]}>
                   {t('parent.orders.empty')}
                 </Text>
-                <Text style={[styles.emptyText, dm500 ? { fontFamily: dm500 } : null]}>
+                <Text style={[styles.emptyText, styles.bannerMatchedBody, dm500 ? { fontFamily: dm500 } : null]}>
                   {t('parent.orders.hint')}
                 </Text>
               </>
@@ -452,6 +526,7 @@ export default function ParentSpaceScreen() {
                     refreshingAccessibilityLabel={t('parent.orders.statusUpdating')}
                     labelFontFamily={dm500}
                     bordered={i > 0}
+                    textScale="banner"
                   />
                 );
               })
@@ -495,7 +570,7 @@ export default function ParentSpaceScreen() {
         <Section title="Informations légales" titleFontFamily={dm700}>
           <TouchableOpacity
             style={styles.row}
-            onPress={() => void openUrl(URL_PRIVACY)}
+            onPress={() => void openUrl(LEGAL_PRIVACY_URL)}
             activeOpacity={0.85}
             accessibilityRole="link"
           >
@@ -509,7 +584,7 @@ export default function ParentSpaceScreen() {
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.row, styles.rowBorderTop]}
-            onPress={() => void openUrl(URL_TERMS)}
+            onPress={() => void openUrl(LEGAL_TERMS_URL)}
             activeOpacity={0.85}
             accessibilityRole="link"
           >
@@ -523,7 +598,7 @@ export default function ParentSpaceScreen() {
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.row, styles.rowBorderTop]}
-            onPress={() => void openUrl(URL_LEGAL)}
+            onPress={() => void openUrl(LEGAL_MENTIONS_URL)}
             activeOpacity={0.85}
             accessibilityRole="link"
           >
@@ -558,6 +633,22 @@ export default function ParentSpaceScreen() {
             ) : (
               <Text style={styles.rowValue}>›</Text>
             )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.row, styles.rowBorderTop]}
+            activeOpacity={0.85}
+            onPress={handleEnablePhotos}
+            accessibilityRole="button"
+            accessibilityLabel={t('parent.application.enablePhotos')}
+          >
+            <View style={styles.rowIconPlaceholder} />
+            <View style={styles.rowText}>
+              <Text style={[styles.rowLabel, dm500 ? { fontFamily: dm500 } : null]}>
+                {t('parent.application.enablePhotos')}
+              </Text>
+              <Text style={styles.rowDetail}>{t('parent.application.enablePhotosHint')}</Text>
+            </View>
+            <Text style={styles.rowValue}>›</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.row, styles.rowBorderTop]}
@@ -712,6 +803,7 @@ function StaticRow({
   refreshingAccessibilityLabel,
   labelFontFamily,
   bordered,
+  textScale,
 }: {
   label: string;
   detail?: string;
@@ -720,7 +812,10 @@ function StaticRow({
   refreshingAccessibilityLabel?: string;
   labelFontFamily?: string;
   bordered?: boolean;
+  /** Aligne label/détail/valeur sur le bandeau (titre base + corps md). */
+  textScale?: 'banner';
 }) {
+  const banner = textScale === 'banner';
   return (
     <View
       style={[styles.row, bordered && styles.rowBorderTop]}
@@ -734,14 +829,22 @@ function StaticRow({
       <View style={styles.rowIconPlaceholder} />
       <View style={styles.rowText}>
         <Text
-          style={[styles.rowLabel, labelFontFamily ? { fontFamily: labelFontFamily } : null]}
+          style={[
+            styles.rowLabel,
+            banner && styles.bannerMatchedLabel,
+            labelFontFamily ? { fontFamily: labelFontFamily } : null,
+          ]}
           numberOfLines={2}
           ellipsizeMode="tail"
         >
           {label}
         </Text>
         {detail ? (
-          <Text style={styles.rowDetail} numberOfLines={1} ellipsizeMode="tail">
+          <Text
+            style={[styles.rowDetail, banner && styles.bannerMatchedDetail]}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+          >
             {detail}
           </Text>
         ) : null}
@@ -749,7 +852,10 @@ function StaticRow({
       {valueRefreshing ? (
         <View style={styles.statusRefreshWrap}>
           {value ? (
-            <Text style={styles.statusLabel} numberOfLines={2}>
+            <Text
+              style={[styles.statusLabel, banner && styles.bannerMatchedDetail]}
+              numberOfLines={2}
+            >
               {value}
             </Text>
           ) : null}
@@ -761,7 +867,7 @@ function StaticRow({
           />
         </View>
       ) : value ? (
-        <Text style={styles.rowValue} numberOfLines={2}>
+        <Text style={[styles.rowValue, banner && styles.bannerMatchedDetail]} numberOfLines={2}>
           {value}
         </Text>
       ) : (
@@ -840,6 +946,49 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: SPACING.md,
     paddingTop: SPACING.md,
+  },
+  billingIssueBanner: {
+    paddingHorizontal: SPACING.md,
+    paddingVertical: verticalScale(14),
+    marginBottom: verticalScale(8),
+    backgroundColor: '#F2F2F7',
+    borderRadius: scale(12),
+    gap: verticalScale(8),
+  },
+  billingIssueTitle: {
+    fontSize: FONT_SIZES.base,
+    fontWeight: '600',
+    color: THEME.textPrimary,
+  },
+  billingIssueBody: {
+    fontSize: FONT_SIZES.md,
+    fontWeight: '500',
+    color: THEME.textSecondary,
+    lineHeight: scale(20),
+  },
+  billingIssueCta: {
+    alignSelf: 'flex-start',
+    marginTop: verticalScale(4),
+    paddingVertical: verticalScale(8),
+    paddingHorizontal: SPACING.md,
+    borderRadius: scale(100),
+    backgroundColor: THEME.accent,
+  },
+  billingIssueCtaText: {
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  /** Même échelle que le bandeau (titre base / corps md). */
+  bannerMatchedLabel: {
+    fontSize: FONT_SIZES.base,
+  },
+  bannerMatchedDetail: {
+    fontSize: FONT_SIZES.md,
+  },
+  bannerMatchedBody: {
+    fontSize: FONT_SIZES.md,
+    lineHeight: scale(20),
   },
   section: {
     marginBottom: SPACING.xl,

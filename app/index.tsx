@@ -7,38 +7,32 @@ import { hydrateTabScreensFromSqliteSync } from '@/services/tabScreensHydrate';
 import { hasRealAuthAccount, peekHasRealAuthAccount } from '@/lib/authAccount';
 import { listLocalChildrenForUser } from '@/lib/localDb';
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
+import type { PostAuthOnboardingPath } from '@/utils/onboardingPermissionsRoute';
 
 /**
  * Règle d'or V2 : compte d’abord, puis enfant.
- * Pas de compte → onboarding. Compte sans enfant → create-child. Sinon tabs.
+ * Pas de compte → onboarding. Compte sans enfant → permissions (1×) ou create-child. Sinon tabs.
  * Ne jamais démarrer sur un enfant SQLite d’un autre e-mail (hydratation scopée).
  * Local-first : si session réelle + SQLite déjà plein → redirect immédiat (cloud en fond).
  * Important : `lastRealAuthUserId` seul ≠ compte actif (reste après déconnexion pour reconnect).
  */
 export default function Index() {
-  const [hasChild, setHasChild] = useState(() => {
-    if (!peekHasRealAuthAccount()) return false;
+  const [href, setHref] = useState<PostAuthOnboardingPath | '/onboarding' | null>(() => {
+    if (!peekHasRealAuthAccount()) return null;
     hydrateTabScreensFromSqliteSync();
     const uid = peekLastRealAuthUserId();
-    if (!uid) return false;
-    return listLocalChildrenForUser(uid).length > 0;
+    if (uid && listLocalChildrenForUser(uid).length > 0) {
+      return '/(tabs)';
+    }
+    return null;
   });
-  const [hasAccount, setHasAccount] = useState(() => peekHasRealAuthAccount());
-  const [isChecking, setIsChecking] = useState(() => {
-    // Fast-path uniquement si mémoire session réelle + enfants locaux.
-    return !(
-      peekHasRealAuthAccount() &&
-      peekLastRealAuthUserId() &&
-      listLocalChildrenForUser(peekLastRealAuthUserId()!).length > 0
-    );
-  });
+  const [isChecking, setIsChecking] = useState(() => href === null);
 
   useEffect(() => {
     void (async () => {
       const accountOk = await hasRealAuthAccount();
-      setHasAccount(accountOk);
       if (!accountOk) {
-        setHasChild(false);
+        setHref('/onboarding');
         setIsChecking(false);
         return;
       }
@@ -46,7 +40,7 @@ export default function Index() {
       const uid = peekLastRealAuthUserId();
       const localKids = uid ? listLocalChildrenForUser(uid) : [];
       if (localKids.length > 0) {
-        setHasChild(true);
+        setHref('/(tabs)');
         setIsChecking(false);
         refreshChildrenFromCloudInBackground();
         return;
@@ -54,12 +48,22 @@ export default function Index() {
 
       // Cold : SQLite vide → pull cloud légitime avant redirect create-child vs tabs.
       const children = await getChildren();
-      setHasChild(children.length > 0);
+      if (children.length > 0) {
+        hydrateTabScreensFromSqliteSync();
+        setHref('/(tabs)');
+        setIsChecking(false);
+        return;
+      }
+
+      const { resolvePostAuthOnboardingPath } = await import(
+        '@/utils/onboardingPermissionsRoute'
+      );
+      setHref(await resolvePostAuthOnboardingPath(uid));
       setIsChecking(false);
     })();
   }, []);
 
-  if (isChecking) {
+  if (isChecking || !href) {
     return (
       <View style={styles.container}>
         <ActivityIndicator size="large" color={THEME.accent} />
@@ -67,14 +71,7 @@ export default function Index() {
     );
   }
 
-  if (!hasAccount) {
-    return <Redirect href="/onboarding" />;
-  }
-  if (!hasChild) {
-    // Permissions avant create-child si pas encore vues (même cold start).
-    return <Redirect href="/onboarding-permissions" />;
-  }
-  return <Redirect href="/(tabs)" />;
+  return <Redirect href={href} />;
 }
 
 const styles = StyleSheet.create({

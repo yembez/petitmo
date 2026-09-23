@@ -11,6 +11,7 @@ import {
   Alert,
   Pressable,
   ActivityIndicator,
+  ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePathname } from 'expo-router';
@@ -100,15 +101,31 @@ export default function SupportContactModal({ visible, kind, defaultEmail, onClo
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={[styles.backdrop, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 }]}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.backdrop}
       >
-        <Pressable style={{ flex: 1 }} onPress={sending ? undefined : onClose}>
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={sending ? undefined : onClose}
+          accessibilityRole="button"
+          accessibilityLabel={t('cancel')}
+        />
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[
+            styles.scrollContent,
+            {
+              paddingTop: insets.top + 20,
+              paddingBottom: insets.bottom + 20,
+            },
+          ]}
+          bounces={false}
+        >
           <Pressable style={styles.card} onPress={e => e.stopPropagation()}>
             <Text style={styles.title}>
               {kind === 'report' ? t('parent.support.reportTitle') : t('parent.support.contactTitle')}
             </Text>
-            <Text style={styles.sub}>{t('parent.support.subtitle')}</Text>
 
             <Text style={styles.label}>{t('parent.support.emailLabel')}</Text>
             <TextInput
@@ -122,6 +139,7 @@ export default function SupportContactModal({ visible, kind, defaultEmail, onClo
               placeholderTextColor={THEME.textMuted}
               editable={!sending}
               style={styles.input}
+              returnKeyType="next"
             />
 
             <Text style={styles.label}>{t('parent.support.messageLabel')}</Text>
@@ -166,7 +184,7 @@ export default function SupportContactModal({ visible, kind, defaultEmail, onClo
               </PetitmoPrimaryPressable>
             </View>
           </Pressable>
-        </Pressable>
+        </ScrollView>
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -175,9 +193,12 @@ export default function SupportContactModal({ visible, kind, defaultEmail, onClo
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    paddingHorizontal: scale(16),
     backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  scrollContent: {
+    flexGrow: 1,
     justifyContent: 'center',
+    paddingHorizontal: scale(16),
   },
   card: {
     backgroundColor: THEME.bg,
@@ -190,12 +211,6 @@ const styles = StyleSheet.create({
     color: THEME.textPrimary,
     fontSize: 18,
     fontWeight: '700',
-    marginBottom: 6,
-  },
-  sub: {
-    color: THEME.textMuted,
-    fontSize: 14,
-    lineHeight: 20,
     marginBottom: verticalScale(12),
   },
   label: {
@@ -215,7 +230,7 @@ const styles = StyleSheet.create({
     marginBottom: verticalScale(12),
   },
   messageInput: {
-    minHeight: verticalScale(120),
+    minHeight: verticalScale(100),
     paddingTop: 12,
     paddingBottom: 12,
   },

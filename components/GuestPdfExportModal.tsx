@@ -73,7 +73,7 @@ export function GuestPdfExportModal({ visible, onClose, onSubmit, loading }: Pro
   }, [email, gdprChecked, marketing, onSubmit]);
 
   const openPrivacy = useCallback(() => {
-    if (privacyUrl) void Linking.openURL(privacyUrl);
+    void Linking.openURL(privacyUrl);
   }, [privacyUrl]);
 
   return (
@@ -89,11 +89,9 @@ export function GuestPdfExportModal({ visible, onClose, onSubmit, loading }: Pro
             Ton e-mail sert au suivi de l’export et à te recontacter si besoin. Tu peux retirer ton
             consentement en nous écrivant (voir politique de confidentialité).
           </Text>
-          {privacyUrl ? (
-            <Pressable onPress={openPrivacy} style={styles.privacyLinkWrap} disabled={loading}>
-              <Text style={styles.privacyLink}>Politique de confidentialité</Text>
-            </Pressable>
-          ) : null}
+          <Pressable onPress={openPrivacy} style={styles.privacyLinkWrap} disabled={loading}>
+            <Text style={styles.privacyLink}>Politique de confidentialité</Text>
+          </Pressable>
           <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <Text style={styles.label}>E-mail</Text>
             <TextInput
@@ -115,7 +113,7 @@ export function GuestPdfExportModal({ visible, onClose, onSubmit, loading }: Pro
               <Text style={styles.rowText}>
                 Je confirme avoir au moins 16 ans (ou l’autorisation d’un titulaire de l’autorité
                 parentale) et j’accepte le traitement de mes données pour cet export conformément à
-                la politique de confidentialité{privacyUrl ? '' : ' applicable'}.
+                la politique de confidentialité.
               </Text>
             </Pressable>
             <View style={styles.rowBetween}>

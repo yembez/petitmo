@@ -8,6 +8,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -31,6 +32,7 @@ import {
 import { listLocalChildrenForUser } from '@/lib/localDb';
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
 import { hydrateTabScreensFromSqliteSync } from '@/services/tabScreensHydrate';
+import { getChildren } from '@/services/children';
 
 const OTP_LENGTH = 6;
 
@@ -83,6 +85,17 @@ export default function AuthVerifyOtpScreen() {
     }
 
     if (localCount === 0) {
+      // OTP signup → assume nouveau ; OTP login rare : si enfants cloud, tabs.
+      const children = await getChildren();
+      if (children.length > 0) {
+        hydrateTabScreensFromSqliteSync();
+        const { markOnboardingPermissionsSeen } = await import(
+          '@/lib/onboardingPermissionsSeen'
+        );
+        await markOnboardingPermissionsSeen(uid);
+        router.replace('/(tabs)');
+        return;
+      }
       const { replaceToOnboardingPermissionsOrCreateChild } = await import(
         '@/utils/onboardingPermissionsRoute'
       );
@@ -168,6 +181,7 @@ export default function AuthVerifyOtpScreen() {
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
       >
         <TouchableOpacity
           onPress={() =>
@@ -181,7 +195,17 @@ export default function AuthVerifyOtpScreen() {
           <ChevronLeft size={ICON_SIZES.lg} color={THEME.textPrimary} strokeWidth={2} />
         </TouchableOpacity>
 
-        <View style={styles.content}>
+        <ScrollView
+          style={styles.flex}
+          contentContainerStyle={[
+            styles.content,
+            { paddingBottom: Math.max(insets.bottom, verticalScale(16)) + verticalScale(24) },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          showsVerticalScrollIndicator={false}
+          bounces
+        >
           <Text style={[styles.title, dm700 && { fontFamily: dm700 }]}>{t('auth.otpTitle')}</Text>
           <Text style={[styles.subtitle, dm500 && { fontFamily: dm500 }]}>
             {t('auth.otpSubtitle', { email })}
@@ -240,7 +264,7 @@ export default function AuthVerifyOtpScreen() {
               {t('auth.otpChangeEmail')}
             </Text>
           </TouchableOpacity>
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </View>
   );
@@ -259,7 +283,7 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.sm,
   },
   content: {
-    flex: 1,
+    flexGrow: 1,
     paddingHorizontal: scale(24),
     paddingTop: verticalScale(24),
   },

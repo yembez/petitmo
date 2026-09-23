@@ -96,8 +96,8 @@ export default function OnboardingScreen() {
         <View style={[styles.contentContainer, { paddingTop: insets.top + verticalScale(12) }]}>
           <View style={styles.logoContainer}>
             <PetitCoeurLogo
-              width={scale(200)}
-              height={scale(200) * (PETIT_COEUR_LOGO_VIEWBOX.height / PETIT_COEUR_LOGO_VIEWBOX.width)}
+              width={scale(132)}
+              height={scale(132) * (PETIT_COEUR_LOGO_VIEWBOX.height / PETIT_COEUR_LOGO_VIEWBOX.width)}
               variant="whiteSolid"
             />
           </View>
@@ -127,9 +127,9 @@ export default function OnboardingScreen() {
             onPress={() => router.push({ pathname: '/auth', params: { mode: 'signup' } })}
             activeOpacity={0.9}
             accessibilityRole="button"
-            accessibilityLabel="Commencer — créer un compte Petitmo"
+            accessibilityLabel="Commencer gratuitement — créer un compte Petit Cœur"
           >
-            <Text style={styles.ctaButtonText}>Commencer</Text>
+            <Text style={styles.ctaButtonText}>Commencer gratuitement</Text>
           </PetitmoPrimaryPressable>
 
           <TouchableOpacity
@@ -203,10 +203,10 @@ const styles = StyleSheet.create({
   },
   logoContainer: {
     alignItems: 'center',
-    paddingTop: verticalScale(0),
+    paddingTop: verticalScale(28),
   },
   topTaglineBlock: {
-    marginTop: verticalScale(6),
+    marginTop: verticalScale(28),
     alignItems: 'center',
   },
   captureBlock: {
@@ -281,18 +281,21 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   linkTertiaryWrap: {
-    marginTop: verticalScale(18),
+    marginTop: verticalScale(16),
     marginBottom: verticalScale(10),
-    paddingVertical: verticalScale(8),
+    paddingVertical: verticalScale(10),
     paddingHorizontal: SPACING.md,
   },
   linkTertiary: {
-    fontSize: FONT_SIZES.sm,
-    fontWeight: '500',
-    color: 'rgba(255, 255, 255, 0.72)',
+    fontSize: FONT_SIZES.md,
+    fontWeight: '600',
+    color: '#FFFFFF',
     textAlign: 'center',
     textDecorationLine: 'underline',
-    textDecorationColor: 'rgba(255, 255, 255, 0.35)',
+    textDecorationColor: 'rgba(255, 255, 255, 0.85)',
+    textShadowColor: 'rgba(0, 0, 0, 0.28)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 8,
   },
   privacyBadge: {
     flexDirection: 'row',

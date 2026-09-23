@@ -27,7 +27,6 @@ import { signOutRealAccount } from '@/lib/authAccount';
 import { listLocalChildrenForUser } from '@/lib/localDb';
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
 import DatePicker from '@/components/DatePicker';
-import PetitCoeurLogo, { PETIT_COEUR_LOGO_VIEWBOX } from '@/components/PetitCoeurLogo';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
 import { CHILD_PROFILE_PHOTO_ASPECT } from '@/utils/captureHeroMetrics';
 
@@ -86,8 +85,11 @@ export default function CreateChildScreen() {
     }
   }, [authIntent, backBusy, router]);
 
-  /** PHPicker : pas de demande d’accès photothèque, la sélection suffit. */
+  /** PHPicker iOS peut s’ouvrir sans permission OS — on exige l’opt-in compte. */
   const handlePhotoUpload = async () => {
+    const { ensureMediaLibraryPickerAllowed } = await import('@/lib/mediaLibraryOptIn');
+    if (!(await ensureMediaLibraryPickerAllowed())) return;
+
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,
@@ -162,14 +164,6 @@ export default function CreateChildScreen() {
           >
             <ChevronLeft size={ICON_SIZES.lg} color={THEME.textPrimary} strokeWidth={2} />
           </TouchableOpacity>
-        </View>
-
-        <View style={styles.logoContainer}>
-          <PetitCoeurLogo
-            width={scale(180)}
-            height={scale(180) * (PETIT_COEUR_LOGO_VIEWBOX.height / PETIT_COEUR_LOGO_VIEWBOX.width)}
-            variant="color"
-          />
         </View>
 
         <Text style={[styles.title, dm700 ? { fontFamily: dm700 } : null]}>
@@ -266,10 +260,6 @@ const styles = StyleSheet.create({
     width: scale(44),
     height: scale(44),
     justifyContent: 'center',
-  },
-  logoContainer: {
-    alignItems: 'center',
-    marginBottom: verticalScale(24),
   },
   title: {
     fontSize: FONT_SIZES.xxl,
