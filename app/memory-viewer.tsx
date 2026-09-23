@@ -835,16 +835,20 @@ function MemoryViewerScreenInner() {
             runSharedDismiss(measured);
             return;
           }
-          if (attempt < 3) {
-            setTimeout(() => tryMeasure(attempt + 1), 40);
+          if (attempt < 4) {
+            setTimeout(() => tryMeasure(attempt + 1), 48);
             return;
           }
           runFadeDismiss();
         });
       };
-      requestAnimationFrame(() => {
+      /**
+       * Laisser le fil masquer + `scrollToIndex` (2 frames + layout) avant de mesurer
+       * la vignette cible — sinon on mesure encore la carte d’ouverture.
+       */
+      setTimeout(() => {
         requestAnimationFrame(() => tryMeasure(0));
-      });
+      }, 64);
       return;
     }
 
