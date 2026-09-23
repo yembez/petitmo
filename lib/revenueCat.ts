@@ -17,6 +17,8 @@ import Purchases, {
   type PurchasesPackage,
 } from 'react-native-purchases';
 import { setUserTier, type UserTier } from '@/lib/userTier';
+import { DEFAULT_APP_LANGUAGE } from '@/lib/i18nTypes';
+import { formatAppCurrency } from '@/utils/appLocale';
 
 export type PetitmoPlusPlan = 'monthly' | 'yearly';
 
@@ -61,6 +63,28 @@ export function hasPetitmoPlusEntitlement(info: CustomerInfo | null | undefined)
 export async function applyUserTierFromCustomerInfo(info: CustomerInfo): Promise<UserTier> {
   const tier: UserTier = hasPetitmoPlusEntitlement(info) ? 'paid' : 'free';
   await setUserTier(tier);
+  try {
+    const { applyLocalArchiveForTier } = await import('@/services/memoryArchiveLocal');
+    applyLocalArchiveForTier(tier);
+  } catch (e) {
+    console.warn('[revenueCat] local archive', e);
+  }
+  if (tier === 'paid') {
+    try {
+      const { setBillingIssueLocal } = await import('@/lib/billingIssue');
+      await setBillingIssueLocal(false);
+    } catch {
+      /* */
+    }
+    try {
+      const { setCaptureLockedLocal } = await import('@/lib/captureLock');
+      await setCaptureLockedLocal(false);
+      const { invalidateMemoryLimitCache } = await import('@/lib/limits');
+      invalidateMemoryLimitCache();
+    } catch {
+      /* */
+    }
+  }
   return tier;
 }
 
@@ -166,11 +190,18 @@ function pickPackageForPlan(
 export type PetitmoPlusPlanPrices = {
   monthlyPriceString: string;
   yearlyPriceString: string;
-  /** Ex. « 4,16 € » — null si RC ne fournit pas pricePerMonthString. */
+  /** Ex. « 4,16 € » — null si incalculable. */
   yearlyPerMonthString: string | null;
   /** Remise annuelle vs 12× mensuel, arrondie ; null si incalculable. */
   yearlyDiscountPercent: number | null;
+  /** Code devise StoreKit (ex. EUR, USD) — pour debug / affichage. */
+  currencyCode: string | null;
 };
+
+function formatStorePrice(amount: number, currencyCode: string | null | undefined): string {
+  const code = (currencyCode ?? 'EUR').trim() || 'EUR';
+  return formatAppCurrency(amount, DEFAULT_APP_LANGUAGE, code);
+}
 
 /** Prix localisés de l’offering courant (Test Store ou App Store). */
 export async function fetchPetitmoPlusPlanPrices(): Promise<PetitmoPlusPlanPrices | null> {
@@ -187,6 +218,11 @@ export async function fetchPetitmoPlusPlanPrices(): Promise<PetitmoPlusPlanPrice
 
     const monthlyPrice = monthlyPkg.product.price;
     const yearlyPrice = yearlyPkg.product.price;
+    const currencyCode =
+      monthlyPkg.product.currencyCode?.trim() ||
+      yearlyPkg.product.currencyCode?.trim() ||
+      null;
+
     let yearlyDiscountPercent: number | null = null;
     if (
       typeof monthlyPrice === 'number' &&
@@ -200,11 +236,16 @@ export async function fetchPetitmoPlusPlanPrices(): Promise<PetitmoPlusPlanPrice
       }
     }
 
+    const yearlyPerMonth =
+      typeof yearlyPrice === 'number' && yearlyPrice > 0 ? yearlyPrice / 12 : null;
+
     return {
-      monthlyPriceString: monthlyPkg.product.priceString,
-      yearlyPriceString: yearlyPkg.product.priceString,
-      yearlyPerMonthString: yearlyPkg.product.pricePerMonthString,
+      monthlyPriceString: formatStorePrice(monthlyPrice, currencyCode),
+      yearlyPriceString: formatStorePrice(yearlyPrice, currencyCode),
+      yearlyPerMonthString:
+        yearlyPerMonth != null ? formatStorePrice(yearlyPerMonth, currencyCode) : null,
       yearlyDiscountPercent,
+      currencyCode,
     };
   } catch (e) {
     console.warn('[revenueCat] fetchPetitmoPlusPlanPrices', e);

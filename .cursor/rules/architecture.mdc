@@ -22,7 +22,7 @@ Règle dédiée (toujours appliquée) : `.cursor/rules/local-first-ux.mdc`.
 - **Isolation multi-compte** : un profil enfant / souvenir appartient au **compte** (`user_id` / e-mail), jamais au téléphone. Changement de compte → purge de l’espace local + restore cloud du compte courant (`prepareLocalWorkspaceForRealUser`). **Même e-mail** : SQLite **conservé** à la déconnexion (reconnexion instantanée). Claim = orphelins seulement.
 - **Sync = fond uniquement** : upload / flush / upsert URLs cloud **ne doivent jamais** faire tressauter fil, Capturer, favoris (pas d’`invalidate` post-flush ; events UI seulement si l’affichage local change — `filMemoryVisualEqual` / `emitMemoriesUpdatedIfVisualChanged`).
 - Promesse : *souvenirs privés et sauvegardés*. Pas de partage familial. Zéro pub.
-- Quotas : **50** souvenirs ; **5** vidéos × **20 s** ; audio **60 s**/souvenir (pas de cap nombre séparé — code peut encore avoir `VOICE_LIMIT = 5`).
+- Quotas : **50** souvenirs ; **5** vidéos × **20 s** ; audio **60 s**/souvenir (pas de cap nombre séparé).
 - Photos : thumb + print A5 cloud ; HD original local jusqu’à Petitmo+.
 - Livre imprimé pour toutes ; QR A/V après commande — `lib/pricingV1.ts`, specs pricing / free-tier QR.
 - Device-user anonyme : **plus le socle produit** (legacy / cas limite seulement).

@@ -84,6 +84,9 @@ export interface Database {
           upload_status?: 'pending' | 'thumb_only' | 'print_only' | 'full'
           created_at: string
           updated_at: string
+          /** NULL = actif (fil / quotas). Downgrade free → posé ; re-subscribe → clear. */
+          archived_at?: string | null
+          archive_reason?: string | null
         }
         Insert: {
           id?: string
@@ -119,6 +122,8 @@ export interface Database {
           upload_status?: 'pending' | 'thumb_only' | 'print_only' | 'full'
           created_at?: string
           updated_at?: string
+          archived_at?: string | null
+          archive_reason?: string | null
         }
         Update: {
           [key: string]: unknown

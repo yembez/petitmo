@@ -2,13 +2,18 @@ import { getUserTier } from '@/lib/userTier'
 import { getCachedUserMode } from '@/lib/userMode'
 import { getAllLocalMemories } from '@/lib/localDb'
 import { pullFamilyMemoriesFromRemoteToLocal } from '@/services/memoriesLocalSync'
+import { getCaptureLockedCached } from '@/lib/captureLock'
 
 /** Prod : 50. Valeur de test éventuelle à documenter ici si on baisse temporairement. */
 export const FREE_TIER_LIMIT = 50
 /** TEST ONLY — prod : 5. */
 export const FREE_TIER_VIDEO_LIMIT = 5
 export const FREE_TIER_VIDEO_MAX_DURATION = 20 // secondes (fil gratuit)
-export const FREE_TIER_VOICE_LIMIT = 5 // max souvenirs audio en gratuit
+/**
+ * @deprecated V2 : plus de plafond **nombre** d’audios en gratuit (borné par les 50 souvenirs).
+ * Conservé pour imports historiques / docs — ne plus gate UX dessus.
+ */
+export const FREE_TIER_VOICE_LIMIT = Number.MAX_SAFE_INTEGER
 export const FREE_TIER_VOICE_MAX_DURATION = 60 // secondes (création de souvenirs audio)
 export const FREE_TIER_BOOK_VOICE_MAX_DURATION = 60 // secondes (livres : QR audio)
 /** Plafond sécurité Petitmo+ — import / QR vidéo (3 min). */
@@ -63,6 +68,8 @@ export type LimitCheck = {
   current: number
   limit: number
   isAtLimit: boolean
+  /** Ex-paid lecture seule (V1) — distinct du plafond 50 never-paid. */
+  reason?: 'capture_locked' | null
 }
 
 const FAMILY_LIMIT_CACHE_KEY = '__family__'
@@ -106,9 +113,22 @@ export async function checkMemoryLimit(
       current: 0,
       limit: Infinity,
       isAtLimit: false,
+      reason: null,
     }
     memoryLimitCache = { childId: FAMILY_LIMIT_CACHE_KEY, at: now, result: paid }
     return paid
+  }
+
+  if (await getCaptureLockedCached()) {
+    const locked: LimitCheck = {
+      canCreate: false,
+      current: 0,
+      limit: 0,
+      isAtLimit: true,
+      reason: 'capture_locked',
+    }
+    memoryLimitCache = { childId: FAMILY_LIMIT_CACHE_KEY, at: now, result: locked }
+    return locked
   }
 
   if (!opts?.skipRemotePull) {
@@ -128,6 +148,7 @@ export async function checkMemoryLimit(
     current,
     limit: FREE_TIER_LIMIT,
     isAtLimit: current >= FREE_TIER_LIMIT,
+    reason: null,
   }
   memoryLimitCache = { childId: FAMILY_LIMIT_CACHE_KEY, at: now, result }
   return result
@@ -151,6 +172,15 @@ export async function checkVideoLimit(
       current: 0,
       limit: Infinity,
       isAtLimit: false,
+    }
+  }
+
+  if (await getCaptureLockedCached()) {
+    return {
+      canCreate: false,
+      current: 0,
+      limit: 0,
+      isAtLimit: true,
     }
   }
 
@@ -184,33 +214,12 @@ export async function checkVoiceLimit(
   isAtLimit: boolean
 }> {
   void childId
-  const tier = await getUserTier()
-
-  if (tier === 'paid') {
-    return {
-      canCreate: true,
-      current: 0,
-      limit: Infinity,
-      isAtLimit: false,
-    }
-  }
-
-  if (!opts?.skipRemotePull) {
-    try {
-      if ((await getCachedUserMode()) === 'cloud') {
-        await pullFamilyMemoriesFromRemoteToLocal()
-      }
-    } catch {
-      // hors ligne
-    }
-  }
-
-  const voiceCount = getAllLocalMemories().filter(m => m.type === 'voice').length
-
+  void opts
+  // V2 : pas de cap nombre d’audios — durée 60 s + plafond 50 souvenirs ailleurs.
   return {
-    canCreate: voiceCount < FREE_TIER_VOICE_LIMIT,
-    current: voiceCount,
-    limit: FREE_TIER_VOICE_LIMIT,
-    isAtLimit: voiceCount >= FREE_TIER_VOICE_LIMIT,
+    canCreate: true,
+    current: 0,
+    limit: Infinity,
+    isAtLimit: false,
   }
 }

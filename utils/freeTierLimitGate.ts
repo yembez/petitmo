@@ -4,17 +4,17 @@ import i18n from '@/lib/i18n';
 import {
   FREE_TIER_LIMIT,
   FREE_TIER_VIDEO_LIMIT,
-  FREE_TIER_VOICE_LIMIT,
+  type LimitCheck,
 } from '@/lib/limits';
 
 /** Contextes paywall alignés sur `app/paywall.tsx`. */
 export type FreeTierPaywallContext =
   | 'LIMIT_REACHED'
   | 'VIDEO_LIMIT_REACHED'
-  | 'VOICE_LIMIT_REACHED'
+  | 'EX_SUBSCRIBER'
   | 'GENERAL';
 
-export type FreeTierLimitKind = 'memories' | 'videos' | 'voices';
+export type FreeTierLimitKind = 'memories' | 'videos' | 'capture_locked';
 
 type LimitCopy = {
   title: string;
@@ -24,6 +24,12 @@ type LimitCopy = {
 
 function copyForKind(kind: FreeTierLimitKind): LimitCopy {
   switch (kind) {
+    case 'capture_locked':
+      return {
+        title: i18n.t('parent.freeTierLimit.captureLockedTitle'),
+        body: i18n.t('parent.freeTierLimit.captureLockedBody'),
+        context: 'EX_SUBSCRIBER',
+      };
     case 'videos':
       return {
         title: i18n.t('parent.freeTierLimit.videosTitle'),
@@ -31,14 +37,6 @@ function copyForKind(kind: FreeTierLimitKind): LimitCopy {
           count: FREE_TIER_VIDEO_LIMIT,
         }),
         context: 'VIDEO_LIMIT_REACHED',
-      };
-    case 'voices':
-      return {
-        title: i18n.t('parent.freeTierLimit.voicesTitle'),
-        body: i18n.t('parent.freeTierLimit.voicesBody', {
-          count: FREE_TIER_VOICE_LIMIT,
-        }),
-        context: 'VOICE_LIMIT_REACHED',
       };
     case 'memories':
     default:
@@ -52,8 +50,14 @@ function copyForKind(kind: FreeTierLimitKind): LimitCopy {
   }
 }
 
+/** Mappe un `LimitCheck` bloquant → kind d’alerte. */
+export function freeTierLimitKindFromCheck(check: LimitCheck): FreeTierLimitKind {
+  if (check.reason === 'capture_locked') return 'capture_locked';
+  return 'memories';
+}
+
 /**
- * Message explicite **avant** le paywall pour toute limite du plan gratuit.
+ * Message explicite **avant** le paywall pour toute limite du plan gratuit / ex-paid.
  * Bouton secondaire = rester ; principal = ouvrir le paywall.
  */
 export function promptFreeTierLimitThenPaywall(opts: {
@@ -103,8 +107,8 @@ export function promptFreeTierLimitFromError(
     promptFreeTierLimitThenPaywall({ ...opts, kind: 'videos' });
     return true;
   }
-  if (message === 'VOICE_LIMIT_REACHED') {
-    promptFreeTierLimitThenPaywall({ ...opts, kind: 'voices' });
+  if (message === 'CAPTURE_LOCKED') {
+    promptFreeTierLimitThenPaywall({ ...opts, kind: 'capture_locked' });
     return true;
   }
   if (message === 'LIMIT_REACHED') {

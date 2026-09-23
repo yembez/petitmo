@@ -6,6 +6,7 @@ import {
   Pressable,
   Alert,
   ScrollView,
+  Linking,
 } from 'react-native'
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -35,16 +36,18 @@ import { getChildren } from '@/services/children'
 import { listLocalChildrenForUser } from '@/lib/localDb'
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset'
 import { grantDigitalExportPurchase } from '@/lib/digitalExportPurchase'
-import { FREE_TIER_LIMIT, FREE_TIER_VIDEO_LIMIT, PAID_TIER_VIDEO_MAX_DURATION, PAID_TIER_VOICE_MAX_DURATION } from '@/lib/limits'
+import { FREE_TIER_LIMIT, FREE_TIER_VIDEO_LIMIT, PAID_TIER_VIDEO_MAX_DURATION } from '@/lib/limits'
 import { THEME } from '@/constants/theme'
 import { hp, scale, screenHeight, screenWidth, verticalScale } from '@/utils/responsive'
+import { LEGAL_PRIVACY_URL, LEGAL_TERMS_URL } from '@/lib/legalUrls'
 
 export type PaywallContext =
   /** Ouverture volontaire (onboarding, découvert…) — hero neutre, sans mention du quota souvenirs. */
   | 'GENERAL'
   | 'LIMIT_REACHED'
   | 'VIDEO_LIMIT_REACHED'
-  | 'VOICE_LIMIT_REACHED'
+  /** Ex-abonnée (captureLocked) — hero réactivation, pas le hero « 50 souvenirs ». */
+  | 'EX_SUBSCRIBER'
   | 'EXPORT_PAYWALL'
   /** Export PDF serveur — achat à l’acte 4,99 € (spec). */
   | 'EXPORT_DIGITAL_PDF'
@@ -77,7 +80,7 @@ const VALID_PAYWALL_CONTEXTS = [
   'GENERAL',
   'LIMIT_REACHED',
   'VIDEO_LIMIT_REACHED',
-  'VOICE_LIMIT_REACHED',
+  'EX_SUBSCRIBER',
   'EXPORT_PAYWALL',
   'EXPORT_DIGITAL_PDF',
   'BOOK_ORDER',
@@ -92,6 +95,8 @@ function normalizePaywallContext(raw: unknown): PaywallContext {
   if (key === 'BOOK_ORDER_DISCOUNT') return 'BOOK_ORDER'
   /** Vidéo dans un livre (gratuit) → même hero neutre que l’onboarding. */
   if (key === 'BOOK_VIDEO') return 'GENERAL'
+  /** V2 : plus de cap nombre d’audios — ancien deep link → hero neutre. */
+  if (key === 'VOICE_LIMIT_REACHED') return 'GENERAL'
   if ((VALID_PAYWALL_CONTEXTS as readonly string[]).includes(key)) {
     return key as PaywallContext
   }
@@ -112,19 +117,19 @@ const PAYWALL_MESSAGES: Record<
     subtitle: '',
   },
   LIMIT_REACHED: {
-    eyebrow: 'Petitmo+',
+    eyebrow: 'Petit Cœur',
     title: n => `Tu as atteint tes ${FREE_TIER_LIMIT} souvenirs de ${n}.`,
     subtitle: 'Continue à capturer chaque moment sans limite.',
   },
   VIDEO_LIMIT_REACHED: {
-    eyebrow: 'Petitmo+',
+    eyebrow: 'Petit Cœur',
     title: n => `Tu as utilisé tes ${FREE_TIER_VIDEO_LIMIT} vidéos gratuites de ${n}.`,
-    subtitle: `Des vidéos illimitées en nombre, jusqu’à ${Math.round(PAID_TIER_VIDEO_MAX_DURATION / 60)} min chacune avec Petitmo+.`,
+    subtitle: `Des vidéos illimitées en nombre, jusqu’à ${Math.round(PAID_TIER_VIDEO_MAX_DURATION / 60)} min chacune avec Petit Cœur.`,
   },
-  VOICE_LIMIT_REACHED: {
-    eyebrow: 'Petitmo+',
-    title: n => `2 minutes, c'est déjà une belle histoire de ${n}.`,
-    subtitle: `Des vocaux illimités en nombre, jusqu’à ${Math.round(PAID_TIER_VOICE_MAX_DURATION / 60)} min avec Petitmo+.`,
+  EX_SUBSCRIBER: {
+    eyebrow: 'Petit Cœur',
+    title: () => 'Reprends là où tu t’étais arrêtée.',
+    subtitle: 'Tes souvenirs sont toujours là. Réactive ton abonnement pour en capturer de nouveaux.',
   },
   EXPORT_PAYWALL: {
     eyebrow: 'Petitmo+',
@@ -212,8 +217,8 @@ export default function PaywallScreen() {
         monthly: prices.monthlyPriceString,
         yearly: prices.yearlyPriceString,
         yearlyPerMonth: prices.yearlyPerMonthString
-          ? `${prices.yearlyPerMonthString}/mois`
-          : `${FALLBACK_ANNUAL_PER_MONTH} €/mois`,
+          ? `${prices.yearlyPerMonthString} / mois`
+          : `${FALLBACK_ANNUAL_PER_MONTH} € / mois`,
         discountLabel:
           prices.yearlyDiscountPercent != null && prices.yearlyDiscountPercent > 0
             ? `-${prices.yearlyDiscountPercent}%`
@@ -398,6 +403,7 @@ export default function PaywallScreen() {
   const dm700 = dmLoaded ? 'DMSans_700Bold' : undefined
 
   const showMemoryLimitHero = context === 'LIMIT_REACHED'
+  const showExSubscriberHero = context === 'EX_SUBSCRIBER'
 
   const contentBottomPad = Math.max(28, insets.bottom + 16)
   const contentPadH = { paddingLeft: 20 + insets.left, paddingRight: 20 + insets.right }
@@ -519,7 +525,23 @@ export default function PaywallScreen() {
           </>
         ) : null}
 
-        <View style={[styles.plansRow, !showMemoryLimitHero && styles.plansRowAfterBrand]}>
+        {showExSubscriberHero ? (
+          <>
+            <Text style={[styles.headline, dm700 && { fontFamily: dm700 }]}>
+              Reprends là où{'\n'}tu t’étais arrêtée
+            </Text>
+            <Text style={[styles.subline, dm500 && { fontFamily: dm500 }]}>
+              Tes souvenirs sont toujours là.{'\n'}Réactive pour en capturer de nouveaux.
+            </Text>
+          </>
+        ) : null}
+
+        <View
+          style={[
+            styles.plansRow,
+            !showMemoryLimitHero && !showExSubscriberHero && styles.plansRowAfterBrand,
+          ]}
+        >
           <Pressable
             onPress={() => setSelectedPlan('yearly')}
             style={({ pressed }) => [
@@ -551,11 +573,14 @@ export default function PaywallScreen() {
                     styles.planPriceMainYear,
                     dm700 && { fontFamily: dm700 },
                   ]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.85}
                 >
                   {planPrices.yearly}
-                  <Text style={styles.planPerMoInline}>/an</Text>
                 </Text>
-                <Text style={[styles.planFine, dm500 && { fontFamily: dm500 }]}>
+                <Text style={[styles.planPeriod, dm500 && { fontFamily: dm500 }]}>par an</Text>
+                <Text style={[styles.planFine, dm500 && { fontFamily: dm500 }]} numberOfLines={1}>
                   {planPrices.yearlyPerMonth}
                 </Text>
               </View>
@@ -584,10 +609,13 @@ export default function PaywallScreen() {
                     styles.planPriceMainMonth,
                     dm700 && { fontFamily: dm700 },
                   ]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.85}
                 >
                   {planPrices.monthly}
-                  <Text style={styles.planPerMoInline}>/mois</Text>
                 </Text>
+                <Text style={[styles.planPeriod, dm500 && { fontFamily: dm500 }]}>par mois</Text>
               </View>
             </View>
           </Pressable>
@@ -644,6 +672,35 @@ export default function PaywallScreen() {
           </View>
         </PetitmoPrimaryMorphButton>
 
+        {/** Apple 3.1.2 — liens visibles près du CTA (sans scroll). */}
+        <View style={styles.legalRow}>
+          <Pressable
+            onPress={() => void Linking.openURL(LEGAL_TERMS_URL)}
+            accessibilityRole="link"
+            accessibilityLabel={t('paywall.legalTerms')}
+            hitSlop={8}
+          >
+            <Text style={[styles.legalLink, dm500 && { fontFamily: dm500 }]}>
+              {t('paywall.legalTerms')}
+            </Text>
+          </Pressable>
+          <Text style={[styles.legalSep, dm500 && { fontFamily: dm500 }]}>·</Text>
+          <Pressable
+            onPress={() => void Linking.openURL(LEGAL_PRIVACY_URL)}
+            accessibilityRole="link"
+            accessibilityLabel={t('paywall.legalPrivacy')}
+            hitSlop={8}
+          >
+            <Text style={[styles.legalLink, dm500 && { fontFamily: dm500 }]}>
+              {t('paywall.legalPrivacy')}
+            </Text>
+          </Pressable>
+        </View>
+
+        <Text style={[styles.finePrint, dm500 && { fontFamily: dm500 }]}>
+          Renouvellement automatique. Résiliable à tout moment{'\n'}dans les réglages de l&apos;App Store.
+        </Text>
+
         <Pressable
           onPress={() => void handleRestorePurchases()}
           disabled={isLoading}
@@ -664,10 +721,6 @@ export default function PaywallScreen() {
         >
           <Text style={[styles.dismissCtaText, dm500 && { fontFamily: dm500 }]}>Pas maintenant</Text>
         </Pressable>
-
-        <Text style={[styles.finePrint, dm500 && { fontFamily: dm500 }]}>
-          Renouvellement automatique. Résiliable à tout moment{'\n'}dans les réglages de l&apos;App Store.
-        </Text>
           </>
         )}
       </View>
@@ -911,10 +964,10 @@ const styles = StyleSheet.create({
     lineHeight: 13,
   },
   planPriceMain: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '800',
     letterSpacing: -0.3,
-    lineHeight: 20,
+    lineHeight: 21,
   },
   planPriceMainYear: {
     color: ACCENT,
@@ -922,10 +975,12 @@ const styles = StyleSheet.create({
   planPriceMainMonth: {
     color: '#1C1C1E',
   },
-  planPerMoInline: {
-    fontSize: 12,
+  planPeriod: {
+    marginTop: 1,
+    fontSize: 11,
     fontWeight: '600',
     color: MUTED,
+    lineHeight: 14,
   },
   radioOuter: {
     width: 20,
@@ -946,10 +1001,11 @@ const styles = StyleSheet.create({
     backgroundColor: ACCENT,
   },
   planFine: {
-    marginTop: 1,
-    fontSize: 11,
+    marginTop: 3,
+    fontSize: 10,
+    fontWeight: '500',
     color: MUTED,
-    lineHeight: 14,
+    lineHeight: 13,
   },
   primaryCta: {
     marginTop: verticalScale(22),
@@ -993,11 +1049,30 @@ const styles = StyleSheet.create({
     color: MUTED,
     textAlign: 'center',
   },
+  legalRow: {
+    marginTop: 12,
+    marginBottom: 4,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+  },
   finePrint: {
     marginTop: 8,
     textAlign: 'center',
     fontSize: 11,
     lineHeight: 15,
     color: '#A0A4AB',
+  },
+  legalLink: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: MUTED,
+    textDecorationLine: 'underline',
+  },
+  legalSep: {
+    fontSize: 12,
+    color: '#C7C7CC',
   },
 })

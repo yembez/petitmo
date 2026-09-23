@@ -17,6 +17,13 @@
 
 > Les enregistrements audio et vidéo inclus dans votre livre restent accessibles en scannant le QR code pendant **15 ans** à compter de la date de commande ou d’export du livre.
 
+**Suppression de compte** (détail lifecycle : [`subscription-lifecycle-retention.md`](./subscription-lifecycle-retention.md)) :
+
+| Cas | QR livres |
+|-----|-----------|
+| Suppression **volontaire** | **Effacés** immédiatement (même avant 15 ans) |
+| Suppression **auto inactivité** (24 mois) | **Conservés** jusqu’à l’échéance 15 ans |
+
 Variante **Petitmo+** (phase 2 produit) :
 
 > Avec Petitmo+, les médias QR de vos livres restent accessibles **20 ans**.
@@ -27,13 +34,13 @@ Variante **Petitmo+** (phase 2 produit) :
 
 ## 2. État actuel vs cible
 
-| Paramètre | Code aujourd’hui | Cible spec |
-|-----------|------------------|------------|
-| Durée accès QR livre | **10 ans** (`BOOK_QR_MEDIA_EXPIRY_YEARS`) | **15 ans** (commande / export) |
-| Durée export guest | **10 ans** (`GUEST_EXPORT_QR_EXPIRY_YEARS`) | **15 ans** (aligné) |
-| Durée Petitmo+ | idem 10 ans | **20 ans** (tier distinct — phase 2) |
+| Paramètre | Code aujourd’hui | Cible / suite |
+|-----------|------------------|---------------|
+| Durée accès QR livre | **15 ans** (`BOOK_QR_MEDIA_EXPIRY_YEARS`) | figé pour privacy / CGU |
+| Durée export guest | **15 ans** (`GUEST_EXPORT_QR_EXPIRY_YEARS` + Edge `guest-upload-urls`) | aligné |
+| Durée Petitmo+ | idem 15 ans | **20 ans** (tier distinct — phase 2) |
 | Format servi | `qr-media/ready/{token}.mp4` ou `.m4a` (H.264/AAC) | inchangé |
-| URL QR | `/m/{token}` sur hôte public | **`petitmo.app/m/…`** (domaine maîtrisé) |
+| URL QR | `/m/{token}` sur hôte public | **`petitcoeur.app/m/…`** (domaine maîtrisé) |
 | Backup bucket `qr-media` | non automatisé | backup mensuel + export SQL tokens |
 | Alertes ops `failed` | logs Railway | alerte si token bloqué > 24 h |
 | Pré-expiration | aucune | email / bannière J-90 (phase 3) |
@@ -98,15 +105,14 @@ flowchart LR
 
 ### Phase 1 — Spec & durée (priorité immédiate)
 
-- [ ] Passer `BOOK_QR_MEDIA_EXPIRY_YEARS` de **10 → 15** dans `server/src/constants/spec.ts`.
-- [ ] Passer `GUEST_EXPORT_QR_EXPIRY_YEARS` de **10 → 15** (même fichier).
-- [ ] Vérifier que **tous** les chemins créent `expires_at` :
-  - `ensurePublicMediaToken` (`server/src/publicMediaTokens.ts`)
-  - `guest-upload-urls` (`bookPublicMediaExpiresAtIso()`)
-  - `preparePublicTokensForBook` / export guest
+- [x] Passer `BOOK_QR_MEDIA_EXPIRY_YEARS` de **10 → 15** dans `server/src/constants/spec.ts`.
+- [x] Passer `GUEST_EXPORT_QR_EXPIRY_YEARS` de **10 → 15** (même fichier).
+- [x] Edge `guest-upload-urls` : `+ 15` (constante locale Deno).
+- [x] **Deploy** : Railway (PDF server) + `supabase functions deploy guest-upload-urls` (2026-09-14).
+- [ ] Vérifier que **tous** les chemins créent `expires_at` (smoke nouvel export).
 - [ ] **Tokens existants** : décision produit —
   - *Option A (recommandée)* : les nouveaux exports only (pas de migration rétroactive).
-  - *Option B* : SQL one-shot `UPDATE … SET expires_at = created_at + interval '15 years' WHERE expires_at < …`.
+  - *Option B* : SQL one-shot `UPDATE … SET expires_at = created_at + interval '15 years' WHERE expires_at IS NOT NULL`.
 - [ ] Copy app : page commande / export / FAQ (§8 ci-dessous).
 - [ ] Checklist QA : `docs/qa/RELEASE_SMOKE_CHECKLIST.md` — mentionner durée 15 ans.
 

@@ -57,7 +57,7 @@ export type BuildBookHtmlInput = {
   /** Couleur fond couverture (white|cream|olive|navy|charcoal|black). */
   coverColorId?: BookCoverColorId | string | null;
   memoriesById: Map<string, MemoryRow>;
-  /** memoryId → token ; QR = `${qrBaseUrl}/${token}` (ex: https://petitmo.app/m/{token}). */
+  /** memoryId → token ; QR = `${qrBaseUrl}/${token}` (ex: https://petitcoeur.app/m/{token}). */
   qrTokensByMemoryId: Map<string, string>;
   /**
    * Tous les enfants du compte (noms + birthdates) — légendes multi-enfants.

@@ -51,9 +51,9 @@ export async function pullMemoriesFromRemoteToLocal(childId: string): Promise<Me
     await healDeadLocalMediaPointersForMemories(withLocal, { max: 64 })
     await reconcileFavoritesAfterCloudSync()
 
-    const remoteIds = new Set(withLocal.map(m => m.id))
-    const localOnly = localBefore.filter(m => !remoteIds.has(m.id))
-    return localOnly.length > 0 ? [...withLocal, ...localOnly] : withLocal
+    // Hors fil : actifs locaux + éventuels locaux pas encore sur le cloud.
+    // Les archivés (archived_at) sont volontairement exclus via getLocalMemories.
+    return getLocalMemories(childId)
   } catch {
     return localBefore
   }

@@ -60,7 +60,7 @@ function newPublicToken(): string {
 
 function bookPublicMediaExpiresAtIso(): string {
   const d = new Date();
-  d.setFullYear(d.getFullYear() + 10);
+  d.setFullYear(d.getFullYear() + 15);
   return d.toISOString();
 }
 

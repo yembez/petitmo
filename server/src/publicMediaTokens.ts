@@ -29,7 +29,7 @@ export async function ensurePublicMediaToken(params: {
   supabase: SupabaseClient;
   mediaId: string;
   kind: 'audio' | 'video';
-  /** Nouveaux tokens : fin d’accès QR (spec 10 ans). */
+  /** Nouveaux tokens : fin d’accès QR (spec 15 ans). */
   expiresAtIso?: string | null;
 }): Promise<string> {
   const { supabase, mediaId, kind, expiresAtIso } = params;

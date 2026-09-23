@@ -83,7 +83,7 @@ Petitmo a **deux plans** sur une **même identité** (compte obligatoire) :
   - **50** souvenirs au total ;
   - **vidéo** : max **5** souvenirs, **20 s** chacun ;
   - **audio** : **60 s** par souvenir, **pas** de cap de nombre séparé (borné par les 50) ;
-  - *(code actuel : encore `FREE_TIER_VOICE_LIMIT = 5` — à retirer pour aligner).*
+  - *(durée audio : 60 s ; plus de plafond nombre d’audios en gratuit — borné par les 50.)*
 - **Photos** : **thumb + print A5** en cloud dès le gratuit ; **original HD** reste local. Petitmo+ débloque le **HD cloud**.
 - **Livre imprimé** : accessible à toutes (gratuites et payantes). Remise Petitmo+ = **−10 %** sur la partie livre (`lib/pricingV1.ts`). QR A/V : composition libre ; facturation au checkout (2 inclus + 0,70 €) — specs pricing / QR.
 - Le **`user_id` anonyme (device-user)** n’est **plus** le socle produit. Cas limite technique éventuel seulement ; **cible bêta** : pas de commande livre sans compte authentifié.
@@ -103,10 +103,11 @@ Petitmo a **deux plans** sur une **même identité** (compte obligatoire) :
 - **Interdit** : promettre du partage familial / multi-membres comme bénéfice cœur (hors scope V1).
 - **Suppression de compte in-app** : **P0** avant TestFlight public / App Store (exigence Apple) dès qu’on crée des comptes.
 - Paywall — hero selon le contexte (`app/paywall.tsx`) :
-  - **Quota souvenirs gratuit atteint** (`context=LIMIT_REACHED` uniquement) : hero chiffré du type « Tu as capturé vos N premiers souvenirs » + sous-texte « Continue à préserver… ».
-  - **Toute autre entrée** : hero **neutre** — « Les abonnements pour préserver chaque moment ». CTA principal **rosé charte**.
-  - Exception : flux **export PDF numérique à l’acte** (`EXPORT_DIGITAL_PDF`) — titre / sous-titre propres.
-  - Passer explicitement `params.context` ; défaut = **`GENERAL`**.
+ - **Quota souvenirs gratuit atteint** (`context=LIMIT_REACHED` uniquement) : hero chiffré du type « Tu as capturé vos N premiers souvenirs » + sous-texte « Continue à préserver… ».
+ - **Ex-abonnée** (`context=EX_SUBSCRIBER`, `captureLocked`) : hero réactivation — « Reprends là où tu t’étais arrêtée » (pas le hero 50).
+ - **Toute autre entrée** : hero **neutre** — « Les abonnements pour préserver chaque moment ». CTA principal **rosé charte**.
+ - Exception : flux **export PDF numérique à l’acte** (`EXPORT_DIGITAL_PDF`) — titre / sous-titre propres.
+ - Passer explicitement `params.context` ; défaut = **`GENERAL`**.
 
 ---
 
@@ -193,15 +194,17 @@ flowchart LR
 
 ---
 
-## Chantiers produit (pas encore tous livrés dans le code)
+## Chantiers produit (pas encore tous livrés / smoke)
 
-1. Auth onboarding + login + mot de passe oublié  
-2. Sync cloud dès le gratuit (limites ci-dessus)  
-3. RevenueCat + webhook `subscriptionTier`  
-4. Suppression de compte in-app (Apple)  
+1. ~~Auth onboarding + login + mot de passe oublié~~ — **code livré** ; smoke TF + Redirect URL Supabase  
+2. ~~Sync cloud dès le gratuit~~ — **code livré** ; smoke restore  
+3. RevenueCat + webhook `subscriptionTier` — **code prêt** ; deploy + conformité Apple / secrets EAS  
+4. ~~Suppression de compte in-app (Apple)~~ — **code + purge Storage** ; déployer Edge `delete-account` + smoke  
 5. Dimensionnement coût Storage gratuit à l’échelle  
-6. Réalignement `lib/limits.ts` (retirer le cap 5 audios ; durée déjà 60 s)  
-7. Mise à jour `docs/specs/architecture-locale-cloud.md` + `supabase-write-policy.mdc`
+6. ~~Réalignement `lib/limits.ts` (cap 5 audios)~~ — **fait** (durée 60 s conservée)  
+7. Mise à jour `docs/specs/architecture-locale-cloud.md` + `supabase-write-policy.mdc`  
+8. **Lifecycle abo / inactivité / mails** — spec [`docs/specs/subscription-lifecycle-retention.md`](docs/specs/subscription-lifecycle-retention.md) : **sans grâce** ; EXPIRATION → free + **lecture totale** + `captureLocked` (0 ajout) ; cancel → mail only ; billing issue → mail + bandeau ; re-subscribe → unlock. **Pas d’archive >50 en V1**. Inactivité 24 mois = P2.  
+9. QR livres = **15 ans** (code + Railway/Edge) ; delete volontaire purge QR ; delete inactivité conserve QR jusqu’à échéance — détail même spec
 
 ---
 

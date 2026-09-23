@@ -39,3 +39,9 @@ verify_jwt = false
 
 [functions.print-orders]
 verify_jwt = false
+
+[functions.touch-activity]
+verify_jwt = false
+
+[functions.inactivity-sweep]
+verify_jwt = false

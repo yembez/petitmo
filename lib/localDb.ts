@@ -133,6 +133,8 @@ export function initLocalDb(): void {
     add('captured_overlay_ink', 'TEXT');
     add('text_title', 'TEXT');
     add('public_media_token', 'TEXT');
+    add('archived_at', 'TEXT');
+    add('archive_reason', 'TEXT');
   } catch {
     // Silencieux (ne doit pas empêcher l’app de démarrer)
   }
@@ -174,15 +176,27 @@ export function initLocalDb(): void {
 export function getLocalMemories(childId: string): Memory[] {
   const rows = db.getAllSync(
     `SELECT * FROM memories 
-     WHERE child_id = ? 
+     WHERE child_id = ?
+       AND (archived_at IS NULL OR archived_at = '')
      ORDER BY created_at DESC, COALESCE(inserted_at, created_at) DESC`,
     [childId]
   ) as Record<string, unknown>[]
   return rows.map(deserializeMemory)
 }
 
-/** Tous les souvenirs famille — ordre fil = date d’événement / prise (`created_at`). */
+/** Tous les souvenirs famille actifs — ordre fil = date d’événement / prise (`created_at`). */
 export function getAllLocalMemories(): Memory[] {
+  const rows = db.getAllSync(
+    `SELECT * FROM memories
+     WHERE (archived_at IS NULL OR archived_at = '')
+     ORDER BY created_at DESC, COALESCE(inserted_at, created_at) DESC`,
+    [],
+  ) as Record<string, unknown>[]
+  return rows.map(deserializeMemory)
+}
+
+/** Inclut les archivés (purge compte, debug). */
+export function getAllLocalMemoriesIncludingArchived(): Memory[] {
   const rows = db.getAllSync(
     `SELECT * FROM memories
      ORDER BY created_at DESC, COALESCE(inserted_at, created_at) DESC`,
@@ -424,9 +438,10 @@ export function upsertLocalMemory(memory: Memory, uploadStatus?: UploadStatus): 
       is_favorite, duration, file_size, location, captured_overlay_ink,
       created_at, inserted_at, updated_at,
       upload_status, sync_status, synced_at,
-      import_asset_id, import_source_fingerprint, public_media_token
+      import_asset_id, import_source_fingerprint, public_media_token,
+      archived_at, archive_reason
     ) VALUES (
-      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
     )`,
     [
       memory.id,
@@ -477,6 +492,8 @@ export function upsertLocalMemory(memory: Memory, uploadStatus?: UploadStatus): 
       memory.import_asset_id?.trim() ? memory.import_asset_id.trim() : null,
       memory.import_source_fingerprint?.trim() ? memory.import_source_fingerprint.trim() : null,
       memory.public_media_token?.trim() ? memory.public_media_token.trim() : null,
+      memory.archived_at?.trim() ? memory.archived_at.trim() : null,
+      memory.archive_reason?.trim() ? memory.archive_reason.trim() : null,
     ]
   )
 }
@@ -744,6 +761,12 @@ function deserializeMemory(row: Record<string, unknown>): Memory {
     public_media_token:
       typeof row.public_media_token === 'string' && row.public_media_token.trim()
         ? row.public_media_token.trim()
+        : null,
+    archived_at:
+      typeof row.archived_at === 'string' && row.archived_at.trim() ? row.archived_at.trim() : null,
+    archive_reason:
+      typeof row.archive_reason === 'string' && row.archive_reason.trim()
+        ? row.archive_reason.trim()
         : null,
   }
 }

@@ -1,6 +1,6 @@
 # Pérennité QR médias livre (`/m/{token}`)
 
-> **Critique produit** : un QR imprimé ou exporté en PDF doit rester lisible pendant toute la durée de vie du souvenir (spec : **10 ans**).  
+> **Critique produit** : un QR imprimé ou exporté en PDF doit rester lisible pendant toute la durée de vie du souvenir (spec : **15 ans**).  
 > Un ré-export ou une ouverture de l’app ne doit **jamais** invalider un token déjà servi.
 
 ## Invariants (non négociables)
