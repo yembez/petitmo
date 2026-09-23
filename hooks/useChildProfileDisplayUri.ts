@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { getInfoAsync } from 'expo-file-system/legacy';
 import { isBareMediaBucketPath, useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import {
+  photoUrlStoragePathOwnedByChild,
   resolveChildProfileImageDisplayUri,
   resolveChildProfileImageUri,
 } from '@/utils/childPhotoUri';
@@ -61,7 +62,11 @@ export function useChildProfileDisplayUri(child: ChildPhotoFields | null | undef
       ? resolveChildProfileImageDisplayUri(localRawPath || null, null, child?.updated_at) ?? ''
       : '';
   const remoteRaw = (child?.photo_url ?? '').trim();
-  const remoteBase = remoteRaw ? resolveChildProfileImageUri(null, remoteRaw) : null;
+  /** Refuse une photo_url Storage clairement rattachée à un autre enfant (restore cloud). */
+  const remoteForeign =
+    !!childId && remoteRaw && photoUrlStoragePathOwnedByChild(remoteRaw, childId) === false;
+  const remoteSafe = remoteForeign ? '' : remoteRaw;
+  const remoteBase = remoteSafe ? resolveChildProfileImageUri(null, remoteSafe) : null;
   const signedRemote = useSignedMediaUrl(remoteBase);
 
   const localCandidate =

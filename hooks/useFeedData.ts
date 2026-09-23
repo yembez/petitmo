@@ -34,6 +34,7 @@ import {
   refreshChildProfileFromLocal,
   refreshChildrenFromCloudInBackground,
   childNeedsFaceBoundsBackfill,
+  repairSiblingDuplicateChildPhotoUrls,
   PETITMO_CHILD_PROFILE_UPDATED_EVENT,
   type ChildProfileUpdatedPayload,
 } from '@/services/children';
@@ -59,7 +60,10 @@ import {
 import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 
 function readFamilyChildrenFromLocal(): Child[] {
-  return sortChildrenByBirthdateAsc(listLocalChildren());
+  /** Sync : casse les photo_url partagées avant le 1er paint (sinon doublon visible au boot TF). */
+  return sortChildrenByBirthdateAsc(
+    repairSiblingDuplicateChildPhotoUrls(listLocalChildren()),
+  );
 }
 
 export type UseFeedDataResult = {
@@ -172,6 +176,7 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
           if (seq !== loadDataSeqRef.current) return;
           setChild(cleaned);
           activeChild = cleaned;
+          setFamilyChildren(readFamilyChildrenFromLocal());
           refreshChildrenFromCloudInBackground();
         } else {
           const children = await getChildren();
@@ -195,6 +200,7 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
           if (seq !== loadDataSeqRef.current) return;
           setChild(cleaned);
           activeChild = cleaned;
+          setFamilyChildren(readFamilyChildrenFromLocal());
         }
       }
 

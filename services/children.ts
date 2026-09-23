@@ -31,7 +31,11 @@ import { deleteLocalMediaFiles } from '@/lib/localCleanup';
 import { invalidateMemoryLimitCache } from '@/lib/limits';
 import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 import { getSignedMediaDisplayUrl } from '@/lib/mediaSignedUrl';
-import { resolveChildProfileImageUri } from '@/utils/childPhotoUri';
+import {
+  canonicalChildPhotoStorageKey,
+  photoUrlStoragePathOwnedByChild,
+  resolveChildProfileImageUri,
+} from '@/utils/childPhotoUri';
 import { ensureLocalImageForPalette } from '@/hooks/ensureLocalImageForPalette';
 import { normalizeChildGivenName } from '@/utils/childDisplayName'
 import { isLegacyHeroHeuristicOnProfileCrop, isValidFaceBounds } from '@/utils/avatarFaceBounds';
@@ -95,6 +99,84 @@ function withLocalChildFields(row: ChildRow): LocalChild {
         ? r.face_img_aspect
         : null,
   }
+}
+
+/**
+ * Après restore cloud : deux enfants ne doivent **jamais** partager la même photo_url
+ * (même objet Storage) ni pointer vers le fichier `/children/{autreId}-…`.
+ * Nettoie SQLite + pousse `photo_url: null` côté Supabase pour les lignes fautives
+ * (sinon le prochain merge remote réinjecte le mauvais URL).
+ */
+export function repairSiblingDuplicateChildPhotoUrls(children: LocalChild[]): LocalChild[] {
+  if (children.length < 2) return children;
+
+  const siblingIds = new Set(
+    children.map(c => c.id.trim().toLowerCase()).filter(Boolean),
+  );
+
+  const clearPhoto = (c: LocalChild, reason: string): LocalChild => {
+    const key = canonicalChildPhotoStorageKey(c.photo_url);
+    console.warn('[children] repair sibling photo_url', reason, c.id, key.slice(0, 96));
+    const next: LocalChild = {
+      ...c,
+      photo_url: null,
+      local_photo_path: null,
+      updated_at: new Date().toISOString(),
+    };
+    upsertLocalChild(next);
+    void supabase
+      .from('children')
+      .update({ photo_url: null, updated_at: next.updated_at })
+      .eq('id', c.id)
+      .then(({ error }) => {
+        if (error) {
+          console.warn('[children] repair sibling photo_url cloud', c.id, error.message);
+        }
+      });
+    notifyChildProfileUpdated(c.id, next);
+    return next;
+  };
+
+  let out = children.map(c => {
+    const raw = (c.photo_url ?? '').trim();
+    if (!raw) return c;
+    const owned = photoUrlStoragePathOwnedByChild(raw, c.id);
+    if (owned === false) {
+      return clearPhoto(c, 'foreign-owner');
+    }
+    const key = canonicalChildPhotoStorageKey(raw);
+    const m = key.match(
+      /\/children\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-/i,
+    );
+    const pathOwner = m?.[1]?.toLowerCase();
+    if (pathOwner && pathOwner !== c.id.toLowerCase() && siblingIds.has(pathOwner)) {
+      return clearPhoto(c, 'sibling-path');
+    }
+    return c;
+  });
+
+  const byKey = new Map<string, LocalChild[]>();
+  for (const c of out) {
+    const key = canonicalChildPhotoStorageKey(c.photo_url);
+    if (!key) continue;
+    const group = byKey.get(key) ?? [];
+    group.push(c);
+    byKey.set(key, group);
+  }
+
+  for (const [, group] of byKey) {
+    if (group.length < 2) continue;
+    const owner =
+      group.find(c => photoUrlStoragePathOwnedByChild(c.photo_url, c.id) === true) ??
+      group[0]!;
+    for (const c of group) {
+      if (c.id === owner.id) continue;
+      const cleared = clearPhoto(c, 'duplicate-key');
+      out = out.map(x => (x.id === c.id ? cleared : x));
+    }
+  }
+
+  return out;
 }
 
 /** Extrait les bounds visage d'un objet quelconque (Supabase row, LocalChild…). */
@@ -350,76 +432,99 @@ export async function loadCaptureChildFromLocalDbFirst(): Promise<LocalChild | n
 
 /**
  * Télécharge `photo_url` (URL signée) vers le sandbox pour affichage offline-first du profil.
+ * Un seul download in-flight par `child.id` (évite courses multi-focus / backfill).
  */
+const cacheRemoteChildInFlight = new Map<string, Promise<LocalChild>>();
+
 export async function cacheRemoteChildProfilePhotoLocally(child: LocalChild): Promise<LocalChild> {
-  if (Platform.OS === 'web' || !documentDirectory) return child;
+  const id = child.id.trim();
+  if (!id) return child;
+  const existing = cacheRemoteChildInFlight.get(id);
+  if (existing) return existing;
 
-  let row = await sanitizeChildLocalAvatarIfMissing(child);
+  const run = (async (): Promise<LocalChild> => {
+    if (Platform.OS === 'web' || !documentDirectory) return child;
 
-  const remote = (row.photo_url ?? '').trim();
-  if (!remote) return row;
-  if ((row.local_photo_path ?? '').trim()) return row;
+    let row = await sanitizeChildLocalAvatarIfMissing(child);
 
-  const dest = `${documentDirectory}petitmo_children/${row.id}.jpg`;
-  const root = `${documentDirectory}petitmo_children/`;
-  await makeDirectoryAsync(root, { intermediates: true }).catch(() => {});
-
-  let headers: Record<string, string> | undefined;
-  try {
-    const host = new URL(remote).hostname;
-    if (host.includes('supabase')) {
-      const { data } = await supabase.auth.getSession();
-      const token = data.session?.access_token;
-      if (token) headers = { Authorization: `Bearer ${token}` };
+    const remote = (row.photo_url ?? '').trim();
+    if (!remote) return row;
+    if (photoUrlStoragePathOwnedByChild(remote, row.id) === false) {
+      console.warn('[children] cacheRemote refuse photo_url foreign', row.id);
+      return row;
     }
-  } catch {
-    /* ignore */
-  }
+    if ((row.local_photo_path ?? '').trim()) return row;
 
-  try {
-    const signedRemote = await getSignedMediaDisplayUrl(remote);
-    const res = await downloadAsync(
-      signedRemote,
-      dest,
-      headers && Object.keys(headers).length ? { headers } : undefined
-    );
-    if (res.status !== 200) return row;
+    const dest = `${documentDirectory}petitmo_children/${row.id}.jpg`;
+    const root = `${documentDirectory}petitmo_children/`;
+    await makeDirectoryAsync(root, { intermediates: true }).catch(() => {});
 
-    // Détecter le visage sur l'image fraîchement téléchargée si les bounds sont absentes.
-    // Couvre la reconnexion sur nouveau téléphone avant que cette feature n'existe
-    // (bounds nulles en Supabase) — on les calcule une fois puis on les persiste dans les 2 sens.
-    const hasBounds = isValidFaceBounds(row);
-    const detectedFace = hasBounds ? null : await detectFaceBounds(res.uri).catch(() => null);
-    const faceToSave = hasBounds
-      ? pickFaceBounds(row)
-      : detectedFace ?? (await estimatePortraitFaceBounds(res.uri));
-
-    const next: LocalChild = {
-      ...row,
-      local_photo_path: res.uri,
-      updated_at: new Date().toISOString(),
-      ...faceToSave,
-    };
-    upsertLocalChild(next);
-    // Affichage changé (remote → sandbox) : fil / parent-space / edit doivent peindre le local,
-    // même si l’appelant a passé `notify: false` pour un backfill de bounds seul.
-    notifyChildProfileUpdated(row.id, next);
-
-    // Si on vient de détecter des bounds manquantes → les pousser vers Supabase silencieusement.
-    if (!hasBounds && detectedFace) {
-      supabase
-        .from('children')
-        .update(faceToSave as Record<string, unknown>)
-        .eq('id', row.id)
-        .then(({ error }) => {
-          if (error) console.warn('[children] face bounds sync to Supabase', row.id, error.message)
-        })
+    let headers: Record<string, string> | undefined;
+    try {
+      const host = new URL(remote).hostname;
+      if (host.includes('supabase')) {
+        const { data } = await supabase.auth.getSession();
+        const token = data.session?.access_token;
+        if (token) headers = { Authorization: `Bearer ${token}` };
+      }
+    } catch {
+      /* ignore */
     }
 
-    return next;
-  } catch (e) {
-    console.warn('[children] cacheRemoteChildProfilePhotoLocally', row.id, e);
-    return row;
+    try {
+      const signedRemote = await getSignedMediaDisplayUrl(remote);
+      const res = await downloadAsync(
+        signedRemote,
+        dest,
+        headers && Object.keys(headers).length ? { headers } : undefined
+      );
+      if (res.status !== 200) return row;
+
+      // Détecter le visage sur l'image fraîchement téléchargée si les bounds sont absentes.
+      // Couvre la reconnexion sur nouveau téléphone avant que cette feature n'existe
+      // (bounds nulles en Supabase) — on les calcule une fois puis on les persiste dans les 2 sens.
+      const hasBounds = isValidFaceBounds(row);
+      const detectedFace = hasBounds ? null : await detectFaceBounds(res.uri).catch(() => null);
+      const faceToSave = hasBounds
+        ? pickFaceBounds(row)
+        : detectedFace ?? (await estimatePortraitFaceBounds(res.uri));
+
+      const next: LocalChild = {
+        ...row,
+        local_photo_path: res.uri,
+        updated_at: new Date().toISOString(),
+        ...faceToSave,
+      };
+      upsertLocalChild(next);
+      // Affichage changé (remote → sandbox) : fil / parent-space / edit doivent peindre le local,
+      // même si l’appelant a passé `notify: false` pour un backfill de bounds seul.
+      notifyChildProfileUpdated(row.id, next);
+
+      // Si on vient de détecter des bounds manquantes → les pousser vers Supabase silencieusement.
+      if (!hasBounds && detectedFace) {
+        supabase
+          .from('children')
+          .update(faceToSave as Record<string, unknown>)
+          .eq('id', row.id)
+          .then(({ error }) => {
+            if (error) console.warn('[children] face bounds sync to Supabase', row.id, error.message)
+          })
+      }
+
+      return next;
+    } catch (e) {
+      console.warn('[children] cacheRemoteChildProfilePhotoLocally', row.id, e);
+      return row;
+    }
+  })();
+
+  cacheRemoteChildInFlight.set(id, run);
+  try {
+    return await run;
+  } finally {
+    if (cacheRemoteChildInFlight.get(id) === run) {
+      cacheRemoteChildInFlight.delete(id);
+    }
   }
 }
 
@@ -490,8 +595,9 @@ export async function getChildren() {
       const safeLocal = sessionUid
         ? localChildren
         : localChildren.filter(c => !(c.user_id ?? '').trim());
-      scheduleChildFaceBoundsBackfill(safeLocal);
-      return sortChildrenByBirthdateAsc(safeLocal);
+      const repairedLocal = repairSiblingDuplicateChildPhotoUrls(safeLocal);
+      scheduleChildFaceBoundsBackfill(repairedLocal);
+      return sortChildrenByBirthdateAsc(repairedLocal);
     }
 
     const { data, error } = await supabase
@@ -507,9 +613,11 @@ export async function getChildren() {
     if (remoteRows.length === 0) {
       if (localChildren.length > 0) {
         void ensureLocalChildrenSyncedToSupabase();
-        scheduleChildFaceBoundsBackfill(localChildren);
+        const repairedEmptyRemote = repairSiblingDuplicateChildPhotoUrls(localChildren);
+        scheduleChildFaceBoundsBackfill(repairedEmptyRemote);
+        return sortChildrenByBirthdateAsc(repairedEmptyRemote);
       }
-      return sortChildrenByBirthdateAsc(localChildren);
+      return [];
     }
 
     const mergedRemote = remoteRows.map(row => mergeRemoteChildRowWithLocal(row));
@@ -519,14 +627,17 @@ export async function getChildren() {
       void ensureLocalChildrenSyncedToSupabase();
     }
 
-    const out = sortChildrenByBirthdateAsc([...mergedRemote, ...localOnly]);
+    const out = repairSiblingDuplicateChildPhotoUrls(
+      sortChildrenByBirthdateAsc([...mergedRemote, ...localOnly]),
+    );
     scheduleChildFaceBoundsBackfill(out);
     return out;
   } catch (error) {
     console.error('Get children error:', error);
     if (localChildren.length > 0) {
-      scheduleChildFaceBoundsBackfill(localChildren);
-      return sortChildrenByBirthdateAsc(localChildren);
+      const repairedCatch = repairSiblingDuplicateChildPhotoUrls(localChildren);
+      scheduleChildFaceBoundsBackfill(repairedCatch);
+      return sortChildrenByBirthdateAsc(repairedCatch);
     }
     return [];
   }

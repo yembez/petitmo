@@ -6,9 +6,12 @@
  * 2. Sinon heuristique avatar (`heuristicFaceBoundsForAvatar`) + ratio mesuré.
  *
  * URI : `useChildProfileDisplayUri` (local sandbox s’il existe, sinon URL signée).
+ * Affichage : ExpoImage + `recyclingKey` par `child.id` (évite le cache RN Image
+ * qui réaffiche la photo d’un autre enfant dans la pile du fil).
  */
 import { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Image as RNImage } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import type { Child } from '@/types/local';
 import { childDisplayInitial } from '@/utils/childDisplayName';
 import {
@@ -76,7 +79,7 @@ export function ChildAvatar({ child, size }: Props) {
     [size, bounds],
   );
 
-  const imageKey = `${child.id}-${child.updated_at ?? '0'}-${photoUri.slice(0, 64)}`;
+  const recyclingKey = `child-avatar-${child.id}-${child.updated_at ?? '0'}-${photoUri.slice(0, 96)}`;
 
   const containerStyle = {
     width: size,
@@ -97,11 +100,14 @@ export function ChildAvatar({ child, size }: Props) {
 
   return (
     <View style={containerStyle}>
-      <RNImage
-        key={imageKey}
+      <ExpoImage
+        key={recyclingKey}
+        recyclingKey={recyclingKey}
         source={{ uri: photoUri }}
         style={[styles.faceImage, frame]}
-        resizeMode="cover"
+        contentFit="cover"
+        cachePolicy="memory"
+        transition={0}
         accessibilityIgnoresInvertColors
       />
     </View>

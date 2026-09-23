@@ -1,4 +1,47 @@
+import { extractMediaBucketPath } from '@/lib/mediaSignedUrl';
 import { rebaseSandboxUriToCurrentContainer } from '@/utils/localMediaReadable';
+
+const UUID_IN_PATH_RE =
+  /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+
+/**
+ * Clé canonique Storage (`userId/children/{childId}-ts.ext`) pour comparer des photo_url
+ * signées / nues sans se faire tromper par le token de signature.
+ */
+export function canonicalChildPhotoStorageKey(
+  photoUrl: string | null | undefined,
+): string {
+  const raw = (photoUrl ?? '').trim();
+  if (!raw) return '';
+  const path = extractMediaBucketPath(raw) ?? raw.split('?')[0] ?? '';
+  return path.trim().toLowerCase();
+}
+
+/**
+ * Convention upload : `{userId}/children/{childId}-{timestamp}.ext`.
+ * `true` / `false` si le chemin est décidable ; `null` si format inconnu.
+ */
+export function photoUrlStoragePathOwnedByChild(
+  photoUrl: string | null | undefined,
+  childId: string,
+): boolean | null {
+  const key = canonicalChildPhotoStorageKey(photoUrl);
+  const id = childId.trim().toLowerCase();
+  if (!key || !id) return null;
+  const childrenOwner = key.match(
+    /\/children\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-/i,
+  );
+  if (childrenOwner?.[1]) {
+    return childrenOwner[1].toLowerCase() === id;
+  }
+  if (key.includes(`/${id}-`) || key.includes(`${id}-`)) return true;
+  const uuids = key.match(UUID_IN_PATH_RE) ?? [];
+  if (uuids.length === 0) return null;
+  const lower = uuids.map(u => u.toLowerCase());
+  if (lower.includes(id)) return true;
+  // Au moins un UUID et aucun n’est cet enfant → probablement photo d’un autre.
+  return false;
+}
 
 /**
  * URI affichable pour la photo de profil d’un enfant (expo-image / Image).
