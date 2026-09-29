@@ -3,6 +3,7 @@ import { ensureSupabaseSession } from '@/lib/ensureSupabaseSession';
 import { supabase } from '@/lib/supabase';
 import { getCachedUserMode } from '@/lib/userMode';
 import { getUserTier } from '@/lib/userTier';
+import { recordCaughtError, recordWarn } from '@/lib/diagnosticTrail';
 import { ensureLocalChildrenSyncedToSupabase } from '@/services/children';
 import { remapLegacyEntityIdsForCloudSync } from '@/services/cloudIdRemap';
 import { ensureMemoryUploadedForCloud } from '@/services/migration';
@@ -45,6 +46,8 @@ export function flushPendingCloudUploadsOnce(): Promise<void> {
         }
       } catch (e) {
         console.warn('[pendingCloudFlush]', m.id, e);
+        recordCaughtError('sync.flush', e);
+        recordWarn('sync.flush.item', m.type ?? 'unknown');
       }
       await new Promise<void>(r => setTimeout(r, 120));
     }

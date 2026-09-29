@@ -19,6 +19,7 @@ import { persistDefaultVideoPostersAtImport } from '@/services/videoPosterLocal'
 export type LocalCaptureMediaType = 'photo' | 'video' | 'voice';
 
 import { newPetitmoEntityId } from '@/utils/petitmoEntityId';
+import { recordAction, recordCaughtError } from '@/lib/diagnosticTrail';
 
 export function newLocalMemoryId(): string {
   return newPetitmoEntityId();
@@ -116,6 +117,7 @@ export function buildLocalTextMemory(params: {
   mem.content = params.content.trim();
   mem.text_title = params.textTitle?.trim() ? params.textTitle.trim() : null;
   mem.sync_status = params.syncStatus ?? 'local';
+  recordAction('capture.text.ok');
   return mem;
 }
 
@@ -130,6 +132,33 @@ export async function captureMemoryLocalOnly(params: {
   duration?: number;
   voiceCoverUri?: string | null;
   /** Début de l’extrait (s) si le fichier local est la prise complète. */
+  voicePlaybackStartSec?: number | null;
+  capturedAtIso?: string;
+  locationOverride?: string | null;
+  importAssetId?: string | null;
+  importSourceFingerprint?: string | null;
+}): Promise<Memory | null> {
+  const { type } = params;
+
+  recordAction(`capture.${type}.start`);
+
+  try {
+    const out = await captureMemoryLocalOnlyInner(params);
+    if (out) recordAction(`capture.${type}.ok`);
+    return out;
+  } catch (e) {
+    recordCaughtError(`capture.${type}`, e);
+    throw e;
+  }
+}
+
+async function captureMemoryLocalOnlyInner(params: {
+  uri: string;
+  type: LocalCaptureMediaType;
+  childId: string;
+  userId: string;
+  duration?: number;
+  voiceCoverUri?: string | null;
   voicePlaybackStartSec?: number | null;
   capturedAtIso?: string;
   locationOverride?: string | null;
@@ -352,6 +381,29 @@ export async function capturePhotoAlbumLocalOnly(params: {
   locationOverride?: string | null;
   importSourceFingerprint?: string | null;
   /** `pending` = Petitmo+ (sync cloud en arrière-plan). */
+  syncStatus?: 'local' | 'pending';
+  memoryId?: string;
+}): Promise<Memory | null> {
+  if (params.uris.length === 0) return null;
+
+  recordAction('capture.album.start');
+  try {
+    const out = await capturePhotoAlbumLocalOnlyInner(params);
+    if (out) recordAction('capture.album.ok');
+    return out;
+  } catch (e) {
+    recordCaughtError('capture.album', e);
+    throw e;
+  }
+}
+
+async function capturePhotoAlbumLocalOnlyInner(params: {
+  uris: string[];
+  childId: string;
+  userId: string;
+  capturedAtIso?: string;
+  locationOverride?: string | null;
+  importSourceFingerprint?: string | null;
   syncStatus?: 'local' | 'pending';
   memoryId?: string;
 }): Promise<Memory | null> {

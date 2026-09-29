@@ -220,7 +220,15 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
 
       const hadLocalPaint = localMemoriesNow.length > 0;
       const [memoriesData, loadedBooks] = await Promise.all([
-        getFamilyMemories({ waitForRemote: !hadLocalPaint }),
+        (async () => {
+          if (hadLocalPaint) {
+            return getFamilyMemories({ waitForRemote: false });
+          }
+          const { restoreFamilyMemoriesFromCloudWithSoftWait } = await import(
+            '@/services/runCloudMemoriesRestore'
+          );
+          return restoreFamilyMemoriesFromCloudWithSoftWait();
+        })(),
         listBooks(),
       ]);
       if (seq !== loadDataSeqRef.current) return;

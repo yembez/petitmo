@@ -4,6 +4,9 @@
  * Sur iOS 14+, `launchImageLibraryAsync` utilise PHPicker et peut s’ouvrir
  * **sans** `requestMediaLibraryPermissionsAsync`. Sans ce flag, « Plus tard »
  * sur l’écran permissions laissait quand même accéder à la galerie.
+ *
+ * Soft-heal : si iOS a déjà `granted` sur ce téléphone, on pose l’opt-in en
+ * silence (même compte / reconnexion / flag AsyncStorage manquant) — pas d’alerte.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert, Linking } from 'react-native';
@@ -65,6 +68,20 @@ export async function clearMediaLibraryOptIn(userId?: string | null): Promise<vo
   }
 }
 
+/** Permission OS déjà OK → aligne opt-in + flag onboarding (sans dialog). */
+async function softHealOptInFromOsGrant(userId?: string | null): Promise<boolean> {
+  if (!(await getPhotoLibraryGranted())) return false;
+  const uid = (userId ?? peekLastRealAuthUserId() ?? '').trim() || null;
+  await setMediaLibraryOptIn(true, uid);
+  try {
+    const { markOnboardingPermissionsSeen } = await import('@/lib/onboardingPermissionsSeen');
+    await markOnboardingPermissionsSeen(uid);
+  } catch {
+    /* */
+  }
+  return true;
+}
+
 /**
  * Avant tout picker : exige l’opt-in compte + (si besoin) la demande iOS.
  * Retourne false → ne pas ouvrir la galerie.
@@ -89,7 +106,10 @@ export async function ensureMediaLibraryPickerAllowed(): Promise<boolean> {
     return false;
   }
 
-  // Pas d’opt-in (Plus tard / toggles OFF) : proposer d’activer maintenant.
+  // Même tel, permission déjà accordée, flag produit manquant → pas d’alerte.
+  if (await softHealOptInFromOsGrant(uid)) return true;
+
+  // Pas d’opt-in et pas encore de grant iOS : proposer d’activer maintenant.
   return await new Promise<boolean>(resolve => {
     Alert.alert(
       i18n.t('permissions.photosTitle'),

@@ -45,6 +45,7 @@ import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
 import {
   completeAuthCallbackFromUrl,
+  ensureCloudSyncAfterRealAuth,
   hasRealAuthAccount,
   isAppleSignInNativeAvailable,
   isPasswordRecoveryCallback,
@@ -59,6 +60,7 @@ import { supabase } from '@/lib/supabase';
 import { getChildren } from '@/services/children';
 import { listLocalChildrenForUser } from '@/lib/localDb';
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
+import type { User } from '@supabase/supabase-js';
 import { hydrateTabScreensFromSqliteSync } from '@/services/tabScreensHydrate';
 import { safeRouterBack } from '@/utils/safeRouterBack';
 import { LEGAL_PRIVACY_URL, LEGAL_TERMS_URL } from '@/lib/legalUrls';
@@ -187,9 +189,17 @@ export default function AuthScreen() {
     });
   }, [router]);
 
+  /**
+   * Après auth : isolation + mode cloud **déjà** awaités via
+   * `ensureCloudSyncAfterRealAuth` (sinon race purge / mode local).
+   */
   const finishAfterAuth = useCallback(
-    async (opts?: { assumeNewAccount?: boolean }) => {
-      const uid = peekLastRealAuthUserId();
+    async (opts?: { assumeNewAccount?: boolean; user?: User | null }) => {
+      if (opts?.user) {
+        await ensureCloudSyncAfterRealAuth(opts.user);
+      }
+
+      const uid = peekLastRealAuthUserId() || opts?.user?.id?.trim() || null;
       const localCount = uid ? listLocalChildrenForUser(uid).length : 0;
 
       // Intent abonnement : compte → paywall tout de suite (profil enfant après).
@@ -210,7 +220,15 @@ export default function AuthScreen() {
               '@/lib/onboardingPermissionsSeen'
             );
             await markOnboardingPermissionsSeen(uid);
+            // Réinstall : tabs d’abord, restore soft en overlay (pas de gel auth prolongé).
             router.replace('/(tabs)');
+            const { getAllLocalMemories } = await import('@/lib/localDb');
+            if (getAllLocalMemories().length === 0) {
+              void import('@/services/runCloudMemoriesRestore').then(async ({ restoreFamilyMemoriesFromCloudWithSoftWait }) => {
+                await restoreFamilyMemoriesFromCloudWithSoftWait();
+                hydrateTabScreensFromSqliteSync();
+              });
+            }
             return;
           }
         }
@@ -221,16 +239,24 @@ export default function AuthScreen() {
         return;
       }
 
-      // Enfants déjà en local → fil.
+      // Enfants déjà en local → Capturer / fil immédiat.
       hydrateTabScreensFromSqliteSync();
       router.replace('/(tabs)');
       if (!opts?.assumeNewAccount) {
-        void getChildren().then(() => {
-          hydrateTabScreensFromSqliteSync();
-        });
+        const { getAllLocalMemories } = await import('@/lib/localDb');
+        if (getAllLocalMemories().length === 0) {
+          void import('@/services/runCloudMemoriesRestore').then(async ({ restoreFamilyMemoriesFromCloudWithSoftWait }) => {
+            await restoreFamilyMemoriesFromCloudWithSoftWait();
+            hydrateTabScreensFromSqliteSync();
+          });
+        } else {
+          void getChildren().then(() => {
+            hydrateTabScreensFromSqliteSync();
+          });
+        }
       }
     },
-    [goPaywall, isSubscribe, mode, router]
+    [goPaywall, isSubscribe, router]
   );
 
   const finishAfterAuthRef = useRef(finishAfterAuth);
@@ -280,7 +306,10 @@ export default function AuthScreen() {
       // OAuth / confirm e-mail via deep link : entrer dans l’app.
       if (cancelled) return true;
       setLeavingShell(true);
-      await finishAfterAuthRef.current();
+      await finishAfterAuthRef.current({
+        assumeNewAccount: false,
+        user: result.user,
+      });
       return true;
     };
 
@@ -299,7 +328,11 @@ export default function AuthScreen() {
         if (accountOk) {
           if (cancelled || passwordRecoveryActiveRef.current) return;
           setLeavingShell(true);
-          await finishAfterAuthRef.current();
+          const { data: sess } = await supabase.auth.getSession();
+          await finishAfterAuthRef.current({
+            assumeNewAccount: false,
+            user: sess.session?.user ?? null,
+          });
           return;
         }
       } catch (e) {
@@ -332,9 +365,15 @@ export default function AuthScreen() {
   const run = useCallback(
     async (
       fn: () => Promise<
-        | { ok: true; needsEmailConfirmation?: boolean }
+        | {
+            ok: true;
+            needsEmailConfirmation?: boolean;
+            user?: User;
+            reconnectedExisting?: boolean;
+          }
         | { ok: false; error: string; alreadyRegistered?: boolean }
-      >
+      >,
+      runOpts?: { oauth?: boolean },
     ) => {
       if (busy || leavingShell) return;
       setBusy(true);
@@ -364,8 +403,12 @@ export default function AuthScreen() {
         setLeavingShell(true);
         const reconnected =
           'reconnectedExisting' in result && Boolean(result.reconnectedExisting);
+        // Apple / Google : toujours pull cloud si SQLite vide (compte existant fréquent).
+        const assumeNewAccount =
+          !runOpts?.oauth && mode === 'signup' && !reconnected;
         await finishAfterAuth({
-          assumeNewAccount: mode === 'signup' && !reconnected,
+          assumeNewAccount,
+          user: 'user' in result ? result.user : null,
         });
       } catch (e) {
         console.warn('[auth] run', e);
@@ -422,7 +465,11 @@ export default function AuthScreen() {
         }
         Alert.alert(t('auth.resetSuccessTitle'), t('auth.resetSuccessBody'));
         setLeavingShell(true);
-        await finishAfterAuth({ assumeNewAccount: false });
+        const { data: sess } = await supabase.auth.getSession();
+        await finishAfterAuth({
+          assumeNewAccount: false,
+          user: sess.session?.user ?? null,
+        });
       } catch (e) {
         console.warn('[auth] reset password', e);
         Alert.alert(t('error'), t('error'));
@@ -685,7 +732,7 @@ export default function AuthScreen() {
                 {appleAvailable ? (
                   <TouchableOpacity
                     style={styles.appleBtn}
-                    onPress={() => void run(signInWithAppleNative)}
+                    onPress={() => void run(signInWithAppleNative, { oauth: true })}
                     disabled={busy}
                     activeOpacity={0.85}
                     accessibilityRole="button"
@@ -700,7 +747,7 @@ export default function AuthScreen() {
 
                 <TouchableOpacity
                   style={styles.googleBtn}
-                  onPress={() => void run(signInWithGoogleOAuth)}
+                  onPress={() => void run(signInWithGoogleOAuth, { oauth: true })}
                   disabled={busy}
                   activeOpacity={0.85}
                   accessibilityRole="button"

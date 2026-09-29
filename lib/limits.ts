@@ -86,8 +86,9 @@ export function invalidateMemoryLimitCache(_childId?: string): void {
  * Avant le décompte, on aligne le local sur Supabase (même principe que le fil au premier sync)
  * pour que « 20 souvenirs » corresponde à ce que l’utilisateur voit, sans utiliser un count distant.
  *
- * `skipRemotePull` : gate UX (Alert / Capturer) — SQLite immédiat, pas d’attente réseau
- * (local-first). Le chemin upload peut encore rappeler sans ce flag pour un décompte durci.
+ * `skipRemotePull` : **obligatoire** sur tout chemin Enregistrer / Capturer —
+ * SQLite immédiat, pas d’attente réseau (local-first). Un pull famille complet
+ * peut bloquer 1–4 min sur un compte chargé.
  */
 export async function checkMemoryLimit(
   childId: string,

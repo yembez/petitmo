@@ -13,6 +13,8 @@ import {
 import { claimLocalDataForCloudUser } from '@/services/claimLocalDataForCloud';
 import { ensureSupabaseSession } from '@/lib/ensureSupabaseSession';
 import { clearSelectedChildAndCaptureSnapshot } from '@/services/children';
+import { recordAction, recordCaughtError, recordWarn } from '@/lib/diagnosticTrail';
+import { setPetitmoSentryUser } from '@/lib/sentry';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -126,34 +128,74 @@ export async function syncUserTierFromSessionUser(user: User | null | undefined)
 }
 
 /**
- * Marque immédiatement la session produit en mémoire (UI / peekLastRealAuthUserId)
- * puis lance la sync en fond — **ne jamais await** depuis un chemin login/signup.
+ * Sync post-auth en cours (dédup) — `finishAfterAuth` doit **await**
+ * `ensureCloudSyncAfterRealAuth` avant de router / pull enfants.
+ */
+let cloudSyncAfterAuthInFlight: { userId: string; promise: Promise<void> } | null = null;
+
+/**
+ * Démarre la sync post-auth (fire-and-forget). Préférer `ensureCloudSyncAfterRealAuth`
+ * sur le chemin UI login pour sérialiser purge + mode cloud avant navigation.
+ *
+ * **Ne pas** poser `lastRealAuthUserId` ici : `prepareLocalWorkspace` doit encore
+ * lire le `prev` pour détecter un changement de compte.
  */
 export function scheduleCloudSyncAfterRealAuth(user: User): void {
-  if (isDeviceUserEmail(user.email)) return;
+  void ensureCloudSyncAfterRealAuth(user);
+}
+
+/**
+ * Attend la partie critique (purge / isolation + mode cloud + tier) puis laisse
+ * claim / RC / livres en fond. Idempotent si déjà lancé pour le même user.
+ */
+export function ensureCloudSyncAfterRealAuth(user: User): Promise<void> {
+  if (isDeviceUserEmail(user.email)) return Promise.resolve();
   rememberRealAuthUser(user);
-  // Mémoire sync tout de suite (AsyncStorage en fond) — finishAfterAuth lit peek*.
-  void setLastRealAuthUserId(user.id);
-  void activateCloudSyncAfterRealAuth(user).catch(e =>
-    console.warn('[auth] activateCloudSyncAfterRealAuth', e),
-  );
+  recordAction('auth.login', user.app_metadata?.provider ?? 'email');
+  setPetitmoSentryUser({ id: user.id });
+
+  const uid = user.id.trim();
+  if (cloudSyncAfterAuthInFlight?.userId === uid) {
+    return cloudSyncAfterAuthInFlight.promise;
+  }
+
+  const promise = activateCloudSyncAfterRealAuth(user)
+    .catch(e => {
+      console.warn('[auth] activateCloudSyncAfterRealAuth', e);
+      recordCaughtError('auth.activateCloud', e);
+    })
+    .finally(() => {
+      if (cloudSyncAfterAuthInFlight?.promise === promise) {
+        cloudSyncAfterAuthInFlight = null;
+      }
+    });
+  cloudSyncAfterAuthInFlight = { userId: uid, promise };
+  return promise;
 }
 
 /**
  * Après auth produit réussie : isole l’espace local au compte, active sync,
- * claim orphelins seulement, flush en arrière-plan — sans bloquer l’UI.
+ * claim orphelins seulement, flush en arrière-plan.
+ * Partie critique awaitable ; RC / livres / print restent non bloquants.
  */
 export async function activateCloudSyncAfterRealAuth(user: User): Promise<void> {
   if (isDeviceUserEmail(user.email)) return;
 
   rememberRealAuthUser(user);
-  // Idempotent si déjà posé par scheduleCloudSyncAfterRealAuth.
-  void setLastRealAuthUserId(user.id);
 
+  /**
+   * Isolation d’abord (lit encore l’ancien lastRealAuthUserId), puis pose le nouvel id.
+   * `setLastRealAuthUserId` est aussi appelé en fin de prepare — double pose OK.
+   */
   try {
     await prepareLocalWorkspaceForRealUser(user.id);
   } catch (e) {
     console.warn('[auth] prepareLocalWorkspaceForRealUser', e);
+    try {
+      await setLastRealAuthUserId(user.id);
+    } catch {
+      /* */
+    }
   }
 
   try {
@@ -863,6 +905,8 @@ async function signInWithGoogleWebOAuth(): Promise<AuthAccountResult> {
 }
 
 export async function signOutRealAccount(): Promise<void> {
+  recordAction('auth.logout');
+  setPetitmoSentryUser(null);
   try {
     const { logOutRevenueCat } = await import('@/lib/revenueCat');
     void logOutRevenueCat();
@@ -925,17 +969,25 @@ export async function deleteRealAccount(): Promise<{ ok: true } | { ok: false; e
 
   if (error) {
     console.warn('[auth] delete-account', error);
+    recordCaughtError('auth.deleteAccount', error);
     return {
       ok: false,
       error: 'Impossible de supprimer le compte pour le moment. Réessaie ou écris à support@petitcoeur.app.',
     };
   }
   if (data && typeof data === 'object' && 'error' in data && data.error) {
+    recordWarn(
+      'auth.deleteAccount',
+      typeof data.error === 'string' ? data.error : 'error',
+    );
     return {
       ok: false,
       error: typeof data.error === 'string' ? data.error : 'Suppression impossible.',
     };
   }
+
+  recordAction('auth.deleteAccount.ok');
+  setPetitmoSentryUser(null);
 
   try {
     const { clearLocalAccountWorkspace, setLastRealAuthUserId } = await import(

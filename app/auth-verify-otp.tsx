@@ -26,9 +26,11 @@ import { scale, verticalScale } from '@/utils/responsive';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
 import {
+  ensureCloudSyncAfterRealAuth,
   resendSignupEmailOtp,
   verifySignupEmailOtp,
 } from '@/lib/authAccount';
+import type { User } from '@supabase/supabase-js';
 import { listLocalChildrenForUser } from '@/lib/localDb';
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
 import { hydrateTabScreensFromSqliteSync } from '@/services/tabScreensHydrate';
@@ -71,8 +73,12 @@ export default function AuthVerifyOtpScreen() {
     return () => clearTimeout(tmr);
   }, []);
 
-  const finishAfterAuth = useCallback(async () => {
-    const uid = peekLastRealAuthUserId();
+  const finishAfterAuth = useCallback(async (user?: User | null) => {
+    if (user) {
+      await ensureCloudSyncAfterRealAuth(user);
+    }
+
+    const uid = peekLastRealAuthUserId() || user?.id?.trim() || null;
     const localCount = uid ? listLocalChildrenForUser(uid).length : 0;
 
     if (isSubscribe) {
@@ -94,6 +100,13 @@ export default function AuthVerifyOtpScreen() {
         );
         await markOnboardingPermissionsSeen(uid);
         router.replace('/(tabs)');
+        const { getAllLocalMemories } = await import('@/lib/localDb');
+        if (getAllLocalMemories().length === 0) {
+          void import('@/services/runCloudMemoriesRestore').then(async ({ restoreFamilyMemoriesFromCloudWithSoftWait }) => {
+            await restoreFamilyMemoriesFromCloudWithSoftWait();
+            hydrateTabScreensFromSqliteSync();
+          });
+        }
         return;
       }
       const { replaceToOnboardingPermissionsOrCreateChild } = await import(
@@ -104,6 +117,13 @@ export default function AuthVerifyOtpScreen() {
     }
     hydrateTabScreensFromSqliteSync();
     router.replace('/(tabs)');
+    const { getAllLocalMemories } = await import('@/lib/localDb');
+    if (getAllLocalMemories().length === 0) {
+      void import('@/services/runCloudMemoriesRestore').then(async ({ restoreFamilyMemoriesFromCloudWithSoftWait }) => {
+        await restoreFamilyMemoriesFromCloudWithSoftWait();
+        hydrateTabScreensFromSqliteSync();
+      });
+    }
   }, [isSubscribe, router]);
 
   const onVerify = useCallback(
@@ -124,7 +144,7 @@ export default function AuthVerifyOtpScreen() {
           verifyingRef.current = false;
           return;
         }
-        await finishAfterAuth();
+        await finishAfterAuth(result.user);
       } catch (e) {
         console.warn('[auth-otp] verify', e);
         Alert.alert(t('error'), t('error'));

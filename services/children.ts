@@ -581,8 +581,9 @@ function mergeRemoteChildRowWithLocal(row: ChildRow): LocalChild {
 }
 
 export async function getChildren() {
-  const { data: auth } = await supabase.auth.getUser();
-  const sessionUser = auth.user;
+  /** Session locale — pas `getUser()` (réseau) sur un chemin UI / login. */
+  const { data: sess } = await supabase.auth.getSession();
+  const sessionUser = sess.session?.user;
   const sessionUid = sessionUser && !isDeviceUserEmail(sessionUser.email) ? sessionUser.id : '';
 
   const localChildren = sessionUid
@@ -590,11 +591,14 @@ export async function getChildren() {
     : listLocalChildren();
 
   try {
-    if ((await getCachedUserMode()) === 'local') {
-      // Sans compte produit : ne pas exposer des profils déjà liés à un e-mail.
-      const safeLocal = sessionUid
-        ? localChildren
-        : localChildren.filter(c => !(c.user_id ?? '').trim());
+    const mode = await getCachedUserMode();
+    /**
+     * Mode `local` sans session produit : ne pas exposer des profils déjà liés à un e-mail.
+     * Session produit réelle : toujours autoriser le pull (évite faux vide juste après login
+     * si `setCloudAccountKind('real')` n’a pas encore invalidé le cache — déjà attendu en P0).
+     */
+    if (mode === 'local' && !sessionUid) {
+      const safeLocal = localChildren.filter(c => !(c.user_id ?? '').trim());
       const repairedLocal = repairSiblingDuplicateChildPhotoUrls(safeLocal);
       scheduleChildFaceBoundsBackfill(repairedLocal);
       return sortChildrenByBirthdateAsc(repairedLocal);

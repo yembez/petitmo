@@ -1575,11 +1575,12 @@ export async function resumePetitmoPlusCloudCaptureOrMerge(
   return false;
 }
 
-/** user_id pour capture locale (SQLite) ; repli device-user Supabase si besoin. */
+/** user_id pour capture locale (SQLite) ; repli session locale (pas `getUser` réseau). */
 async function resolveCaptureUserId(childId: string): Promise<string> {
   const fromChild = getLocalChild(childId)?.user_id?.trim();
   if (fromChild) return fromChild;
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: sess } = await supabase.auth.getSession();
+  const user = sess.session?.user;
   if (!user?.id) throw new Error('User not authenticated');
   return user.id;
 }
@@ -1602,13 +1603,20 @@ export async function uploadMedia({
 }: UploadMediaParams): Promise<MemoryRow | null> {
   console.log('[uploadMedia] called', { type, childId });
   try {
-    const limitCheck = await checkMemoryLimit(childId, { force: true });
+    /**
+     * Local-first : décompte SQLite immédiat — **jamais** await pull famille
+     * sur le chemin Enregistrer (sinon modal audio figée plusieurs minutes).
+     */
+    const limitCheck = await checkMemoryLimit(childId, {
+      force: true,
+      skipRemotePull: true,
+    });
     if (!limitCheck.canCreate) {
       throw new Error(limitCheck.reason === 'capture_locked' ? 'CAPTURE_LOCKED' : 'LIMIT_REACHED');
     }
 
     if (type === 'video') {
-      const videoLimitCheck = await checkVideoLimit(childId);
+      const videoLimitCheck = await checkVideoLimit(childId, { skipRemotePull: true });
       if (!videoLimitCheck.canCreate) {
         throw new Error('VIDEO_LIMIT_REACHED');
       }
@@ -1642,7 +1650,8 @@ export async function uploadMedia({
       return null;
     }
 
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: sess } = await supabase.auth.getSession();
+    const user = sess.session?.user;
     if (!user) throw new Error('User not authenticated');
 
     const paid = isPaid ?? (await getUserTier()) === 'paid';
@@ -2218,7 +2227,10 @@ export async function uploadPhotoAlbum({
   try {
     if (uris.length === 0) return null;
 
-    const limitCheck = await checkMemoryLimit(childId);
+    const limitCheck = await checkMemoryLimit(childId, {
+      force: true,
+      skipRemotePull: true,
+    });
     if (!limitCheck.canCreate) {
       throw new Error(limitCheck.reason === 'capture_locked' ? 'CAPTURE_LOCKED' : 'LIMIT_REACHED');
     }
