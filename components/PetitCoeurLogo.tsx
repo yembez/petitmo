@@ -3,10 +3,10 @@ import { Image, StyleSheet, View, type ImageSourcePropType } from 'react-native'
 import Svg, { Defs, Ellipse, RadialGradient, Stop } from 'react-native-svg';
 
 /**
- * Ratio du lockup `logo_petit_coeur_48*.png` (879×294).
+ * Ratio du lockup `logo_petit_coeur_48*.png` (900×450 — LOGO_4 bulle + wordmark).
  * Conservé sous ce nom pour les callers qui calculent `height` depuis `width`.
  */
-export const PETIT_COEUR_LOGO_VIEWBOX = { width: 879, height: 294 } as const;
+export const PETIT_COEUR_LOGO_VIEWBOX = { width: 900, height: 450 } as const;
 
 /** Ratio du picto cœur axo-outline (PNG crop ~864×805). */
 export const PETIT_COEUR_HEART_VIEWBOX = { width: 864, height: 805 } as const;

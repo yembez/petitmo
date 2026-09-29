@@ -1,5 +1,5 @@
 /**
- * SplashAnimation — logo PETIT CŒUR blanc sur dégradé splash vertical.
+ * SplashAnimation — lockup PETIT CŒUR blanc (cœur transparent) sur dégradé splash.
  *
  * Timing :
  *   0.0 → 0.55s  — fade + scale-in doux
@@ -28,8 +28,8 @@ interface Props {
 
 export default function SplashAnimation({ onFinished }: Props) {
   const { width: screenW } = useWindowDimensions();
-  /** ~52 % largeur écran — aligné splash natif ; ratio géré par PetitCoeurLogo. */
-  const logoW = Math.min(screenW * 0.52, 248);
+  /** ~58 % largeur — aligné splash natif (lockup bulle + wordmark). */
+  const logoW = Math.min(screenW * 0.58, 280);
   const logoH = logoW * (PETIT_COEUR_LOGO_VIEWBOX.height / PETIT_COEUR_LOGO_VIEWBOX.width);
 
   const globalOpacity = useSharedValue(1);
@@ -75,8 +75,8 @@ export default function SplashAnimation({ onFinished }: Props) {
     <Animated.View style={[styles.container, containerStyle]}>
       <LinearGradient
         colors={[...BRAND_SPLASH_GRADIENT]}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 1 }}
+        start={{ x: 0.15, y: 0 }}
+        end={{ x: 0.85, y: 1 }}
         style={StyleSheet.absoluteFillObject}
       />
       <Animated.View style={logoStyle}>

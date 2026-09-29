@@ -5,16 +5,18 @@ export const CAPTURE_SCREEN_BG = '#FEFBF7';
 export const CAPTURE_SCREEN_BG_RGB = { r: 254, g: 251, b: 247 } as const;
 
 /**
- * Accent marque unie — spinners, tab actif, splash, icônes.
+ * Accent marque unie — spinners, tab actif, splash letterbox fallback, icônes.
  * Distinct du dégradé CTA Capturer (bleu → rose → corail).
  */
 export const BRAND_ACTION_ACCENT = '#FD7764';
 export const BRAND_ACTION_ACCENT_RGB = '253, 119, 100';
 /**
- * Splash / boot / icône — vertical rose → corail (L−3 punchy, même teinte H).
- * Origine charte : #FD7198 → #FD7673.
+ * Splash / boot natif + `SplashAnimation` —
+ * rose/fuchsia → corail logo → orangé (sans violet).
+ * LinearGradient : `#FD628D` → `#FA5D4E` → `#FB8F22`.
+ * Image native = bilinear (`scripts/generate-splash-assets.py`).
  */
-export const BRAND_SPLASH_GRADIENT = ['#FD628D', '#FD6764'] as const;
+export const BRAND_SPLASH_GRADIENT = ['#FD628D', '#FA5D4E', '#FB8F22'] as const;
 /** @deprecated nom historique — `BRAND_ACTION_ACCENT`. */
 export const BRAND_ACTION_GREEN = BRAND_ACTION_ACCENT;
 /** @deprecated — `BRAND_ACTION_ACCENT_RGB`. */
@@ -40,9 +42,9 @@ export const CAPTURE_CTA_IMPORT_GRADIENT = ['#FD6F9F', '#FD7D4D'] as const;
 
 /**
  * CTA primaire app (`PetitmoPrimaryPressable` / Morph / paywall « S’abonner »…).
- * Même couple L−3 que splash / icône — distinct des 3 disques Capturer.
+ * Rose → corail L−3 — distinct du dégradé splash diagonal et des 3 disques Capturer.
  */
-export const BRAND_ACTION_GRADIENT = BRAND_SPLASH_GRADIENT;
+export const BRAND_ACTION_GRADIENT = ['#FD628D', '#FD6764'] as const;
 /** @deprecated alias — `BRAND_ACTION_GRADIENT`. */
 export const CAPTURE_CTA_BRAND_GRADIENT = BRAND_ACTION_GRADIENT;
 /**

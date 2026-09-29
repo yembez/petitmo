@@ -51,7 +51,7 @@
       "package": "com.petitmo.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon_petit_coeur_heart.png",
-        "backgroundColor": "#FD628D"
+        "backgroundColor": "#FA5D4E"
       },
       "permissions": [
         "android.permission.CAMERA",

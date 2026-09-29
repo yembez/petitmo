@@ -20,7 +20,7 @@ const BRAND_CTA_ACCENT_RGB = BRAND_ACTION_ACCENT_RGB;
  * @deprecated orange historique — `#FC6C39` (`widget_petitmo_orange2`).
  */
 const BRAND_WIDGET_ORANGE = '#FC6C39';
-/** Fond splash natif (letterbox) — départ du dégradé splash vertical. */
+/** Fond splash letterbox natif — départ du dégradé splash diagonal. */
 const BRAND_SPLASH = BRAND_SPLASH_GRADIENT[0];
 /** Gris — CTA secondaires (paywall, livres, modales, favoris, memory-view…). */
 const BRAND_CTA_GRAY = '#51545E';
@@ -49,7 +49,7 @@ export const THEME = {
 
   /** Couleur de marque — CTA, cœurs favoris, paywall, spinners d’accent… */
   brandPrimary: BRAND_PRIMARY,
-  /** Fond splash letterbox natif — départ dégradé rose charte (image = dégradé complet). */
+  /** Fond splash letterbox natif — départ dégradé splash diagonal (image = dégradé complet). */
   splashScreenBackground: BRAND_SPLASH,
   /** @deprecated orange historique — icône store = `widget_petitmo_gradient.png`. */
   brandWidgetOrange: BRAND_WIDGET_ORANGE,
