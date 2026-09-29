@@ -100,10 +100,7 @@ import {
   type Child,
 } from "@/utils/feedHelpers";
 import { styles, TEXT_POST_GUTTER } from "@/components/feed/feedStyles";
-import {
-  useMemoryEditorialFont,
-  useMemoryEditorialBoldFont,
-} from '@/contexts/MemoryTextFontContext';
+import { memoryEditorialTextStyle } from '@/constants/memoryTextFont';
 import { ensurePlaybackAudioForListening } from '@/lib/playbackAudioMode';
 import { useIsFeedVideoAutoplay, useIsFeedVideoOnScreen } from '@/lib/feedAutoplayStore';
 import { loadedFontStyle } from '@/utils/loadedFontStyle';
@@ -313,8 +310,8 @@ function FilMemoryRow({
     memory.type === 'video' ? memory.id : null,
   );
   const isFeedVideoOnScreen = useIsFeedVideoOnScreen(memory.id);
-  const memoryEditorialFont = useMemoryEditorialFont();
-  const memoryEditorialBoldFont = useMemoryEditorialBoldFont();
+  const memoryEditorialFontStyle = memoryEditorialTextStyle('regular');
+  const memoryEditorialBoldFontStyle = memoryEditorialTextStyle('bold');
   const photoUrls = useFeedPhotoDisplayUrls(memory);
   const contentTextRaw = memory.content?.trim() || '';
   const contentText =
@@ -1069,7 +1066,7 @@ function FilMemoryRow({
             >
               {!!memory.text_title?.trim() && (
                 <Text
-                  style={[styles.textTitle, loadedFontStyle(memoryEditorialBoldFont)]}
+                  style={[styles.textTitle, memoryEditorialBoldFontStyle]}
                   {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
                 >
                   {memory.text_title.trim()}
@@ -1084,7 +1081,7 @@ function FilMemoryRow({
                     key={idx}
                     style={[
                       styles.textContent,
-                      loadedFontStyle(memoryEditorialFont),
+                      memoryEditorialFontStyle,
                       idx > 0 && styles.textBookParagraphSpacing,
                     ]}
                     {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
@@ -1106,7 +1103,7 @@ function FilMemoryRow({
                   key={idx}
                   style={[
                     styles.captionAnnotation,
-                    loadedFontStyle(memoryEditorialFont),
+                    memoryEditorialFontStyle,
                     idx > 0 && styles.textBookParagraphSpacing,
                   ]}
                   {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}

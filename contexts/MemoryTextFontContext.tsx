@@ -8,6 +8,7 @@ import {
   MEMORY_TEXT_FONT_FALLBACK,
   MEMORY_TEXT_FONT_FAMILY,
   MEMORY_TEXT_FONT_SOURCES,
+  USE_SYSTEM_MEMORY_TEXT_FONTS,
 } from '@/constants/memoryTextFont';
 
 const MemoryTextFontContext = createContext<string>(MEMORY_TEXT_FONT_FALLBACK);
@@ -15,15 +16,18 @@ const MemoryEditorialFontContext = createContext<string>(MEMORY_EDITORIAL_FONT_F
 const MemoryEditorialBoldFontContext = createContext<string>(MEMORY_EDITORIAL_FONT_FALLBACK);
 
 function memoryFontsReady(loadedFromHook: boolean): boolean {
+  if (USE_SYSTEM_MEMORY_TEXT_FONTS) return true;
   return (
     loadedFromHook ||
     (Font.isLoaded('DMSans_400Regular') && Font.isLoaded('DMSans_600SemiBold'))
   );
 }
 
-/** Charge DM Sans une fois pour les onglets (souvent déjà au boot). */
+/** Charge DM Sans une fois pour les onglets (souvent déjà au boot) — skip si essai système. */
 export function MemoryTextFontProvider({ children }: PropsWithChildren) {
-  const [loaded] = useFonts(MEMORY_TEXT_FONT_SOURCES);
+  const [loaded] = useFonts(
+    USE_SYSTEM_MEMORY_TEXT_FONTS ? {} : MEMORY_TEXT_FONT_SOURCES,
+  );
   const ready = memoryFontsReady(loaded);
   const family = useMemo(
     () => (ready ? MEMORY_TEXT_FONT_FAMILY : MEMORY_TEXT_FONT_FALLBACK),
@@ -52,12 +56,12 @@ export function useMemoryTextFont(): string {
   return useContext(MemoryTextFontContext);
 }
 
-/** Typo DM Sans des souvenirs texte du fil — titre + corps + légendes. */
+/** Typo éditoriale des souvenirs (corps + légendes) — DM Sans ou système selon flag. */
 export function useMemoryEditorialFont(): string {
   return useContext(MemoryEditorialFontContext);
 }
 
-/** Variante semi-bold — titre des souvenirs texte du fil. */
+/** Variante semi-bold — titre des souvenirs texte. */
 export function useMemoryEditorialBoldFont(): string {
   return useContext(MemoryEditorialBoldFontContext);
 }
