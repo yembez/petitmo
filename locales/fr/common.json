@@ -6,6 +6,28 @@
   "brand": {
     "wordmark": "Petit cœur..."
   },
+  "restore": {
+    "bodyWithName": "On restaure tes souvenirs de {{name}}, encore quelques instants…",
+    "bodyGeneric": "On restaure tes souvenirs, encore quelques instants…",
+    "hint": "Ça peut prendre un moment si tu en as beaucoup."
+  },
+  "onboarding": {
+    "ctaContinue": "Continuer",
+    "ctaStart": "Commencer gratuitement",
+    "ctaStartA11y": "Commencer gratuitement — créer un compte Petit Cœur",
+    "alreadyAccount": "J’ai déjà un compte",
+    "privacy": "Souvenirs privés et sauvegardés.",
+    "slides": {
+      "bondTitle": "La plus belle des histoires, c’est la vôtre",
+      "bondSubtitle": "Les moments qui comptent ne se perdent plus.",
+      "captureTitle": "Chaque jour compte",
+      "captureSubtitle": "Capture photos, vidéos et voix en un geste.",
+      "anywhereTitle": "Toujours avec toi",
+      "anywhereSubtitle": "Retrouve tes souvenirs où que tu sois.",
+      "bookTitle": "Un livre qui prend vie",
+      "bookSubtitle": "Imprime tes moments, écoute et revois grâce au QR."
+    }
+  },
   "auth": {
     "signupTitle": "Crée ton espace Petitmo",
     "signupSubtitle": "Sécurise et retrouve les souvenirs qui comptent",
@@ -170,7 +192,15 @@
       "pushTokenMissingTitle": "Pas de token push",
       "pushTokenMissingBody": "Active d’abord les notifications (ligne ci-dessus). Il faut un iPhone physique.",
       "pushTokenShareTitle": "Token Expo Push",
-      "pushTokenHint": "Colle-le sur expo.dev/notifications. Pour un test durable : verrouille l’écran avant Send."
+      "pushTokenHint": "Colle-le sur expo.dev/notifications. Pour un test durable : verrouille l’écran avant Send.",
+      "sentrySmokeTitle": "Test Sentry (caché)",
+      "sentrySmokeBody": "Envoie une fausse erreur « capture photo » vers Sentry. Tu dois recevoir un mail draft sur support@. À me renvoyer : le mail reçu (ou une capture) + l’event id ci-dessous.",
+      "sentrySmokeConfirm": "Provoquer l’erreur",
+      "sentrySmokeOffTitle": "Sentry désactivé",
+      "sentrySmokeOffBody": "Ce build n’a pas de DSN Sentry. Rebuild TF avec EXPO_PUBLIC_SENTRY_DSN.",
+      "sentrySmokeDoneTitle": "Erreur envoyée",
+      "sentrySmokeDoneBody": "Event : {{eventId}}\n\nDans 1–2 min : check support@ (draft HITL). Transfère-moi ce mail ou partage l’event id.",
+      "sentrySmokeShare": "Partager l’event id"
     },
     "orders": {
       "sectionTitle": "Mes commandes",
@@ -321,7 +351,11 @@
     "importTooShort": "Ce fichier audio est trop court.",
     "importNeedsRebuild": "L’import audio nécessite une mise à jour de l’app (module Fichiers). Tu peux toujours enregistrer avec le micro.",
     "rerecord": "Réenregistrer",
-    "save": "Sauvegarder"
+    "save": "Sauvegarder",
+    "cancel": "Annuler",
+    "limitFree": "Plan gratuit = 1 mn max.",
+    "limitPaid": "Max 5 mn",
+    "pickBestMoment": "Choisir le meilleur moment"
   },
   "shareIntent": {
     "failed": "Impossible d’ouvrir ce partage dans Petitmo.",

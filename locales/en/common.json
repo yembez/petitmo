@@ -6,6 +6,28 @@
   "brand": {
     "wordmark": "Petit cœur..."
   },
+  "restore": {
+    "bodyWithName": "We’re restoring {{name}}’s memories — just a moment…",
+    "bodyGeneric": "We’re restoring your memories — just a moment…",
+    "hint": "This can take a little while if you have many."
+  },
+  "onboarding": {
+    "ctaContinue": "Continue",
+    "ctaStart": "Get started for free",
+    "ctaStartA11y": "Get started for free — create a Petit Cœur account",
+    "alreadyAccount": "I already have an account",
+    "privacy": "Private and safely saved memories.",
+    "slides": {
+      "bondTitle": "The most beautiful story is yours",
+      "bondSubtitle": "The moments that matter are never lost again.",
+      "captureTitle": "Every day counts",
+      "captureSubtitle": "Capture photos, videos, and voice in one tap.",
+      "anywhereTitle": "Always with you",
+      "anywhereSubtitle": "Find your memories wherever you are.",
+      "bookTitle": "A book that comes to life",
+      "bookSubtitle": "Print your moments — play them back with the QR."
+    }
+  },
   "auth": {
     "signupTitle": "Create your Petitmo space",
     "signupSubtitle": "Keep the memories that matter safe and find them anytime",
@@ -170,7 +192,15 @@
       "pushTokenMissingTitle": "No push token",
       "pushTokenMissingBody": "Enable notifications first (row above). A physical iPhone is required.",
       "pushTokenShareTitle": "Expo Push token",
-      "pushTokenHint": "Paste it at expo.dev/notifications. For a lasting banner: lock the screen before Send."
+      "pushTokenHint": "Paste it at expo.dev/notifications. For a lasting banner: lock the screen before Send.",
+      "sentrySmokeTitle": "Sentry test (hidden)",
+      "sentrySmokeBody": "Sends a fake “photo capture” error to Sentry. You should get a draft email on support@. Send me: that email (or a screenshot) + the event id below.",
+      "sentrySmokeConfirm": "Trigger error",
+      "sentrySmokeOffTitle": "Sentry off",
+      "sentrySmokeOffBody": "This build has no Sentry DSN. Rebuild TF with EXPO_PUBLIC_SENTRY_DSN.",
+      "sentrySmokeDoneTitle": "Error sent",
+      "sentrySmokeDoneBody": "Event: {{eventId}}\n\nIn 1–2 min: check support@ (HITL draft). Forward that email or share the event id.",
+      "sentrySmokeShare": "Share event id"
     },
     "orders": {
       "sectionTitle": "My orders",
@@ -321,7 +351,11 @@
     "importTooShort": "This audio file is too short.",
     "importNeedsRebuild": "Audio import needs an app update (Files module). You can still record with the mic.",
     "rerecord": "Record again",
-    "save": "Save"
+    "save": "Save",
+    "cancel": "Cancel",
+    "limitFree": "Free plan = 1 min max.",
+    "limitPaid": "Max 5 min",
+    "pickBestMoment": "Pick the best moment"
   },
   "shareIntent": {
     "failed": "Couldn’t open this share in Petitmo.",
