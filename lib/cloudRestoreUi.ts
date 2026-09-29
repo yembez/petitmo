@@ -6,7 +6,8 @@ import { DeviceEventEmitter } from 'react-native';
 
 export const CLOUD_RESTORE_UI_EVENT = 'petitmo:cloud-restore-ui';
 
-const SHOW_AFTER_MS = 2000;
+/** Court délai anti-flash ; assez bas pour être visible dès une réinstall TestFlight. */
+const SHOW_AFTER_MS = 400;
 /** Garde-fou : ne jamais bloquer l’UI indéfiniment. */
 export const CLOUD_RESTORE_MAX_MS = 120_000;
 

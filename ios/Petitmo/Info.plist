@@ -64,15 +64,15 @@
       <true/>
     </dict>
     <key>NSCameraUsageDescription</key>
-    <string>Petitmo a besoin d'accéder à ta caméra pour capturer des photos et vidéos de vos moments précieux.</string>
+    <string>Petit Cœur a besoin d’accéder à ta caméra pour capturer des photos et vidéos de vos moments précieux.</string>
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>Petit Cœur utilise ta position pour indiquer le lieu de vos souvenirs audio et textes — uniquement quand tu en crées, et pour afficher une ville sur le fil.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Petitmo a besoin d'accéder à ton microphone pour enregistrer la voix de ton enfant.</string>
+    <string>Petit Cœur a besoin d’accéder à ton microphone pour enregistrer la voix de ton enfant.</string>
     <key>NSPhotoLibraryAddUsageDescription</key>
     <string>Allow $(PRODUCT_NAME) to save photos</string>
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>Petitmo a besoin d'accéder à vos photos pour importer des souvenirs existants.</string>
+    <string>Petit Cœur a besoin d’accéder à vos photos pour importer des souvenirs existants.</string>
     <key>NSUserActivityTypes</key>
     <array>
       <string>$(PRODUCT_BUNDLE_IDENTIFIER).expo.index_route</string>

@@ -19,6 +19,7 @@ import { ensurePlaybackAudioForListening } from '@/lib/playbackAudioMode';
 import { ensureSupabaseSession } from '@/lib/ensureSupabaseSession';
 import { supabaseAnonKey, supabaseUrl } from '@/lib/supabase';
 import { PendingMediaUploadsProvider } from '@/contexts/PendingMediaUploadsContext';
+import CloudRestoreOverlay from '@/components/CloudRestoreOverlay';
 import { initLocalDb } from '@/lib/localDb';
 import { resetUserTierForTesting } from '@/lib/userTier';
 import { getUserTier } from '@/lib/userTier';
@@ -427,6 +428,11 @@ function RootLayoutNav() {
       </Stack>
       {/** Défaut fond clair : icônes statut foncées. `auto` suivait le thème OS (icônes claires en mode sombre) alors que l’UI reste claire. */}
       <StatusBar style="dark" />
+      {/**
+       * Restore cloud soft (réinstall / SQLite souvenirs vide) — monté ici pour
+       * recevoir `petitmo:cloud-restore-ui` même après `router.replace('/(tabs)')`.
+       */}
+      <CloudRestoreOverlay />
       </PendingMediaUploadsProvider>
     </GestureHandlerRootView>
   );

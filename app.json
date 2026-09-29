@@ -39,9 +39,9 @@
           "fetch",
           "remote-notification"
         ],
-        "NSCameraUsageDescription": "Petitmo a besoin d'accéder à ta caméra pour capturer des photos et vidéos de vos moments précieux.",
-        "NSMicrophoneUsageDescription": "Petitmo a besoin d'accéder à ton microphone pour enregistrer la voix de ton enfant.",
-        "NSPhotoLibraryUsageDescription": "Petitmo a besoin d'accéder à vos photos pour importer des souvenirs existants.",
+        "NSCameraUsageDescription": "Petit Cœur a besoin d'accéder à ta caméra pour capturer des photos et vidéos de vos moments précieux.",
+        "NSMicrophoneUsageDescription": "Petit Cœur a besoin d'accéder à ton microphone pour enregistrer la voix de ton enfant.",
+        "NSPhotoLibraryUsageDescription": "Petit Cœur a besoin d'accéder à vos photos pour importer des souvenirs existants.",
         "NSLocationWhenInUseUsageDescription": "Petit Cœur utilise ta position pour indiquer le lieu de vos souvenirs audio et textes — uniquement quand tu en crées, et pour afficher une ville sur le fil.",
         "ITSAppUsesNonExemptEncryption": false,
         "EXDefaultScreenOrientationMask": "UIInterfaceOrientationMaskAllButUpsideDown"
@@ -75,20 +75,20 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Petitmo a besoin d'accéder à ta caméra pour capturer des photos et vidéos de vos moments précieux."
+          "cameraPermission": "Petit Cœur a besoin d'accéder à ta caméra pour capturer des photos et vidéos de vos moments précieux."
         }
       ],
       [
         "expo-av",
         {
-          "microphonePermission": "Petitmo a besoin d'accéder à ton microphone pour enregistrer la voix de ton enfant."
+          "microphonePermission": "Petit Cœur a besoin d'accéder à ton microphone pour enregistrer la voix de ton enfant."
         }
       ],
       "expo-video",
       [
         "expo-image-picker",
         {
-          "photosPermission": "Petitmo a besoin d'accéder à vos photos pour importer des souvenirs existants."
+          "photosPermission": "Petit Cœur a besoin d'accéder à vos photos pour importer des souvenirs existants."
         }
       ],
       [
@@ -114,7 +114,7 @@
       [
         "expo-media-library",
         {
-          "photosPermission": "Petitmo a besoin d'accéder à vos photos pour importer des souvenirs existants."
+          "photosPermission": "Petit Cœur a besoin d'accéder à vos photos pour importer des souvenirs existants."
         }
       ],
       [
