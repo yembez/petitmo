@@ -80,10 +80,10 @@ Petitmo a **deux plans** sur une **même identité** (compte obligatoire) :
   **Pas** de partage familial / diffusion (Petitmo = relation intime parent–enfant, pas TinyBeans).  
   **Zéro pub**, même en gratuit.
 - **Quotas fil gratuit** (cible produit — aligner `lib/limits.ts`) :
-  - **50** souvenirs au total ;
-  - **vidéo** : max **5** souvenirs, **20 s** chacun ;
-  - **audio** : **60 s** par souvenir, **pas** de cap de nombre séparé (borné par les 50) ;
-  - *(durée audio : 60 s ; plus de plafond nombre d’audios en gratuit — borné par les 50.)*
+  - **50** souvenirs au total (tous types) ;
+  - **vidéo** : **20 s** max chacun — **pas** de cap de nombre (borné par les 50) ;
+  - **audio** : **60 s** par souvenir — **pas** de cap de nombre (borné par les 50) ;
+  - *(plus de plafond nombre de vidéos / audios en gratuit — uniquement les 50 + durées.)*
 - **Photos** : **thumb + print A5** en cloud dès le gratuit ; **original HD** reste local. Petitmo+ débloque le **HD cloud**.
 - **Livre imprimé** : accessible à toutes (gratuites et payantes). Remise Petitmo+ = **−10 %** sur la partie livre (`lib/pricingV1.ts`). QR A/V : composition libre ; facturation au checkout (2 inclus + 0,70 €) — specs pricing / QR.
 - Le **`user_id` anonyme (device-user)** n’est **plus** le socle produit. Cas limite technique éventuel seulement ; **cible bêta** : pas de commande livre sans compte authentifié.
@@ -201,7 +201,7 @@ flowchart LR
 3. RevenueCat + webhook `subscriptionTier` — **code prêt** ; deploy + conformité Apple / secrets EAS  
 4. ~~Suppression de compte in-app (Apple)~~ — **code + purge Storage** ; déployer Edge `delete-account` + smoke  
 5. Dimensionnement coût Storage gratuit à l’échelle  
-6. ~~Réalignement `lib/limits.ts` (cap 5 audios)~~ — **fait** (durée 60 s conservée)  
+6. ~~Réalignement `lib/limits.ts` (cap nombre vidéos / audios)~~ — **fait** (durées 20 s / 60 s conservées)  
 7. Mise à jour `docs/specs/architecture-locale-cloud.md` + `supabase-write-policy.mdc`  
 8. **Lifecycle abo / inactivité / mails** — spec [`docs/specs/subscription-lifecycle-retention.md`](docs/specs/subscription-lifecycle-retention.md) : **sans grâce** ; EXPIRATION → free + **lecture totale** + `captureLocked` (0 ajout) ; cancel → mail only ; billing issue → mail + bandeau ; re-subscribe → unlock. **Pas d’archive >50 en V1**. Inactivité 24 mois = P2.  
 9. QR livres = **15 ans** (code + Railway/Edge) ; delete volontaire purge QR ; delete inactivité conserve QR jusqu’à échéance — détail même spec

@@ -6,8 +6,12 @@ import { getCaptureLockedCached } from '@/lib/captureLock'
 
 /** Prod : 50. Valeur de test éventuelle à documenter ici si on baisse temporairement. */
 export const FREE_TIER_LIMIT = 50
-/** TEST ONLY — prod : 5. */
-export const FREE_TIER_VIDEO_LIMIT = 5
+/**
+ * @deprecated V2 : plus de plafond **nombre** de vidéos en gratuit (borné par les 50 souvenirs).
+ * Conservé pour imports / paywall historique — ne plus gate UX dessus.
+ * La **durée** reste plafonnée (`FREE_TIER_VIDEO_MAX_DURATION`).
+ */
+export const FREE_TIER_VIDEO_LIMIT = Number.MAX_SAFE_INTEGER
 export const FREE_TIER_VIDEO_MAX_DURATION = 20 // secondes (fil gratuit)
 /**
  * @deprecated V2 : plus de plafond **nombre** d’audios en gratuit (borné par les 50 souvenirs).
@@ -165,17 +169,7 @@ export async function checkVideoLimit(
   isAtLimit: boolean
 }> {
   void childId
-  const tier = await getUserTier()
-
-  if (tier === 'paid') {
-    return {
-      canCreate: true,
-      current: 0,
-      limit: Infinity,
-      isAtLimit: false,
-    }
-  }
-
+  void opts
   if (await getCaptureLockedCached()) {
     return {
       canCreate: false,
@@ -184,24 +178,12 @@ export async function checkVideoLimit(
       isAtLimit: true,
     }
   }
-
-  if (!opts?.skipRemotePull) {
-    try {
-      if ((await getCachedUserMode()) === 'cloud') {
-        await pullFamilyMemoriesFromRemoteToLocal()
-      }
-    } catch {
-      // hors ligne
-    }
-  }
-
-  const videoCount = getAllLocalMemories().filter(m => m.type === 'video').length
-
+  // V2 : pas de cap nombre de vidéos — durée 20 s + plafond 50 souvenirs ailleurs.
   return {
-    canCreate: videoCount < FREE_TIER_VIDEO_LIMIT,
-    current: videoCount,
-    limit: FREE_TIER_VIDEO_LIMIT,
-    isAtLimit: videoCount >= FREE_TIER_VIDEO_LIMIT,
+    canCreate: true,
+    current: 0,
+    limit: Infinity,
+    isAtLimit: false,
   }
 }
 

@@ -3,7 +3,6 @@ import type { Router } from 'expo-router';
 import i18n from '@/lib/i18n';
 import {
   FREE_TIER_LIMIT,
-  FREE_TIER_VIDEO_LIMIT,
   type LimitCheck,
 } from '@/lib/limits';
 
@@ -31,12 +30,13 @@ function copyForKind(kind: FreeTierLimitKind): LimitCopy {
         context: 'EX_SUBSCRIBER',
       };
     case 'videos':
+      // Legacy : plus de cap nombre de vidéos — même copy que souvenirs (50).
       return {
-        title: i18n.t('parent.freeTierLimit.videosTitle'),
-        body: i18n.t('parent.freeTierLimit.videosBody', {
-          count: FREE_TIER_VIDEO_LIMIT,
+        title: i18n.t('parent.freeTierLimit.memoriesTitle'),
+        body: i18n.t('parent.freeTierLimit.memoriesBody', {
+          count: FREE_TIER_LIMIT,
         }),
-        context: 'VIDEO_LIMIT_REACHED',
+        context: 'LIMIT_REACHED',
       };
     case 'memories':
     default:
@@ -104,7 +104,8 @@ export function promptFreeTierLimitFromError(
   opts: Omit<Parameters<typeof promptFreeTierLimitThenPaywall>[0], 'kind'>,
 ): boolean {
   if (message === 'VIDEO_LIMIT_REACHED') {
-    promptFreeTierLimitThenPaywall({ ...opts, kind: 'videos' });
+    // Legacy error — plus de cap nombre ; traiter comme plafond 50 souvenirs.
+    promptFreeTierLimitThenPaywall({ ...opts, kind: 'memories' });
     return true;
   }
   if (message === 'CAPTURE_LOCKED') {

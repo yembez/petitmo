@@ -36,7 +36,7 @@ import { getChildren } from '@/services/children'
 import { listLocalChildrenForUser } from '@/lib/localDb'
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset'
 import { grantDigitalExportPurchase } from '@/lib/digitalExportPurchase'
-import { FREE_TIER_LIMIT, FREE_TIER_VIDEO_LIMIT, PAID_TIER_VIDEO_MAX_DURATION } from '@/lib/limits'
+import { FREE_TIER_LIMIT, PAID_TIER_VIDEO_MAX_DURATION } from '@/lib/limits'
 import { recordAction, recordCaughtError, recordWarn } from '@/lib/diagnosticTrail'
 import { THEME } from '@/constants/theme'
 import { hp, scale, screenHeight, screenWidth, verticalScale } from '@/utils/responsive'
@@ -124,8 +124,9 @@ const PAYWALL_MESSAGES: Record<
   },
   VIDEO_LIMIT_REACHED: {
     eyebrow: 'Petit Cœur',
-    title: n => `Tu as utilisé tes ${FREE_TIER_VIDEO_LIMIT} vidéos gratuites de ${n}.`,
-    subtitle: `Des vidéos illimitées en nombre, jusqu’à ${Math.round(PAID_TIER_VIDEO_MAX_DURATION / 60)} min chacune avec Petit Cœur.`,
+    /** Legacy : plus de cap nombre de vidéos — même hero que LIMIT_REACHED. */
+    title: n => `Tu as atteint tes ${FREE_TIER_LIMIT} souvenirs de ${n}.`,
+    subtitle: `Continue à capturer — vidéos jusqu’à ${Math.round(PAID_TIER_VIDEO_MAX_DURATION / 60)} min avec Petit Cœur.`,
   },
   EX_SUBSCRIBER: {
     eyebrow: 'Petit Cœur',
