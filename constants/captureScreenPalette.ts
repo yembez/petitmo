@@ -12,11 +12,12 @@ export const BRAND_ACTION_ACCENT = '#FD7764';
 export const BRAND_ACTION_ACCENT_RGB = '253, 119, 100';
 /**
  * Splash / boot natif + `SplashAnimation` —
- * rose/fuchsia → corail logo → orangé (sans violet).
- * LinearGradient : `#FD628D` → `#FA5D4E` → `#FB8F22`.
+ * même famille que le CTA primaire (`BRAND_ACTION_GRADIENT`), un cran plus soutenu :
+ * rose/fuchsia → corail CTA → corail logo (sans orangé soft).
+ * LinearGradient : `#FD628D` → `#FD6764` → `#FA5D4E`.
  * Image native = bilinear (`scripts/generate-splash-assets.py`).
  */
-export const BRAND_SPLASH_GRADIENT = ['#FD628D', '#FA5D4E', '#FB8F22'] as const;
+export const BRAND_SPLASH_GRADIENT = ['#FD628D', '#FD6764', '#FA5D4E'] as const;
 /** @deprecated nom historique — `BRAND_ACTION_ACCENT`. */
 export const BRAND_ACTION_GREEN = BRAND_ACTION_ACCENT;
 /** @deprecated — `BRAND_ACTION_ACCENT_RGB`. */

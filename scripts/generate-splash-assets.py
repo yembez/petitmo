@@ -16,10 +16,10 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 
-TL = np.array([0xFD, 0x62, 0x8D], dtype=np.float64)  # rose / fuchsia brief
-TR = np.array([0xFD, 0x6F, 0x9F], dtype=np.float64)  # rose
-BL = np.array([0xFA, 0x5D, 0x4E], dtype=np.float64)  # coral logo
-BR = np.array([0xFB, 0x8F, 0x22], dtype=np.float64)  # orangé
+TL = np.array([0xFD, 0x62, 0x8D], dtype=np.float64)  # rose CTA / fuchsia
+TR = np.array([0xFD, 0x6A, 0x78], dtype=np.float64)  # rose → corail
+BL = np.array([0xFD, 0x67, 0x64], dtype=np.float64)  # corail CTA (L−3)
+BR = np.array([0xFA, 0x5D, 0x4E], dtype=np.float64)  # corail logo (plus intense)
 
 
 def diagonal_gradient(w: int, h: int) -> Image.Image:
