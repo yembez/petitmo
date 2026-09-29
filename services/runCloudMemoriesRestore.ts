@@ -11,15 +11,15 @@ import {
 } from '@/lib/cloudRestoreUi';
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
 import { pullFamilyMemoriesFromRemoteToLocal } from '@/services/memoriesLocalSync';
-import { childDisplayGivenName } from '@/utils/childDisplayName';
+import { formatChildGivenNamesList } from '@/utils/childDisplayName';
 import type { Memory } from '@/types/local';
 
-function firstChildGivenName(): string | null {
+/** Tous les prénoms locaux du compte, libellé FR (« Léa et Tom »). */
+function localChildrenGivenNamesLabel(): string | null {
   const uid = peekLastRealAuthUserId();
   const kids = uid ? listLocalChildrenForUser(uid) : [];
-  const raw = kids[0]?.name;
-  const given = childDisplayGivenName(raw);
-  return given.trim() ? given.trim() : null;
+  const label = formatChildGivenNamesList(kids.map(k => k.name));
+  return label.trim() ? label : null;
 }
 
 /**
@@ -41,7 +41,7 @@ export async function restoreFamilyMemoriesFromCloudWithSoftWait(): Promise<Memo
     return getAllLocalMemories();
   }
 
-  beginCloudRestoreUi({ childName: firstChildGivenName() });
+  beginCloudRestoreUi({ childName: localChildrenGivenNamesLabel() });
   try {
     await Promise.race([
       pullFamilyMemoriesFromRemoteToLocal().catch(() => undefined),

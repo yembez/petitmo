@@ -1,5 +1,5 @@
 /**
- * Overlay restore cloud — visible après ~2 s si SQLite était vide.
+ * Overlay restore cloud — visible après délai court si SQLite était vide.
  * Ne remplace pas le splash marque ; fond doux charte + message soft.
  */
 import { useEffect, useState } from 'react';

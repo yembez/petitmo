@@ -1,3 +1,12 @@
+/**
+ * Clients OAuth Google (Sign in natif + idToken Supabase).
+ *
+ * **Nom affiché dans l’UI Google (« Continuer vers Petitmo »)** :
+ * ce n’est **pas** `CFBundleDisplayName` — c’est le **nom de l’application**
+ * de l’écran de consentement OAuth dans Google Cloud Console
+ * (APIs & Services → OAuth consent screen → App name → « Petit Cœur »).
+ * Puis attendre la propagation (parfois quelques minutes à quelques heures).
+ */
 import Constants from 'expo-constants';
 
 function readPublicEnv(name: string): string | undefined {

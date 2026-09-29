@@ -1,6 +1,6 @@
 /**
  * Attente douce restore cloud — uniquement SQLite souvenirs vide (réinstall / nouveau device).
- * Visible après 2 s (spec). Jamais si le local a déjà des souvenirs (local-first).
+ * Visible après SHOW_AFTER_MS (anti-flash). Jamais si le local a déjà des souvenirs (local-first).
  */
 import { DeviceEventEmitter } from 'react-native';
 

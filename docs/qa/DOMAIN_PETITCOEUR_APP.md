@@ -47,6 +47,17 @@ Pointer `petitcoeur.app/m` → même backend que aujourd’hui (Railway `/m`), p
 supabase functions deploy support-contact --project-ref gswtsnhmwjwhwjdiijbs
 ```
 
+### 6. Google Sign-In — nom « Petitmo » dans l’UI Google
+Le sélecteur / consentement Google affiche le **App name** OAuth Cloud, **pas** le nom iOS de l’app.
+
+1. [Google Cloud Console](https://console.cloud.google.com/) → projet OAuth Petit Cœur  
+2. **APIs & Services** → **OAuth consent screen**  
+3. **App name** → `Petit Cœur` (et logo / support URL `petitcoeur.app` si possible)  
+4. Enregistrer ; la propagation peut prendre quelques minutes à quelques heures  
+5. Sur l’iPhone : fermer complètement l’app (voire Réglages → Google → retirer l’accès une fois) puis retester
+
+Clients OAuth (ne pas renommer les IDs) : Web + iOS déjà dans EAS (`EXPO_PUBLIC_GOOGLE_*`).
+
 ### Ne pas changer (pour l’instant)
 - Bundle ID / package `com.petitmo.app`
 - Scheme deep link `petitmo://`
