@@ -41,10 +41,10 @@
 
 Réf. détaillée : [`RELEASE_SMOKE_CHECKLIST.md`](./RELEASE_SMOKE_CHECKLIST.md).
 
-> **Check auto 2026-07-21** — scripts mis à jour pour tarif V1 (`gelato_pages` ≥ 30).
+> **Check auto 2026-09-24** — `content_verified_at` + `cgv_version` + `print-payment` bypass ajoutés aux scripts.
 
-- [x] `./scripts/qa/smoke-print.sh` — OK (ticket V1 `priceCents=3510` paid −10 %, PDF print 33 pages, ~41 Ko)
-- [x] `./scripts/qa/smoke-gelato-draft.sh` — OK PDF + pages Gelato ; **à confirmer manuellement** dans dashboard Gelato / SQL `printer_order_id` (`exportRequestId=0a4cf8e0-bd71-47df-aa61-47c140700c88`) — pas de `SUPABASE_SERVICE_ROLE_KEY` dans `.env.qa`
+- [x] `./scripts/qa/smoke-print.sh` — OK (ticket V1 `priceCents=3510` paid −10 %, PDF print, bypass paiement bêta)
+- [x] `./scripts/qa/smoke-gelato-draft.sh` — OK PDF + `printer_order_id` + `sent_to_printer`
 - [x] `./scripts/qa/smoke-qr-audio.sh` — OK (token ready, URL `/m/…` joue)
 
 **Action manuelle restante** : ouvrir le dashboard Gelato (draft) pour l’export ci-dessus, ou ajouter le service role dans `.env.qa` puis `./check-gelato-export.sh 0a4cf8e0-bd71-47df-aa61-47c140700c88`.
@@ -53,13 +53,20 @@ Réf. détaillée : [`RELEASE_SMOKE_CHECKLIST.md`](./RELEASE_SMOKE_CHECKLIST.md)
 
 Guide TestFlight : [`TESTFLIGHT.md`](./TESTFLIGHT.md).  
 Correctifs JS rapides (OTA) : après **un** rebuild OTA-ready (`npm run tf:ios`), puis `npm run ota:production -- --message "…"`.  
-Bugs bêta (Sentry + signalement) : [`OBSERVABILITY_BETA.md`](./OBSERVABILITY_BETA.md).
+Bugs bêta (Sentry + signalement) : [`OBSERVABILITY_BETA.md`](./OBSERVABILITY_BETA.md).  
+**Smoke fondateur (parcours app)** : [`BETA_TF_SMOKE_CHECKLIST.md`](./BETA_TF_SMOKE_CHECKLIST.md).  
+**Brief proches** : [`BETA_INTERNAL_BRIEF.md`](./BETA_INTERNAL_BRIEF.md).  
+**IAP** : [`IAP_PETITMO_PLUS_READINESS.md`](./IAP_PETITMO_PLUS_READINESS.md).  
+**GO ouverte** : [`BETA_OPEN_PREP.md`](./BETA_OPEN_PREP.md).
 
-### À finir avant bêta ouverte (mis de côté 2026-07-21)
+### À finir avant bêta ouverte (observabilité — mis à jour 2026-09-24)
 
-- [ ] **Sentry** : créer projet + `EXPO_PUBLIC_SENTRY_DSN` sur EAS (production + development)
-- [ ] **Rebuild** natif après DSN (`tf:ios` et/ou `dev:ios:build`) — le code signalement est déjà dans l’app
-- [ ] Test : Espace parent → « Signaler un problème » → mail reçu + event Sentry
+- [x] **Sentry EAS** : `EXPO_PUBLIC_SENTRY_DSN` + `SENTRY_ORG` / `PROJECT` / `AUTH_TOKEN` (production)
+- [x] **Code** : anneau diagnostic + Signaler → `user_report` + parcours ; Edge `sentry-issue-notify` (HITL draft à toi)
+- [x] **Migration** `bug_outreach_drafts` appliquée (table presente 2026-09-24)
+- [x] **Edge** `sentry-issue-notify` redéployée + `SENTRY_WEBHOOK_SECRET` + smoke HITL `{emailed:true}`
+- [ ] **Sentry Alert UI** : brancher webhook New issue → Edge — **avant GO ouverte** ; pas bloquant GO interne tant que Signaler TF OK. Prefer **Internal Integration** (pas le plugin WebHooks legacy / « Send Test Event » souvent cassé). Secret path ou header — voir [`OBSERVABILITY_BETA.md`](./OBSERVABILITY_BETA.md)
+- [ ] **Smoke TF** : Espace parent → « Signaler un problème » → mail + event Sentry — checklist [`BETA_TF_SMOKE_CHECKLIST.md`](./BETA_TF_SMOKE_CHECKLIST.md)
 
 Sur **build TestFlight** (profil EAS `production` — pas le dev client) :
 
@@ -77,11 +84,11 @@ Sur **build TestFlight** (profil EAS `production` — pas le dev client) :
 
 ### P0.4 Gelato & commande
 
-- [ ] Variables Railway `GELATO_*` présentes (`API_KEY`, `PRODUCT_UID`, shipment, phone…)
-- [ ] **Bêta interne** : `GELATO_ORDER_TYPE=draft` accepté (pas d’impression auto)
+- [x] Variables Railway `GELATO_*` présentes — smoke draft 2026-09-24 → `printer_order_id` OK
+- [x] **Bêta interne** : Gelato draft OK (`sent_to_printer`, order `67ff89e6-…`) + `STRIPE_PRINT_BYPASS=1`
 - [ ] **Bêta ouverte / vrai colis** : bascule `GELATO_ORDER_TYPE=order` + **1 livre physique** reçu + QR OK
-- [ ] Pays livrables communiqués : **FR** (évent. BE / CH / LU) — pas « monde entier »
-- [ ] Tarif V1 affiché cohérent (39 € / 30 pages, QR 2 inclus + 0,70 €) — Edge recalcule
+- [x] Pays livrables communiqués : **FR** (brief interne)
+- [x] Tarif V1 affiché cohérent (39 € / 30 pages → `priceCents=3510` paid −10 %) — Edge recalcule
 
 ### P0.5 Compte + sync + Petitmo+ (bloque GO ouverte — orientation V2)
 
@@ -98,10 +105,10 @@ Décision produit (2026-07-22) : la bêta doit exercer le **modèle compte + clo
 - [x] Remise print **−10 %** paid (`lib/pricingV1.ts`) — figé, pas 15 %
 - [x] Suppression de compte in-app (UI + Edge `delete-account` + purge Storage) — **Edge redéployée 2026-09-23** ; **smoke manuel TF encore ouvert**
 - [x] Edge `revenuecat-webhook` + lifecycle (`touch-activity`, `inactivity-sweep`) — **redéployées 2026-09-23** ; IAP store + secrets EAS encore ouverts
-- [ ] RevenueCat + IAP abo + webhook `subscriptionTier=paid` — **code + Edge prêts ; bloqué conformité Apple / offerings dashboard / secrets EAS**
-- [ ] Smoke TF : restore même e-mail + parcours 1–9
-- [ ] Décision print : **A)** Stripe checkout branché, **ou** **B)** bêta « livres offerts » écrite aux testeurs
-- [ ] Si B print : message in-app ou email (« pas de débit ») — **l’abo reste P0** même si le print est offert
+- [ ] RevenueCat + IAP abo + webhook `subscriptionTier=paid` — **code + Edge prêts** ; checklist [`IAP_PETITMO_PLUS_READINESS.md`](./IAP_PETITMO_PLUS_READINESS.md)
+- [ ] Smoke TF : restore même e-mail + parcours 1–9 — [`BETA_TF_SMOKE_CHECKLIST.md`](./BETA_TF_SMOKE_CHECKLIST.md)
+- [x] Décision print **B** : bêta interne « livres offerts » (`STRIPE_PRINT_BYPASS=1`) — [`BETA_INTERNAL_BRIEF.md`](./BETA_INTERNAL_BRIEF.md)
+- [x] Message testeurs print offert (brief) — **l’abo reste P0 pour GO ouverte**
 
 **Petitmo+ n’est plus optionnel** pour une bêta qui annonce le modèle cible : pas de « abo démo OK » une fois la conformité Apple validée.
 
@@ -155,21 +162,22 @@ Lifecycle abo / inactivité / mails Resend : [`docs/specs/subscription-lifecycle
 ## Checklist « GO » (cocher avant invite large)
 
 ```text
-[ ] Health Railway OK
-[ ] Edge init-export V1 déployé
-[ ] Smoke print + QR audio OK
-[ ] TestFlight install frais OK (parcours 1–9)
-[ ] Gelato draft OK (interne) OU order + 1 colis OK (ouverte)
+[x] Health Railway OK (2026-09-24)
+[x] Edge init-export V1 déployé
+[x] Smoke print + QR audio OK (scripts QA 2026-09-24)
+[ ] TestFlight install frais OK (parcours 1–9) — checklist TF
+[x] Gelato draft OK (interne) — printer_order_id présent
 [x] Auth + sync gratuit (code) — smoke restore TF encore ouvert
 [ ] RevenueCat / IAP abo + subscriptionTier serveur OK (attente conformité Apple + offerings RC)
-[x] Remise print −10 % paid affichée cohérente (code)
+[x] Remise print −10 % paid affichée cohérente (code + smoke priceCents=3510)
 [x] Suppression de compte in-app (code + purge Storage + Edge déployée 2026-09-23) — smoke TF ouvert
 [x] Cap nombre audios retiré (durée 60 s conservée)
 [x] Mot de passe oublié bout-en-bout (code) — smoke + Redirect URL Supabase
-[ ] Paiement print : branché OU bêta offerte documentée
-[ ] Privacy URL OK (page `petitcoeur.app/#/privacy` joignable — contenu juridique à valider)
-[ ] Canal feedback OK
-[ ] Aucun TEMP / reset tier actif en build bêta (`resetUserTierForTesting` déjà commenté)```
+[x] Paiement print : bêta offerte documentée (STRIPE_PRINT_BYPASS + brief)
+[x] Privacy URL joignable (https://petitcoeur.app/#/privacy → 200)
+[x] Canal feedback OK (Signaler + support@)
+[x] Aucun TEMP / reset tier actif (`resetUserTierForTesting` commenté)
+```
 
 **Si une case manque → NO-GO ouverte.**  
 **GO interne** possible avec Gelato draft + paiement offert / non encaissé, **à condition** que les testeurs le sachent.

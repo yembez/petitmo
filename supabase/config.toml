@@ -45,3 +45,6 @@ verify_jwt = false
 
 [functions.inactivity-sweep]
 verify_jwt = false
+
+[functions.sentry-issue-notify]
+verify_jwt = false

@@ -3,6 +3,7 @@ import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
 import { getUserTier } from '@/lib/userTier';
 import { getUserMode } from '@/lib/userMode';
+import { formatTrailForSupport } from '@/lib/diagnosticTrail';
 
 /** Bloc technique joint aux messages support (version, appareil, écran). */
 export type BugReportContext = {
@@ -112,6 +113,8 @@ export function formatBugReportTechBlock(ctx: BugReportContext, sentryEventId?: 
   if (sentryEventId?.trim()) {
     lines.push(`Sentry event: ${sentryEventId.trim()}`);
   }
+  lines.push('--- Parcours récent ---');
+  lines.push(formatTrailForSupport(15));
   lines.push('---------------------------------------');
   return lines.join('\n');
 }

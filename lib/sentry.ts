@@ -89,6 +89,16 @@ export async function enrichSentryUserContext(tags: {
   if (tags.userMode) Sentry.setTag('app.userMode', tags.userMode);
 }
 
+/** UUID compte seulement — jamais d’e-mail / nom. */
+export function setPetitmoSentryUser(user: { id: string } | null): void {
+  if (!isSentryEnabled()) return;
+  if (!user?.id?.trim()) {
+    Sentry.setUser(null);
+    return;
+  }
+  Sentry.setUser({ id: user.id.trim() });
+}
+
 /** Signalement manuel → event Sentry + id pour le coller dans le mail. */
 export function captureUserBugReport(message: string, extra: Record<string, unknown>): string | null {
   if (!isSentryEnabled()) return null;
@@ -96,6 +106,25 @@ export function captureUserBugReport(message: string, extra: Record<string, unkn
     level: 'info',
     tags: { 'app.source': 'user_report' },
     extra,
+  });
+}
+
+/**
+ * Smoke HITL (appui long version Espace parent).
+ * Fingerprint unique à chaque envoi → nouvelle issue Sentry → webhook fondateur.
+ */
+export function captureSentrySmokeTest(): string | null {
+  if (!isSentryEnabled()) return null;
+  const stamp = new Date().toISOString();
+  const err = new Error(`petitmo_sentry_smoke_hitl ${stamp}`);
+  return Sentry.captureException(err, {
+    level: 'error',
+    tags: {
+      'app.smokeTest': 'yes',
+      'app.errorScope': 'capture.photo',
+    },
+    fingerprint: ['petitmo-sentry-smoke', stamp],
+    extra: { purpose: 'hitl_draft_smoke', stamp },
   });
 }
 

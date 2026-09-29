@@ -25,7 +25,8 @@ import {
   collectBugReportContext,
   formatBugReportTechBlock,
 } from '@/lib/bugReportContext';
-import { isSentryEnabled } from '@/lib/sentry';
+import { getTrailSnapshot } from '@/lib/diagnosticTrail';
+import { captureUserBugReport, isSentryEnabled } from '@/lib/sentry';
 import { sendSupportMessage, type SupportMessageKind } from '@/services/supportContact';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -78,11 +79,24 @@ export default function SupportContactModal({ visible, kind, defaultEmail, onClo
         pathname,
         sentryEnabled: isSentryEnabled(),
       });
+      const trail = getTrailSnapshot(15);
+      const sentryEventId = captureUserBugReport(
+        kind === 'report' ? 'user_report' : 'user_contact',
+        {
+          pathname: ctx.pathname,
+          tier: ctx.tier,
+          userMode: ctx.userMode,
+          build: ctx.buildNumber,
+          platform: ctx.platform,
+          trail,
+          messagePreview: nextMessage.slice(0, 200),
+        },
+      );
       await sendSupportMessage({
         email: nextEmail,
         message: nextMessage,
         kind,
-        techContext: formatBugReportTechBlock(ctx),
+        techContext: formatBugReportTechBlock(ctx, sentryEventId),
       });
       onClose();
       Alert.alert(t('parent.support.successTitle'), t('parent.support.successBody', { email: nextEmail }));
