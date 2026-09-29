@@ -79,7 +79,15 @@ export default function OnboardingPermissionsScreen() {
     if (busy) return;
     setBusy(true);
     try {
-      await markOnboardingPermissionsSeen(peekLastRealAuthUserId());
+      const uid = peekLastRealAuthUserId();
+      const { getMediaLibraryOptIn, setMediaLibraryDeferred } = await import(
+        '@/lib/mediaLibraryOptIn'
+      );
+      // « Plus tard » / continuer sans photos → report explicite (pas un message réinstall).
+      if (!(await getMediaLibraryOptIn(uid))) {
+        await setMediaLibraryDeferred(true, uid);
+      }
+      await markOnboardingPermissionsSeen(uid);
       hydrateTabScreensFromSqliteSync();
       replaceAfterOnboardingPermissions(router);
     } finally {
