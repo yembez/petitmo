@@ -105,6 +105,20 @@ generate_pdf() {
     --data "$payload_json"
 }
 
+# Compte print_order comme payé (STRIPE_PRINT_BYPASS=1 en bêta interne).
+mark_print_paid() {
+  local export_ticket="$1"
+  local email="${2:-qa@example.com}"
+  curl -sS "${SUPABASE_URL}/functions/v1/print-payment" \
+    -H "content-type: application/json" \
+    -H "authorization: Bearer ${SUPABASE_ANON_KEY}" \
+    -H "apikey: ${SUPABASE_ANON_KEY}" \
+    --data "$(jq -nc \
+      --arg ticket "$export_ticket" \
+      --arg email "$email" \
+      '{ action: "create", exportTicket: $ticket, customerEmail: $email }')"
+}
+
 assert_jq_field() {
   local json="$1"
   local filter="$2"

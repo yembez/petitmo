@@ -60,12 +60,19 @@ INIT_RESP="$(curl -sS "${SUPABASE_URL}/functions/v1/init-export" \
       gelato_pages: $pages,
       billable_pages: $pages,
       discount_percent: 10,
-      printer_name: "gelato"
+      printer_name: "gelato",
+      content_verified_at: $now,
+      cgv_version: "2026-09-17"
     }')")"
 
 TICKET="$(assert_jq_field "$INIT_RESP" '.exportTicket' 'exportTicket absent')"
 EXPORT_ID="$(assert_jq_field "$INIT_RESP" '.exportRequestId' 'exportRequestId absent')"
 ok "Ticket obtenu (exportRequestId=$EXPORT_ID)"
+
+info "2b/5 print-payment (bypass bêta → paid)"
+PAY_RESP="$(mark_print_paid "$TICKET" "$QA_TEST_EMAIL")"
+echo "$PAY_RESP" | jq -e '.paymentStatus == "paid"' >/dev/null || die "print-payment n’a pas marqué paid : $PAY_RESP"
+ok "Paiement marqué paid"
 
 info "3/5 generate-pdf print (${GELATO_QA_MAQUETTE_PAGES} pages maquette → ${GELATO_QA_INNER_PAGES} intérieures + format Gelato)"
 PAGES_JSON="$(jq -nc --argjson n "$GELATO_QA_MAQUETTE_PAGES" '
