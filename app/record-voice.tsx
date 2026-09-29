@@ -150,7 +150,12 @@ export default function RecordVoiceScreen() {
     if (result.granted) {
       setHasPermission(true);
       setShowPermissionModal(false);
-      void startRecording();
+      /**
+       * iOS : le dialog système doit se fermer avant `Recording.createAsync`,
+       * sinon plantage intermittent au 1er grant.
+       */
+      await new Promise<void>(r => setTimeout(r, 400));
+      await startRecording();
     } else {
       setShowPermissionModal(false);
     }
@@ -243,14 +248,28 @@ export default function RecordVoiceScreen() {
       setIsExcerptPlaying(false);
       lastExcerptTrimKeyRef.current = '';
 
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-      });
+      const armAudioSession = async () => {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: true,
+          playsInSilentModeIOS: true,
+        });
+        await new Promise<void>(r => setTimeout(r, 120));
+      };
 
-      const { recording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
+      await armAudioSession();
+
+      let recording: Audio.Recording;
+      try {
+        ({ recording } = await Audio.Recording.createAsync(
+          Audio.RecordingOptionsPresets.HIGH_QUALITY,
+        ));
+      } catch (firstErr) {
+        console.warn('[record-voice] createAsync retry after session settle', firstErr);
+        await armAudioSession();
+        ({ recording } = await Audio.Recording.createAsync(
+          Audio.RecordingOptionsPresets.HIGH_QUALITY,
+        ));
+      }
 
       recordingRef.current = recording;
       recordingFileUriRef.current = null;
@@ -644,7 +663,7 @@ export default function RecordVoiceScreen() {
       const locationOverride =
         locationForNextSaveRef.current !== undefined
           ? locationForNextSaveRef.current
-          : await resolveCurrentPlaceLabelSilent({ timeoutMs: 10000 });
+          : null;
       locationForNextSaveRef.current = undefined;
 
       const result = await uploadMedia({
@@ -654,7 +673,7 @@ export default function RecordVoiceScreen() {
         duration: finalDuration,
         voiceCoverUri: coverUri,
         voicePlaybackStartSec,
-        locationOverride: locationOverride ?? null,
+        locationOverride,
       });
 
       if (result) {
@@ -720,6 +739,45 @@ export default function RecordVoiceScreen() {
     setCtaPhase('idle');
   }, []);
 
+  const discardRecordingAndLeave = useCallback(() => {
+    if (isSaving || ctaPhase !== 'idle') return;
+    void (async () => {
+      try {
+        await stopExcerptPlayback();
+      } catch {
+        /* */
+      }
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      if (recordingRef.current) {
+        try {
+          await recordingRef.current.stopAndUnloadAsync();
+        } catch {
+          /* */
+        }
+        recordingRef.current = null;
+      }
+      recordingFileUriRef.current = null;
+      setHasRecording(false);
+      setIsRecording(false);
+      setCoverUri(null);
+      setTrimStartSec(0);
+      setTrimEndSec(0);
+      setCtaPhase('idle');
+      leaveCaptureFlowScreen(router);
+    })();
+  }, [ctaPhase, isSaving, router, stopExcerptPlayback]);
+
+  const onHeaderBack = useCallback(() => {
+    if (hasRecording && !isRecording) {
+      discardRecordingAndLeave();
+      return;
+    }
+    leaveCaptureFlowScreen(router);
+  }, [discardRecordingAndLeave, hasRecording, isRecording, router]);
+
   const onSaveSuccessHoldEnd = useCallback(() => {
     const next = pendingAfterSuccessRef.current;
     pendingAfterSuccessRef.current = null;
@@ -759,6 +817,9 @@ export default function RecordVoiceScreen() {
   }
 
   const showPostRecordFooter = hasRecording && !isRecording;
+  const voiceMaxSec =
+    tier === 'free' ? FREE_TIER_VOICE_MAX_DURATION : PAID_TIER_VOICE_MAX_DURATION;
+  const needsTrimCoach = showPostRecordFooter && recordingDuration > voiceMaxSec + 0.01;
 
   return (
     <View style={styles.container}>
@@ -777,11 +838,34 @@ export default function RecordVoiceScreen() {
 
       <View style={[styles.header, showPostRecordFooter && styles.headerTight]}>
         <TouchableOpacity
-          onPress={() => leaveCaptureFlowScreen(router)}
+          onPress={onHeaderBack}
           style={styles.backButton}
+          accessibilityRole="button"
+          accessibilityLabel={t('recordVoice.cancel')}
         >
           <ChevronLeft size={ICON_SIZES.lg} color="#3F4A5A" strokeWidth={2} />
         </TouchableOpacity>
+        {showPostRecordFooter ? (
+          <TouchableOpacity
+            onPress={discardRecordingAndLeave}
+            style={styles.headerCancel}
+            disabled={isSaving || ctaPhase !== 'idle'}
+            accessibilityRole="button"
+            accessibilityLabel={t('recordVoice.cancel')}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Text
+              style={[
+                styles.headerCancelText,
+                (isSaving || ctaPhase !== 'idle') && styles.cancelButtonTextDisabled,
+              ]}
+            >
+              {t('recordVoice.cancel')}
+            </Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.headerCancelSpacer} />
+        )}
       </View>
 
       {showPostRecordFooter ? (
@@ -795,16 +879,21 @@ export default function RecordVoiceScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.postRecordHead}>
-            <Text style={styles.titlePostRecord}>{t('recordVoice.title')}</Text>
-            <Text style={styles.subtitlePostRecord}>{t('recordVoice.subtitleDone')}</Text>
-          </View>
+          {needsTrimCoach ? (
+            <View style={styles.postRecordHead}>
+              <Text style={styles.limitHint}>
+                {tier === 'free' ? t('recordVoice.limitFree') : t('recordVoice.limitPaid')}
+              </Text>
+            </View>
+          ) : null}
 
           <View style={styles.editSurfaceCard}>
             <AudioTrimEditor
               presentation="editorCard"
               durationSec={recordingDuration}
               tier={tier}
+              showCoachTitle={needsTrimCoach}
+              coachTitle={t('recordVoice.pickBestMoment')}
               value={{ startSec: trimStartSec, endSec: trimEndSec }}
               onChange={v => clampTrim(v.startSec, v.endSec)}
               onDragActiveChange={setTrimScrollLocked}
@@ -841,7 +930,6 @@ export default function RecordVoiceScreen() {
           </View>
 
           <View style={styles.illustrateBlock}>
-            <Text style={styles.illustrateTitle}>Illustrer ce souvenir (optionnel)</Text>
             {coverUri ? (
               <>
                 <View style={styles.coverFrame}>
@@ -977,7 +1065,7 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'flex-start',
+    justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: SPACING.md,
     paddingTop: verticalScale(40),
@@ -990,25 +1078,31 @@ const styles = StyleSheet.create({
   backButton: {
     padding: SPACING.sm,
   },
+  headerCancel: {
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.sm,
+  },
+  headerCancelText: {
+    fontSize: FONT_SIZES.base,
+    fontWeight: '500',
+    color: THEME.textMuted,
+  },
+  headerCancelSpacer: {
+    width: scale(64),
+  },
   preRecordBody: {
     flex: 1,
     paddingHorizontal: SPACING.xl,
   },
   postRecordHead: {
     alignItems: 'center',
-    marginBottom: verticalScale(4),
+    marginBottom: verticalScale(8),
   },
-  titlePostRecord: {
-    fontSize: FONT_SIZES.lg,
+  limitHint: {
+    fontSize: FONT_SIZES.base,
     fontWeight: '600',
-    color: '#3F4A5A',
-    marginBottom: scale(2),
-  },
-  subtitlePostRecord: {
-    fontSize: FONT_SIZES.sm,
-    color: '#8791A1',
+    color: THEME.textPrimary,
     textAlign: 'center',
-    marginBottom: verticalScale(4),
   },
   postScroll: {
     flex: 1,
@@ -1087,13 +1181,6 @@ const styles = StyleSheet.create({
     marginTop: verticalScale(22),
     alignItems: 'center',
   },
-  illustrateTitle: {
-    alignSelf: 'stretch',
-    fontSize: FONT_SIZES.sm,
-    fontWeight: '600',
-    color: '#3F4A5A',
-    marginBottom: verticalScale(12),
-  },
   coverFrame: {
     width: '100%',
     maxWidth: scale(280),
@@ -1164,6 +1251,9 @@ const styles = StyleSheet.create({
   saveButtonMaquetteText: {
     fontSize: FONT_SIZES.sm,
     fontWeight: '600',
+  },
+  cancelButtonTextDisabled: {
+    opacity: 0.45,
   },
   privacyRow: {
     flexDirection: 'row',

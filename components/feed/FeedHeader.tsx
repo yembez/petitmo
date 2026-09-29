@@ -154,7 +154,11 @@ export const FeedHeader = memo(function FeedHeader({
   );
 
   return Platform.OS === 'ios' ? (
-    <BlurView intensity={14} tint="light" style={styles.headerBlur}>
+    <BlurView
+      intensity={44}
+      tint="systemThinMaterialLight"
+      style={styles.headerBlur}
+    >
       <View style={[styles.headerContent, { paddingTop }]}>{inner}</View>
     </BlurView>
   ) : (

@@ -7,7 +7,7 @@ import {
 /**
  * Essai UI Capturer :
  * - `'d1'` = outline beige + liseré gris · Mic / PencilLine / ImagePlus (corail ou dégradé)
- * - `'d2'` = disques dégradé splash/icône (#FD628D→#FD6764) · icônes blanches (mock D2)
+ * - `'d2'` = disques dégradé CTA L−3 (#FD628D→#FD6764) · icônes blanches (mock D2)
  * - `'d3'` = fond corail pâle · icônes corail (mock D3)
  * - `'d16'` = disques corail action (#FD7764) · icônes blanches (mock D16)
  * - `'d6'` = disques gris pâle + icônes encre Lucide (mock D6)
@@ -29,7 +29,7 @@ export const CAPTURE_CTA_VARIANT:
 export const CAPTURE_CTA_D1_ICON = CAPTURE_CTA_ICON_CORAL;
 export const CAPTURE_CTA_D1_ICON_STROKE = 2.4;
 
-/** D2 — fond uni legacy (remplacé par `BRAND_SPLASH_GRADIENT` sur Capturer). */
+/** D2 — fond uni legacy (remplacé par `BRAND_ACTION_GRADIENT` sur Capturer). */
 export const CAPTURE_CTA_D2_BG = CAPTURE_CTA_ICON_CORAL;
 /** D2 — icônes blanches. */
 export const CAPTURE_CTA_D2_ICON = '#FFFFFF';

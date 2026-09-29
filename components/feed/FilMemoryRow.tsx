@@ -35,6 +35,7 @@ import { MOTION_FEED_VIDEO_POSTER_MS } from '@/constants/motion';
 import { scale, verticalScale } from "@/utils/responsive";
 import { FavoriteHeartButton } from '@/components/FavoriteHeartButton';
 import MotionPressable from '@/components/MotionPressable';
+import FeedMediaPressable from '@/components/feed/FeedMediaPressable';
 import { ICON_SIZES } from "@/constants/sizes";
 import {
   MOTION_PRESS_FILL_ANNOTATE,
@@ -858,7 +859,7 @@ function FilMemoryRow({
             <View style={{ position: 'relative' }}>
               {mediaMetaOverlay}
               {videoPlaybackUri.trim() || videoPosterUri.trim() ? (
-              <Pressable
+              <FeedMediaPressable
                 ref={videoImmersiveHostRef}
                 collapsable={false}
                 onPress={() =>
@@ -961,7 +962,7 @@ function FilMemoryRow({
                     </View>
                   ) : null}
                 </View>
-              </Pressable>
+              </FeedMediaPressable>
               ) : (
                 <View style={[styles.mediaCard, styles.photoPlaceholder]} />
               )}
@@ -1059,7 +1060,7 @@ function FilMemoryRow({
           )}
 
           {memory.type === 'text' && (
-            <Pressable
+            <FeedMediaPressable
               style={styles.textBody}
               onPress={() => launchImmersive()}
               disabled={skipImmersive}
@@ -1093,7 +1094,7 @@ function FilMemoryRow({
                   </Text>
                 ))}
               </ScrollableTextBlock>
-            </Pressable>
+            </FeedMediaPressable>
           )}
           </View>
 

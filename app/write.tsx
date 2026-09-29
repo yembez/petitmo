@@ -271,7 +271,8 @@ export default function WriteScreen() {
     try {
       setContent(textToSave);
 
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: sess } = await supabase.auth.getSession();
+      const user = sess.session?.user;
       if (!user) {
         setCtaPhase('error');
         Alert.alert('Erreur', 'Utilisateur non authentifié');
@@ -298,10 +299,8 @@ export default function WriteScreen() {
       if (locationForNextSaveRef.current !== undefined) {
         locationLabel = locationForNextSaveRef.current;
         locationForNextSaveRef.current = undefined;
-      } else {
-        /** GPS complet (pas quick) — lastKnown manque souvent juste après Autoriser. */
-        locationLabel = await resolveCurrentPlaceLabelSilent({ timeoutMs: 10000 });
       }
+      // GPS en fond via enrichMemoryLocationInBackground — ne bloque pas Enregistrer.
       const mem = buildLocalTextMemory({
         childId,
         userId: user.id,

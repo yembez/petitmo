@@ -574,9 +574,9 @@ function MemoryViewerScreenInner() {
     clearDismissSafetyTimer();
     setPhotoZoomActive(false);
     /**
-     * Retour fil : souvenir de la page pager actuelle (pas celui d’ouverture).
-     * Si le dismiss swipe a déjà armé le snap, ne pas réarmer (sinon 2ᵉ
-     * applyImmersiveSnapHidden → flash / course avec le 1ᵉ).
+     * Retour fil après swipe / fade : souvenir de la page pager (pas d’ouverture).
+     * Shared dismiss « même souvenir » a déjà dismissSnapArmedRef — ne pas
+     * réarmer (applyImmersiveSnapHidden post-hero = flash plein fil).
      */
     if (!dismissSnapArmedRef.current) {
       const visibleKey = syncVisibleItemKeyFromPager();
@@ -736,6 +736,7 @@ function MemoryViewerScreenInner() {
   const finishDismiss = useCallback(() => {
     if (isClosingRef.current) return;
     isClosingRef.current = true;
+    dismissSnapArmedRef.current = false;
     /** Filet : spring annulé (`finished === false`) ne doit pas laisser keepAlive / modal collés. */
     armDismissSafety();
     /** Barre d’état rendue au fil tout de suite : sinon elle bascule après l’animation. */
@@ -758,6 +759,15 @@ function MemoryViewerScreenInner() {
       if (!isUsableSharedOrigin(shared.origin) || !shared.uri.trim()) {
         runFadeDismiss();
         return;
+      }
+      /**
+       * Même souvenir sous le modal : le fil est déjà à la bonne place.
+       * Ne PAS armer snapToKey (opacity 0 sur toute la liste) — sinon leaveViewer
+       * le fait *après* la disparition du hero → gros flash.
+       * Marquer armed pour skip leaveViewer ; le chemin swipe a déjà armé + snap.
+       */
+      if (!dismissSnapArmedRef.current) {
+        dismissSnapArmedRef.current = true;
       }
       sharedElementRef.current = shared;
       openedItemKeyRef.current = shared.openedItemKey;
@@ -841,20 +851,20 @@ function MemoryViewerScreenInner() {
             runSharedDismiss(measured);
             return;
           }
-          if (attempt < 5) {
-            setTimeout(() => tryMeasure(attempt + 1), 56);
+          if (attempt < 10) {
+            setTimeout(() => tryMeasure(attempt + 1), 64);
             return;
           }
           runFadeDismiss();
         });
       };
       /**
-       * Attendre le snap fil (opacity 0 + scrollToIndex ~140ms) avant de mesurer
-       * la vignette cible — sinon on mesure encore la carte d’ouverture.
+       * Attendre le snap fil (opacity 0 + scroll jusqu’au host cible) avant
+       * de mesurer la vignette — sinon on mesure encore la carte d’ouverture.
        */
       setTimeout(() => {
         requestAnimationFrame(() => tryMeasure(0));
-      }, 160);
+      }, 200);
       return;
     }
 

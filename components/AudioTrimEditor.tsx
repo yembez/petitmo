@@ -66,6 +66,9 @@ export const AudioTrimEditor = memo(function AudioTrimEditor(props: {
   compact?: boolean;
   /** Carte éditeur : barres, lignes de coupe, poignées type maquette. */
   presentation?: 'track' | 'editorCard';
+  /** Titre coach — seulement si durée > limite plan. */
+  showCoachTitle?: boolean;
+  coachTitle?: string;
   /** Indique un glissement actif sur une poignée (ex. désactiver le ScrollView parent). */
   onDragActiveChange?: (active: boolean) => void;
 }) {
@@ -262,15 +265,12 @@ export const AudioTrimEditor = memo(function AudioTrimEditor(props: {
     const barMaxH = scale(44);
     return (
       <View style={styles.editorRoot}>
-        <View style={styles.editorTitleRow}>
-          <Scissors size={scale(22)} color={TRIM_ACCENT} strokeWidth={2.2} />
-          <Text style={styles.editorTitle}>Choisir le meilleur moment</Text>
-        </View>
-        <Text style={styles.editorSub}>
-          {props.tier === 'free'
-            ? 'En plan gratuit, ton extrait est limité à 1 minute.'
-            : 'Coupez librement pour garder l’essentiel.'}
-        </Text>
+        {props.showCoachTitle ? (
+          <View style={styles.editorTitleRow}>
+            <Scissors size={scale(22)} color={TRIM_ACCENT} strokeWidth={2.2} />
+            <Text style={styles.editorTitle}>{props.coachTitle ?? 'Choisir le meilleur moment'}</Text>
+          </View>
+        ) : null}
 
         <View style={styles.editorTimeRowEnds}>
           <Text style={styles.editorTimeEnd}>{fmt(0)}</Text>
@@ -331,12 +331,11 @@ export const AudioTrimEditor = memo(function AudioTrimEditor(props: {
 
   return (
     <View style={[styles.root, c && styles.rootCompact]}>
-      <Text style={[styles.title, c && styles.titleCompact]}>Choisir le meilleur moment</Text>
-      <Text style={[styles.sub, c && styles.subCompact]}>
-        {props.tier === 'free'
-          ? 'En plan gratuit, ton extrait est limité à 1 minute.'
-          : 'Coupez librement pour garder l’essentiel.'}
-      </Text>
+      {props.showCoachTitle ? (
+        <Text style={[styles.title, c && styles.titleCompact]}>
+          {props.coachTitle ?? 'Choisir le meilleur moment'}
+        </Text>
+      ) : null}
 
       <View style={styles.timeRow}>
         <Text style={[styles.time, c && styles.timeCompact]}>{fmt(normalized.startSec)}</Text>

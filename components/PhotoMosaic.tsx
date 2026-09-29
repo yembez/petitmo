@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   useWindowDimensions,
-  Pressable,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
@@ -24,6 +23,7 @@ import {
   registerFeedImmersiveHost,
   unregisterFeedImmersiveHost,
 } from '@/utils/feedImmersiveHostRegistry';
+import FeedMediaPressable from '@/components/feed/FeedMediaPressable';
 
 const GAP = scale(3);
 
@@ -86,7 +86,7 @@ function MosaicTapCell({
   }, [immersiveKey, uri, cornerRadius]);
 
   return (
-    <Pressable
+    <FeedMediaPressable
       ref={ref}
       collapsable={false}
       style={style}
@@ -99,7 +99,7 @@ function MosaicTapCell({
       }}
     >
       {children}
-    </Pressable>
+    </FeedMediaPressable>
   );
 }
 
@@ -226,7 +226,7 @@ export default function PhotoMosaic({
             immersiveKey={cellKey(1)}
             cornerRadius={cellCorner}
             onOpen={openImmersive}
-            style={[styles.fill, { width: cell, height: halfH, marginBottom: GAP }]}
+              style={[styles.fill, { width: cell, height: halfH, marginBottom: GAP }]}
           >
             <Image source={{ uri: urls[1] }} style={StyleSheet.absoluteFillObject} contentFit="cover" {...feedImageCache(1)} />
           </MosaicTapCell>
@@ -236,7 +236,7 @@ export default function PhotoMosaic({
             immersiveKey={cellKey(2)}
             cornerRadius={cellCorner}
             onOpen={openImmersive}
-            style={[styles.fill, { width: cell, height: halfH }]}
+              style={[styles.fill, { width: cell, height: halfH }]}
           >
             <Image source={{ uri: urls[2] }} style={StyleSheet.absoluteFillObject} contentFit="cover" {...feedImageCache(2)} />
           </MosaicTapCell>
@@ -254,7 +254,7 @@ export default function PhotoMosaic({
             immersiveKey={cellKey(0)}
             cornerRadius={cellCorner}
             onOpen={openImmersive}
-            style={[styles.fill, { width: cell, height: rowH }]}
+              style={[styles.fill, { width: cell, height: rowH }]}
           >
             <Image source={{ uri: urls[0] }} style={StyleSheet.absoluteFillObject} contentFit="cover" {...feedImageCache(0)} />
           </MosaicTapCell>
@@ -265,7 +265,7 @@ export default function PhotoMosaic({
             immersiveKey={cellKey(1)}
             cornerRadius={cellCorner}
             onOpen={openImmersive}
-            style={[styles.fill, { width: cell, height: rowH }]}
+              style={[styles.fill, { width: cell, height: rowH }]}
           >
             <Image source={{ uri: urls[1] }} style={StyleSheet.absoluteFillObject} contentFit="cover" {...feedImageCache(1)} />
           </MosaicTapCell>
@@ -277,7 +277,7 @@ export default function PhotoMosaic({
             immersiveKey={cellKey(2)}
             cornerRadius={cellCorner}
             onOpen={openImmersive}
-            style={[styles.fill, { width: cell, height: rowH }]}
+              style={[styles.fill, { width: cell, height: rowH }]}
           >
             <Image source={{ uri: urls[2] }} style={StyleSheet.absoluteFillObject} contentFit="cover" {...feedImageCache(2)} />
           </MosaicTapCell>
@@ -288,7 +288,7 @@ export default function PhotoMosaic({
             immersiveKey={cellKey(fourthIndex)}
             cornerRadius={cellCorner}
             onOpen={(_index, origin, uri) => onPressFourthCell(origin, uri)}
-            style={[styles.fill, { width: cell, height: rowH, position: 'relative' }]}
+              style={[styles.fill, { width: cell, height: rowH, position: 'relative' }]}
             accessibilityLabel={fourthOverlay > 0 ? `Voir les ${n} photos` : 'Ouvrir la photo en grand'}
           >
             <Image source={{ uri: urls[3] }} style={[StyleSheet.absoluteFillObject, styles.fill]} contentFit="cover" {...feedImageCache(3)} />

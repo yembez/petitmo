@@ -32,6 +32,18 @@ export function unregisterFeedImmersiveHost(itemKey: string): void {
   if (key) hosts.delete(key);
 }
 
+/** True si une vignette fil est enregistrée pour ce souvenir (id ou cellule album). */
+export function hasFeedImmersiveHost(itemKey: string): boolean {
+  const key = itemKey.trim();
+  if (!key) return false;
+  if (hosts.has(key)) return true;
+  const albumPrefix = `${key}-album-`;
+  for (const k of hosts.keys()) {
+    if (k.startsWith(albumPrefix)) return true;
+  }
+  return false;
+}
+
 /**
  * Mesure la vignette fil pour une clé viewer (`memory.id` ou `id-album-N`).
  * Préférer scroller le fil sur la carte avant d’appeler.

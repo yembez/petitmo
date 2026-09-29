@@ -5,6 +5,7 @@ import { PETITMO_CTA_BORDER_WIDTH } from '@/constants/petitmoCtaStyles';
 import { FONT_SIZES } from '@/constants/sizes';
 import {
   FEED_POST_CARD_RADIUS,
+  FEED_POST_CARD_RADIUS_BL,
   MEDIA_CARD_INSET,
   MEDIA_CARD_RADIUS,
   TEXT_POST_CARD_INSET,
@@ -37,38 +38,45 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: THEME.familyFlowScreenBg,
   },
-  /** Header hors liste : le scroll ne passe pas « sous » le bandeau — pas de double comptage pour snap */
+  /** Header glass en overlay : le fil scroll dessous (vrai flou). */
   headerShell: {
-    flexShrink: 0,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
     zIndex: 2,
     ...Platform.select({
       ios: {
         shadowColor: '#000000',
         shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.035,
-        shadowRadius: 4,
+        shadowOpacity: 0.06,
+        shadowRadius: 10,
       },
-      android: { elevation: 1 },
+      android: { elevation: 2 },
       default: {
         shadowColor: '#000000',
         shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.035,
-        shadowRadius: 4,
+        shadowOpacity: 0.06,
+        shadowRadius: 10,
       },
     }),
   },
   headerContent: {
-    backgroundColor: 'rgba(246,244,241,0.94)',
+    backgroundColor: 'transparent',
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: THEME.familyFlowLine,
+    borderBottomColor: 'rgba(60, 49, 38, 0.08)',
     paddingHorizontal: scale(20),
     paddingBottom: verticalScale(8),
   },
+  /** Teinte crème par-dessus BlurView — verre lisible, pas trop transparent. */
   headerBlur: {
-    backgroundColor: 'rgba(246,244,241,0.78)',
+    overflow: 'hidden',
+    backgroundColor: 'rgba(246, 244, 241, 0.72)',
   },
   headerAndroid: {
-    backgroundColor: THEME.familyFlowScreenBg,
+    backgroundColor: 'rgba(246, 244, 241, 0.96)',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(60, 49, 38, 0.08)',
   },
   headerRow: {
     flexDirection: 'row',
@@ -208,7 +216,10 @@ const styles = StyleSheet.create({
   postShell: {
     alignSelf: 'stretch',
     marginHorizontal: scale(8),
-    borderRadius: FEED_POST_CARD_RADIUS,
+    borderTopLeftRadius: FEED_POST_CARD_RADIUS,
+    borderTopRightRadius: FEED_POST_CARD_RADIUS,
+    borderBottomRightRadius: FEED_POST_CARD_RADIUS,
+    borderBottomLeftRadius: FEED_POST_CARD_RADIUS_BL,
     backgroundColor: '#FFFFFF',
     ...Platform.select({
       ios: {
@@ -231,7 +242,10 @@ const styles = StyleSheet.create({
   },
   post: {
     backgroundColor: '#FFFFFF',
-    borderRadius: FEED_POST_CARD_RADIUS,
+    borderTopLeftRadius: FEED_POST_CARD_RADIUS,
+    borderTopRightRadius: FEED_POST_CARD_RADIUS,
+    borderBottomRightRadius: FEED_POST_CARD_RADIUS,
+    borderBottomLeftRadius: FEED_POST_CARD_RADIUS_BL,
     overflow: 'hidden',
   },
   /**
@@ -310,7 +324,7 @@ const styles = StyleSheet.create({
   postBody: {
     overflow: 'visible',
   },
-  /** Photo / vidéo : pleine largeur, sans arrondi ni ombre (fil type social). */
+  /** Photo / vidéo : pleine largeur, coins inchangés (fil social). */
   mediaCard: {
     marginHorizontal: MEDIA_CARD_INSET,
     alignSelf: 'stretch',

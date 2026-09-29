@@ -1,12 +1,12 @@
 /**
- * Icône Lucide masquée avec le dégradé splash / icône d’app
- * (`BRAND_SPLASH_GRADIENT` rose → corail).
+ * Icône Lucide masquée avec le dégradé CTA primaire
+ * (`BRAND_ACTION_GRADIENT` rose → corail L−3).
  */
 import { View, StyleSheet } from 'react-native';
 import MaskedView from '@react-native-masked-view/masked-view';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { LucideIcon } from 'lucide-react-native';
-import { BRAND_SPLASH_GRADIENT } from '@/constants/captureScreenPalette';
+import { BRAND_ACTION_GRADIENT } from '@/constants/captureScreenPalette';
 
 type Props = {
   Icon: LucideIcon;
@@ -29,7 +29,7 @@ export default function CaptureCtaBrandGradientIcon({
       }
     >
       <LinearGradient
-        colors={[...BRAND_SPLASH_GRADIENT]}
+        colors={[...BRAND_ACTION_GRADIENT]}
         start={{ x: 0.5, y: 0 }}
         end={{ x: 0.5, y: 1 }}
         style={{ width: size, height: size }}

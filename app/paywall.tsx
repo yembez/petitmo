@@ -37,6 +37,7 @@ import { listLocalChildrenForUser } from '@/lib/localDb'
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset'
 import { grantDigitalExportPurchase } from '@/lib/digitalExportPurchase'
 import { FREE_TIER_LIMIT, FREE_TIER_VIDEO_LIMIT, PAID_TIER_VIDEO_MAX_DURATION } from '@/lib/limits'
+import { recordAction, recordCaughtError, recordWarn } from '@/lib/diagnosticTrail'
 import { THEME } from '@/constants/theme'
 import { hp, scale, screenHeight, screenWidth, verticalScale } from '@/utils/responsive'
 import { LEGAL_PRIVACY_URL, LEGAL_TERMS_URL } from '@/lib/legalUrls'
@@ -196,6 +197,10 @@ export default function PaywallScreen() {
   const returnTo = normalizePaywallReturnTo(params.returnTo)
   const fromSubscribe = isSubscribeOnboarding(params.from)
 
+  useEffect(() => {
+    recordAction('paywall.open', context)
+  }, [context])
+
   const [planPrices, setPlanPrices] = useState<{
     monthly: string
     yearly: string
@@ -290,17 +295,22 @@ export default function PaywallScreen() {
     if (ctaPhase !== 'idle' || restoreBusy) return
     setCtaPhase('busy')
     purchaseDevReportRef.current = null
+    recordAction('paywall.purchase.start', plan)
     try {
       const purchase = await purchasePetitmoPlusPlan(plan)
       if (!purchase.ok) {
         if (purchase.cancelled) {
+          recordAction('paywall.purchase.cancelled', plan)
           setCtaPhase('idle')
           return
         }
+        recordWarn('paywall.purchase.fail', purchase.message)
         setCtaPhase('error')
         Alert.alert(t('error'), purchase.message)
         return
       }
+
+      recordAction('paywall.purchase.ok', plan)
 
       // Paiement StoreKit confirmé → migration cloud + cache paid (déjà posé par RC).
       const report = await upgradeToFullCloud()
@@ -330,6 +340,7 @@ export default function PaywallScreen() {
 
       setCtaPhase('success')
     } catch (e) {
+      recordCaughtError('paywall.purchase', e)
       setCtaPhase('error')
       Alert.alert(
         t('error'),

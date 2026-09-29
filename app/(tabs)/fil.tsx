@@ -55,6 +55,7 @@ import {
   PETITMO_FIL_APPLY_SCROLL_INTENT,
   type FeedScrollIntent,
 } from '@/services/feedScrollRestore';
+import { hasFeedImmersiveHost } from '@/utils/feedImmersiveHostRegistry';
 import { useFocusEffect } from '@react-navigation/native';
 import { getTimingNudge, markNudgeSeen, recordInstallDate } from '@/lib/paywallTiming';
 import type { Child, Memory } from '@/types/local';
@@ -76,6 +77,9 @@ function FilScreen() {
   const pendingPinOffsetRef = useRef<number | null>(null);
   const pendingScrollIntentRef = useRef<FeedScrollIntent | null>(null);
   const [feedListOpacity, setFeedListOpacity] = useState(1);
+  /** Hauteur réelle header glass (overlay) — padding liste + viewOffset snap. */
+  const [feedHeaderHeight, setFeedHeaderHeight] = useState(0);
+  const feedHeaderHeightRef = useRef(0);
   /** Empêche `onContentSizeChange` de révéler le fil au milieu d’un snap immersif. */
   const immersiveSnapInFlightRef = useRef(false);
   const immersiveRevealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -246,9 +250,26 @@ function FilScreen() {
     () => verticalScale(28) + tabBarFloatingOverlapPad(insets.bottom),
     [insets.bottom],
   );
+  /** Estimé avant onLayout — évite un jump à l’ouverture. */
+  const feedHeaderPadFallback =
+    insets.top + verticalScale(6) + verticalScale(52) + verticalScale(8);
+  const feedHeaderPad =
+    feedHeaderHeight > 0 ? feedHeaderHeight : feedHeaderPadFallback;
   const listContentContainerStyle = useMemo(
-    () => [styles.scrollContent, { paddingBottom: listBottomPad }],
-    [listBottomPad],
+    () => [
+      styles.scrollContent,
+      { paddingTop: feedHeaderPad, paddingBottom: listBottomPad },
+    ],
+    [feedHeaderPad, listBottomPad],
+  );
+  const onFeedHeaderLayout = useCallback(
+    (e: { nativeEvent: { layout: { height: number } } }) => {
+      const h = Math.round(e.nativeEvent.layout.height);
+      if (h <= 0 || h === feedHeaderHeightRef.current) return;
+      feedHeaderHeightRef.current = h;
+      setFeedHeaderHeight(h);
+    },
+    [],
   );
   const onFeedScroll = useCallback(
     (e: { nativeEvent: { contentOffset: { y: number } } }) => {
@@ -293,7 +314,12 @@ function FilScreen() {
       );
       if (index >= 0) {
         try {
-          listRef.current.scrollToIndex({ index, animated, viewPosition: 0 });
+          listRef.current.scrollToIndex({
+            index,
+            animated,
+            viewPosition: 0,
+            viewOffset: feedHeaderHeightRef.current,
+          });
         } catch {
           listRef.current.scrollToOffset({ offset: 0, animated });
         }
@@ -320,9 +346,11 @@ function FilScreen() {
   }, [feedData, memoryFlatListKeyByIdRef]);
 
   /**
-   * Retour immersif : rester opaque=0 jusqu’à ce que le scroll ait eu le temps
-   * de se poser. Sinon `onContentSizeChange` / 2 rAF révèlent trop tôt → flash
-   * du souvenir d’ouverture (souvent dès le 2ᵉ aller-retour).
+   * Retour immersif : rester opaque=0 jusqu’à ce que le scroll ait posé la
+   * vignette cible (host enregistré). Sinon reveal trop tôt → mauvais souvenir.
+   *
+   * Au reveal : **ne pas** re-`scrollToIndex` (micro-saut, surtout vidéo quand
+   * la VideoView fil se remonte) — pin l’offset le temps que le layout se pose.
    */
   const applyImmersiveSnapHidden = useCallback(() => {
     immersiveSnapInFlightRef.current = true;
@@ -337,11 +365,33 @@ function FilScreen() {
       tick();
       requestAnimationFrame(() => {
         tick();
-        immersiveRevealTimerRef.current = setTimeout(() => {
-          applyPendingFeedScrollIntent({ reveal: true });
-          immersiveSnapInFlightRef.current = false;
-          immersiveRevealTimerRef.current = null;
-        }, 140);
+        let attempts = 0;
+        const tryReveal = () => {
+          attempts += 1;
+          tick();
+          const intent = pendingScrollIntentRef.current;
+          const snapKey =
+            intent?.type === 'snapToKey' ? intent.key.trim() : '';
+          const hostReady = !snapKey || hasFeedImmersiveHost(snapKey);
+          if (hostReady || attempts >= 14) {
+            /** Reveal sans re-scroll : évite le « léger replacement » post-vidéo. */
+            pendingScrollIntentRef.current = null;
+            const pinY = feedScrollOffsetRef.current;
+            pendingPinOffsetRef.current = pinY;
+            listRef.current?.scrollToOffset({ offset: pinY, animated: false });
+            setFeedListOpacity(1);
+            immersiveSnapInFlightRef.current = false;
+            immersiveRevealTimerRef.current = null;
+            setTimeout(() => {
+              if (pendingPinOffsetRef.current === pinY) {
+                pendingPinOffsetRef.current = null;
+              }
+            }, 480);
+            return;
+          }
+          immersiveRevealTimerRef.current = setTimeout(tryReveal, 48);
+        };
+        immersiveRevealTimerRef.current = setTimeout(tryReveal, 96);
       });
     });
   }, [applyPendingFeedScrollIntent]);
@@ -462,6 +512,17 @@ function FilScreen() {
   /** Import / replace vers le fil déjà actif : le focus ne repasse pas, on consomme l’intent au changement de données. */
   useEffect(() => {
     if (pendingPinOffsetRef.current != null) return;
+    /**
+     * Pendant un snap immersif : jamais reveal/clear ici (même bug que
+     * onContentSizeChange) — un soft merge souvenirs pendant le retour
+     * vidait l’intent et montrait le mauvais item.
+     */
+    if (immersiveSnapInFlightRef.current) {
+      if (pendingScrollIntentRef.current) {
+        applyPendingFeedScrollIntent({ reveal: false });
+      }
+      return;
+    }
     if (pendingScrollIntentRef.current) {
       applyPendingFeedScrollIntent();
       return;
@@ -469,9 +530,15 @@ function FilScreen() {
     const intent = consumeFeedScrollIntent();
     if (!intent) return;
     pendingScrollIntentRef.current = intent;
+    const immersiveJump =
+      intent.type === 'snapToKey' && intent.animated !== true;
+    if (immersiveJump) {
+      applyImmersiveSnapHidden();
+      return;
+    }
     setFeedListOpacity(0);
     applyPendingFeedScrollIntent();
-  }, [feedData.length, pendingUploads.length, applyPendingFeedScrollIntent]);
+  }, [feedData.length, pendingUploads.length, applyPendingFeedScrollIntent, applyImmersiveSnapHidden]);
 
   /** Pas d’écran plein pendant l’import : pending, flag « retour import », ou 1er rendu avant consume. */
   if (isLoading && pendingUploads.length === 0 && !peekSilentInitialFilLoadArmed()) {
@@ -511,13 +578,6 @@ function FilScreen() {
   return (
     <View style={styles.container}>
       <StatusBar style="dark" />
-      <View style={styles.headerShell}>
-        <FeedHeader
-          familyChildren={familyChildren}
-          paddingTop={insets.top + verticalScale(6)}
-          onPressChild={onFeedHeaderChildPress}
-        />
-      </View>
       <View style={[styles.feedViewport, { opacity: feedListOpacity }]}>
         <Animated.FlatList<FeedListItem>
           ref={listRef}
@@ -535,14 +595,28 @@ function FilScreen() {
           scrollEventThrottle={16}
           onContentSizeChange={onFeedContentSizeChange}
           onScrollToIndexFailed={info => {
-            listRef.current?.scrollToOffset({
-              offset: Math.max(0, info.averageItemLength * info.index),
-              animated: false,
-            });
+            /**
+             * Hauteurs variables : l’approx averageItemLength est fausse.
+             * Pendant un snap immersif → approx légère puis retry scrollToIndex
+             * (évite d’atterrir / mesurer la mauvaise carte).
+             */
+            const approx = Math.max(0, info.averageItemLength * info.index);
+            listRef.current?.scrollToOffset({ offset: approx, animated: false });
             if (immersiveSnapInFlightRef.current && pendingScrollIntentRef.current) {
-              requestAnimationFrame(() => {
+              setTimeout(() => {
+                try {
+                  listRef.current?.scrollToIndex({
+                    index: info.index,
+                    animated: false,
+                    viewPosition: 0,
+                    viewOffset: feedHeaderHeightRef.current,
+                  });
+                } catch {
+                  /* ignore */
+                }
                 applyPendingFeedScrollIntent({ reveal: false });
-              });
+              }, 72);
+              return;
             }
           }}
           bounces={false}
@@ -594,6 +668,13 @@ function FilScreen() {
           maxToRenderPerBatch={2}
           updateCellsBatchingPeriod={40}
           windowSize={7}
+        />
+      </View>
+      <View style={styles.headerShell} onLayout={onFeedHeaderLayout} pointerEvents="box-none">
+        <FeedHeader
+          familyChildren={familyChildren}
+          paddingTop={insets.top + verticalScale(6)}
+          onPressChild={onFeedHeaderChildPress}
         />
       </View>
       {timingNudge && (

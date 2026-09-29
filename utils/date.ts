@@ -1,31 +1,29 @@
-const MONTH_NAMES_FR = [
-  'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
-  'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre',
-] as const;
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : String(n);
+}
 
-const MONTH_ABBR_FR = [
-  'janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin',
-  'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.',
-] as const;
+/** Date calendaire locale en chiffres — ex. `12/03` (sans année). */
+function formatNumericDayMonth(date: Date): string {
+  return `${pad2(date.getDate())}/${pad2(date.getMonth() + 1)}`;
+}
 
-/** En-tête Capturer — ex. « 29 mai » (jour + mois abrégé). */
+/** Date calendaire locale en chiffres — ex. `12/03/2026`. */
+function formatNumericDayMonthYear(date: Date): string {
+  return `${formatNumericDayMonth(date)}/${date.getFullYear()}`;
+}
+
+/** En-tête Capturer — ex. « 29/05 ». */
 export function formatCaptureHeaderDate(date: Date = new Date()): string {
-  return `${date.getDate()} ${MONTH_ABBR_FR[date.getMonth()]}`;
+  return formatNumericDayMonth(date);
 }
 
 export function formatDate(dateString: string): string {
-  const date = new Date(dateString);
-  const day = date.getDate();
-  const month = MONTH_NAMES_FR[date.getMonth()];
-  return `${day} ${month}`;
+  return formatNumericDayMonth(new Date(dateString));
 }
 
-/** Ex. « 12 mars 2026 » — pour l’en-tête des souvenirs */
+/** Ex. « 12/03/2026 » — en-tête / pastilles souvenirs (fil, viewer). */
 export function formatDateLong(dateString: string): string {
-  const date = new Date(dateString);
-  const day = date.getDate();
-  const month = MONTH_NAMES_FR[date.getMonth()];
-  return `${day} ${month} ${date.getFullYear()}`;
+  return formatNumericDayMonthYear(new Date(dateString));
 }
 
 /** Même jour calendaire (fuseau local, cohérent avec `formatDateLong`) */

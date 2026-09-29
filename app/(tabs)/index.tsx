@@ -43,7 +43,7 @@ import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
 import { scale, verticalScale } from '@/utils/responsive';
 import {
   CAPTURE_SCREEN_BG,
-  BRAND_SPLASH_GRADIENT,
+  BRAND_ACTION_GRADIENT,
   CAPTURE_CTA_RECORD_GRADIENT,
   CAPTURE_CTA_WRITE_GRADIENT,
   CAPTURE_CTA_IMPORT_GRADIENT,
@@ -115,10 +115,12 @@ function listCaptureScopedChildren(): Child[] {
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
-/** Zoom « respiration » sur la photo carte (1 → max). */
+/** Zoom « respiration » sur la photo carte (1 → max) — assez marqué pour se lire en TF. */
+/** Photo hero plein cadre — respiration + micro-parallax. */
 const CAPTURE_HERO_BREATHE_MIN = 1;
 const CAPTURE_HERO_BREATHE_MAX = 1.055;
-const CAPTURE_HERO_BREATHE_HALF_MS = 8500;
+const CAPTURE_HERO_BREATHE_HALF_MS = 7_200;
+const CAPTURE_HERO_PARALLAX_Y = 6;
 
 const CAPTURE_PHOTO_CARD_RADIUS = scale(32);
 const CAPTURE_PHOTO_CARD_ASPECT = CHILD_PROFILE_PHOTO_ASPECT;
@@ -225,7 +227,7 @@ function CapturerScreen() {
   const lang = useAppLanguage();
   const todayLabel = formatAppDate(
     new Date(),
-    { weekday: 'short', day: 'numeric', month: 'short' },
+    { day: '2-digit', month: '2-digit' },
     lang,
   );
   const [captureFontsLoaded] = useFonts({
@@ -878,7 +880,7 @@ function CapturerScreen() {
                     label="Enregistrer"
                     labelFontFamily={captureCtaLabelFont}
                     accessibilityLabel="Enregistrer un audio"
-                    discGradient={BRAND_SPLASH_GRADIENT}
+                    discGradient={BRAND_ACTION_GRADIENT}
                     icon={
                       <Mic
                         size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
@@ -893,7 +895,7 @@ function CapturerScreen() {
                   <CaptureDiscCtaGradient
                     label="Écrire"
                     labelFontFamily={captureCtaLabelFont}
-                    discGradient={BRAND_SPLASH_GRADIENT}
+                    discGradient={BRAND_ACTION_GRADIENT}
                     icon={
                       <PencilLine
                         size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
@@ -909,7 +911,7 @@ function CapturerScreen() {
                     label="Importer"
                     labelFontFamily={captureCtaLabelFont}
                     accessibilityLabel="Importer des photos ou vidéos"
-                    discGradient={BRAND_SPLASH_GRADIENT}
+                    discGradient={BRAND_ACTION_GRADIENT}
                     icon={
                       <ImagePlus
                         size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
@@ -1404,6 +1406,7 @@ function CaptureHeroImageStack({
   isTabFocused,
 }: CaptureHeroImageStackProps & { isTabFocused: boolean }) {
   const breatheScale = useRef(new Animated.Value(CAPTURE_HERO_BREATHE_MIN)).current;
+  const parallaxY = useRef(new Animated.Value(0)).current;
   const [imageReady, setImageReady] = useState(false);
   const lastReadyUriRef = useRef('');
 
@@ -1444,29 +1447,48 @@ function CaptureHeroImageStack({
 
   useEffect(() => {
     breatheScale.setValue(CAPTURE_HERO_BREATHE_MIN);
+    parallaxY.setValue(0);
     if (!isTabFocused || CAPTURE_HERO_BREATHE_MAX <= CAPTURE_HERO_BREATHE_MIN) {
       return undefined;
     }
     const ease = Easing.inOut(Easing.ease);
-    const up = Animated.timing(breatheScale, {
+    const scaleUp = Animated.timing(breatheScale, {
       toValue: CAPTURE_HERO_BREATHE_MAX,
       duration: CAPTURE_HERO_BREATHE_HALF_MS,
       easing: ease,
       useNativeDriver: captureHeroBreatheNativeDriver,
     });
-    const down = Animated.timing(breatheScale, {
+    const scaleDown = Animated.timing(breatheScale, {
       toValue: CAPTURE_HERO_BREATHE_MIN,
       duration: CAPTURE_HERO_BREATHE_HALF_MS,
       easing: ease,
       useNativeDriver: captureHeroBreatheNativeDriver,
     });
-    const loop = Animated.loop(Animated.sequence([up, down]));
+    const yUp = Animated.timing(parallaxY, {
+      toValue: -CAPTURE_HERO_PARALLAX_Y,
+      duration: CAPTURE_HERO_BREATHE_HALF_MS,
+      easing: ease,
+      useNativeDriver: captureHeroBreatheNativeDriver,
+    });
+    const yDown = Animated.timing(parallaxY, {
+      toValue: CAPTURE_HERO_PARALLAX_Y,
+      duration: CAPTURE_HERO_BREATHE_HALF_MS,
+      easing: ease,
+      useNativeDriver: captureHeroBreatheNativeDriver,
+    });
+    const loop = Animated.loop(
+      Animated.parallel([
+        Animated.sequence([scaleUp, scaleDown]),
+        Animated.sequence([yUp, yDown]),
+      ]),
+    );
     loop.start();
     return () => {
       loop.stop();
       breatheScale.setValue(CAPTURE_HERO_BREATHE_MIN);
+      parallaxY.setValue(0);
     };
-  }, [reactKey, breatheScale, isTabFocused]);
+  }, [reactKey, breatheScale, parallaxY, isTabFocused]);
 
   /**
    * ExpoImage peut peindre 1 frame à taille intrinsèque (miniature bas-gauche)
@@ -1475,7 +1497,10 @@ function CaptureHeroImageStack({
   return (
     <View style={[StyleSheet.absoluteFillObject, styles.heroImageClip]} pointerEvents="box-none" collapsable={false}>
       <Animated.View
-        style={[StyleSheet.absoluteFillObject, { transform: [{ scale: breatheScale }] }]}
+        style={[
+          StyleSheet.absoluteFillObject,
+          { transform: [{ translateY: parallaxY }, { scale: breatheScale }] },
+        ]}
         collapsable={false}
       >
         {Platform.OS === 'web' ? (

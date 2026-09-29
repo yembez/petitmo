@@ -1,6 +1,7 @@
 import type { ComponentProps } from 'react';
 import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
+import { BlurView } from 'expo-blur';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { PlatformPressable } from '@react-navigation/elements';
 import type { LucideIcon } from 'lucide-react-native';
@@ -18,7 +19,6 @@ import {
 import { THEME } from '@/constants/theme';
 import CaptureTabPlusIcon from '@/components/CaptureTabPlusIcon';
 import {
-  TAB_BAR_BACKGROUND,
   TAB_BAR_BORDER_WIDTH,
   TAB_BAR_CONTAINER_BORDER,
   TAB_BAR_PADDING_TOP,
@@ -295,6 +295,16 @@ export default function PetitmoContextTabBar({
         },
       ]}
     >
+      {Platform.OS === 'ios' ? (
+        <BlurView
+          pointerEvents="none"
+          intensity={50}
+          tint="systemThinMaterialLight"
+          style={styles.tabBarGlass}
+        />
+      ) : (
+        <View pointerEvents="none" style={styles.tabBarGlassAndroid} />
+      )}
       <View style={styles.tabBarRow}>
         <Animated.View pointerEvents="none" style={[styles.tabActivePill, pillStyle]} />
         {FIXED_TAB_BAR_SLOTS.map((routeName, slotIndex) => {
@@ -370,10 +380,19 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    backgroundColor: TAB_BAR_BACKGROUND,
+    backgroundColor: 'transparent',
     borderTopWidth: TAB_BAR_BORDER_WIDTH,
     borderTopColor: TAB_BAR_CONTAINER_BORDER,
     zIndex: 20,
+    overflow: 'hidden',
+  },
+  tabBarGlass: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(246, 244, 241, 0.70)',
+  },
+  tabBarGlassAndroid: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(246, 244, 241, 0.96)',
   },
   tabBarRow: {
     flex: 1,

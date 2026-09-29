@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import {
   View,
   Text,
@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { usePathname, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronLeft, Plus } from 'lucide-react-native';
+import { ChevronLeft, ChevronDown, Plus } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BRAND_ACTION_GRADIENT } from '@/constants/captureScreenPalette';
 import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
@@ -45,7 +45,7 @@ import {
   collectBugReportContext,
   formatAppVersionLabel,
 } from '@/lib/bugReportContext';
-import { isSentryEnabled } from '@/lib/sentry';
+import { captureSentrySmokeTest, isSentryEnabled } from '@/lib/sentry';
 import { applyAvailableOtaUpdate } from '@/services/applyOtaUpdate';
 import {
   peekCachedExpoPushToken,
@@ -150,6 +150,49 @@ export default function ParentSpaceScreen() {
       }
     })();
   }, [pathname]);
+
+  const handleSentrySmokeLongPress = useCallback(() => {
+    Alert.alert(
+      t('parent.application.sentrySmokeTitle'),
+      t('parent.application.sentrySmokeBody'),
+      [
+        { text: t('cancel'), style: 'cancel' },
+        {
+          text: t('parent.application.sentrySmokeConfirm'),
+          onPress: () => {
+            if (!isSentryEnabled()) {
+              Alert.alert(
+                t('parent.application.sentrySmokeOffTitle'),
+                t('parent.application.sentrySmokeOffBody'),
+              );
+              return;
+            }
+            const eventId = captureSentrySmokeTest();
+            const id = eventId?.trim() || '—';
+            Alert.alert(
+              t('parent.application.sentrySmokeDoneTitle'),
+              t('parent.application.sentrySmokeDoneBody', { eventId: id }),
+              [
+                { text: t('ok'), style: 'cancel' },
+                {
+                  text: t('parent.application.sentrySmokeShare'),
+                  onPress: () => {
+                    void Share.share({
+                      message: [
+                        'Petit Cœur — smoke Sentry HITL',
+                        `eventId: ${id}`,
+                        'Transférer aussi le mail support@ (draft à valider).',
+                      ].join('\n'),
+                    });
+                  },
+                },
+              ],
+            );
+          },
+        },
+      ],
+    );
+  }, [t]);
 
   const handleSharePushToken = useCallback(() => {
     void (async () => {
@@ -369,6 +412,11 @@ export default function ParentSpaceScreen() {
   }, [deleteBusy, performDeleteAccount, signOutBusy, t]);
 
   const paid = tier === 'paid';
+  /** Accordion : une seule rubrique ouverte à la fois (défaut = toutes repliées). */
+  const [openSectionId, setOpenSectionId] = useState<string | null>(null);
+  const toggleSection = useCallback((id: string) => {
+    setOpenSectionId(prev => (prev === id ? null : id));
+  }, []);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -389,7 +437,13 @@ export default function ParentSpaceScreen() {
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + verticalScale(24) }]}
         showsVerticalScrollIndicator={false}
       >
-        <Section title="Mes enfants" titleFontFamily={dm700}>
+        <Section
+          sectionId="children"
+          title="Mes enfants"
+          titleFontFamily={dm700}
+          open={openSectionId === 'children'}
+          onToggle={toggleSection}
+        >
           {children.length === 0 ? (
             <Text style={[styles.emptyText, dm500 ? { fontFamily: dm500 } : null]}>
               Aucun enfant pour le moment.
@@ -427,7 +481,13 @@ export default function ParentSpaceScreen() {
           </TouchableOpacity>
         </Section>
 
-        <Section title={t('parent.subscription.sectionTitle')} titleFontFamily={dm700}>
+        <Section
+          sectionId="subscription"
+          title={t('parent.subscription.sectionTitle')}
+          titleFontFamily={dm700}
+          open={openSectionId === 'subscription'}
+          onToggle={toggleSection}
+        >
           {billingIssue ? (
             <View style={styles.billingIssueBanner}>
               <Text style={[styles.billingIssueTitle, dm600 ? { fontFamily: dm600 } : null]}>
@@ -499,7 +559,13 @@ export default function ParentSpaceScreen() {
         </Section>
 
         {hasRealAccount ? (
-          <Section title={t('parent.orders.sectionTitle')} titleFontFamily={dm700}>
+          <Section
+            sectionId="orders"
+            title={t('parent.orders.sectionTitle')}
+            titleFontFamily={dm700}
+            open={openSectionId === 'orders'}
+            onToggle={toggleSection}
+          >
             {orders.length === 0 ? (
               <>
                 <Text style={[styles.emptyText, styles.bannerMatchedBody, dm500 ? { fontFamily: dm500 } : null]}>
@@ -512,7 +578,7 @@ export default function ParentSpaceScreen() {
             ) : (
               orders.map((o, i) => {
                 const when = o.createdAt
-                  ? formatAppDate(new Date(o.createdAt), { day: 'numeric', month: 'short', year: 'numeric' }, lang)
+                  ? formatAppDate(new Date(o.createdAt), { day: '2-digit', month: '2-digit', year: 'numeric' }, lang)
                   : '';
                 const price = formatAppCurrency(o.priceCents / 100, lang);
                 const meta = [when, price].filter(Boolean).join(' · ');
@@ -534,7 +600,13 @@ export default function ParentSpaceScreen() {
           </Section>
         ) : null}
 
-        <Section title="Aide" titleFontFamily={dm700}>
+        <Section
+          sectionId="help"
+          title="Aide"
+          titleFontFamily={dm700}
+          open={openSectionId === 'help'}
+          onToggle={toggleSection}
+        >
           <TouchableOpacity
             style={styles.row}
             onPress={() => setSupportKind('report')}
@@ -567,7 +639,13 @@ export default function ParentSpaceScreen() {
           </TouchableOpacity>
         </Section>
 
-        <Section title="Informations légales" titleFontFamily={dm700}>
+        <Section
+          sectionId="legal"
+          title="Informations légales"
+          titleFontFamily={dm700}
+          open={openSectionId === 'legal'}
+          onToggle={toggleSection}
+        >
           <TouchableOpacity
             style={styles.row}
             onPress={() => void openUrl(LEGAL_PRIVACY_URL)}
@@ -610,12 +688,20 @@ export default function ParentSpaceScreen() {
           </TouchableOpacity>
         </Section>
 
-        <Section title="Application" titleFontFamily={dm700}>
+        <Section
+          sectionId="application"
+          title="Application"
+          titleFontFamily={dm700}
+          open={openSectionId === 'application'}
+          onToggle={toggleSection}
+        >
           <TouchableOpacity
             style={styles.row}
             activeOpacity={0.85}
             disabled={updateCheckBusy}
             onPress={handleCheckForUpdate}
+            onLongPress={handleSentrySmokeLongPress}
+            delayLongPress={700}
             accessibilityRole="button"
             accessibilityLabel={t('parent.application.checkUpdate')}
           >
@@ -685,7 +771,13 @@ export default function ParentSpaceScreen() {
         </Section>
 
         {hasRealAccount ? (
-          <Section title={t('parent.account.sectionTitle')} titleFontFamily={dm700}>
+          <Section
+            sectionId="account"
+            title={t('parent.account.sectionTitle')}
+            titleFontFamily={dm700}
+            open={openSectionId === 'account'}
+            onToggle={toggleSection}
+          >
             <StaticRow label={accountEmail || '—'} labelFontFamily={dm500} />
             <TouchableOpacity
               style={[styles.row, styles.rowBorderTop]}
@@ -723,7 +815,13 @@ export default function ParentSpaceScreen() {
         ) : null}
 
         {hasRealAccount ? (
-          <Section title="Sauvegarde cloud" titleFontFamily={dm700}>
+          <Section
+            sectionId="backup"
+            title="Sauvegarde cloud"
+            titleFontFamily={dm700}
+            open={openSectionId === 'backup'}
+            onToggle={toggleSection}
+          >
             <StaticRow label="Sauvegarde" value={backupStatus || 'À jour'} labelFontFamily={dm500} />
           </Section>
         ) : null}
@@ -777,20 +875,44 @@ function printOrderStatusLabel(
 }
 
 function Section({
+  sectionId,
   title,
   children,
   titleFontFamily,
+  open,
+  onToggle,
 }: {
+  sectionId: string;
   title: string;
-  children: React.ReactNode;
+  children: ReactNode;
   titleFontFamily?: string;
+  open: boolean;
+  onToggle: (id: string) => void;
 }) {
   return (
     <View style={styles.section}>
-      <Text style={[styles.sectionTitle, titleFontFamily ? { fontFamily: titleFontFamily } : null]}>
-        {title}
-      </Text>
-      <View style={styles.card}>{children}</View>
+      <TouchableOpacity
+        style={styles.sectionHeader}
+        onPress={() => onToggle(sectionId)}
+        activeOpacity={0.75}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={title}
+      >
+        <Text
+          style={[styles.sectionTitle, titleFontFamily ? { fontFamily: titleFontFamily } : null]}
+          numberOfLines={1}
+        >
+          {title}
+        </Text>
+        <ChevronDown
+          size={ICON_SIZES.md}
+          color={THEME.textSecondary}
+          strokeWidth={2.2}
+          style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }}
+        />
+      </TouchableOpacity>
+      {open ? <View style={styles.card}>{children}</View> : null}
     </View>
   );
 }
@@ -991,15 +1113,23 @@ const styles = StyleSheet.create({
     lineHeight: scale(20),
   },
   section: {
-    marginBottom: SPACING.xl,
+    marginBottom: SPACING.lg,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: SPACING.sm,
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.xs,
+    marginBottom: SPACING.xs,
   },
   sectionTitle: {
+    flex: 1,
     fontSize: FONT_SIZES.xl,
     fontWeight: '700',
     color: THEME.textPrimary,
     letterSpacing: -0.3,
-    marginBottom: SPACING.md,
-    paddingHorizontal: SPACING.xs,
   },
   card: {
     backgroundColor: THEME.bg,
