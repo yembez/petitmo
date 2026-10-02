@@ -11,6 +11,19 @@
 
 ---
 
+## Low Friction First (règle d’or UX — avec le local-first)
+
+**Référence : Apple.** Si l’utilisatrice n’a pas besoin de savoir / décider ce qui se passe sous le capot, **on ne lui demande rien**.
+
+- Toujours opter pour la solution **autorisée** (App Store, Keychain, sync silencieuse…) qui **minimise la friction**.
+- Avant toute Alert / confirmation / CTA « informatif » : *est-ce indispensable ?* Sinon → silence + SQLite / fond / préremplissage.
+- En cas de **doute** → demander à Guilhem, ne pas inventer une décision UX « par prudence ».
+- Règle agent toujours appliquée : [`.cursor/rules/low-friction-first.mdc`](.cursor/rules/low-friction-first.mdc).
+
+Ex. auth : e-mail + MDP du dernier compte via **Keychain** (`expo-secure-store`) ; reprise hors-ligne **sans** demander « continuer hors ligne ? ».
+
+---
+
 ## Paiements — règle absolue
 
 Les abonnements Petitmo+ sont gérés **exclusivement via les stores natifs** :
@@ -104,7 +117,7 @@ Petitmo a **deux plans** sur une **même identité** (compte obligatoire) :
 - **Suppression de compte in-app** : **P0** avant TestFlight public / App Store (exigence Apple) dès qu’on crée des comptes.
 - Paywall — hero selon le contexte (`app/paywall.tsx`) :
  - **Quota souvenirs gratuit atteint** (`context=LIMIT_REACHED` uniquement) : hero chiffré du type « Tu as capturé vos N premiers souvenirs » + sous-texte « Continue à préserver… ».
- - **Ex-abonnée** (`context=EX_SUBSCRIBER`, `captureLocked`) : hero réactivation — « Reprends là où tu t’étais arrêtée » (pas le hero 50).
+ - **Ex-abonnée** (`context=EX_SUBSCRIBER`) : hero réactivation — « Reprends là où tu t’étais arrêtée » (pas le hero 50). Legacy soft CTA ; l’ajout n’est **pas** bloqué (plan gratuit 50).
  - **Toute autre entrée** : hero **neutre** — « Les abonnements pour préserver chaque moment ». CTA principal **rosé charte**.
  - Exception : flux **export PDF numérique à l’acte** (`EXPORT_DIGITAL_PDF`) — titre / sous-titre propres.
  - Passer explicitement `params.context` ; défaut = **`GENERAL`**.
@@ -203,7 +216,7 @@ flowchart LR
 5. Dimensionnement coût Storage gratuit à l’échelle  
 6. ~~Réalignement `lib/limits.ts` (cap nombre vidéos / audios)~~ — **fait** (durées 20 s / 60 s conservées)  
 7. Mise à jour `docs/specs/architecture-locale-cloud.md` + `supabase-write-policy.mdc`  
-8. **Lifecycle abo / inactivité / mails** — spec [`docs/specs/subscription-lifecycle-retention.md`](docs/specs/subscription-lifecycle-retention.md) : **sans grâce** ; EXPIRATION → free + **lecture totale** + `captureLocked` (0 ajout) ; cancel → mail only ; billing issue → mail + bandeau ; re-subscribe → unlock. **Pas d’archive >50 en V1**. Inactivité 24 mois = P2.  
+8. **Lifecycle abo / inactivité / mails** — spec [`docs/specs/subscription-lifecycle-retention.md`](docs/specs/subscription-lifecycle-retention.md) : **sans grâce** ; EXPIRATION → **plan gratuit** (plafond **50**, comme never-paid) ; cancel → mail only ; billing issue → mail + bandeau ; re-subscribe → paid. **Pas d’archive >50 en V1** (tout reste visible). Inactivité 24 mois = P2.  
 9. QR livres = **15 ans** (code + Railway/Edge) ; delete volontaire purge QR ; delete inactivité conserve QR jusqu’à échéance — détail même spec
 
 ---
@@ -212,10 +225,11 @@ flowchart LR
 
 1. **Toujours** lire ce fichier en début de session avant tout correctif sensible.
 2. **Citer la règle d'or en une ligne** au début de tout plan ou patch touchant : import, souvenirs, livres, paywall, auth, sync, écran d'accueil, paramètres, fil, Capturer.  
-   Exemple : *« Règle d’or V2 : compte + sync limitée ; local-first — l’UI ne ressent jamais la sync cloud. »*
-3. **Avant tout done** : checklist [`.cursor/rules/local-first-ux.mdc`](.cursor/rules/local-first-ux.mdc) — peindre SQLite d’abord ; pas de spinner / flash liés au réseau si le local existe ; **audit ressenti** = parcours boot / login / focus Capturer+fil (pas seulement grep `invalidate`).
-4. Si une demande entre en conflit avec la règle d'or ou le local-first UX, **lever le drapeau immédiatement**.
-5. Ne **pas** réintroduire « gratuit sans compte » / « perte téléphone = perte données assumée » / interdiction de dire « sauvegardés » en gratuit.
-6. Export PDF livre : **uniquement** serveur.
-7. Changement livre / maquette : [`.cursor/rules/book-maquette-pdf-parity.mdc`](.cursor/rules/book-maquette-pdf-parity.mdc).
-8. Remise print Petitmo+ = **10 %** — ne pas inventer 15 %.
+   Exemple : *« Règle d’or V2 : compte + sync limitée ; local-first — l’UI ne ressent jamais la sync cloud ; Low Friction First. »*
+3. **Low Friction First** : pas d’Alert / décision utilisateur si un chemin autorisé silencieux existe ; doute → demander. Voir [`.cursor/rules/low-friction-first.mdc`](.cursor/rules/low-friction-first.mdc).
+4. **Avant tout done** : checklist [`.cursor/rules/local-first-ux.mdc`](.cursor/rules/local-first-ux.mdc) — peindre SQLite d’abord ; pas de spinner / flash liés au réseau si le local existe ; **audit ressenti** = parcours boot / login / focus Capturer+fil (pas seulement grep `invalidate`).
+5. Si une demande entre en conflit avec la règle d'or, le local-first UX ou le Low Friction First, **lever le drapeau immédiatement**.
+6. Ne **pas** réintroduire « gratuit sans compte » / « perte téléphone = perte données assumée » / interdiction de dire « sauvegardés » en gratuit.
+7. Export PDF livre : **uniquement** serveur.
+8. Changement livre / maquette : [`.cursor/rules/book-maquette-pdf-parity.mdc`](.cursor/rules/book-maquette-pdf-parity.mdc).
+9. Remise print Petitmo+ = **10 %** — ne pas inventer 15 %.

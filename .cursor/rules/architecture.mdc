@@ -15,6 +15,12 @@ Peindre SQLite + sandbox d’abord ; réseau / pull / flush / materialisation **
 Pas de roue, flash, remount ou écran bloqué « en attendant le cloud » quand le local existe.  
 Règle dédiée (toujours appliquée) : `.cursor/rules/local-first-ux.mdc`.
 
+## 0bis. LOW FRICTION FIRST — absolu (toute évolution)
+
+Réf. Apple : si l’utilisatrice n’a pas besoin de décider / savoir, **ne pas demander**.  
+Solution autorisée la moins frictionnante ; doute → demander à Guilhem.  
+Règle : `.cursor/rules/low-friction-first.mdc` · détail `AGENTS.md`.
+
 ## 1. PLAN GRATUIT — compte + cloud limité (local-first)
 
 - Compte obligatoire dès le début du parcours (après présentation) : Google → Apple → email + mdp (+ mot de passe oublié), puis profil enfant.

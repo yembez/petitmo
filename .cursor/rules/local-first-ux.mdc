@@ -8,6 +8,8 @@ alwaysApply: true
 **Règle d’or produit :** SQLite + sandbox = source d’affichage. Le cloud synchronise en silence.  
 **L’utilisatrice ne doit jamais ressentir une sync** (pas de roue, flash, remount, freeze, écran vide « en attendant le réseau »).
 
+Complément **Low Friction First** (décisions UX / Apple) : `.cursor/rules/low-friction-first.mdc`.
+
 Citer en une ligne au début de tout plan/patch touchant : fil, Capturer, favoris, livres, auth, login, sync, import, souvenirs, paramètres.
 
 ## Interdit (bloqueurs PR / revue)

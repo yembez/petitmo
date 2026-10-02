@@ -1,0 +1,38 @@
+---
+description: Low Friction First — minimiser décisions / friction UX (réf. Apple)
+alwaysApply: true
+---
+
+# Low Friction First (règle d’or produit)
+
+**Positionnement :** local-first **et** low-friction. Référence UX : **Apple** — quand l’utilisatrice n’a pas besoin de savoir ce qui se passe sous le capot, **on ne lui dit pas**.
+
+Citer en une ligne au début de tout plan/patch touchant : auth, onboarding, alerts, permissions, sync, restore, paywall, formulaires, déconnexion.
+
+## Principe
+
+1. **Toujours** choisir la solution **autorisée** (App Store / Apple / sécurité) qui **limite au maximum la friction**.
+2. Avant toute **Alert**, CTA de confirmation, écran intermédiaire, bannière « hors ligne », ou question : *est-ce indispensable que l’utilisatrice décide / sache ?*
+3. Si **non** → faire le travail en silence (SQLite, Keychain, sync fond, reprise locale…).
+4. Si **doute** → **demander à Guilhem** avant d’ajouter une décision UX.
+5. Préremplir, mémoriser, reprendre l’état local dès que c’est autorisé et sûr (ex. e-mail + MDP dans **SecureStore / Keychain**, jamais AsyncStorage pour un secret).
+
+## Interdit
+
+- Demander une confirmation « pour informer » alors que le chemin sûr/local-first est déjà clair.
+- Empiler deux UX pour le même but (ex. CTA hors-ligne **et** Alert « continuer hors ligne ? »).
+- Bloquer l’entrée dans l’app pour expliquer une sync / un restore / un hors-ligne quand le local suffit.
+- Stocker un secret en clair (AsyncStorage, SQLite, logs).
+
+## Autorisé / préféré
+
+- Keychain (`expo-secure-store`) pour secrets de confort (dernier MDP e-mail).
+- Reprise hors-ligne silencieuse du dernier compte si SQLite est là.
+- Hydratation / flush cloud **en fond** sans spinner ni copie technique.
+- Autofill système (`textContentType` / trousseau iOS) en complément.
+
+## Checklist agent
+
+- [ ] La feature ajoute-t-elle une **décision** ou un **message** utilisateur ? Si oui → justifier pourquoi indispensable.
+- [ ] Existe-t-il un chemin **silencieux** autorisé (local / Keychain / fond) ?
+- [ ] En cas de doute produit → poser la question, ne pas inventer une Alert « par sécurité UX ».
