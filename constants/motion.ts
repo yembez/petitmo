@@ -175,11 +175,11 @@ export const MOTION_CAPTURE_PRESS_SCALE = 0.9;
 export const MOTION_CAPTURE_PRESS_OPACITY_DIP = 0.1;
 export const MOTION_CAPTURE_PRESS_SHADOW = {
   color: '#1C1C1E',
-  ambient: { offsetY: 6, radius: 14, opacity: 0.2 },
-  ambientPressed: { offsetY: 1, radius: 4, opacity: 0.08 },
-  contact: { offsetY: 2, radius: 3, opacity: 0.14 },
-  contactPressed: { offsetY: 0, radius: 1, opacity: 0.06 },
-  elevation: 5,
+  ambient: { offsetY: 5, radius: 12, opacity: 0.12 },
+  ambientPressed: { offsetY: 1, radius: 3, opacity: 0.06 },
+  contact: { offsetY: 1, radius: 2, opacity: 0.08 },
+  contactPressed: { offsetY: 0, radius: 1, opacity: 0.04 },
+  elevation: 3,
   elevationPressed: 1,
 } as const;
 

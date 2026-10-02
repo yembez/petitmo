@@ -29,7 +29,7 @@ export const CAPTURE_CTA_VARIANT:
 export const CAPTURE_CTA_D1_ICON = CAPTURE_CTA_ICON_CORAL;
 export const CAPTURE_CTA_D1_ICON_STROKE = 2.4;
 
-/** D2 — fond uni legacy (remplacé par `BRAND_ACTION_GRADIENT` sur Capturer). */
+/** D2 — rouge corail « cœur » (`brandPrimary` / cœur titre). */
 export const CAPTURE_CTA_D2_BG = CAPTURE_CTA_ICON_CORAL;
 /** D2 — icônes blanches. */
 export const CAPTURE_CTA_D2_ICON = '#FFFFFF';
@@ -55,7 +55,7 @@ export const CAPTURE_CTA_D6_ICON_STROKE = 2.4;
 
 export const CAPTURE_CTA_SIZE = scale(72);
 export const CAPTURE_CTA_SIZE_COMPACT = scale(60);
-export const CAPTURE_CTA_ICON_SIZE = scale(28);
-export const CAPTURE_CTA_ICON_SIZE_COMPACT = scale(24);
-export const CAPTURE_CTA_MIC_ICON_SIZE = scale(32);
-export const CAPTURE_CTA_MIC_ICON_SIZE_COMPACT = scale(27);
+export const CAPTURE_CTA_ICON_SIZE = scale(31);
+export const CAPTURE_CTA_ICON_SIZE_COMPACT = scale(26);
+export const CAPTURE_CTA_MIC_ICON_SIZE = scale(34);
+export const CAPTURE_CTA_MIC_ICON_SIZE_COMPACT = scale(29);

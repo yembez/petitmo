@@ -35,11 +35,11 @@ import { scale, verticalScale } from '@/utils/responsive';
  */
 const SH = {
   color: '#1C1C1E',
-  ambient: { offsetY: 3, radius: 8, opacity: 0.08 },
-  ambientPressed: { offsetY: 1, radius: 3, opacity: 0.04 },
-  contact: { offsetY: 1, radius: 2, opacity: 0.06 },
-  contactPressed: { offsetY: 0, radius: 1, opacity: 0.03 },
-  elevation: 2,
+  ambient: { offsetY: 2, radius: 7, opacity: 0.06 },
+  ambientPressed: { offsetY: 1, radius: 3, opacity: 0.03 },
+  contact: { offsetY: 1, radius: 2, opacity: 0.04 },
+  contactPressed: { offsetY: 0, radius: 1, opacity: 0.02 },
+  elevation: 1,
   elevationPressed: 0,
 } as const;
 
