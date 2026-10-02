@@ -250,10 +250,7 @@ export default function WriteScreen() {
       });
 
       if (!ok) {
-        Alert.alert(
-          'Connexion',
-          "Ton texte est bien enregistré sur l’app, mais la synchronisation a échoué. Réessaie plus tard."
-        );
+        Alert.alert('Erreur', "Impossible d’enregistrer le texte sur l’appareil.");
       }
 
       pendingAfterSuccessRef.current = () => leaveCaptureFlowScreen(router);

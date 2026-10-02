@@ -12,7 +12,7 @@ import {
   ActivityIndicator,
   useWindowDimensions,
 } from 'react-native';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft, ImageIcon } from 'lucide-react-native';
@@ -23,11 +23,13 @@ import { THEME } from '@/constants/theme';
 import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import { createChild, setSelectedChild } from '@/services/children';
+import { hydrateTabScreensFromSqliteSync } from '@/services/tabScreensHydrate';
 import { signOutRealAccount } from '@/lib/authAccount';
 import { listLocalChildrenForUser } from '@/lib/localDb';
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
 import DatePicker from '@/components/DatePicker';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { CHILD_PROFILE_PHOTO_ASPECT } from '@/utils/captureHeroMetrics';
 
 /** Même ratio que carte Capturer / CropModal (évite 4:5 ≠ 0.93). */
@@ -36,9 +38,16 @@ const CREATE_CHILD_PHOTO_ASPECT: [number, number] = [
   100,
 ];
 
+function joinSoftList(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? '';
+  if (items.length === 2) return `${items[0]} et ${items[1]}`;
+  return `${items.slice(0, -1).join(', ')} et ${items[items.length - 1]}`;
+}
+
 export default function CreateChildScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ intent?: string }>();
+  const { t } = useAppTranslation('common');
   const authIntent =
     (Array.isArray(params.intent) ? params.intent[0] : params.intent) === 'subscribe'
       ? 'subscribe'
@@ -51,6 +60,40 @@ export default function CreateChildScreen() {
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [backBusy, setBackBusy] = useState(false);
+  const [missingHint, setMissingHint] = useState<string | null>(null);
+  /** Après un tap Continuer incomplet : liserés rouges sur les champs encore vides. */
+  const [showFieldErrors, setShowFieldErrors] = useState(false);
+
+  const hasName = !!childName.trim();
+  const hasBirth = !!birthDate.trim();
+  const hasPhoto = !!photoUri;
+  const formComplete = hasName && hasBirth && hasPhoto;
+
+  const missingItems = useMemo(() => {
+    const items: string[] = [];
+    if (!hasPhoto) items.push(t('createChild.missingPhoto'));
+    if (!hasName) items.push(t('createChild.missingName'));
+    if (!hasBirth) items.push(t('createChild.missingBirth'));
+    return items;
+  }, [hasBirth, hasName, hasPhoto, t]);
+
+  const softMissingMessage = useCallback(() => {
+    if (missingItems.length === 0) return null;
+    if (missingItems.length === 1) {
+      return t('createChild.missingHintOne', { item: missingItems[0] });
+    }
+    return t('createChild.missingHintMany', { items: joinSoftList(missingItems) });
+  }, [missingItems, t]);
+
+  useEffect(() => {
+    if (!showFieldErrors) return;
+    if (formComplete) {
+      setMissingHint(null);
+      setShowFieldErrors(false);
+      return;
+    }
+    setMissingHint(softMissingMessage());
+  }, [formComplete, showFieldErrors, softMissingMessage]);
 
   const handleBack = useCallback(async () => {
     if (backBusy) return;
@@ -103,28 +146,35 @@ export default function CreateChildScreen() {
   };
 
   const handleContinue = async () => {
-    if (!childName.trim() || !birthDate.trim()) return;
+    if (isCreating) return;
+    if (!formComplete) {
+      setShowFieldErrors(true);
+      setMissingHint(softMissingMessage());
+      return;
+    }
 
     try {
       setIsCreating(true);
+      setMissingHint(null);
+      setShowFieldErrors(false);
 
       const child = await createChild(childName.trim(), birthDate, photoUri || undefined);
 
       if (child) {
         await setSelectedChild(child.id);
+        // Peindre Capturer immédiatement depuis SQLite (sync cloud déjà en fond).
+        hydrateTabScreensFromSqliteSync();
         router.replace('/(tabs)');
       } else {
-        Alert.alert('Erreur', 'Impossible de créer le profil de l\'enfant');
+        Alert.alert(t('error'), t('createChild.createFailed'));
       }
     } catch (error) {
       console.error('Error creating child:', error);
-      Alert.alert('Erreur', 'Une erreur est survenue');
+      Alert.alert(t('error'), t('createChild.createError'));
     } finally {
       setIsCreating(false);
     }
   };
-
-  const canContinue = !!childName.trim() && !!birthDate.trim();
 
   if (!fontsLoaded) {
     return (
@@ -158,7 +208,7 @@ export default function CreateChildScreen() {
             onPress={() => void handleBack()}
             style={styles.backButton}
             accessibilityRole="button"
-            accessibilityLabel="Retour"
+            accessibilityLabel={t('back')}
             disabled={backBusy}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
@@ -166,19 +216,43 @@ export default function CreateChildScreen() {
           </TouchableOpacity>
         </View>
 
-        <Text style={[styles.title, dm700 ? { fontFamily: dm700 } : null]}>
-          Créer le profil de ton enfant
+        <Text
+          style={[
+            styles.title,
+            missingHint ? styles.titleWithHint : null,
+            dm700 ? { fontFamily: dm700 } : null,
+          ]}
+        >
+          {t('createChild.title')}
         </Text>
+
+        {missingHint ? (
+          <Text
+            style={[styles.missingHint, dm600 ? { fontFamily: dm600 } : null]}
+            accessibilityLiveRegion="polite"
+          >
+            {missingHint}
+          </Text>
+        ) : null}
 
         <View style={styles.photoSection}>
           {photoUri ? (
             <TouchableOpacity onPress={handlePhotoUpload} activeOpacity={0.8}>
-              <Image source={{ uri: photoUri }} style={styles.photoPreview} />
+              <Image
+                source={{ uri: photoUri }}
+                style={[
+                  styles.photoPreview,
+                  showFieldErrors && !hasPhoto ? styles.photoErrorRing : null,
+                ]}
+              />
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
               onPress={handlePhotoUpload}
-              style={styles.photoPlaceholder}
+              style={[
+                styles.photoPlaceholder,
+                showFieldErrors && !hasPhoto ? styles.photoErrorRing : null,
+              ]}
               activeOpacity={0.8}
             >
               <ImageIcon size={ICON_SIZES.xl} color={THEME.textMuted} strokeWidth={2} />
@@ -186,18 +260,26 @@ export default function CreateChildScreen() {
           )}
 
           <TouchableOpacity onPress={handlePhotoUpload} activeOpacity={0.7}>
-            <Text style={[styles.addPhotoText, dm500 ? { fontFamily: dm500 } : null]}>Ajouter une photo</Text>
+            <Text style={[styles.addPhotoText, dm500 ? { fontFamily: dm500 } : null]}>
+              {t('createChild.addPhoto')}
+            </Text>
           </TouchableOpacity>
         </View>
 
         <View style={styles.formSection}>
           <View style={styles.inputGroup}>
-            <Text style={[styles.label, dm600 ? { fontFamily: dm600 } : null]}>Prénom de l'enfant</Text>
+            <Text style={[styles.label, dm600 ? { fontFamily: dm600 } : null]}>
+              {t('createChild.nameLabel')}
+            </Text>
             <TextInput
-              style={[styles.input, dm500 ? { fontFamily: dm500 } : null]}
+              style={[
+                styles.input,
+                dm500 ? { fontFamily: dm500 } : null,
+                showFieldErrors && !hasName ? styles.inputError : null,
+              ]}
               value={childName}
               onChangeText={setChildName}
-              placeholder="Prénom ou prénoms composés"
+              placeholder={t('createChild.namePlaceholder')}
               placeholderTextColor={THEME.textMuted}
               autoCapitalize="words"
               autoCorrect={false}
@@ -206,27 +288,36 @@ export default function CreateChildScreen() {
 
           <View style={styles.inputGroup}>
             <Text style={[styles.label, dm600 ? { fontFamily: dm600 } : null]}>
-              Date de naissance
+              {t('createChild.birthLabel')}
             </Text>
             <DatePicker
               value={birthDate}
               onChange={setBirthDate}
-              placeholder="JJ/MM/AAAA"
+              placeholder={t('createChild.birthPlaceholder')}
+              hasError={showFieldErrors && !hasBirth}
             />
           </View>
         </View>
 
+        {/*
+          Incomplete : opacity réduite mais pressable (scale + haptic) —
+          pas de `disabled` qui coupe le feedback.
+        */}
         <PetitmoPrimaryPressable
-          style={petitmoCtaStyles.primaryFullWidth}
-          onPress={handleContinue}
-          disabled={!canContinue || isCreating}
+          style={[
+            petitmoCtaStyles.primaryFullWidth,
+            !formComplete && !isCreating ? petitmoCtaStyles.primaryDisabled : null,
+          ]}
+          onPress={() => void handleContinue()}
+          disabled={isCreating}
           activeOpacity={0.9}
+          accessibilityLabel={t('createChild.continue')}
         >
           {isCreating ? (
             <ActivityIndicator color={PETITMO_CTA_SPINNER_COLOR} />
           ) : (
             <Text style={[petitmoCtaStyles.primaryText, dm600 ? { fontFamily: dm600 } : null]}>
-              Continuer
+              {t('createChild.continue')}
             </Text>
           )}
         </PetitmoPrimaryPressable>
@@ -268,6 +359,18 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: verticalScale(32),
   },
+  titleWithHint: {
+    marginBottom: verticalScale(10),
+  },
+  missingHint: {
+    textAlign: 'center',
+    fontSize: FONT_SIZES.base,
+    fontWeight: '600',
+    color: THEME.textPrimary,
+    lineHeight: scale(22),
+    paddingHorizontal: SPACING.sm,
+    marginBottom: verticalScale(24),
+  },
   photoSection: {
     alignItems: 'center',
     marginBottom: verticalScale(32),
@@ -287,15 +390,15 @@ const styles = StyleSheet.create({
     borderRadius: scale(56),
     marginBottom: verticalScale(16),
   },
+  photoErrorRing: {
+    borderWidth: 1.5,
+    borderColor: '#E5484D',
+  },
   addPhotoText: {
     fontSize: FONT_SIZES.base,
     color: THEME.brandCtaOrange,
     fontWeight: '600',
     marginBottom: verticalScale(8),
-  },
-  laterText: {
-    fontSize: FONT_SIZES.sm,
-    color: '#B8B2A8',
   },
   formSection: {
     marginBottom: verticalScale(48),
@@ -320,5 +423,9 @@ const styles = StyleSheet.create({
     color: THEME.textPrimary,
     // iOS : le letterSpacing de l’écran OTP peut fuiter vers les TextInput suivants.
     letterSpacing: 0,
+  },
+  inputError: {
+    borderColor: '#E5484D',
+    borderWidth: 1.5,
   },
 });

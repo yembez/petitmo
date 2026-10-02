@@ -7,12 +7,17 @@ import {
   setCaptureTabChildSnapshot,
 } from '@/services/children';
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
+import { peekHasRealAuthAccount } from '@/lib/authAccount';
 import { getFamilyMemories } from '@/services/media';
 import { pullFamilyMemoriesFromRemoteToLocal } from '@/services/memoriesLocalSync';
 import { listBooks, listBooksFromSqliteSync, healAllBookCovers, healAllBookMemoryIdsIfWiped } from '@/services/books';
 import { setFeedHydrationSnapshots } from '@/services/tabScreensCache';
 
 function scopedLocalChildren() {
+  // lastRealAuthUserId reste après logout (reconnexion) — ne pas peindre sans session réelle.
+  if (!peekHasRealAuthAccount()) {
+    return [];
+  }
   const uid = peekLastRealAuthUserId();
   if (uid) return listLocalChildrenForUser(uid);
   // Pas de compte produit connu : ignorer les profils déjà liés à un e-mail.
@@ -27,6 +32,11 @@ function scopedLocalChildren() {
  */
 export function hydrateTabScreensFromSqliteSync(): boolean {
   try {
+    if (!peekHasRealAuthAccount()) {
+      setFeedHydrationSnapshots(null, [], []);
+      setCaptureTabChildSnapshot(null);
+      return false;
+    }
     const localChildren = scopedLocalChildren();
     if (!localChildren.length) {
       setFeedHydrationSnapshots(null, [], []);

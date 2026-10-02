@@ -96,6 +96,16 @@ export function mergeServerMemoryRowWithExistingLocal(
 
   return {
     ...base,
+    /** Annotation / titre / lieu : ne jamais écraser un local non vide par un remote vide. */
+    content: preferRemoteElseLocal(base.content, existing.content),
+    text_title: preferRemoteElseLocal(base.text_title, existing.text_title),
+    location: preferRemoteElseLocal(base.location, existing.location),
+    voice_playback_start_sec:
+      existing.voice_playback_start_sec ?? base.voice_playback_start_sec ?? null,
+    captured_overlay_ink: preferRemoteElseLocal(
+      base.captured_overlay_ink as string | null | undefined,
+      existing.captured_overlay_ink as string | null | undefined,
+    ),
     media_url: preferRemoteElseLocal(base.media_url, existing.media_url),
     media_path: preferRemoteElseLocal(base.media_path, existing.media_path),
     thumb_url: preferRemoteElseLocal(base.thumb_url, existing.thumb_url),
@@ -134,6 +144,11 @@ export function mergeServerMemoryRowWithExistingLocal(
     voice_cover_path: pickPath(existing.voice_cover_path) ?? base.voice_cover_path,
     import_asset_id: existing.import_asset_id ?? base.import_asset_id,
     import_source_fingerprint: existing.import_source_fingerprint ?? base.import_source_fingerprint,
+    /** Token QR : cache local définitif — ne jamais l’effacer au pull (remote n’a pas la colonne). */
+    public_media_token:
+      nonEmptyTrimmed(existing.public_media_token) ??
+      nonEmptyTrimmed((base as Memory).public_media_token) ??
+      null,
     extra_photo_paths: mergedExtraPaths,
     /** Favori local optimiste ou pas encore poussé : ne pas l’effacer au pull cloud. */
     is_favorite: existing.is_favorite || base.is_favorite,

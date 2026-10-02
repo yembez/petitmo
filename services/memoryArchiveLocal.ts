@@ -70,7 +70,7 @@ export function restoreLocalDowngradeArchivedMemories(): { restored: number } {
 
 /** Appliquer après changement de tier UX (RC listener / login).
  * V1 : plus d’archivage à l’expiration — on restaure les archives downgrade
- * pour que tout reste visible ; le frein à l’ajout est `captureLocked`.
+ * pour que tout reste visible ; le frein à l’ajout est le plafond gratuit 50.
  */
 export function applyLocalArchiveForTier(tier: 'free' | 'paid'): void {
   try {

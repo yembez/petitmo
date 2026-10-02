@@ -5,7 +5,6 @@ import {
   Text,
   StyleSheet,
   Pressable,
-  ActivityIndicator,
   Platform,
   useWindowDimensions,
   DeviceEventEmitter,
@@ -37,6 +36,7 @@ import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
 import { scale, verticalScale } from '@/utils/responsive';
 import TabSceneTransition from '@/components/TabSceneTransition';
+import { FeedLoadingDots } from '@/components/FeedLoadingDots';
 import { THEME } from '@/constants/theme';
 import { emptyStateStyles } from '@/constants/emptyStateStyles';
 import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
@@ -55,6 +55,7 @@ import {
 } from '@/contexts/MemoryTextFontContext';
 import {
   loadMemoriesForFavorisTab,
+  loadMemoriesForFavorisTabSync,
   memoryShouldAppearInFavoris,
   syncFavorisMemoriesFromCloudInBackground,
 } from '@/services/favorisMemories';
@@ -71,11 +72,16 @@ import { healDeadLocalMediaPointersForMemories } from '@/services/memoryDisplayH
 import FavorisVideoThumb from '@/components/feed/FavorisVideoThumb';
 import { useFeedVideoPosterDisplayUrl } from '@/hooks/useFeedVideoPosterDisplayUrl';
 import { getOrSelectFirstChild } from '@/services/children';
-import { getLocalMemoryById } from '@/lib/localDb';
+import { getLocalMemoryById, listLocalChildren } from '@/lib/localDb';
 import {
   feedChildHydrationSnapshot,
   feedMemoriesHydrationSnapshot,
 } from '@/services/tabScreensCache';
+import { hydrateTabScreensFromSqliteSync } from '@/services/tabScreensHydrate';
+import {
+  PETITMO_AUTH_SIGNED_OUT_EVENT,
+  peekHasRealAuthAccount,
+} from '@/lib/authAccount';
 import {
   filMemoryVisualEqual,
   mergeMemoriesListPreservingVisualRowRefs,
@@ -1268,12 +1274,31 @@ export const FavorisScreen = memo(function FavorisScreen({
     addToBookId?: string;
   }>();
   const insets = useSafeAreaInsets();
-  /** Prérempli après `hydrateTabScreensFromLocal` : pas de roue si les données locales sont déjà connues. */
-  const [loading, setLoading] = useState(() => feedChildHydrationSnapshot === null);
-  const [memories, setMemories] = useState<Memory[]>(() => [...feedMemoriesHydrationSnapshot]);
+  /** Boot local-first : peindre SQLite tout de suite ; dots seulement si rien à peindre encore. */
+  const [loading, setLoading] = useState(() => {
+    if (feedChildHydrationSnapshot === null) {
+      hydrateTabScreensFromSqliteSync();
+    }
+    const boot =
+      feedMemoriesHydrationSnapshot.length > 0
+        ? feedMemoriesHydrationSnapshot
+        : loadMemoriesForFavorisTabSync();
+    // Souvenirs locaux déjà là → peindre (grille ou empty favoris), pas de blanc.
+    if (boot.length > 0) return false;
+    // Liste encore vide (race post-reconnexion ou 1er paint) → dots jusqu’au 1er load.
+    return true;
+  });
+  const [memories, setMemories] = useState<Memory[]>(() => {
+    if (feedMemoriesHydrationSnapshot.length > 0) {
+      return [...feedMemoriesHydrationSnapshot];
+    }
+    return loadMemoriesForFavorisTabSync();
+  });
   const memoriesRef = useRef(memories);
   memoriesRef.current = memories;
-  const [hasChild, setHasChild] = useState(() => feedChildHydrationSnapshot !== null);
+  const [hasChild, setHasChild] = useState(
+    () => feedChildHydrationSnapshot !== null || listLocalChildren().length > 0,
+  );
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const galleryListRef = useRef<FlatList<FavListItem> | null>(null);
@@ -1298,43 +1323,83 @@ export const FavorisScreen = memo(function FavorisScreen({
     (addToBookTargetId ?? addToBookSessionId)?.trim() || null;
 
   const load = useCallback(async (opts?: { background?: boolean }) => {
-    const childId = await getOrSelectFirstChild();
-    if (!childId) {
+    const background = opts?.background === true;
+
+    // Sans compte produit : ne jamais repeindre SQLite (même e-mail conservé en local).
+    if (!peekHasRealAuthAccount()) {
       setMemories([]);
       setHasChild(false);
       setLoading(false);
       return;
     }
-    setHasChild(true);
 
-    // Local-first : peindre SQLite tout de suite (pas d’await pull cloud).
-    const list = await loadMemoriesForFavorisTab();
-    setMemories(prev => mergeMemoriesListPreservingVisualRowRefs(prev, list));
-    setLoading(false);
-
-    const applyCloudList = (refreshed: Memory[]) => {
-      setMemories(prev => mergeMemoriesListPreservingVisualRowRefs(prev, refreshed));
-    };
-
-    // Pull + reconcile favoris en fond (ne bloque jamais la grille / le héros).
-    syncFavorisMemoriesFromCloudInBackground(applyCloudList);
-
-    const bookAddSession = peekFavorisAddToBookSession() != null;
-    const healList = list.filter(m => memoryShouldAppearInFavoris(m));
-    const runHeavy = async () => {
-      await healDeadLocalMediaPointersForMemories(healList, {
-        max: bookAddSession ? 16 : 64,
-      });
-      const refreshed = await loadMemoriesForFavorisTab();
-      applyCloudList(refreshed);
-      if (!bookAddSession) {
-        void requestMissingMediaDerivatives(refreshed);
+    // Local-first : peindre SQLite **avant** tout await (évite écran blanc).
+    const localNow = loadMemoriesForFavorisTabSync();
+    const hasKids =
+      listLocalChildren().length > 0 || feedChildHydrationSnapshot !== null;
+    if (hasKids) {
+      setHasChild(true);
+      if (localNow.length > 0) {
+        setMemories(prev => mergeMemoriesListPreservingVisualRowRefs(prev, localNow));
+        setLoading(false);
+      } else if (!background) {
+        // Enfants OK mais souvenirs pas encore lisibles (race post-login) → dots, pas blanc.
+        setLoading(true);
       }
-    };
-    // Heal médias toujours en fond — ne jamais bloquer l’onglet sur le réseau / I/O.
-    InteractionManager.runAfterInteractions(() => {
-      void runHeavy();
-    });
+    } else if (!background) {
+      setLoading(true);
+    } else {
+      setLoading(false);
+    }
+
+    try {
+      const childId = await getOrSelectFirstChild();
+      if (!childId) {
+        setMemories([]);
+        setHasChild(false);
+        setLoading(false);
+        return;
+      }
+      if (!peekHasRealAuthAccount()) {
+        setMemories([]);
+        setHasChild(false);
+        setLoading(false);
+        return;
+      }
+      setHasChild(true);
+
+      const list = await loadMemoriesForFavorisTab();
+      setMemories(prev => mergeMemoriesListPreservingVisualRowRefs(prev, list));
+      setLoading(false);
+
+      const applyCloudList = (refreshed: Memory[]) => {
+        if (!peekHasRealAuthAccount()) return;
+        setMemories(prev => mergeMemoriesListPreservingVisualRowRefs(prev, refreshed));
+      };
+
+      // Pull + reconcile favoris en fond (ne bloque jamais la grille / le héros).
+      syncFavorisMemoriesFromCloudInBackground(applyCloudList);
+
+      const bookAddSession = peekFavorisAddToBookSession() != null;
+      const healList = list.filter(m => memoryShouldAppearInFavoris(m));
+      const runHeavy = async () => {
+        await healDeadLocalMediaPointersForMemories(healList, {
+          max: bookAddSession ? 16 : 64,
+        });
+        if (!peekHasRealAuthAccount()) return;
+        const refreshed = loadMemoriesForFavorisTabSync();
+        applyCloudList(refreshed);
+        if (!bookAddSession) {
+          void requestMissingMediaDerivatives(refreshed);
+        }
+      };
+      InteractionManager.runAfterInteractions(() => {
+        void runHeavy();
+      });
+    } catch (e) {
+      console.warn('[FavorisScreen] load', e);
+      setLoading(false);
+    }
   }, []);
 
   const exitSelection = useCallback(() => {
@@ -1434,17 +1499,29 @@ export const FavorisScreen = memo(function FavorisScreen({
         };
       }
 
-      const hasCached =
-        feedMemoriesHydrationSnapshot.length > 0 || feedChildHydrationSnapshot !== null;
-      if (hasCached) {
-        if (feedMemoriesHydrationSnapshot.length > 0) {
-          setMemories([...feedMemoriesHydrationSnapshot]);
-        }
-        setHasChild(feedChildHydrationSnapshot !== null);
+      // Peindre SQLite sync dès le focus (évite blanc post-login avant le 1er await).
+      const localNow = loadMemoriesForFavorisTabSync();
+      if (localNow.length > 0) {
+        setMemories(prev => mergeMemoriesListPreservingVisualRowRefs(prev, localNow));
+        setHasChild(true);
         setLoading(false);
         void load({ background: true });
       } else {
-        void load();
+        const hasCached =
+          feedMemoriesHydrationSnapshot.length > 0 || feedChildHydrationSnapshot !== null;
+        if (hasCached) {
+          if (feedMemoriesHydrationSnapshot.length > 0) {
+            setMemories([...feedMemoriesHydrationSnapshot]);
+            setLoading(false);
+          } else {
+            setLoading(true);
+          }
+          setHasChild(feedChildHydrationSnapshot !== null || listLocalChildren().length > 0);
+          void load({ background: feedMemoriesHydrationSnapshot.length > 0 });
+        } else {
+          setLoading(true);
+          void load();
+        }
       }
       return () => {
         galleryScrollY.value = 0;
@@ -1469,10 +1546,19 @@ export const FavorisScreen = memo(function FavorisScreen({
   }, [bookAddModalBookId, isBookAddModal, load]);
 
   useEffect(() => {
+    const subSignedOut = DeviceEventEmitter.addListener(PETITMO_AUTH_SIGNED_OUT_EVENT, () => {
+      setMemories([]);
+      setHasChild(false);
+      setLoading(false);
+      setSelectionMode(false);
+      setSelectedIds(new Set());
+    });
     const subInvalidate = DeviceEventEmitter.addListener('petitmo:memories-invalidate', () => {
+      if (!peekHasRealAuthAccount()) return;
       void load({ background: true });
     });
     const subUpdated = DeviceEventEmitter.addListener('petitmo:memories-updated', (payload: unknown) => {
+      if (!peekHasRealAuthAccount()) return;
       const memoryId =
         payload &&
         typeof payload === 'object' &&
@@ -1499,6 +1585,7 @@ export const FavorisScreen = memo(function FavorisScreen({
       void load({ background: true });
     });
     return () => {
+      subSignedOut.remove();
       subInvalidate.remove();
       subUpdated.remove();
     };
@@ -1815,10 +1902,17 @@ export const FavorisScreen = memo(function FavorisScreen({
     <View style={styles.container}>
       {isScreenActive ? <StatusBar style={isBookAddFromSpreadFlow ? 'dark' : 'light'} /> : null}
       {loading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color={THEME.brandCtaOrange} />
+        <View
+          style={styles.centered}
+          accessibilityRole="progressbar"
+          accessibilityLabel={t('favoris.loading.a11y')}
+        >
+          <FeedLoadingDots color={THEME.textPrimary} />
         </View>
       ) : !hasChild ? (
+        !peekHasRealAuthAccount() ? (
+          <View style={styles.centered} />
+        ) : (
         <View style={[styles.centered, styles.noChildPad]}>
           <Text style={emptyStateStyles.title}>{t('favoris.noChild.title')}</Text>
           <Text style={[emptyStateStyles.subtitle, styles.noChildSubGap]}>
@@ -1834,6 +1928,7 @@ export const FavorisScreen = memo(function FavorisScreen({
             </Text>
           </PetitmoPrimaryPressable>
         </View>
+        )
       ) : (
         <View
           style={[

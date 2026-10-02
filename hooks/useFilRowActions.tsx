@@ -50,10 +50,7 @@ export function useFilRowActions(
       setMemories(prev => prev.map(m => (m.id === target.id ? { ...m, content: text } : m)));
       const ok = await updateMemoryContent(target.id, text);
       if (!ok) {
-        Alert.alert(
-          'Connexion',
-          "Ton texte est bien enregistré sur l’app, mais la synchronisation a échoué. Réessaie plus tard."
-        );
+        Alert.alert('Erreur', "Impossible d’enregistrer le texte sur l’appareil.");
       }
     },
     [editingMemory, setMemories]
@@ -75,10 +72,7 @@ export function useFilRowActions(
       );
       const ok = await updateMemoryLocation(target.id, next ? next : null);
       if (!ok) {
-        Alert.alert(
-          'Connexion',
-          "Ton lieu est bien enregistré sur l’app, mais la synchronisation a échoué. Réessaie plus tard."
-        );
+        Alert.alert('Erreur', "Impossible d’enregistrer le lieu sur l’appareil.");
       }
     },
     [editingLocationMemory, setMemories]

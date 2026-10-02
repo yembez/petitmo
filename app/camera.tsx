@@ -14,7 +14,7 @@ import { usePendingMediaUploads } from '@/contexts/PendingMediaUploadsContext';
 import { getOrSelectFirstChild } from '@/services/children';
 import { getUserTier } from '@/lib/userTier';
 import { checkMemoryLimit, checkVideoLimit, FREE_TIER_VIDEO_MAX_DURATION } from '@/lib/limits';
-import { promptFreeTierLimitThenPaywall, freeTierLimitKindFromCheck } from '@/utils/freeTierLimitGate';
+import { promptFreeTierLimitThenPaywall, freeTierLimitKindFromCheck, freeTierLimitKindFromVideoCheck } from '@/utils/freeTierLimitGate';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -199,7 +199,11 @@ export default function CameraScreen() {
         }
         const videoLimit = await checkVideoLimit(childId, { skipRemotePull: true });
         if (!videoLimit.canCreate) {
-          promptFreeTierLimitThenPaywall({ kind: 'videos', router, returnTo: 'fil' });
+          promptFreeTierLimitThenPaywall({
+            kind: freeTierLimitKindFromVideoCheck(videoLimit),
+            router,
+            returnTo: 'fil',
+          });
           return;
         }
 
@@ -272,7 +276,11 @@ export default function CameraScreen() {
       }
       const videoLimitCheck = await checkVideoLimit(childId, { skipRemotePull: true });
       if (!videoLimitCheck.canCreate) {
-        promptFreeTierLimitThenPaywall({ kind: 'videos', router, returnTo: 'fil' });
+        promptFreeTierLimitThenPaywall({
+          kind: freeTierLimitKindFromVideoCheck(videoLimitCheck),
+          router,
+          returnTo: 'fil',
+        });
         return;
       }
       startBackgroundUploadNavigateToFeed({

@@ -18,7 +18,7 @@ import { ensureSupabaseSession } from '@/lib/ensureSupabaseSession';
 import { supabase } from '@/lib/supabase';
 import type { Database } from '@/types/database';
 import type { Memory } from '@/types/local';
-import { withLocalFields } from '@/services/memoryRowMapping';
+import { mergeServerMemoryRowWithExistingLocal } from '@/services/memoryRowMapping';
 import {
   collectPhotoCloudSyncUriCandidates,
   collectPhotoLocalUploadUriCandidates,
@@ -108,9 +108,10 @@ function isTextTitleSchemaError(error: unknown): boolean {
 async function insertOrMergeMemoryOnce(
   row: Database['public']['Tables']['memories']['Insert']
 ): Promise<Memory> {
+  const existing = row.id ? getLocalMemoryById(row.id) : null;
   const { data, error } = await supabase.from('memories').insert(row).select('*').single();
   if (!error && data) {
-    return withLocalFields(data);
+    return mergeServerMemoryRowWithExistingLocal(data, existing ?? undefined);
   }
   if (!isDuplicateKeyError(error) || !row.id) {
     throw new Error(error?.message ?? 'insert memories a échoué');
@@ -125,7 +126,8 @@ async function insertOrMergeMemoryOnce(
   if (upErr || !updated) {
     throw new Error(upErr?.message ?? 'update memories a échoué');
   }
-  return withLocalFields(updated);
+  const localAgain = getLocalMemoryById(id) ?? existing;
+  return mergeServerMemoryRowWithExistingLocal(updated, localAgain ?? undefined);
 }
 
 async function insertOrMergeMemory(

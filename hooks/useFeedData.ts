@@ -13,6 +13,7 @@ import {
   getLocalMemoryById,
   getLocalChild,
   listLocalChildren,
+  listLocalChildrenForUser,
   getAllLocalMemories,
 } from '@/lib/localDb';
 import { useFocusEffect } from '@react-navigation/native';
@@ -58,12 +59,20 @@ import {
   type Child,
 } from '@/utils/feedHelpers';
 import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
+import {
+  PETITMO_AUTH_SIGNED_OUT_EVENT,
+  peekHasRealAuthAccount,
+} from '@/lib/authAccount';
+import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
 
 function readFamilyChildrenFromLocal(): Child[] {
+  if (!peekHasRealAuthAccount()) return [];
+  const uid = peekLastRealAuthUserId();
+  const scoped = uid
+    ? listLocalChildrenForUser(uid)
+    : listLocalChildren().filter(c => !(c.user_id ?? '').trim());
   /** Sync : casse les photo_url partagées avant le 1er paint (sinon doublon visible au boot TF). */
-  return sortChildrenByBirthdateAsc(
-    repairSiblingDuplicateChildPhotoUrls(listLocalChildren()),
-  );
+  return sortChildrenByBirthdateAsc(repairSiblingDuplicateChildPhotoUrls(scoped));
 }
 
 export type UseFeedDataResult = {
@@ -118,6 +127,17 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
     const silent = opts?.silent === true;
     const seq = ++loadDataSeqRef.current;
     try {
+      // Sans session réelle : ne jamais repeindre SQLite (lastRealAuthUserId peut rester).
+      if (!peekHasRealAuthAccount()) {
+        setChild(null);
+        setFamilyChildren([]);
+        setMemories([]);
+        setBooks([]);
+        setIsLoading(false);
+        setFeedHydrationSnapshots(null, [], []);
+        return;
+      }
+
       /**
        * Local-first : peindre SQLite **avant** tout réseau.
        * Sinon le 1er ouverture du fil après reconnexion attend le pull cloud → roue longue.
@@ -224,10 +244,11 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
           if (hadLocalPaint) {
             return getFamilyMemories({ waitForRemote: false });
           }
+          // Fil vide = état valide (compte neuf). Pull silencieux — jamais l’overlay restore.
           const { restoreFamilyMemoriesFromCloudWithSoftWait } = await import(
             '@/services/runCloudMemoriesRestore'
           );
-          return restoreFamilyMemoriesFromCloudWithSoftWait();
+          return restoreFamilyMemoriesFromCloudWithSoftWait({ softUi: false });
         })(),
         listBooks(),
       ]);
@@ -305,6 +326,14 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
   useEffect(() => {
     const subInvalidate = DeviceEventEmitter.addListener('petitmo:memories-invalidate', () => {
       void loadData({ silent: true });
+    });
+    const subSignedOut = DeviceEventEmitter.addListener(PETITMO_AUTH_SIGNED_OUT_EVENT, () => {
+      setChild(null);
+      setFamilyChildren([]);
+      setMemories([]);
+      setBooks([]);
+      setIsLoading(false);
+      setFeedHydrationSnapshots(null, [], []);
     });
     const subUpdated = DeviceEventEmitter.addListener('petitmo:memories-updated', (payload: unknown) => {
       const memoryId =
@@ -428,6 +457,7 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
     );
     return () => {
       subInvalidate.remove();
+      subSignedOut.remove();
       subUpdated.remove();
       subChildProfile.remove();
       subInserted.remove();

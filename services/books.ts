@@ -2179,7 +2179,9 @@ export async function restoreBooksFromSupabaseIfPremium(): Promise<void> {
     }
 
     const createdAt = typeof row.created_at === 'string' ? row.created_at : new Date().toISOString();
-    const title = typeof row.title === 'string' ? row.title : 'Livre';
+    const remoteTitle = typeof row.title === 'string' ? row.title.trim() : '';
+    const localTitle = (local?.title ?? '').trim();
+    const title = remoteTitle || localTitle || 'Livre';
     const remoteMemoryIds = dedupeMemoryIds(safeStringArray(row.memory_ids));
     const localMemoryIds = dedupeMemoryIds(local?.memoryIds ?? []);
     await hydrateMemoriesByIds([...localMemoryIds, ...remoteMemoryIds]);
@@ -2210,15 +2212,20 @@ export async function restoreBooksFromSupabaseIfPremium(): Promise<void> {
         ? row.cover_color_id.trim()
         : null;
     const coverColorId = remoteCoverColorId ?? local?.coverColorId ?? null;
-    const rotations = safeRecordNumber(row.rotations);
+    const rotations = safeRecordNumber(row.rotations) ?? local?.rotations ?? null;
     /**
      * Remote sans crops (backup debounce pas encore passé, payload legacy) : garder le
      * local. Même garde que `coverColorId` — un restore de fond ne défait pas un
      * recadrage que l’utilisatrice vient de faire.
      */
     const photoCrops = safePhotoCrops(row.photo_crops) ?? local?.photoCrops ?? null;
-    const textEdits = safeTextEdits(row.text_edits);
-    const chapterTitle = typeof row.chapter_title === 'string' ? row.chapter_title : null;
+    /** Idem textEdits / chapitre — remote muet ne doit pas effacer l’édition locale. */
+    const textEdits = safeTextEdits(row.text_edits) ?? local?.textEdits ?? null;
+    const remoteChapter =
+      typeof row.chapter_title === 'string' && row.chapter_title.trim().length > 0
+        ? row.chapter_title.trim()
+        : null;
+    const chapterTitle = remoteChapter ?? local?.chapterTitle ?? null;
     /** Remote muet (colonne absente / backup pas encore passé) : garder le local. */
     const remoteBackTagline =
       typeof row.back_cover_tagline === 'string' && row.back_cover_tagline.trim().length > 0

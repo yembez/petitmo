@@ -8,6 +8,7 @@ import {
   downloadAsync,
   getInfoAsync,
   makeDirectoryAsync,
+  readDirectoryAsync,
 } from 'expo-file-system/legacy';
 import { DeviceEventEmitter, Platform } from 'react-native';
 import type { Database } from '@/types/database';
@@ -294,7 +295,39 @@ function pickFaceBounds(src: {
 }
 
 /**
- * Copie la source (picker, crop, fichier sandbox) vers `petitmo_children/{id}.ext` (Petitmo+).
+ * Supprime les anciennes photos sandbox d’un enfant (`{id}.ext` et `{id}-*.ext`),
+ * en conservant éventuellement le fichier courant.
+ */
+async function purgeStaleChildAvatarSandboxFiles(
+  childId: string,
+  keepUri?: string | null,
+): Promise<void> {
+  if (Platform.OS === 'web' || !documentDirectory) return;
+  const root = `${documentDirectory}petitmo_children/`;
+  const keepNorm = (keepUri ?? '').trim().replace(/^file:\/\//, '');
+  const id = childId.trim();
+  if (!id) return;
+  try {
+    const names = await readDirectoryAsync(root);
+    await Promise.all(
+      names.map(async name => {
+        const base = name.split('?')[0] ?? name;
+        const isLegacy = base.startsWith(`${id}.`);
+        const isVersioned = base.startsWith(`${id}-`);
+        if (!isLegacy && !isVersioned) return;
+        const full = `${root}${name}`;
+        if (keepNorm && full.replace(/^file:\/\//, '') === keepNorm) return;
+        await deleteAsync(full, { idempotent: true }).catch(() => {});
+      }),
+    );
+  } catch {
+    /* dossier absent */
+  }
+}
+
+/**
+ * Copie la source (picker, crop) vers un fichier **versionné**
+ * `petitmo_children/{id}-{ts}.ext` — évite le cache Image quand on écrase le même path.
  */
 async function copyChildAvatarSourceToSandbox(childId: string, sourceUri: string): Promise<string | null> {
   if (Platform.OS === 'web' || !documentDirectory) return null;
@@ -302,15 +335,16 @@ async function copyChildAvatarSourceToSandbox(childId: string, sourceUri: string
   await makeDirectoryAsync(root, { intermediates: true }).catch(() => {});
   const rawExt = (sourceUri.split('?')[0] ?? '').split('.').pop()?.toLowerCase() || 'jpg';
   const safeExt = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'].includes(rawExt) ? rawExt : 'jpg';
-  const dest = `${root}${childId}.${safeExt}`;
   const src = sourceUri.trim();
   if (!src) return null;
+  const dest = `${root}${childId}-${Date.now()}.${safeExt}`;
   const norm = (u: string) => u.replace(/^file:\/\//, '');
   if (norm(src) === norm(dest)) {
     return dest;
   }
   try {
     await copyAsync({ from: src, to: dest });
+    await purgeStaleChildAvatarSandboxFiles(childId, dest);
     return dest;
   } catch (e) {
     console.warn('[children] copyChildAvatarSourceToSandbox', childId, e);
@@ -335,6 +369,7 @@ export async function sanitizeChildLocalAvatarIfMissing(child: LocalChild): Prom
       id &&
       base &&
       !base.startsWith(`${id}.`) &&
+      !base.startsWith(`${id}-`) &&
       base !== id &&
       /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(base)
     ) {
@@ -455,9 +490,9 @@ export async function cacheRemoteChildProfilePhotoLocally(child: LocalChild): Pr
     }
     if ((row.local_photo_path ?? '').trim()) return row;
 
-    const dest = `${documentDirectory}petitmo_children/${row.id}.jpg`;
     const root = `${documentDirectory}petitmo_children/`;
     await makeDirectoryAsync(root, { intermediates: true }).catch(() => {});
+    const dest = `${root}${row.id}-${Date.now()}.jpg`;
 
     let headers: Record<string, string> | undefined;
     try {
@@ -479,6 +514,7 @@ export async function cacheRemoteChildProfilePhotoLocally(child: LocalChild): Pr
         headers && Object.keys(headers).length ? { headers } : undefined
       );
       if (res.status !== 200) return row;
+      await purgeStaleChildAvatarSandboxFiles(row.id, res.uri);
 
       // Détecter le visage sur l'image fraîchement téléchargée si les bounds sont absentes.
       // Couvre la reconnexion sur nouveau téléphone avant que cette feature n'existe
@@ -572,7 +608,30 @@ function mergeRemoteChildRowWithLocal(row: ChildRow): LocalChild {
     face_img_aspect: localFace.face_img_aspect ?? remoteFace.face_img_aspect,
   };
 
-  const merged: LocalChild = { ...base, local_photo_path: lp || null, ...face };
+  const merged: LocalChild = {
+    ...base,
+    // Nom / date : ne jamais effacer un local non vide avec un remote vide.
+    name: (() => {
+      const r = (base.name ?? '').trim();
+      if (r) return base.name;
+      const l = (local?.name ?? '').trim();
+      return l ? local!.name : base.name;
+    })(),
+    birthdate: (() => {
+      const r = (base.birthdate ?? '').trim();
+      if (r) return base.birthdate;
+      const l = (local?.birthdate ?? '').trim();
+      return l ? local!.birthdate : base.birthdate;
+    })(),
+    photo_url: (() => {
+      const r = (base.photo_url ?? '').trim();
+      if (r) return base.photo_url;
+      const l = (local?.photo_url ?? '').trim();
+      return l ? local!.photo_url : null;
+    })(),
+    local_photo_path: lp || null,
+    ...face,
+  };
 
   // Persister en SQLite pour que les lectures locales-first soient à jour.
   upsertLocalChild(merged);
@@ -586,8 +645,24 @@ export async function getChildren() {
   const sessionUser = sess.session?.user;
   const sessionUid = sessionUser && !isDeviceUserEmail(sessionUser.email) ? sessionUser.id : '';
 
-  const localChildren = sessionUid
-    ? listLocalChildrenForUser(sessionUid)
+  /** Reprise hors-ligne : pas de session produit → SQLite du dernier compte. */
+  let scopeUid = sessionUid;
+  if (!scopeUid) {
+    try {
+      const { peekHasRealAuthAccount, peekOfflineLocalResumeActive } = await import(
+        '@/lib/authAccount'
+      );
+      const { peekLastRealAuthUserId } = await import('@/services/accountLocalReset');
+      if (peekHasRealAuthAccount() || peekOfflineLocalResumeActive()) {
+        scopeUid = (peekLastRealAuthUserId() ?? '').trim();
+      }
+    } catch {
+      /* */
+    }
+  }
+
+  const localChildren = scopeUid
+    ? listLocalChildrenForUser(scopeUid)
     : listLocalChildren();
 
   try {
@@ -602,6 +677,13 @@ export async function getChildren() {
       const repairedLocal = repairSiblingDuplicateChildPhotoUrls(safeLocal);
       scheduleChildFaceBoundsBackfill(repairedLocal);
       return sortChildrenByBirthdateAsc(repairedLocal);
+    }
+
+    // Hors-ligne / reprise locale : ne pas attendre un pull cloud (évite menu parent « vide »).
+    if (!sessionUid) {
+      const repairedOffline = repairSiblingDuplicateChildPhotoUrls(localChildren);
+      scheduleChildFaceBoundsBackfill(repairedOffline);
+      return sortChildrenByBirthdateAsc(repairedOffline);
     }
 
     const { data, error } = await supabase
@@ -657,13 +739,10 @@ export async function uploadChildPhoto(childId: string, photoUri: string): Promi
       if (!documentDirectory) {
         throw new Error('Stockage local indisponible (documentDirectory).');
       }
-      const root = `${documentDirectory}petitmo_children/`;
-      await makeDirectoryAsync(root, { intermediates: true }).catch(() => {});
-      const ext =
-        (photoUri.split('?')[0] ?? '').split('.').pop()?.toLowerCase() || 'jpg';
-      const safeExt = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'].includes(ext) ? ext : 'jpg';
-      const dest = `${root}${childId}.${safeExt}`;
-      await copyAsync({ from: photoUri.trim(), to: dest });
+      const dest = await copyChildAvatarSourceToSandbox(childId, photoUri.trim());
+      if (!dest) {
+        throw new Error('Impossible de copier la photo de profil en local');
+      }
       const cur = getLocalChild(childId);
       if (!cur) {
         throw new Error('Enfant introuvable en local');
@@ -767,10 +846,13 @@ export async function uploadChildPhoto(childId: string, photoUri: string): Promi
 
     const { error: faceSyncErr } = await supabase
       .from('children')
-      .update(faceMeta as Record<string, unknown>)
+      .update({
+        ...faceMeta,
+        photo_url: signedUrl,
+      } as Record<string, unknown>)
       .eq('id', childId);
     if (faceSyncErr) {
-      console.warn('[children] face bounds sync after photo upload', childId, faceSyncErr.message);
+      console.warn('[children] photo/face sync after photo upload', childId, faceSyncErr.message);
     }
 
     const refreshed = getLocalChild(childId);
@@ -939,96 +1021,132 @@ export async function ensureChildRowExistsOnSupabaseForExport(childId: string): 
   }
 }
 
+/**
+ * Insert cloud + upload photo en fond (même `id` local) — ne jamais bloquer Continuer.
+ */
+function syncNewChildToCloudInBackground(child: LocalChild): void {
+  void (async () => {
+    try {
+      if ((await getCachedUserMode()) !== 'cloud') return;
+      const uid = (child.user_id ?? '').trim();
+      if (!uid || !child.birthdate) return;
+
+      const insert: Database['public']['Tables']['children']['Insert'] = {
+        id: child.id,
+        user_id: uid,
+        name: child.name,
+        birthdate: child.birthdate,
+        photo_url: child.photo_url ?? null,
+        created_at: child.created_at,
+        updated_at: child.updated_at ?? child.created_at,
+      };
+
+      const { error } = await supabase.from('children').insert(insert);
+      if (error && !isChildDuplicateKeyError(error)) {
+        console.warn('[children] syncNewChildToCloudInBackground insert', child.id, error.message);
+        return;
+      }
+
+      const latest = getLocalChild(child.id) ?? child;
+      await syncChildProfilePhotoFromLocalIfNeeded(latest);
+
+      // Face bounds éventuels (déjà en SQLite) → cloud sans bloquer l’UI.
+      const faced = getLocalChild(child.id);
+      if (
+        faced &&
+        typeof faced.face_cx === 'number' &&
+        typeof faced.face_cy === 'number' &&
+        typeof faced.face_h === 'number'
+      ) {
+        const { error: faceErr } = await supabase
+          .from('children')
+          .update({
+            face_cx: faced.face_cx,
+            face_cy: faced.face_cy,
+            face_h: faced.face_h,
+            face_img_aspect: faced.face_img_aspect ?? null,
+          } as Record<string, unknown>)
+          .eq('id', faced.id);
+        if (faceErr) {
+          console.warn('[children] syncNewChildToCloudInBackground face', faced.id, faceErr.message);
+        }
+      }
+    } catch (e) {
+      console.warn('[children] syncNewChildToCloudInBackground', child.id, e);
+    }
+  })();
+}
+
+/**
+ * Création profil enfant — **local-first** (gratuit et compte cloud).
+ * SQLite + sandbox (+ face heuristique) puis return ; insert Storage / Supabase en fond.
+ */
 export async function createChild(rawName: string, birthdate?: string, photoUri?: string) {
   const name = normalizeChildGivenName(rawName);
   try {
-    const { data: { user } } = await supabase.auth.getUser();
+    /** Session cache locale — pas `getUser()` (réseau) sur Continuer. */
+    const { data: sess } = await supabase.auth.getSession();
+    const user = sess.session?.user;
     if (!user) throw new Error('User not authenticated');
 
     const birthdateValue = birthdate && birthdate.trim() ? birthdate.trim() : '2020-01-01';
+    const id = newLocalChildId();
+    const now = new Date().toISOString();
 
-    if ((await getCachedUserMode()) === 'local') {
-      const id = newLocalChildId();
-      const now = new Date().toISOString();
-      let localPhotoPath: string | null = null;
-      if (photoUri?.trim() && documentDirectory) {
-        const root = `${documentDirectory}petitmo_children/`;
-        await makeDirectoryAsync(root, { intermediates: true }).catch(() => {});
-        const ext = photoUri.split('?')[0]?.split('.').pop()?.toLowerCase() || 'jpg';
-        const dest = `${root}${id}.${ext}`;
-        try {
-          await copyAsync({ from: photoUri.trim(), to: dest });
-          localPhotoPath = dest;
-        } catch (e) {
-          console.warn('[children] local profile photo copy failed', e);
-        }
-      } else if (photoUri?.trim() && Platform.OS === 'web') {
-        // TODO: persistance profil enfant côté web en mode local (V1 cible plutôt iOS ; pas de documentDirectory)
+    let localPhotoPath: string | null = null;
+    if (photoUri?.trim() && documentDirectory) {
+      try {
+        localPhotoPath = await copyChildAvatarSourceToSandbox(id, photoUri.trim());
+      } catch (e) {
+        console.warn('[children] profile photo copy failed', e);
       }
-      const faceMeta = localPhotoPath
-        ? (await detectFaceBounds(localPhotoPath).catch(() => null)) ??
-          (await estimatePortraitFaceBounds(localPhotoPath))
-        : pickFaceBounds(null);
-      const row: LocalChild = {
-        id,
-        user_id: user.id,
-        name,
-        birthdate: birthdateValue,
-        photo_url: null,
-        created_at: now,
-        updated_at: now,
-        local_photo_path: localPhotoPath,
-        ...faceMeta,
-      };
-      upsertLocalChild(row);
-      notifyChildProfileUpdated(id, row);
-      return row;
+    } else if (photoUri?.trim() && Platform.OS === 'web') {
+      // TODO: persistance profil enfant côté web (V1 cible iOS).
     }
 
-    const payload: Database['public']['Tables']['children']['Insert'] = {
+    // Heuristique rapide pour peindre Capturer ; ML visage en fond (évite spinner long).
+    const faceMeta = localPhotoPath
+      ? await estimatePortraitFaceBounds(localPhotoPath)
+      : pickFaceBounds(null);
+
+    const row: LocalChild = {
+      id,
       user_id: user.id,
       name,
       birthdate: birthdateValue,
+      photo_url: null,
+      created_at: now,
+      updated_at: now,
+      local_photo_path: localPhotoPath,
+      ...faceMeta,
     };
+    upsertLocalChild(row);
+    setCaptureTabChildSnapshot(row);
+    notifyChildProfileUpdated(id, row);
 
-    const { data, error } = await supabase
-      .from('children')
-      .insert(payload)
-      .select()
-      .single();
-
-    if (error) throw error;
-    if (!data) return null;
-
-    /**
-     * Local-first : matérialiser SQLite + event **avant** toute photo.
-     * Sans ça, Capturer (lecture locale seule) ne voit l’enfant qu’après un pull
-     * cloud ultérieur — bug « sans photo = invisible au 1er focus ».
-     */
-    const localRow = withLocalChildFields(data as ChildRow);
-    upsertLocalChild(localRow);
-    notifyChildProfileUpdated(data.id, localRow);
-
-    if (photoUri) {
-      try {
-        const photoUrl = await uploadChildPhoto(data.id, photoUri);
-        const { data: updatedChild, error: updateError } = await supabase
-          .from('children')
-          .update({ photo_url: photoUrl })
-          .eq('id', data.id)
-          .select()
-          .single();
-
-        if (!updateError && updatedChild) {
-          /** `uploadChildPhoto` a déjà syncé SQLite + notify ; renvoyer le local. */
-          return getLocalChild(data.id) ?? withLocalChildFields(updatedChild as ChildRow);
-        }
-      } catch (photoError) {
-        console.error('Error uploading photo, continuing without photo:', photoError);
-      }
+    if (localPhotoPath) {
+      void detectFaceBounds(localPhotoPath)
+        .then(detected => {
+          if (!detected) return;
+          const cur = getLocalChild(id);
+          if (!cur) return;
+          const refined = pickFaceBounds(detected);
+          const next: LocalChild = {
+            ...cur,
+            ...refined,
+            updated_at: new Date().toISOString(),
+          };
+          upsertLocalChild(next);
+          notifyChildProfileUpdated(id, next);
+        })
+        .catch(() => {});
     }
 
-    return getLocalChild(data.id) ?? localRow;
+    if ((await getCachedUserMode()) === 'cloud') {
+      syncNewChildToCloudInBackground(row);
+    }
+
+    return row;
   } catch (error) {
     console.error('Create child error:', error);
     return null;
@@ -1166,16 +1284,7 @@ async function deleteChildAvatarFiles(child: LocalChild): Promise<void> {
         /* fichier déjà absent */
       }
     }
-    if (documentDirectory) {
-      const root = `${documentDirectory}petitmo_children/`;
-      for (const ext of ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif']) {
-        try {
-          await deleteAsync(`${root}${child.id}.${ext}`, { idempotent: true });
-        } catch {
-          /* */
-        }
-      }
-    }
+    await purgeStaleChildAvatarSandboxFiles(child.id, null);
   }
   try {
     await AsyncStorage.removeItem(`${CHILD_ORIGINAL_PHOTO_KEY_PREFIX}${child.id}`);

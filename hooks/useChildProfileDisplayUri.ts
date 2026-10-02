@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getInfoAsync } from 'expo-file-system/legacy';
 import { isBareMediaBucketPath, useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import {
@@ -42,8 +42,8 @@ function localPathBelongsToOtherChild(
   if (!id || !lp || !lp.includes('petitmo_children/')) return false;
   const base = stripUriQuery(lp).split('/').pop() ?? '';
   if (!base) return false;
-  // Attendu : `{childId}.ext` — refus si un autre UUID apparaît dans le nom.
-  if (base.startsWith(`${id}.`) || base === id) return false;
+  // Attendu : `{childId}.ext` ou `{childId}-{ts}.ext` — refus si un autre UUID apparaît dans le nom.
+  if (base.startsWith(`${id}.`) || base.startsWith(`${id}-`) || base === id) return false;
   return /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(base);
 }
 
@@ -51,6 +51,9 @@ function localPathBelongsToOtherChild(
  * URI affichable pour la photo profil enfant (Capturer, avatar, mosaïque).
  * Local sandbox **seulement** s’il existe encore ; sinon URL Storage re-signée.
  * Évite le trou « file:// mort » après TestFlight / réinstall qui masquait `photo_url`.
+ *
+ * Local-first : ne jamais renvoyer `''` pendant la re-vérif async si une URI
+ * valide était déjà affichée pour ce `childId` (flash blanc Capturer fil↔onglet).
  */
 export function useChildProfileDisplayUri(child: ChildPhotoFields | null | undefined): string {
   const childId = (child?.id ?? '').trim();
@@ -75,6 +78,13 @@ export function useChildProfileDisplayUri(child: ChildPhotoFields | null | undef
 
   /** `null` = pas encore vérifié pour ce probe — ne jamais réutiliser un true d’un autre path. */
   const [verifiedProbe, setVerifiedProbe] = useState<string | null>(null);
+  const lastGoodRef = useRef('');
+  const lastChildIdRef = useRef(childId);
+
+  if (childId !== lastChildIdRef.current) {
+    lastChildIdRef.current = childId;
+    lastGoodRef.current = '';
+  }
 
   useEffect(() => {
     setVerifiedProbe(null);
@@ -94,11 +104,31 @@ export function useChildProfileDisplayUri(child: ChildPhotoFields | null | undef
     };
   }, [childId, localProbe]);
 
-  if (localCandidate && verifiedProbe === localProbe) return localCandidate;
+  let resolved = '';
 
-  if (signedRemote && !isBareMediaBucketPath(signedRemote)) return signedRemote;
-  if (remoteBase && !isBareMediaBucketPath(remoteBase) && /^https?:\/\//i.test(remoteBase)) {
-    return remoteBase;
+  // Pendant verify (`null`) : garder le local en optimistic — évite le trou avant signedRemote.
+  // Si verify dit absent (`''`) : ne pas coller un file:// mort.
+  if (localCandidate && (verifiedProbe === null || verifiedProbe === localProbe)) {
+    resolved = localCandidate;
   }
-  return '';
+
+  if (!resolved && signedRemote && !isBareMediaBucketPath(signedRemote)) {
+    resolved = signedRemote;
+  }
+  if (
+    !resolved &&
+    remoteBase &&
+    !isBareMediaBucketPath(remoteBase) &&
+    /^https?:\/\//i.test(remoteBase)
+  ) {
+    resolved = remoteBase;
+  }
+
+  if (resolved) {
+    lastGoodRef.current = resolved;
+    return resolved;
+  }
+
+  // Fenêtre courte post-restore / re-probe : garder le dernier frame pour ce child.
+  return lastGoodRef.current;
 }

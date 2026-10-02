@@ -11,9 +11,16 @@ interface DatePickerProps {
   value: string;
   onChange: (date: string) => void;
   placeholder?: string;
+  /** Liseré d’erreur (ex. champ requis manquant). */
+  hasError?: boolean;
 }
 
-export default function DatePicker({ value, onChange, placeholder = 'JJ/MM/AAAA' }: DatePickerProps) {
+export default function DatePicker({
+  value,
+  onChange,
+  placeholder = 'JJ/MM/AAAA',
+  hasError = false,
+}: DatePickerProps) {
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [selectedDay, setSelectedDay] = useState<number>(1);
   const [selectedMonth, setSelectedMonth] = useState<number>(1);
@@ -57,7 +64,7 @@ export default function DatePicker({ value, onChange, placeholder = 'JJ/MM/AAAA'
   return (
     <>
       <TouchableOpacity
-        style={styles.inputContainer}
+        style={[styles.inputContainer, hasError ? styles.inputContainerError : null]}
         onPress={() => setIsModalVisible(true)}
         activeOpacity={0.7}
       >
@@ -185,6 +192,10 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.md,
     borderWidth: 1,
     borderColor: THEME.familyFlowLine,
+  },
+  inputContainerError: {
+    borderColor: '#E5484D',
+    borderWidth: 1.5,
   },
   inputText: {
     fontSize: FONT_SIZES.lg,

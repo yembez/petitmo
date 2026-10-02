@@ -1,19 +1,19 @@
 /**
  * Attente douce restore cloud — uniquement SQLite souvenirs vide (réinstall / nouveau device).
- * Visible après SHOW_AFTER_MS (anti-flash). Jamais si le local a déjà des souvenirs (local-first).
+ * `immediate` : visible tout de suite (évite flash Capturer avant l’overlay).
  */
 import { DeviceEventEmitter } from 'react-native';
 
 export const CLOUD_RESTORE_UI_EVENT = 'petitmo:cloud-restore-ui';
 
-/** Court délai anti-flash ; assez bas pour être visible dès une réinstall TestFlight. */
-const SHOW_AFTER_MS = 400;
+/** Anti-flash si restore ultra-court ; ignorer si `immediate`. */
+const SHOW_AFTER_MS = 120;
 /** Garde-fou : ne jamais bloquer l’UI indéfiniment. */
 export const CLOUD_RESTORE_MAX_MS = 120_000;
 
 export type CloudRestoreUiState = {
   active: boolean;
-  /** Affiché seulement après SHOW_AFTER_MS. */
+  /** Affiché seulement après SHOW_AFTER_MS (ou tout de suite si immediate). */
   visible: boolean;
   childName: string | null;
 };
@@ -35,27 +35,43 @@ export function peekCloudRestoreUi(): CloudRestoreUiState {
   return { ...state };
 }
 
-export function beginCloudRestoreUi(opts?: { childName?: string | null }): void {
+export function beginCloudRestoreUi(opts?: {
+  childName?: string | null;
+  /** Réinstall / login : pas de délai — sinon Capturer flash avant l’overlay. */
+  immediate?: boolean;
+}): void {
   depth += 1;
   if (depth > 1) {
     if (opts?.childName?.trim() && !state.childName) {
       state = { ...state, childName: opts.childName.trim() };
       emit();
     }
+    if (opts?.immediate && state.active && !state.visible) {
+      if (showTimer) {
+        clearTimeout(showTimer);
+        showTimer = null;
+      }
+      state = { ...state, visible: true };
+      emit();
+    }
     return;
   }
 
   const name = opts?.childName?.trim() || null;
-  state = { active: true, visible: false, childName: name };
+  const immediate = opts?.immediate === true;
+  state = { active: true, visible: immediate, childName: name };
   emit();
 
   if (showTimer) clearTimeout(showTimer);
-  showTimer = setTimeout(() => {
-    showTimer = null;
-    if (!state.active) return;
-    state = { ...state, visible: true };
-    emit();
-  }, SHOW_AFTER_MS);
+  showTimer = null;
+  if (!immediate) {
+    showTimer = setTimeout(() => {
+      showTimer = null;
+      if (!state.active) return;
+      state = { ...state, visible: true };
+      emit();
+    }, SHOW_AFTER_MS);
+  }
 }
 
 export function endCloudRestoreUi(): void {

@@ -242,10 +242,7 @@ export default function MemoryViewScreen() {
     setMemory({ ...memory, content: text });
     const ok = await updateMemoryContent(memory.id, text);
     if (!ok) {
-      Alert.alert(
-        'Connexion',
-        "Ton texte est bien enregistré sur l’app, mais la synchronisation a échoué. Réessaie plus tard."
-      );
+      Alert.alert('Erreur', "Impossible d’enregistrer le texte sur l’appareil.");
     }
   };
 

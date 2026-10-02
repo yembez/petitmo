@@ -38,12 +38,12 @@ import TabSceneTransition from '@/components/TabSceneTransition';
 import SettingsHeaderButton from '@/components/SettingsHeaderButton';
 import { loadedFontStyle } from '@/utils/loadedFontStyle';
 import { useAppLanguage } from '@/hooks/useAppLanguage';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { formatAppDate } from '@/utils/appLocale';
 import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
 import { scale, verticalScale } from '@/utils/responsive';
 import {
   CAPTURE_SCREEN_BG,
-  BRAND_ACTION_GRADIENT,
   CAPTURE_CTA_RECORD_GRADIENT,
   CAPTURE_CTA_WRITE_GRADIENT,
   CAPTURE_CTA_IMPORT_GRADIENT,
@@ -57,6 +57,7 @@ import {
   CAPTURE_CTA_MIC_ICON_SIZE,
   CAPTURE_CTA_MIC_ICON_SIZE_COMPACT,
   CAPTURE_CTA_D1_ICON_STROKE,
+  CAPTURE_CTA_D2_BG,
   CAPTURE_CTA_D2_ICON,
   CAPTURE_CTA_D2_ICON_STROKE,
   CAPTURE_CTA_D3_BG,
@@ -84,6 +85,11 @@ import { checkMemoryLimit } from '@/lib/limits';
 import { promptFreeTierLimitThenPaywall, freeTierLimitKindFromCheck } from '@/utils/freeTierLimitGate';
 import { getLocalChild, listLocalChildren, listLocalChildrenForUser } from '@/lib/localDb';
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
+import {
+  PETITMO_AUTH_SIGNED_OUT_EVENT,
+  peekHasRealAuthAccount,
+} from '@/lib/authAccount';
+import { resetNavigationToOnboarding } from '@/utils/resetNavigationToOnboarding';
 import { useChildProfileDisplayUri } from '@/hooks/useChildProfileDisplayUri';
 import {
   useCaptureHeroPillBackdrop,
@@ -106,8 +112,9 @@ const CAPTURE_TITLE_LINE_HEIGHT = 28;
 const CAPTURE_TITLE_HEART_SIZE = scale(18);
 /** Hauteur de la ligne date / paramètres (alignés sur le bouton). */
 const CAPTURE_HEADER_ROW_H = scale(40);
-/** Enfants visibles pour le compte courant — jamais ceux d’un autre e-mail. */
+/** Enfants visibles pour le compte **connecté** — jamais après déconnexion (SQLite peut rester). */
 function listCaptureScopedChildren(): Child[] {
+  if (!peekHasRealAuthAccount()) return [];
   const uid = peekLastRealAuthUserId();
   if (uid) return listLocalChildrenForUser(uid);
   return listLocalChildren().filter(c => !(c.user_id ?? '').trim());
@@ -115,12 +122,17 @@ function listCaptureScopedChildren(): Child[] {
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
-/** Zoom « respiration » sur la photo carte (1 → max) — assez marqué pour se lire en TF. */
-/** Photo hero plein cadre — respiration + micro-parallax. */
+/** Photo hero plein cadre — respiration très légère (évite bandeaux / saut de fin de cycle). */
 const CAPTURE_HERO_BREATHE_MIN = 1;
-const CAPTURE_HERO_BREATHE_MAX = 1.055;
+const CAPTURE_HERO_BREATHE_MAX = 1.02;
 const CAPTURE_HERO_BREATHE_HALF_MS = 7_200;
-const CAPTURE_HERO_PARALLAX_Y = 6;
+/** Micro-parallax ; doit revenir à 0 avec le scale min (sinon saut à chaque tour de loop). */
+const CAPTURE_HERO_PARALLAX_Y = 2;
+/**
+ * Overscan du calque animé (comme Favoris slideshowZoom).
+ * À scale=1 + translateY ±PARALLAX, sans overscan le fond crème apparaît en bandeaux.
+ */
+const CAPTURE_HERO_BREATHE_OVERSCAN = 0.06;
 
 const CAPTURE_PHOTO_CARD_RADIUS = scale(32);
 const CAPTURE_PHOTO_CARD_ASPECT = CHILD_PROFILE_PHOTO_ASPECT;
@@ -223,6 +235,7 @@ function CapturerScreen() {
   const insets = useSafeAreaInsets();
   const frame = useSafeAreaFrame();
   const { height: windowH } = useWindowDimensions();
+  const { t } = useAppTranslation('common');
 
   const lang = useAppLanguage();
   const todayLabel = formatAppDate(
@@ -270,7 +283,15 @@ function CapturerScreen() {
   const captureScrollMaxYRef = useRef(0);
 
   const heroDisplayUri = useChildProfileDisplayUri(child);
-  const photoUri = heroDisplayUri ?? '';
+  const stickyHeroUriRef = useRef('');
+  const stickyHeroChildIdRef = useRef('');
+  if ((child?.id ?? '') !== stickyHeroChildIdRef.current) {
+    stickyHeroChildIdRef.current = child?.id ?? '';
+    stickyHeroUriRef.current = '';
+  }
+  if (heroDisplayUri.trim()) stickyHeroUriRef.current = heroDisplayUri.trim();
+  /** Évite unmount hero → placeholder crème quand l’URI est brièvement vide post-restore. */
+  const photoUri = heroDisplayUri.trim() || stickyHeroUriRef.current;
   const heroPhotoCacheKey = child ? captureHeroPhotoRevision(child) : '';
   const heroPillBackdrop = useCaptureHeroPillBackdrop(
     familyChildren.length > 1 ? null : photoUri,
@@ -282,8 +303,26 @@ function CapturerScreen() {
   }, [photoUri]);
 
   useEffect(() => {
+    if (!peekHasRealAuthAccount()) {
+      setCaptureTabChildSnapshot(null);
+      return;
+    }
     setCaptureTabChildSnapshot(child);
   }, [child]);
+
+  /** Déconnexion : vider le hero immédiatement (onglets restent montés / SQLite intact). */
+  useEffect(() => {
+    const clearGhost = () => {
+      stickyHeroUriRef.current = '';
+      stickyHeroChildIdRef.current = '';
+      setChild(null);
+      setFamilyChildren([]);
+      setIsLoading(false);
+      setCaptureTabChildSnapshot(null);
+    };
+    const sub = DeviceEventEmitter.addListener(PETITMO_AUTH_SIGNED_OUT_EVENT, clearGhost);
+    return () => sub.remove();
+  }, []);
 
   /**
    * Écrire est un `fullScreenModal` : Capturer peut rester « focused » dessous.
@@ -442,12 +481,31 @@ function CapturerScreen() {
       let cancelled = false;
 
       const run = async () => {
+        // Sans compte produit : jamais peindre SQLite (lastRealAuthUserId peut rester).
+        if (!peekHasRealAuthAccount()) {
+          stickyHeroUriRef.current = '';
+          stickyHeroChildIdRef.current = '';
+          setChild(null);
+          setFamilyChildren([]);
+          setIsLoading(false);
+          setCaptureTabChildSnapshot(null);
+          if (!cancelled) resetNavigationToOnboarding(router, navigation);
+          return;
+        }
+
         const silent = childRef.current != null;
         try {
           if (!silent) setIsLoading(true);
           // Local-first : ID sélectionné + SQLite (getOrSelectFirstChild ne bloque plus sur le cloud).
           const storedSelectedId = await getOrSelectFirstChild();
           if (cancelled) return;
+          if (!peekHasRealAuthAccount()) {
+            setChild(null);
+            setFamilyChildren([]);
+            setIsLoading(false);
+            if (!cancelled) resetNavigationToOnboarding(router, navigation);
+            return;
+          }
 
           /** Retour onglet : lecture SQLite légère (pas de ML / sanitize en boucle). */
           if (silent && storedSelectedId) {
@@ -497,8 +555,12 @@ function CapturerScreen() {
             }
           } else if (allChildren.length === 0) {
             setChild(null);
-            // replace : évite une pile sans historique + GO_BACK si create-child est déjà la cible.
-            router.replace('/create-child');
+            // Compte connecté sans enfant seulement — jamais après logout (peek faux → early return).
+            if (peekHasRealAuthAccount()) {
+              router.replace('/create-child');
+            } else if (!cancelled) {
+              resetNavigationToOnboarding(router, navigation);
+            }
           } else if (!cancelled) {
             setCaptureTabChildSnapshot(allChildren[0]);
             setChild(prev => (captureChildDisplayEqual(prev, allChildren[0]) ? prev : allChildren[0]));
@@ -525,8 +587,16 @@ function CapturerScreen() {
         cancelled = true;
         setStatusBarStyle('dark');
       };
-    }, [router])
+    }, [navigation, router])
   );
+
+  if (!peekHasRealAuthAccount()) {
+    return (
+      <View style={[styles.root, styles.loadingContainer]}>
+        <StatusBar style="dark" />
+      </View>
+    );
+  }
 
   if (isLoading && !child) {
     return (
@@ -541,8 +611,13 @@ function CapturerScreen() {
     return (
       <View style={[styles.root, styles.loadingContainer]}>
         <StatusBar style="dark" />
-        <TouchableOpacity onPress={() => router.push('/create-child')} activeOpacity={0.85}>
-          <Text style={styles.ctaGhostText}>Créer un profil enfant</Text>
+        <TouchableOpacity
+          onPress={() => router.push('/create-child')}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel={t('createChild.title')}
+        >
+          <Text style={styles.ctaGhostText}>{t('createChild.title')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -714,7 +789,7 @@ function CapturerScreen() {
                   <Text
                     style={[
                       styles.captureTitle,
-                      loadedFontStyle(captureTitleFont) ?? { fontWeight: '500' },
+                      loadedFontStyle(captureTitleFont) ?? { fontWeight: '400' },
                     ]}
                     numberOfLines={1}
                     adjustsFontSizeToFit
@@ -733,7 +808,7 @@ function CapturerScreen() {
                       style={[
                         styles.captureTitle,
                         styles.captureTitleBold,
-                        loadedFontStyle(captureTitleBoldFont) ?? { fontWeight: '700' },
+                        loadedFontStyle(captureTitleBoldFont) ?? { fontWeight: '600' },
                       ]}
                     >
                       aujourd&apos;hui ?
@@ -745,7 +820,7 @@ function CapturerScreen() {
                   <Text
                     style={[
                       styles.captureTitle,
-                      loadedFontStyle(captureTitleFont) ?? { fontWeight: '500' },
+                      loadedFontStyle(captureTitleFont) ?? { fontWeight: '400' },
                     ]}
                   >
                     Quel souvenir pour {childGivenName || "l'enfant"}{' '}
@@ -760,7 +835,7 @@ function CapturerScreen() {
                     style={[
                       styles.captureTitle,
                       styles.captureTitleBold,
-                      loadedFontStyle(captureTitleBoldFont) ?? { fontWeight: '700' },
+                      loadedFontStyle(captureTitleBoldFont) ?? { fontWeight: '600' },
                     ]}
                   >
                     aujourd&apos;hui ?
@@ -880,7 +955,7 @@ function CapturerScreen() {
                     label="Enregistrer"
                     labelFontFamily={captureCtaLabelFont}
                     accessibilityLabel="Enregistrer un audio"
-                    discGradient={BRAND_ACTION_GRADIENT}
+                    discColor={CAPTURE_CTA_D2_BG}
                     icon={
                       <Mic
                         size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
@@ -895,7 +970,7 @@ function CapturerScreen() {
                   <CaptureDiscCtaGradient
                     label="Écrire"
                     labelFontFamily={captureCtaLabelFont}
-                    discGradient={BRAND_ACTION_GRADIENT}
+                    discColor={CAPTURE_CTA_D2_BG}
                     icon={
                       <PencilLine
                         size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
@@ -911,7 +986,7 @@ function CapturerScreen() {
                     label="Importer"
                     labelFontFamily={captureCtaLabelFont}
                     accessibilityLabel="Importer des photos ou vidéos"
-                    discGradient={BRAND_ACTION_GRADIENT}
+                    discColor={CAPTURE_CTA_D2_BG}
                     icon={
                       <ImagePlus
                         size={compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE}
@@ -1203,12 +1278,12 @@ const styles = StyleSheet.create({
     ...Platform.select({
       ios: {
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: verticalScale(8) },
-        shadowOpacity: 0.12,
-        shadowRadius: scale(16),
+        shadowOffset: { width: 0, height: verticalScale(6) },
+        shadowOpacity: 0.08,
+        shadowRadius: scale(12),
       },
       android: {
-        elevation: 6,
+        elevation: 4,
       },
       default: {},
     }),
@@ -1365,6 +1440,16 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: CAPTURE_SCREEN_BG,
   },
+  /**
+   * Calque plus grand que le cadre : de-zoom (scale → 1) + parallax restent plein cadre.
+   */
+  heroImageBreatheLayer: {
+    position: 'absolute',
+    top: `${-CAPTURE_HERO_BREATHE_OVERSCAN * 100}%`,
+    left: `${-CAPTURE_HERO_BREATHE_OVERSCAN * 100}%`,
+    width: `${(1 + 2 * CAPTURE_HERO_BREATHE_OVERSCAN) * 100}%`,
+    height: `${(1 + 2 * CAPTURE_HERO_BREATHE_OVERSCAN) * 100}%`,
+  },
   heroImageCover: {
     width: '100%',
     height: '100%',
@@ -1427,6 +1512,8 @@ function CaptureHeroImageStack({
     }
     const prev = lastReadyUriRef.current;
     const next = photoUri.trim();
+    // URI vide un instant (re-probe / signature) : garder le frame déjà peint.
+    if (!next) return;
     const upgradingRemoteToLocal =
       !!prev &&
       /^https?:\/\//i.test(prev) &&
@@ -1439,54 +1526,68 @@ function CaptureHeroImageStack({
       /^https?:\/\//i.test(prev) &&
       !!next &&
       /^https?:\/\//i.test(next);
-    // Cache sandbox après sync / URL signée : garder l’image affichée.
-    if (!upgradingRemoteToLocal && !sameRemoteHost) {
-      setImageReady(false);
+    const localToRemoteFallback =
+      !!prev &&
+      (prev.startsWith('file:') ||
+        prev.startsWith('content:') ||
+        prev.startsWith('ph://')) &&
+      /^https?:\/\//i.test(next);
+    // Déjà un hero visible : ne jamais repasser par opacity 0 (flash crème fil↔Capturer).
+    if (prev && (upgradingRemoteToLocal || sameRemoteHost || localToRemoteFallback)) {
+      return;
     }
+    if (prev) {
+      // Changement de fichier : garder opaque jusqu’au onLoad du suivant.
+      return;
+    }
+    setImageReady(false);
   }, [photoUri, imageRevision]);
 
   useEffect(() => {
     breatheScale.setValue(CAPTURE_HERO_BREATHE_MIN);
     parallaxY.setValue(0);
+  }, [reactKey, breatheScale, parallaxY]);
+
+  useEffect(() => {
     if (!isTabFocused || CAPTURE_HERO_BREATHE_MAX <= CAPTURE_HERO_BREATHE_MIN) {
       return undefined;
     }
     const ease = Easing.inOut(Easing.ease);
-    const scaleUp = Animated.timing(breatheScale, {
-      toValue: CAPTURE_HERO_BREATHE_MAX,
-      duration: CAPTURE_HERO_BREATHE_HALF_MS,
-      easing: ease,
-      useNativeDriver: captureHeroBreatheNativeDriver,
+    // Aller : zoom + léger up ; retour : de-zoom + Y → 0 (même état de fin que le début → pas de saut).
+    const go = Animated.parallel([
+      Animated.timing(breatheScale, {
+        toValue: CAPTURE_HERO_BREATHE_MAX,
+        duration: CAPTURE_HERO_BREATHE_HALF_MS,
+        easing: ease,
+        useNativeDriver: captureHeroBreatheNativeDriver,
+      }),
+      Animated.timing(parallaxY, {
+        toValue: -CAPTURE_HERO_PARALLAX_Y,
+        duration: CAPTURE_HERO_BREATHE_HALF_MS,
+        easing: ease,
+        useNativeDriver: captureHeroBreatheNativeDriver,
+      }),
+    ]);
+    const back = Animated.parallel([
+      Animated.timing(breatheScale, {
+        toValue: CAPTURE_HERO_BREATHE_MIN,
+        duration: CAPTURE_HERO_BREATHE_HALF_MS,
+        easing: ease,
+        useNativeDriver: captureHeroBreatheNativeDriver,
+      }),
+      Animated.timing(parallaxY, {
+        toValue: 0,
+        duration: CAPTURE_HERO_BREATHE_HALF_MS,
+        easing: ease,
+        useNativeDriver: captureHeroBreatheNativeDriver,
+      }),
+    ]);
+    const loop = Animated.loop(Animated.sequence([go, back]), {
+      resetBeforeIteration: false,
     });
-    const scaleDown = Animated.timing(breatheScale, {
-      toValue: CAPTURE_HERO_BREATHE_MIN,
-      duration: CAPTURE_HERO_BREATHE_HALF_MS,
-      easing: ease,
-      useNativeDriver: captureHeroBreatheNativeDriver,
-    });
-    const yUp = Animated.timing(parallaxY, {
-      toValue: -CAPTURE_HERO_PARALLAX_Y,
-      duration: CAPTURE_HERO_BREATHE_HALF_MS,
-      easing: ease,
-      useNativeDriver: captureHeroBreatheNativeDriver,
-    });
-    const yDown = Animated.timing(parallaxY, {
-      toValue: CAPTURE_HERO_PARALLAX_Y,
-      duration: CAPTURE_HERO_BREATHE_HALF_MS,
-      easing: ease,
-      useNativeDriver: captureHeroBreatheNativeDriver,
-    });
-    const loop = Animated.loop(
-      Animated.parallel([
-        Animated.sequence([scaleUp, scaleDown]),
-        Animated.sequence([yUp, yDown]),
-      ]),
-    );
     loop.start();
     return () => {
       loop.stop();
-      breatheScale.setValue(CAPTURE_HERO_BREATHE_MIN);
-      parallaxY.setValue(0);
     };
   }, [reactKey, breatheScale, parallaxY, isTabFocused]);
 
@@ -1494,25 +1595,26 @@ function CaptureHeroImageStack({
    * ExpoImage peut peindre 1 frame à taille intrinsèque (miniature bas-gauche)
    * avant le layout cover — on masque jusqu’à `onLoad` **uniquement** au 1er paint d’une URI.
    */
+  const paintUri = photoUri.trim() || lastReadyUriRef.current;
   return (
     <View style={[StyleSheet.absoluteFillObject, styles.heroImageClip]} pointerEvents="box-none" collapsable={false}>
       <Animated.View
         style={[
-          StyleSheet.absoluteFillObject,
+          styles.heroImageBreatheLayer,
           { transform: [{ translateY: parallaxY }, { scale: breatheScale }] },
         ]}
         collapsable={false}
       >
         {Platform.OS === 'web' ? (
           <ImageBackground
-            source={{ uri: photoUri }}
+            source={{ uri: paintUri }}
             style={StyleSheet.absoluteFillObject}
             imageStyle={styles.heroImageCover}
             resizeMode="cover"
           />
-        ) : (
+        ) : paintUri ? (
           <ExpoImage
-            source={{ uri: photoUri }}
+            source={{ uri: paintUri }}
             style={[
               StyleSheet.absoluteFillObject,
               styles.heroImageCover,
@@ -1525,12 +1627,12 @@ function CaptureHeroImageStack({
             priority="high"
             transition={0}
             onLoad={() => {
-              lastReadyUriRef.current = photoUri;
+              lastReadyUriRef.current = paintUri;
               setImageReady(true);
             }}
             accessibilityIgnoresInvertColors
           />
-        )}
+        ) : null}
       </Animated.View>
     </View>
   );

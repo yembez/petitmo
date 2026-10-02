@@ -32,6 +32,7 @@ import { styles } from '@/components/feed/feedStyles';
 import { THEME } from '@/constants/theme';
 import { emptyStateStyles } from '@/constants/emptyStateStyles';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
+import { peekHasRealAuthAccount } from '@/lib/authAccount';
 import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
@@ -551,6 +552,14 @@ function FilScreen() {
   }
 
   if (familyChildren.length === 0 && pendingUploads.length === 0) {
+    // Déconnecté / ghost : jamais « Créer un profil » — sortir vers onboarding.
+    if (!peekHasRealAuthAccount()) {
+      return (
+        <View style={[styles.container, styles.centered]}>
+          <StatusBar style="dark" />
+        </View>
+      );
+    }
     return (
       <View style={[styles.container, styles.centered]}>
         <StatusBar style="dark" />

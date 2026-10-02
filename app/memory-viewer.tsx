@@ -182,6 +182,11 @@ function immersiveTopFadeHeight(pageHeight: number): number {
 
 /** Hauteur réservée sous la vidéo pour le curseur + labels temps (relevé du cœur favori). */
 const IMMERSIVE_VIDEO_SCRUBBER_RESERVE = verticalScale(44);
+/**
+ * Hauteur réservée sous l’audio immersif pour play + onde + compteur
+ * (évite que la légende se colle / bloque les touches).
+ */
+const IMMERSIVE_VOICE_PLAYER_RESERVE = verticalScale(92);
 /** Place du crayon sous le cœur (taille disque + écart). */
 const IMMERSIVE_EDIT_UNDER_FAVORITE = scale(32) + verticalScale(8);
 /** Légende overlay : ~5 lignes, puis scroll — pas 32 % d’écran blanc. */
@@ -1295,10 +1300,7 @@ function MemoryViewerScreenInner() {
       setMemories(prev => prev.map(m => (m.id === target.id ? { ...m, content: text } : m)));
       const ok = await updateMemoryContent(target.id, text);
       if (!ok) {
-        Alert.alert(
-          'Connexion',
-          "Ton texte est bien enregistré sur l’app, mais la synchronisation a échoué. Réessaie plus tard."
-        );
+        Alert.alert('Erreur', "Impossible d’enregistrer le texte sur l’appareil.");
       }
       setEditingCaptionMemory(null);
     },
@@ -1607,7 +1609,8 @@ function ImmersivePage({
 
   const editFabBottom =
     overlayBottomInset +
-    (memory.type === 'video' && isActive ? IMMERSIVE_VIDEO_SCRUBBER_RESERVE : 0);
+    (memory.type === 'video' && isActive ? IMMERSIVE_VIDEO_SCRUBBER_RESERVE : 0) +
+    (memory.type === 'voice' ? IMMERSIVE_VOICE_PLAYER_RESERVE : 0);
   /** Cœur au-dessus du crayon (même colonne bas-droite). */
   const favoriteBottomInset = editFabBottom + IMMERSIVE_EDIT_UNDER_FAVORITE;
 
@@ -1772,11 +1775,14 @@ function ImmersivePage({
                 pointerEvents="box-none"
               >
                 <Reanimated.View
+                  pointerEvents="box-none"
                   style={[
                     captionTextStyle,
                     memory.type === 'video' && isActive
                       ? { paddingBottom: IMMERSIVE_VIDEO_SCRUBBER_RESERVE }
-                      : null,
+                      : memory.type === 'voice'
+                        ? { paddingBottom: IMMERSIVE_VOICE_PLAYER_RESERVE }
+                        : null,
                   ]}
                 >
                   <ScrollableTextBlock
@@ -2730,6 +2736,8 @@ const styles = StyleSheet.create({
     paddingLeft: scale(16),
     // Crayon bas-droite (right 12 + disque 32) + petit écart.
     paddingRight: scale(12) + scale(32) + scale(8),
+    // Au-dessus du bandeau légende (zIndex 7) pour que play / onde restent cliquables.
+    zIndex: 12,
   },
   /** Vue immersive audio : raccourcit le bandeau sombre derrière la wave. */
   voicePlayerImmersiveCompact: {

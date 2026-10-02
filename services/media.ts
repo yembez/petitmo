@@ -982,6 +982,54 @@ function memoryIsPhotoAlbum(memory: Memory): boolean {
   });
 }
 
+
+/** Après insert cloud : fusionner sans écraser content/text_title locaux, puis rattraper le cloud si besoin. */
+function upsertLocalAfterCloudInsert(
+  insertedRow: MemoryRowDb,
+  prev: Memory | null | undefined,
+  opts?: {
+    clientUploadStatus?: UploadStatus;
+    extras?: Partial<Memory>;
+  },
+): Memory {
+  const merged: Memory = {
+    ...mergeServerMemoryRowWithExistingLocal(insertedRow, prev, {
+      clientUploadStatus: opts?.clientUploadStatus,
+    }),
+    sync_status: 'synced',
+    ...(opts?.extras ?? {}),
+  };
+  upsertLocalMemory(merged);
+
+  const content = (merged.content ?? '').trim();
+  const title = (merged.text_title ?? '').trim();
+  if (content || title || (prev?.location ?? '').trim()) {
+    const patch: {
+      content?: string | null;
+      text_title?: string | null;
+      location?: string | null;
+    } = {};
+    if (content) patch.content = merged.content;
+    if (title || merged.text_title === null) patch.text_title = merged.text_title;
+    const loc = (merged.location ?? '').trim();
+    if (loc) patch.location = merged.location;
+    if (Object.keys(patch).length > 0) {
+      void supabase
+        .from('memories')
+        .update(patch)
+        .eq('id', insertedRow.id)
+        .then(({ error }) => {
+          if (error) {
+            console.warn('[media] push local annotation after insert', insertedRow.id, error.message);
+          }
+        });
+    }
+  }
+
+  return merged;
+}
+
+
 /**
  * Album photo local-first : upload Supabase en arrière-plan.
  * Gratuit authentifié = thumb + print A5 ; paid = original HD + dérivés.
@@ -1031,6 +1079,8 @@ async function syncCloudPhotoAlbumInBackground(params: {
       child_id: childId,
       user_id: userId,
       type: 'photo',
+      content: memory.content ?? null,
+      text_title: memory.text_title ?? null,
       media_url: primary.media_url,
       media_path: primary.media_path,
       extra_photo_urls: extraPhotoUrls,
@@ -1042,11 +1092,12 @@ async function syncCloudPhotoAlbumInBackground(params: {
       extra_display_urls: extraDisplayUrls,
       duration: null,
       file_size: totalSize,
-      location: locationLabel,
+      location: locationLabel ?? memory.location ?? null,
       voice_cover_url: null,
       voice_cover_path: null,
       inserted_at: insertedAtIso,
       upload_status: insertedUploadStatus,
+      is_favorite: memory.is_favorite === true,
     };
 
     if (capturedAtIso) {
@@ -1070,7 +1121,8 @@ async function syncCloudPhotoAlbumInBackground(params: {
         child_id: childId,
         user_id: userId,
         type: 'photo',
-        content: null,
+        content: memory.content ?? null,
+        text_title: memory.text_title ?? null,
         media_url: primary.media_url ?? null,
         media_path: primary.media_path ?? null,
         extra_photo_urls: extraPhotoUrls as MemoryRowDb['extra_photo_urls'],
@@ -1111,22 +1163,9 @@ async function syncCloudPhotoAlbumInBackground(params: {
     void triggerProcessMemory(insertedRow.id);
 
     const prev = getLocalMemoryById(insertedRow.id);
-    const out: Memory = {
-      ...withLocalFields(insertedRow, { clientUploadStatus: insertedUploadStatus }),
-      local_media_path: prev?.local_media_path ?? prev?.local_thumb_path ?? null,
-      local_original_path: prev?.local_original_path ?? null,
-      local_thumb_path: prev?.local_thumb_path ?? null,
-      local_display_path: prev?.local_display_path ?? null,
-      local_print_path: prev?.local_print_path ?? null,
-      original_px_w: prev?.original_px_w ?? null,
-      original_px_h: prev?.original_px_h ?? null,
-      print_px_w: prev?.print_px_w ?? null,
-      print_px_h: prev?.print_px_h ?? null,
-      sync_status: 'synced',
-      import_asset_id: prev?.import_asset_id ?? null,
-      import_source_fingerprint: prev?.import_source_fingerprint ?? null,
-    };
-    upsertLocalMemory(out);
+    upsertLocalAfterCloudInsert(insertedRow, prev, {
+      clientUploadStatus: insertedUploadStatus,
+    });
     emitMemoriesUpdatedIfVisualChanged(insertedRow.id, prev);
   } catch (e) {
     console.warn('[media] syncCloudPhotoAlbumInBackground', params.memoryId, e);
@@ -1173,12 +1212,14 @@ async function syncCloudPhotoMemoryInBackground(params: {
     });
 
     const insertedAt = new Date().toISOString();
+    const localBeforeInsert = getLocalMemoryById(memoryId);
     const insertPayload: Database['public']['Tables']['memories']['Insert'] = {
       id: memoryId,
       child_id: childId,
       user_id: userId,
       type: 'photo',
-      content: null,
+      content: localBeforeInsert?.content ?? null,
+      text_title: localBeforeInsert?.text_title ?? null,
       media_url: uploaded.media_url,
       media_path: uploaded.media_path,
       thumb_url: uploaded.thumb_url,
@@ -1193,11 +1234,11 @@ async function syncCloudPhotoMemoryInBackground(params: {
       favorite_photo_urls: [],
       duration: null,
       file_size: uploaded.file_size,
-      location: locationLabel,
+      location: locationLabel ?? localBeforeInsert?.location ?? null,
       voice_cover_url: null,
       voice_cover_path: null,
       edited_media_url: null,
-      is_favorite: false,
+      is_favorite: localBeforeInsert?.is_favorite === true,
       inserted_at: insertedAt,
       captured_overlay_ink: null,
     };
@@ -1217,23 +1258,13 @@ async function syncCloudPhotoMemoryInBackground(params: {
     void triggerProcessMemory(insertedRow.id);
 
     const prev = getLocalMemoryById(insertedRow.id);
-    const base = withLocalFields(insertedRow, { clientUploadStatus: uploaded.upload_status });
-    const out: Memory = {
-      ...base,
-      local_media_path: prev?.local_media_path ?? prev?.local_thumb_path ?? localOriginalUri,
-      local_original_path: prev?.local_original_path ?? localOriginalUri,
-      local_thumb_path: prev?.local_thumb_path ?? null,
-      local_display_path: prev?.local_display_path ?? null,
-      local_print_path: prev?.local_print_path ?? null,
-      original_px_w: prev?.original_px_w ?? null,
-      original_px_h: prev?.original_px_h ?? null,
-      print_px_w: prev?.print_px_w ?? null,
-      print_px_h: prev?.print_px_h ?? null,
-      sync_status: 'synced',
-      import_asset_id: prev?.import_asset_id ?? null,
-      import_source_fingerprint: prev?.import_source_fingerprint ?? null,
-    };
-    upsertLocalMemory(out);
+    upsertLocalAfterCloudInsert(insertedRow, prev, {
+      clientUploadStatus: uploaded.upload_status,
+      extras: {
+        local_media_path: prev?.local_media_path ?? prev?.local_thumb_path ?? localOriginalUri,
+        local_original_path: prev?.local_original_path ?? localOriginalUri,
+      },
+    });
     emitMemoriesUpdatedIfVisualChanged(insertedRow.id, prev);
   } catch (e) {
     console.warn('[media] syncCloudPhotoMemoryInBackground', params.memoryId, e);
@@ -1278,12 +1309,14 @@ async function syncCloudVideoMemoryInBackground(params: {
     });
 
     const insertedAt = new Date().toISOString();
+    const localBeforeInsert = getLocalMemoryById(memoryId);
     const insertPayload: Database['public']['Tables']['memories']['Insert'] = {
       id: memoryId,
       child_id: childId,
       user_id: userId,
       type: 'video',
-      content: null,
+      content: localBeforeInsert?.content ?? null,
+      text_title: localBeforeInsert?.text_title ?? null,
       media_url: uploaded.media_url,
       media_path: uploaded.media_path,
       thumb_url: uploaded.thumb_url,
@@ -1298,11 +1331,11 @@ async function syncCloudVideoMemoryInBackground(params: {
       favorite_photo_urls: [],
       duration: typeof durationSec === 'number' && Number.isFinite(durationSec) ? durationSec : null,
       file_size: uploaded.file_size,
-      location: locationLabel,
+      location: locationLabel ?? localBeforeInsert?.location ?? null,
       voice_cover_url: null,
       voice_cover_path: null,
       edited_media_url: null,
-      is_favorite: false,
+      is_favorite: localBeforeInsert?.is_favorite === true,
       inserted_at: insertedAt,
       captured_overlay_ink: null,
     };
@@ -1322,23 +1355,13 @@ async function syncCloudVideoMemoryInBackground(params: {
     void triggerProcessMemory(insertedRow.id);
 
     const prev = getLocalMemoryById(insertedRow.id);
-    const base = withLocalFields(insertedRow, { clientUploadStatus: uploaded.upload_status });
-    const out: Memory = {
-      ...base,
-      local_media_path: prev?.local_media_path ?? null,
-      local_original_path: prev?.local_original_path ?? localOriginalUri,
-      local_thumb_path: prev?.local_thumb_path ?? null,
-      local_display_path: prev?.local_display_path ?? null,
-      local_print_path: prev?.local_print_path ?? null,
-      original_px_w: prev?.original_px_w ?? null,
-      original_px_h: prev?.original_px_h ?? null,
-      print_px_w: prev?.print_px_w ?? null,
-      print_px_h: prev?.print_px_h ?? null,
-      sync_status: 'synced',
-      import_asset_id: prev?.import_asset_id ?? null,
-      import_source_fingerprint: prev?.import_source_fingerprint ?? null,
-    };
-    upsertLocalMemory(out);
+    upsertLocalAfterCloudInsert(insertedRow, prev, {
+      clientUploadStatus: uploaded.upload_status,
+      extras: {
+        local_media_path: prev?.local_media_path ?? null,
+        local_original_path: prev?.local_original_path ?? localOriginalUri,
+      },
+    });
     emitMemoriesUpdatedIfVisualChanged(insertedRow.id, prev);
   } catch (e) {
     console.warn('[media] syncCloudVideoMemoryInBackground', params.memoryId, e);
@@ -1388,12 +1411,14 @@ async function syncCloudVoiceMemoryInBackground(params: {
     });
 
     const insertedAt = new Date().toISOString();
+    const localBeforeInsert = getLocalMemoryById(memoryId);
     const insertPayload: Database['public']['Tables']['memories']['Insert'] = {
       id: memoryId,
       child_id: childId,
       user_id: userId,
       type: 'voice',
-      content: null,
+      content: localBeforeInsert?.content ?? null,
+      text_title: localBeforeInsert?.text_title ?? null,
       media_url: uploaded.media_url,
       media_path: uploaded.media_path,
       thumb_url: uploaded.thumb_url,
@@ -1409,11 +1434,11 @@ async function syncCloudVoiceMemoryInBackground(params: {
       duration:
         typeof durationSec === 'number' && Number.isFinite(durationSec) ? durationSec : null,
       file_size: uploaded.file_size,
-      location: locationLabel,
+      location: locationLabel ?? localBeforeInsert?.location ?? null,
       voice_cover_url: voiceCoverPublicUrl,
       voice_cover_path: voiceCoverPath,
       edited_media_url: null,
-      is_favorite: false,
+      is_favorite: localBeforeInsert?.is_favorite === true,
       inserted_at: insertedAt,
       captured_overlay_ink: null,
     };
@@ -1433,28 +1458,17 @@ async function syncCloudVoiceMemoryInBackground(params: {
     void triggerProcessMemory(insertedRow.id);
 
     const prev = getLocalMemoryById(insertedRow.id);
-    const base = withLocalFields(insertedRow, { clientUploadStatus: uploaded.upload_status });
-    const out: Memory = {
-      ...base,
-      voice_playback_start_sec:
-        prev?.voice_playback_start_sec ??
-        voicePlaybackStartSec ??
-        base.voice_playback_start_sec ??
-        null,
-      local_media_path: prev?.local_media_path ?? localVoiceUri,
-      local_original_path: prev?.local_original_path ?? localVoiceUri,
-      local_thumb_path: prev?.local_thumb_path ?? null,
-      local_display_path: prev?.local_display_path ?? null,
-      local_print_path: prev?.local_print_path ?? null,
-      original_px_w: prev?.original_px_w ?? null,
-      original_px_h: prev?.original_px_h ?? null,
-      print_px_w: prev?.print_px_w ?? null,
-      print_px_h: prev?.print_px_h ?? null,
-      sync_status: 'synced',
-      import_asset_id: prev?.import_asset_id ?? null,
-      import_source_fingerprint: prev?.import_source_fingerprint ?? null,
-    };
-    upsertLocalMemory(out);
+    upsertLocalAfterCloudInsert(insertedRow, prev, {
+      clientUploadStatus: uploaded.upload_status,
+      extras: {
+        voice_playback_start_sec:
+          prev?.voice_playback_start_sec ??
+          voicePlaybackStartSec ??
+          null,
+        local_media_path: prev?.local_media_path ?? localVoiceUri,
+        local_original_path: prev?.local_original_path ?? localVoiceUri,
+      },
+    });
     emitMemoriesUpdatedIfVisualChanged(insertedRow.id, prev);
   } catch (e) {
     console.warn('[media] syncCloudVoiceMemoryInBackground', params.memoryId, e);
@@ -1618,7 +1632,9 @@ export async function uploadMedia({
     if (type === 'video') {
       const videoLimitCheck = await checkVideoLimit(childId, { skipRemotePull: true });
       if (!videoLimitCheck.canCreate) {
-        throw new Error('VIDEO_LIMIT_REACHED');
+        throw new Error(
+          videoLimitCheck.reason === 'capture_locked' ? 'CAPTURE_LOCKED' : 'VIDEO_LIMIT_REACHED',
+        );
       }
     }
 
@@ -2107,25 +2123,25 @@ export async function uploadMedia({
       }
     }
 
-    const out: Memory = {
-      ...withLocalFields(insertedRow, { clientUploadStatus: uploaded.upload_status }),
-      // Offline-first: pointer vers les fichiers durables en local.
-      local_media_path: localOriginal ?? uri,
-      local_original_path: localOriginal,
-      local_thumb_path: localThumb,
-      local_display_path: localDisplay,
-      local_print_path: localPrint,
-      original_px_w: originalPxW,
-      original_px_h: originalPxH,
-      print_px_w: printPxW,
-      print_px_h: printPxH,
-      sync_status: 'synced',
-      import_asset_id: importAssetId?.trim() ? importAssetId.trim() : null,
-      import_source_fingerprint: importSourceFingerprint?.trim()
-        ? importSourceFingerprint.trim()
-        : null,
-    };
-    upsertLocalMemory(out);
+    const prevImport = getLocalMemoryById(insertedRow.id);
+    const out = upsertLocalAfterCloudInsert(insertedRow, prevImport, {
+      clientUploadStatus: uploaded.upload_status,
+      extras: {
+        local_media_path: localOriginal ?? uri,
+        local_original_path: localOriginal,
+        local_thumb_path: localThumb,
+        local_display_path: localDisplay,
+        local_print_path: localPrint,
+        original_px_w: originalPxW,
+        original_px_h: originalPxH,
+        print_px_w: printPxW,
+        print_px_h: printPxH,
+        import_asset_id: importAssetId?.trim() ? importAssetId.trim() : null,
+        import_source_fingerprint: importSourceFingerprint?.trim()
+          ? importSourceFingerprint.trim()
+          : null,
+      },
+    });
     return out;
   } catch (error) {
     if (error instanceof Error) {
@@ -2623,6 +2639,61 @@ export async function updateMemoryContent(memoryId: string, content: string) {
   return updateMemoryText(memoryId, { content });
 }
 
+/** Push annotation / titre vers Supabase en silence (retry si la ligne cloud n’existe pas encore). */
+function pushMemoryTextToCloudSilent(memoryId: string): void {
+  void (async () => {
+    const attempt = async (): Promise<boolean> => {
+      const row = getLocalMemoryById(memoryId);
+      if (!row) return true;
+      const patch: { content: string; text_title?: string | null } = {
+        content: row.content ?? '',
+      };
+      if (row.text_title !== undefined) {
+        patch.text_title = row.text_title?.trim() ? row.text_title.trim() : null;
+      }
+      const { error } = await supabase.from('memories').update(patch).eq('id', memoryId);
+      if (!error) return true;
+      console.warn('[media] pushMemoryTextToCloudSilent', memoryId, error.message);
+      return false;
+    };
+    try {
+      if (await attempt()) return;
+      // Souvenir pas encore insert cloud (capture en fond) → retry silencieux.
+      await new Promise<void>(r => setTimeout(r, 2800));
+      await attempt();
+    } catch (e) {
+      console.warn('[media] pushMemoryTextToCloudSilent', memoryId, e);
+    }
+  })();
+}
+
+function pushMemoryLocationToCloudSilent(memoryId: string): void {
+  void (async () => {
+    const attempt = async (): Promise<boolean> => {
+      const row = getLocalMemoryById(memoryId);
+      if (!row) return true;
+      const { error } = await supabase
+        .from('memories')
+        .update({ location: row.location ?? null })
+        .eq('id', memoryId);
+      if (!error) return true;
+      console.warn('[media] pushMemoryLocationToCloudSilent', memoryId, error.message);
+      return false;
+    };
+    try {
+      if (await attempt()) return;
+      await new Promise<void>(r => setTimeout(r, 2800));
+      await attempt();
+    } catch (e) {
+      console.warn('[media] pushMemoryLocationToCloudSilent', memoryId, e);
+    }
+  })();
+}
+
+/**
+ * Local-first : SQLite d’abord, succès UX immédiat.
+ * Échec cloud → retry silencieux en fond — **jamais** d’Alert « réessaie ».
+ */
 export async function updateMemoryText(
   memoryId: string,
   payload: { content: string; textTitle?: string | null }
@@ -2630,50 +2701,35 @@ export async function updateMemoryText(
   try {
     updateLocalMemoryText(memoryId, payload);
     DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId });
-
-    if ((await getCachedUserMode()) === 'local') {
-      return true;
-    }
-
-    const patch: { content: string; text_title?: string | null } = {
-      content: payload.content,
-    };
-    if (payload.textTitle !== undefined) {
-      patch.text_title = payload.textTitle?.trim() ? payload.textTitle.trim() : null;
-    }
-
-    const { error } = await supabase.from('memories').update(patch).eq('id', memoryId);
-    if (error) throw error;
-    return true;
   } catch (error) {
-    console.error('Update memory text error:', error);
+    console.error('Update memory text local error:', error);
     return false;
   }
+
+  if ((await getCachedUserMode()) === 'local') {
+    return true;
+  }
+
+  pushMemoryTextToCloudSilent(memoryId);
+  return true;
 }
+
 export async function updateMemoryLocation(memoryId: string, location: string | null) {
+  const next = location?.trim() ? location.trim() : null;
   try {
-    /**
-     * Offline-first: persister localement tout de suite.
-     * La sync Supabase peut échouer, mais l’app (fil + livre) doit rester cohérente.
-     */
-    const next = location?.trim() ? location.trim() : null;
     updateLocalMemoryLocation(memoryId, next);
-
-    if ((await getCachedUserMode()) === 'local') {
-      return true;
-    }
-
-    const { error } = await supabase
-      .from('memories')
-      .update({ location: next })
-      .eq('id', memoryId);
-
-    if (error) throw error;
-    return true;
+    DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId });
   } catch (error) {
-    console.error('Update memory location error:', error);
+    console.error('Update memory location local error:', error);
     return false;
   }
+
+  if ((await getCachedUserMode()) === 'local') {
+    return true;
+  }
+
+  pushMemoryLocationToCloudSilent(memoryId);
+  return true;
 }
 
 export async function deleteMemory(memoryId: string) {

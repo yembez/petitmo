@@ -29,7 +29,7 @@ import { buildImportMetadataFromPickerAsset } from '@/utils/mediaExif';
 import { getUserTier } from '@/lib/userTier';
 import { checkMemoryLimit, checkVideoLimit, FREE_TIER_VIDEO_MAX_DURATION, PAID_TIER_VIDEO_MAX_DURATION } from '@/lib/limits';
 import { mediaDurationToSeconds } from '@/utils/mediaDuration';
-import { promptFreeTierLimitThenPaywall, freeTierLimitKindFromCheck } from '@/utils/freeTierLimitGate';
+import { promptFreeTierLimitThenPaywall, freeTierLimitKindFromCheck, freeTierLimitKindFromVideoCheck } from '@/utils/freeTierLimitGate';
 import { IMPORT_DUPLICATE_ASSET } from '@/lib/importDuplicate';
 import {
   buildAlbumImportFingerprintFromAssets,
@@ -243,7 +243,13 @@ export default function ImportMediaScreen() {
                 throw new Error(memLimit.reason === 'capture_locked' ? 'CAPTURE_LOCKED' : 'LIMIT_REACHED');
               }
               const videoLimitCheck = await checkVideoLimit(childIdForVideo);
-              if (!videoLimitCheck.canCreate) throw new Error('VIDEO_LIMIT_REACHED');
+              if (!videoLimitCheck.canCreate) {
+                throw new Error(
+                  videoLimitCheck.reason === 'capture_locked'
+                    ? 'CAPTURE_LOCKED'
+                    : 'VIDEO_LIMIT_REACHED',
+                );
+              }
               const meta = await buildImportMetadataFromPickerAsset(pickedAsset, { isVideo: true });
               const locationOverride =
                 meta.locationLabel && meta.locationLabel.trim()
@@ -504,7 +510,7 @@ export default function ImportMediaScreen() {
               if (!videoLimitCheck.canCreate) {
                 router.replace('/(tabs)/fil');
                 promptFreeTierLimitThenPaywall({
-                  kind: 'videos',
+                  kind: freeTierLimitKindFromVideoCheck(videoLimitCheck),
                   router,
                   replace: true,
                   returnTo: 'fil',

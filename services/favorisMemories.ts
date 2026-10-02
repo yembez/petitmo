@@ -1,6 +1,9 @@
 import { getAllLocalMemories } from '@/lib/localDb';
 import { getFamilyMemories } from '@/services/media';
-import { reconcileFavoritesAfterCloudSync } from '@/services/memoryDisplayHeal';
+import {
+  applyFeedHydrationFavoriteFlagsToLocal,
+  reconcileFavoritesAfterCloudSync,
+} from '@/services/memoryDisplayHeal';
 import type { Memory } from '@/types/local';
 import { parseFavoritePhotoUrls } from '@/utils/memoryPhotos';
 
@@ -14,6 +17,12 @@ export function memoryShouldAppearInFavoris(m: Memory): boolean {
   return false;
 }
 
+/** Lecture SQLite synchrone — peindre Favoris sans await (local-first). */
+export function loadMemoriesForFavorisTabSync(): Memory[] {
+  applyFeedHydrationFavoriteFlagsToLocal();
+  return getAllLocalMemories();
+}
+
 /**
  * Charge les souvenirs pour Favoris.
  * Défaut = **local-first** (SQLite immédiat). Passer `{ waitForRemote: true }` seulement
@@ -22,17 +31,15 @@ export function memoryShouldAppearInFavoris(m: Memory): boolean {
 export async function loadMemoriesForFavorisTab(opts?: {
   waitForRemote?: boolean;
 }): Promise<Memory[]> {
-  const { applyFeedHydrationFavoriteFlagsToLocal } = await import('@/services/memoryDisplayHeal');
-  applyFeedHydrationFavoriteFlagsToLocal();
-
   if (opts?.waitForRemote === true) {
+    applyFeedHydrationFavoriteFlagsToLocal();
     await getFamilyMemories();
     applyFeedHydrationFavoriteFlagsToLocal();
     await reconcileFavoritesAfterCloudSync();
     return getAllLocalMemories();
   }
 
-  return getAllLocalMemories();
+  return loadMemoriesForFavorisTabSync();
 }
 
 /** Pull cloud + reconcile favoris en fond (ne doit jamais bloquer l’UI). */
