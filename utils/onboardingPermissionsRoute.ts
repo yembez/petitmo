@@ -3,7 +3,8 @@
  * Même flux pour e-mail, Google et Apple.
  * Règle d’or V2 : compte d’abord ; local-first (pas de sync bloquante ici).
  *
- * L’écran permissions = **1× par compte** (flag `hasSeen`).
+ * L’écran permissions = **1× par compte** (flag `hasSeen`) — sauf wipe local
+ * (réinstall) où le flag disparaît : on réaffiche avec copy « returning ».
  * Ne jamais le réafficher si : déjà vu, enfants locaux, ou opt-in photos
  * déjà posé (ex. activation depuis l’espace parents / alerte import).
  */
@@ -57,10 +58,20 @@ export async function resolvePostAuthOnboardingPath(
 /** Compte sans enfant local → permissions (1× / compte) puis create-child ; sinon tabs. */
 export async function replaceToOnboardingPermissionsOrCreateChild(
   router: Pick<Router, 'replace'>,
+  opts?: { returning?: boolean },
 ): Promise<void> {
   const path = await resolvePostAuthOnboardingPath();
   if (path === '/(tabs)') {
     hydrateTabScreensFromSqliteSync();
+    router.replace(path);
+    return;
+  }
+  if (path === '/onboarding-permissions' && opts?.returning) {
+    router.replace({
+      pathname: '/onboarding-permissions',
+      params: { context: 'returning' },
+    });
+    return;
   }
   router.replace(path);
 }

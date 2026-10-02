@@ -99,13 +99,20 @@ export default function AuthVerifyOtpScreen() {
           '@/lib/onboardingPermissionsSeen'
         );
         await markOnboardingPermissionsSeen(uid);
-        router.replace('/(tabs)');
         const { getAllLocalMemories } = await import('@/lib/localDb');
         if (getAllLocalMemories().length === 0) {
-          void import('@/services/runCloudMemoriesRestore').then(async ({ restoreFamilyMemoriesFromCloudWithSoftWait }) => {
-            await restoreFamilyMemoriesFromCloudWithSoftWait();
-            hydrateTabScreensFromSqliteSync();
-          });
+          const { restoreFamilyMemoriesFromCloudWithSoftWait } = await import(
+            '@/services/runCloudMemoriesRestore'
+          );
+          const { endCloudRestoreUi, peekCloudRestoreUi } = await import('@/lib/cloudRestoreUi');
+          await restoreFamilyMemoriesFromCloudWithSoftWait({ softUi: true, holdUi: true });
+          hydrateTabScreensFromSqliteSync();
+          router.replace('/(tabs)');
+          if (peekCloudRestoreUi().active) {
+            setTimeout(() => endCloudRestoreUi(), 220);
+          }
+        } else {
+          router.replace('/(tabs)');
         }
         return;
       }
@@ -115,15 +122,22 @@ export default function AuthVerifyOtpScreen() {
       await replaceToOnboardingPermissionsOrCreateChild(router);
       return;
     }
-    hydrateTabScreensFromSqliteSync();
-    router.replace('/(tabs)');
     const { getAllLocalMemories } = await import('@/lib/localDb');
     if (getAllLocalMemories().length === 0) {
-      void import('@/services/runCloudMemoriesRestore').then(async ({ restoreFamilyMemoriesFromCloudWithSoftWait }) => {
-        await restoreFamilyMemoriesFromCloudWithSoftWait();
-        hydrateTabScreensFromSqliteSync();
-      });
+      const { restoreFamilyMemoriesFromCloudWithSoftWait } = await import(
+        '@/services/runCloudMemoriesRestore'
+      );
+      const { endCloudRestoreUi, peekCloudRestoreUi } = await import('@/lib/cloudRestoreUi');
+      await restoreFamilyMemoriesFromCloudWithSoftWait({ softUi: true, holdUi: true });
+      hydrateTabScreensFromSqliteSync();
+      router.replace('/(tabs)');
+      if (peekCloudRestoreUi().active) {
+        setTimeout(() => endCloudRestoreUi(), 220);
+      }
+      return;
     }
+    hydrateTabScreensFromSqliteSync();
+    router.replace('/(tabs)');
   }, [isSubscribe, router]);
 
   const onVerify = useCallback(

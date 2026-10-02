@@ -8,21 +8,24 @@ import {
   TouchableOpacity,
   useWindowDimensions,
   View,
+  BackHandler,
   type ImageSourcePropType,
   type ListRenderItemInfo,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Lock } from 'lucide-react-native';
+import { Lock, ChevronRight } from 'lucide-react-native';
+import { useNavigation } from '@react-navigation/native';
 import { scale, verticalScale } from '@/utils/responsive';
-import PetitCoeurWordmark from '@/components/PetitCoeurWordmark';
 import { SPACING } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
 import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
+import MotionPressable from '@/components/MotionPressable';
+import PetitCoeurWordmark from '@/components/PetitCoeurWordmark';
 import { LinearGradient } from 'expo-linear-gradient';
 import { getChildren, refreshChildrenFromCloudInBackground } from '@/services/children';
-import { hasRealAuthAccount } from '@/lib/authAccount';
+import { hasRealAuthAccount, peekIntentionalSignedOut } from '@/lib/authAccount';
 import { listLocalChildrenForUser } from '@/lib/localDb';
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
@@ -76,19 +79,47 @@ const PHOTO_ZOOM = 1.14;
 
 export default function OnboardingScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const { t } = useAppTranslation('common');
   const listRef = useRef<FlatList<OnboardingSlide>>(null);
   const [index, setIndex] = useState(0);
   const isLast = index >= SLIDES.length - 1;
+  const isFirst = index === 0;
+  /** Plus petit que l’ancien wordmark (~20 % / 78) — 1ʳᵉ slide seulement. */
+  const logoW = Math.min(windowWidth * 0.14, scale(54));
 
-  const logoW = Math.min(windowWidth * 0.2, scale(78));
   const topFadeH = insets.top + verticalScale(100);
   const bottomFadeH = Math.min(windowHeight * 0.42, verticalScale(340));
+  /** Dernière slide : CTA + lien + privacy — dégradé plus haut pour lisibilité. */
+  const bottomFadeHLast = Math.min(windowHeight * 0.58, verticalScale(470));
+
+  /**
+   * Bloque le retour système / gesture vers `(tabs)` laissés sous la pile après logout.
+   * (gestureEnabled:false sur le Stack + filet Android Back.)
+   */
+  useEffect(() => {
+    const unsub = navigation.addListener('beforeRemove', e => {
+      if (e.data.action.type !== 'GO_BACK' && e.data.action.type !== 'POP') return;
+      e.preventDefault();
+    });
+    const backSub = BackHandler.addEventListener('hardwareBackPress', () => {
+      // S’il y a une entrée sous onboarding (souvent les tabs post-logout), bloquer.
+      if (navigation.canGoBack()) return true;
+      return false;
+    });
+    return () => {
+      unsub();
+      backSub.remove();
+    };
+  }, [navigation]);
 
   useEffect(() => {
     const checkExisting = async () => {
+      // Déconnexion volontaire : rester sur onboarding (pas de rebond session fantôme).
+      if (peekIntentionalSignedOut()) return;
+
       const hasAccount = await hasRealAuthAccount();
       if (!hasAccount) return;
 
@@ -107,7 +138,8 @@ export default function OnboardingScreen() {
         const { replaceToOnboardingPermissionsOrCreateChild } = await import(
           '@/utils/onboardingPermissionsRoute'
         );
-        await replaceToOnboardingPermissionsOrCreateChild(router);
+        // Session déjà là sans enfants locaux : souvent restore / login → copy returning.
+        await replaceToOnboardingPermissionsOrCreateChild(router, { returning: true });
       }
     };
 
@@ -142,7 +174,10 @@ export default function OnboardingScreen() {
   );
 
   const renderItem = useCallback(
-    ({ item }: ListRenderItemInfo<OnboardingSlide>) => (
+    ({ item, index: slideIndex }: ListRenderItemInfo<OnboardingSlide>) => {
+      const isLastSlide = slideIndex === SLIDES.length - 1;
+      const fadeH = isLastSlide ? bottomFadeHLast : bottomFadeH;
+      return (
       <View
         style={{
           width: windowWidth,
@@ -170,14 +205,24 @@ export default function OnboardingScreen() {
           pointerEvents="none"
         />
         <LinearGradient
-          colors={['transparent', 'rgba(40, 22, 18, 0.5)', 'rgba(40, 22, 18, 0.78)']}
-          locations={[0, 0.48, 1]}
-          style={[styles.bottomOverlay, { height: bottomFadeH }]}
+          colors={
+            isLastSlide
+              ? [
+                  'transparent',
+                  'rgba(40, 22, 18, 0.35)',
+                  'rgba(40, 22, 18, 0.62)',
+                  'rgba(40, 22, 18, 0.82)',
+                ]
+              : ['transparent', 'rgba(40, 22, 18, 0.5)', 'rgba(40, 22, 18, 0.78)']
+          }
+          locations={isLastSlide ? [0, 0.28, 0.62, 1] : [0, 0.48, 1]}
+          style={[styles.bottomOverlay, { height: fadeH }]}
           pointerEvents="none"
         />
       </View>
-    ),
-    [bottomFadeH, topFadeH, windowHeight, windowWidth],
+      );
+    },
+    [bottomFadeH, bottomFadeHLast, topFadeH, windowHeight, windowWidth],
   );
 
   const current = SLIDES[index] ?? SLIDES[0];
@@ -210,14 +255,19 @@ export default function OnboardingScreen() {
         style={[styles.chrome, { paddingTop: insets.top + verticalScale(8) }]}
         pointerEvents="box-none"
       >
-        <View style={styles.logoContainer}>
-          <PetitCoeurWordmark width={logoW} variant="white" opacity={0.92} />
-        </View>
+        {isFirst ? (
+          <View
+            style={[styles.logoContainer, { top: insets.top + verticalScale(8) }]}
+            pointerEvents="none"
+          >
+            <PetitCoeurWordmark width={logoW} variant="white" opacity={0.92} />
+          </View>
+        ) : null}
 
         <View
           style={[
             styles.footer,
-            { paddingBottom: insets.bottom + verticalScale(12) },
+            { paddingBottom: Math.max(insets.bottom, verticalScale(8)) },
           ]}
           pointerEvents="box-none"
         >
@@ -228,34 +278,43 @@ export default function OnboardingScreen() {
             </View>
           </View>
 
-          <PetitmoPrimaryPressable
-            style={styles.ctaButton}
-            onPress={onContinue}
-            activeOpacity={0.9}
-            accessibilityRole="button"
-            accessibilityLabel={
-              isLast ? t('onboarding.ctaStartA11y') : t('onboarding.ctaContinue')
-            }
-          >
-            <Text style={styles.ctaButtonText}>
-              {isLast ? t('onboarding.ctaStart') : t('onboarding.ctaContinue')}
-            </Text>
-          </PetitmoPrimaryPressable>
+          {isLast ? (
+            <PetitmoPrimaryPressable
+              style={styles.ctaButton}
+              onPress={onContinue}
+              activeOpacity={0.9}
+              accessibilityRole="button"
+              accessibilityLabel={t('onboarding.ctaStartA11y')}
+            >
+              <Text style={styles.ctaButtonText}>{t('onboarding.ctaStart')}</Text>
+            </PetitmoPrimaryPressable>
+          ) : (
+            <MotionPressable
+              onPress={onContinue}
+              haptic
+              accessibilityRole="button"
+              accessibilityLabel={t('onboarding.ctaContinue')}
+              style={styles.continueArrowHit}
+              hitSlop={16}
+            >
+              <ChevronRight
+                size={scale(40)}
+                color="#FFFFFF"
+                strokeWidth={2.4}
+              />
+            </MotionPressable>
+          )}
 
           <View style={styles.afterCtaSlot}>
-            {isLast ? (
-              <TouchableOpacity
-                style={styles.linkTertiaryWrap}
-                onPress={handleExistingAccount}
-                activeOpacity={0.7}
-                accessibilityRole="button"
-                accessibilityLabel={t('onboarding.alreadyAccount')}
-              >
-                <Text style={styles.linkTertiary}>{t('onboarding.alreadyAccount')}</Text>
-              </TouchableOpacity>
-            ) : (
-              <View style={styles.linkTertiarySpacer} />
-            )}
+            <TouchableOpacity
+              style={styles.linkTertiaryWrap}
+              onPress={handleExistingAccount}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={t('onboarding.alreadyAccount')}
+            >
+              <Text style={styles.linkTertiary}>{t('onboarding.alreadyAccount')}</Text>
+            </TouchableOpacity>
           </View>
 
           <View style={styles.dotsRow}>
@@ -304,35 +363,36 @@ const styles = StyleSheet.create({
   },
   chrome: {
     ...StyleSheet.absoluteFillObject,
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
   },
   logoContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
     alignItems: 'center',
-    paddingTop: verticalScale(6),
-    paddingHorizontal: SPACING.lg,
   },
   footer: {
     paddingHorizontal: SPACING.lg,
     alignItems: 'center',
   },
   copySlot: {
-    minHeight: verticalScale(110),
+    minHeight: verticalScale(64),
     width: '100%',
     justifyContent: 'flex-end',
-    marginBottom: verticalScale(4),
+    marginBottom: verticalScale(2),
   },
   copyBlock: {
     alignItems: 'center',
     width: '100%',
   },
   title: {
-    fontSize: scale(28),
-    fontWeight: '700',
+    fontSize: scale(32),
+    fontWeight: '500',
     color: '#FFFFFF',
     textAlign: 'center',
-    lineHeight: scale(34),
-    letterSpacing: -0.2,
-    marginBottom: verticalScale(12),
+    lineHeight: scale(38),
+    letterSpacing: -0.3,
+    marginBottom: verticalScale(10),
     maxWidth: scale(340),
     textShadowColor: 'rgba(0, 0, 0, 0.35)',
     textShadowOffset: { width: 0, height: 2 },
@@ -345,7 +405,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: scale(26),
     letterSpacing: -0.1,
-    marginBottom: verticalScale(20),
+    marginBottom: verticalScale(14),
     maxWidth: scale(320),
     textShadowColor: 'rgba(40, 22, 18, 0.4)',
     textShadowOffset: { width: 0, height: 1 },
@@ -365,17 +425,20 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
     color: THEME.captureScreenCtaForeground,
   },
+  continueArrowHit: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: verticalScale(8),
+    paddingHorizontal: scale(12),
+  },
   afterCtaSlot: {
-    minHeight: verticalScale(46),
+    minHeight: verticalScale(36),
     justifyContent: 'center',
   },
   linkTertiaryWrap: {
-    marginTop: verticalScale(10),
-    paddingVertical: verticalScale(8),
+    marginTop: verticalScale(6),
+    paddingVertical: verticalScale(6),
     paddingHorizontal: SPACING.md,
-  },
-  linkTertiarySpacer: {
-    height: verticalScale(36),
   },
   linkTertiary: {
     fontSize: scale(18),
@@ -393,8 +456,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: scale(7),
-    marginTop: verticalScale(8),
-    marginBottom: verticalScale(6),
+    marginTop: verticalScale(4),
+    marginBottom: verticalScale(2),
   },
   dot: {
     height: scale(6),

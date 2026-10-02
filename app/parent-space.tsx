@@ -20,7 +20,7 @@ import { BRAND_ACTION_GRADIENT } from '@/constants/captureScreenPalette';
 import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
 import { getChildren, setSelectedChild } from '@/services/children';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { Child } from '@/types/local';
 import { scale, verticalScale } from '@/utils/responsive';
 import { calculateAge } from '@/utils/date';
@@ -29,9 +29,15 @@ import {
   deleteRealAccount,
   getRealAuthUser,
   peekHasRealAuthAccount,
+  peekOfflineLocalResumeActive,
   peekRealAuthEmail,
   signOutRealAccount,
 } from '@/lib/authAccount';
+import { resetNavigationToOnboarding } from '@/utils/resetNavigationToOnboarding';
+import {
+  beginAccountClosingUi,
+  endAccountClosingUi,
+} from '@/lib/accountClosingUi';
 import {
   getLocalChild,
   getLocalMemoriesPendingCloudSync,
@@ -97,6 +103,7 @@ async function openUrl(url: string): Promise<void> {
 
 export default function ParentSpaceScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
   const { t } = useAppTranslation('common');
@@ -313,8 +320,8 @@ export default function ParentSpaceScreen() {
     }).then((ctx) => setVersionLabel(formatAppVersionLabel(ctx)));
 
     void getRealAuthUser().then((realUser) => {
-      setHasRealAccount(!!realUser);
       if (realUser) {
+        setHasRealAccount(true);
         void syncBillingIssueFromUser(realUser).then(setBillingIssue);
         void syncCaptureLockedFromUser(realUser).then(setCaptureLocked);
         const rawEmail =
@@ -330,19 +337,36 @@ export default function ParentSpaceScreen() {
           });
           refreshOrderTracking();
         }
-      } else {
-        setAccountEmail('');
-        setBackupStatus('');
-        setOrders([]);
-        setBillingIssue(false);
-        setCaptureLocked(false);
+        return;
       }
+
+      // Reprise hors-ligne : pas de session Supabase, mais compte local actif.
+      if (peekHasRealAuthAccount() || peekOfflineLocalResumeActive()) {
+        setHasRealAccount(true);
+        setAccountEmail(peekRealAuthEmail() || '—');
+        const pending = getLocalMemoriesPendingCloudSync().length;
+        setBackupStatus(
+          peekOfflineLocalResumeActive()
+            ? t('parent.account.backupOfflinePaused')
+            : pending > 0
+              ? `Synchronisation (${pending})`
+              : 'À jour',
+        );
+        return;
+      }
+
+      setHasRealAccount(false);
+      setAccountEmail('');
+      setBackupStatus('');
+      setOrders([]);
+      setBillingIssue(false);
+      setCaptureLocked(false);
     });
 
     void getChildren().then((list) => {
       setChildrenState(sortChildrenByBirthdateAsc(list));
     });
-  }, [pathname, refreshOrderTracking]);
+  }, [pathname, refreshOrderTracking, t]);
 
   useFocusEffect(
     useCallback(() => {
@@ -360,15 +384,19 @@ export default function ParentSpaceScreen() {
   const performSignOut = useCallback(async () => {
     if (signOutBusy || deleteBusy) return;
     setSignOutBusy(true);
+    beginAccountClosingUi('signOut');
     try {
-      // Navigation d’abord côté UX : signOut est déjà rapide (device-user en bg).
       await signOutRealAccount();
-      router.replace('/onboarding');
+      // Reset pile : sinon swipe-back onboarding → fil du compte précédent.
+      resetNavigationToOnboarding(router, navigation);
+      // Overlay racine : survit au unmount Espace parent, puis fade vers onboarding.
+      setTimeout(() => endAccountClosingUi(), 280);
     } catch {
+      endAccountClosingUi();
       Alert.alert(t('error'), t('parent.account.signOutFailed'));
       setSignOutBusy(false);
     }
-  }, [deleteBusy, router, signOutBusy, t]);
+  }, [deleteBusy, navigation, router, signOutBusy, t]);
 
   const handleSignOut = useCallback(() => {
     if (signOutBusy || deleteBusy) return;
@@ -385,22 +413,30 @@ export default function ParentSpaceScreen() {
   const performDeleteAccount = useCallback(async () => {
     if (deleteBusy || signOutBusy) return;
     setDeleteBusy(true);
+    beginAccountClosingUi('delete');
     try {
       const result = await deleteRealAccount();
       if (!result.ok) {
+        endAccountClosingUi();
         Alert.alert(t('error'), result.error);
         setDeleteBusy(false);
         return;
       }
-      router.replace('/onboarding');
+      resetNavigationToOnboarding(router, navigation);
+      setTimeout(() => endAccountClosingUi(), 280);
     } catch {
+      endAccountClosingUi();
       Alert.alert(t('error'), t('parent.account.deleteFailed'));
       setDeleteBusy(false);
     }
-  }, [deleteBusy, router, signOutBusy, t]);
+  }, [deleteBusy, navigation, router, signOutBusy, t]);
 
   const handleDeleteAccount = useCallback(() => {
     if (deleteBusy || signOutBusy) return;
+    if (peekOfflineLocalResumeActive()) {
+      Alert.alert(t('error'), t('parent.account.deleteNeedsNetwork'));
+      return;
+    }
     Alert.alert(t('parent.account.deleteConfirmTitle'), t('parent.account.deleteConfirmBody'), [
       { text: t('cancel'), style: 'cancel' },
       {
@@ -790,7 +826,7 @@ export default function ParentSpaceScreen() {
               <View style={styles.rowIconPlaceholder} />
               <View style={styles.rowText}>
                 <Text style={[styles.rowLabelDestructive, dm500 ? { fontFamily: dm500 } : null]}>
-                  {signOutBusy ? '…' : t('parent.account.signOut')}
+                  {t('parent.account.signOut')}
                 </Text>
               </View>
               <View style={styles.rowValuePlaceholder} />
@@ -806,7 +842,7 @@ export default function ParentSpaceScreen() {
               <View style={styles.rowIconPlaceholder} />
               <View style={styles.rowText}>
                 <Text style={[styles.rowLabelDestructive, dm500 ? { fontFamily: dm500 } : null]}>
-                  {deleteBusy ? '…' : t('parent.account.deleteAccount')}
+                  {t('parent.account.deleteAccount')}
                 </Text>
               </View>
               <View style={styles.rowValuePlaceholder} />

@@ -20,8 +20,10 @@ import { setFeedHydrationSnapshots } from '@/services/tabScreensCache';
 import { clearSelectedChildAndCaptureSnapshot } from '@/services/children';
 
 const LAST_REAL_AUTH_USER_ID_KEY = 'petitmo:lastRealAuthUserId';
+const LAST_REAL_AUTH_EMAIL_KEY = 'petitmo:lastRealAuthEmail';
 
 let lastRealAuthUserIdMemory: string | null | undefined;
+let lastRealAuthEmailMemory: string | null | undefined;
 
 export async function getLastRealAuthUserId(): Promise<string | null> {
   if (lastRealAuthUserIdMemory !== undefined) {
@@ -54,6 +56,44 @@ export async function setLastRealAuthUserId(userId: string | null): Promise<void
   } catch (e) {
     console.warn('[accountLocalReset] setLastRealAuthUserId', e);
   }
+}
+
+/** E-mail du dernier compte produit sur cet appareil (survit à la déconnexion). */
+export async function getLastRealAuthEmail(): Promise<string | null> {
+  if (lastRealAuthEmailMemory !== undefined) {
+    return lastRealAuthEmailMemory;
+  }
+  try {
+    const v = (await AsyncStorage.getItem(LAST_REAL_AUTH_EMAIL_KEY))?.trim().toLowerCase() || null;
+    lastRealAuthEmailMemory = v;
+    return v;
+  } catch {
+    lastRealAuthEmailMemory = null;
+    return null;
+  }
+}
+
+export function peekLastRealAuthEmail(): string | null {
+  return lastRealAuthEmailMemory ?? null;
+}
+
+export async function setLastRealAuthEmail(email: string | null): Promise<void> {
+  const e = (email ?? '').trim().toLowerCase() || null;
+  lastRealAuthEmailMemory = e;
+  try {
+    if (e) {
+      await AsyncStorage.setItem(LAST_REAL_AUTH_EMAIL_KEY, e);
+    } else {
+      await AsyncStorage.removeItem(LAST_REAL_AUTH_EMAIL_KEY);
+    }
+  } catch (err) {
+    console.warn('[accountLocalReset] setLastRealAuthEmail', err);
+  }
+}
+
+/** Au boot : hydrate caches sync id + e-mail (Capturer / auth hors-ligne). */
+export async function warmLastRealAuthIdentityFromStorage(): Promise<void> {
+  await Promise.all([getLastRealAuthUserId(), getLastRealAuthEmail()]);
 }
 
 /** True si SQLite contient des lignes déjà rattachées à un autre compte. */

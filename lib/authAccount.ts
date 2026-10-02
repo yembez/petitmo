@@ -1,6 +1,7 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
-import { Platform } from 'react-native';
+import { DeviceEventEmitter, Platform } from 'react-native';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { setCloudAccountKind } from '@/lib/userMode';
@@ -9,14 +10,90 @@ import { getGoogleIosClientId, getGoogleWebClientId } from '@/lib/googleAuthConf
 import {
   prepareLocalWorkspaceForRealUser,
   setLastRealAuthUserId,
+  setLastRealAuthEmail,
+  getLastRealAuthEmail,
+  peekLastRealAuthUserId,
+  getLastRealAuthUserId,
 } from '@/services/accountLocalReset';
 import { claimLocalDataForCloudUser } from '@/services/claimLocalDataForCloud';
-import { ensureSupabaseSession } from '@/lib/ensureSupabaseSession';
 import { clearSelectedChildAndCaptureSnapshot } from '@/services/children';
 import { recordAction, recordCaughtError, recordWarn } from '@/lib/diagnosticTrail';
 import { setPetitmoSentryUser } from '@/lib/sentry';
+import { listLocalChildrenForUser } from '@/lib/localDb';
 
 WebBrowser.maybeCompleteAuthSession();
+
+/** Déconnexion / suppression : Capturer + onglets doivent vider le paint (SQLite peut rester). */
+export const PETITMO_AUTH_SIGNED_OUT_EVENT = 'petitmo:auth-signed-out';
+
+type SupabaseAuthInternals = {
+  storageKey?: string;
+  _removeSession?: () => Promise<void>;
+};
+
+/**
+ * GoTrue `signOut({ scope: 'local' })` appelle quand même `/logout` réseau.
+ * Hors-ligne : l’erreur réseau peut renvoyer **sans** `_removeSession()` → session
+ * AsyncStorage intacte → à la reprise réseau, l’utilisatrice « se reconnecte » toute seule.
+ * On force donc la purge mémoire + storage, même si le logout distant échoue.
+ */
+async function clearLocalAuthSessionGuaranteed(): Promise<void> {
+  const auth = supabase.auth as unknown as SupabaseAuthInternals;
+  try {
+    await Promise.race([
+      supabase.auth.signOut({ scope: 'local' }),
+      new Promise<void>(resolve => setTimeout(resolve, 700)),
+    ]);
+  } catch (e) {
+    console.warn('[auth] signOut local', e);
+  }
+
+  try {
+    if (typeof auth._removeSession === 'function') {
+      await auth._removeSession();
+    }
+  } catch (e) {
+    console.warn('[auth] _removeSession', e);
+  }
+
+  const key = typeof auth.storageKey === 'string' ? auth.storageKey.trim() : '';
+  if (key) {
+    try {
+      await AsyncStorage.multiRemove([key, `${key}-code-verifier`, `${key}-user`]);
+    } catch (e) {
+      console.warn('[auth] hardClear auth storage', e);
+    }
+  } else {
+    try {
+      const keys = await AsyncStorage.getAllKeys();
+      const authKeys = keys.filter(
+        k =>
+          /^sb-.*-auth-token$/.test(k) ||
+          /^sb-.*-auth-token-code-verifier$/.test(k) ||
+          /^sb-.*-auth-token-user$/.test(k),
+      );
+      if (authKeys.length > 0) await AsyncStorage.multiRemove(authKeys);
+    } catch (e) {
+      console.warn('[auth] hardClear auth keys scan', e);
+    }
+  }
+
+  // Vérif : si une session produit traîne encore, retenter une fois.
+  try {
+    const { data } = await supabase.auth.getSession();
+    const email = data.session?.user?.email;
+    if (data.session?.user && !isDeviceUserEmail(email)) {
+      if (typeof auth._removeSession === 'function') {
+        await auth._removeSession();
+      }
+      if (key) {
+        await AsyncStorage.multiRemove([key, `${key}-code-verifier`, `${key}-user`]);
+      }
+    }
+  } catch {
+    /* */
+  }
+}
 
 /**
  * Redirect e-mail Auth (reset MDP) → scheme natif uniquement.
@@ -33,12 +110,130 @@ const DEVICE_EMAIL_SUFFIX = '@petitmo.local';
 let realAuthEmailMemory: string | null = null;
 let hasRealAuthMemory = false;
 
+/**
+ * Déconnexion volontaire : bloque tout rebond onboarding→tabs / paint SQLite
+ * tant qu’il n’y a pas de vrai login ou « Continuer hors ligne ».
+ * Persisté : survit au kill (évite resurrection session fantôme hors-ligne).
+ */
+const INTENTIONAL_SIGNED_OUT_KEY = 'petitmo:intentionalSignedOut';
+let intentionalSignedOut = false;
+
+export function peekIntentionalSignedOut(): boolean {
+  return intentionalSignedOut;
+}
+
+async function persistIntentionalSignedOut(value: boolean): Promise<void> {
+  intentionalSignedOut = value;
+  try {
+    if (value) {
+      await AsyncStorage.setItem(INTENTIONAL_SIGNED_OUT_KEY, '1');
+    } else {
+      await AsyncStorage.removeItem(INTENTIONAL_SIGNED_OUT_KEY);
+    }
+  } catch (e) {
+    console.warn('[auth] persistIntentionalSignedOut', e);
+  }
+}
+
+export async function warmIntentionalSignedOutFromStorage(): Promise<boolean> {
+  try {
+    const v = await AsyncStorage.getItem(INTENTIONAL_SIGNED_OUT_KEY);
+    intentionalSignedOut = v === '1';
+    if (intentionalSignedOut) {
+      clearOfflineLocalResume();
+      hasRealAuthMemory = false;
+      realAuthEmailMemory = null;
+      await clearLocalAuthSessionGuaranteed();
+    }
+    return intentionalSignedOut;
+  } catch {
+    intentionalSignedOut = false;
+    return false;
+  }
+}
+
+export function clearIntentionalSignedOut(): void {
+  void persistIntentionalSignedOut(false);
+}
+
+/**
+ * Reprise locale hors-ligne après déconnexion (même appareil + SQLite du dernier compte).
+ * Pas de session Supabase : sync cloud en pause jusqu’à une vraie reconnexion.
+ * Persisté : survit à un kill d’app en avion.
+ */
+const OFFLINE_LOCAL_RESUME_KEY = 'petitmo:offlineLocalResume';
+let offlineLocalResume: { userId: string; email: string } | null = null;
+
 export function peekHasRealAuthAccount(): boolean {
-  return hasRealAuthMemory;
+  if (intentionalSignedOut) return false;
+  return hasRealAuthMemory || offlineLocalResume != null;
 }
 
 export function peekRealAuthEmail(): string {
-  return realAuthEmailMemory ?? '';
+  if (intentionalSignedOut && !offlineLocalResume) return '';
+  return realAuthEmailMemory ?? offlineLocalResume?.email ?? '';
+}
+
+export function peekOfflineLocalResumeActive(): boolean {
+  return !intentionalSignedOut && offlineLocalResume != null;
+}
+
+async function persistOfflineLocalResume(
+  value: { userId: string; email: string } | null,
+): Promise<void> {
+  try {
+    if (value) {
+      await AsyncStorage.setItem(OFFLINE_LOCAL_RESUME_KEY, JSON.stringify(value));
+    } else {
+      await AsyncStorage.removeItem(OFFLINE_LOCAL_RESUME_KEY);
+    }
+  } catch (e) {
+    console.warn('[auth] persistOfflineLocalResume', e);
+  }
+}
+
+function clearOfflineLocalResume(): void {
+  offlineLocalResume = null;
+  void persistOfflineLocalResume(null);
+}
+
+/** Au boot : réarmer une reprise hors-ligne persistée si le SQLite local est encore là. */
+export async function warmOfflineLocalResumeFromStorage(): Promise<boolean> {
+  try {
+    if (intentionalSignedOut) {
+      await persistOfflineLocalResume(null);
+      offlineLocalResume = null;
+      return false;
+    }
+    const raw = await AsyncStorage.getItem(OFFLINE_LOCAL_RESUME_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw) as { userId?: string; email?: string };
+    const userId = (parsed.userId ?? '').trim();
+    const email = (parsed.email ?? '').trim().toLowerCase();
+    if (!userId || !email || isDeviceUserEmail(email)) {
+      await persistOfflineLocalResume(null);
+      return false;
+    }
+    if (listLocalChildrenForUser(userId).length === 0) {
+      await persistOfflineLocalResume(null);
+      return false;
+    }
+    // Session cloud réelle prioritaire si elle est revenue.
+    const { data } = await supabase.auth.getSession();
+    const sessionUser = data.session?.user;
+    if (sessionUser && !isDeviceUserEmail(sessionUser.email)) {
+      await persistOfflineLocalResume(null);
+      return false;
+    }
+    offlineLocalResume = { userId, email };
+    hasRealAuthMemory = true;
+    realAuthEmailMemory = email;
+    await setCloudAccountKind('real');
+    return true;
+  } catch (e) {
+    console.warn('[auth] warmOfflineLocalResumeFromStorage', e);
+    return false;
+  }
 }
 
 function rememberRealAuthUser(user: User | null | undefined): void {
@@ -47,12 +242,19 @@ function rememberRealAuthUser(user: User | null | undefined): void {
     realAuthEmailMemory = null;
     return;
   }
+  // Vrai login / session produit : lever le verrou déconnexion.
+  intentionalSignedOut = false;
+  void persistIntentionalSignedOut(false);
+  clearOfflineLocalResume();
   hasRealAuthMemory = true;
   const raw =
     user.email ??
     (typeof user.user_metadata?.email === 'string' ? user.user_metadata.email : '') ??
     '';
   realAuthEmailMemory = raw.trim() || null;
+  if (realAuthEmailMemory) {
+    void setLastRealAuthEmail(realAuthEmailMemory);
+  }
 }
 
 export type AuthAccountResult =
@@ -76,14 +278,23 @@ export function isDeviceUserEmail(email: string | null | undefined): boolean {
  * Lit la session **locale** (`getSession`) — jamais `getUser()` (réseau) sur un chemin UI.
  */
 export async function getRealAuthUser(): Promise<User | null> {
+  // Déconnexion volontaire : ignorer toute session AsyncStorage fantôme.
+  if (intentionalSignedOut) {
+    return null;
+  }
   const { data, error } = await supabase.auth.getSession();
   const user = data.session?.user;
   if (error || !user) {
-    rememberRealAuthUser(null);
+    // Ne pas effacer une reprise hors-ligne active (pas de session cloud, SQLite OK).
+    if (!offlineLocalResume) {
+      rememberRealAuthUser(null);
+    }
     return null;
   }
   if (isDeviceUserEmail(user.email)) {
-    rememberRealAuthUser(null);
+    if (!offlineLocalResume) {
+      rememberRealAuthUser(null);
+    }
     return null;
   }
   rememberRealAuthUser(user);
@@ -91,7 +302,63 @@ export async function getRealAuthUser(): Promise<User | null> {
 }
 
 export async function hasRealAuthAccount(): Promise<boolean> {
+  if (intentionalSignedOut) return false;
+  if (offlineLocalResume) return true;
   return (await getRealAuthUser()) != null;
+}
+
+/**
+ * Données locales encore là pour le dernier compte de cet appareil ?
+ * (après logout : lastRealAuthUserId + enfants SQLite conservés).
+ */
+export async function canResumeLastAccountOffline(): Promise<{
+  ok: true;
+  userId: string;
+  email: string;
+} | { ok: false }> {
+  const uid = (await getLastRealAuthUserId())?.trim() || peekLastRealAuthUserId()?.trim() || '';
+  if (!uid) return { ok: false };
+  const email = ((await getLastRealAuthEmail()) ?? '').trim().toLowerCase();
+  if (!email || isDeviceUserEmail(email)) return { ok: false };
+  const kids = listLocalChildrenForUser(uid);
+  if (kids.length === 0) return { ok: false };
+  return { ok: true, userId: uid, email };
+}
+
+/**
+ * Déverrouille l’UI local-first sans session Supabase.
+ * Sync / flush cloud restent en pause jusqu’à un vrai login réseau.
+ */
+export async function resumeLastAccountOffline(): Promise<
+  { ok: true; email: string } | { ok: false; error: string }
+> {
+  const can = await canResumeLastAccountOffline();
+  if (!can.ok) {
+    return {
+      ok: false,
+      error: 'Aucun espace local à rouvrir hors ligne sur cet appareil.',
+    };
+  }
+
+  offlineLocalResume = { userId: can.userId, email: can.email };
+  hasRealAuthMemory = true;
+  realAuthEmailMemory = can.email;
+  await persistIntentionalSignedOut(false);
+  await persistOfflineLocalResume(offlineLocalResume);
+  await setCloudAccountKind('real');
+  await setUserTier('free');
+
+  try {
+    const { hydrateTabScreensFromSqliteSync } = await import('@/services/tabScreensHydrate');
+    hydrateTabScreensFromSqliteSync();
+  } catch (e) {
+    console.warn('[auth] resumeLastAccountOffline hydrate', e);
+  }
+
+  DeviceEventEmitter.emit('petitmo:memories-invalidate');
+  DeviceEventEmitter.emit('petitmo:books-updated');
+  recordAction('auth.offlineLocalResume');
+  return { ok: true, email: can.email };
 }
 
 export function tierFromUserAppMetadata(user: User | null | undefined): UserTier {
@@ -264,6 +531,10 @@ export async function syncCloudAccountKindFromSession(): Promise<void> {
   const { data } = await supabase.auth.getSession();
   const user = data.session?.user;
   if (!user || isDeviceUserEmail(user.email)) {
+    if (offlineLocalResume) {
+      await setCloudAccountKind('real');
+      return;
+    }
     rememberRealAuthUser(null);
     await setCloudAccountKind('none');
     return;
@@ -383,6 +654,11 @@ export async function signUpWithEmailPassword(
     scheduleCloudSyncAfterRealAuth(data.session.user);
   }
 
+  // Keychain même si OTP encore à valider — reconnect low-friction après.
+  void import('@/lib/lastEmailPasswordSecure').then(({ saveLastEmailPassword }) =>
+    saveLastEmailPassword(trimmed, password)
+  );
+
   return {
     ok: true,
     user: data.user,
@@ -481,6 +757,9 @@ export async function signInWithEmailPassword(
   }
 
   scheduleCloudSyncAfterRealAuth(data.user);
+  void import('@/lib/lastEmailPasswordSecure').then(({ saveLastEmailPassword }) =>
+    saveLastEmailPassword(trimmed, password)
+  );
   return { ok: true, user: data.user, session: data.session };
 }
 
@@ -668,6 +947,12 @@ export async function updatePasswordAfterRecovery(
   }
 
   scheduleCloudSyncAfterRealAuth(data.user);
+  const email = (data.user.email ?? '').trim().toLowerCase();
+  if (email) {
+    void import('@/lib/lastEmailPasswordSecure').then(({ saveLastEmailPassword }) =>
+      saveLastEmailPassword(email, password)
+    );
+  }
   return { ok: true };
 }
 
@@ -907,23 +1192,30 @@ async function signInWithGoogleWebOAuth(): Promise<AuthAccountResult> {
 export async function signOutRealAccount(): Promise<void> {
   recordAction('auth.logout');
   setPetitmoSentryUser(null);
+  // Verrou AVANT toute purge : bloque rebond onboarding→tabs + paint fantôme.
+  await persistIntentionalSignedOut(true);
+  // Conserver l’e-mail (+ MDP Keychain) pour reconnect low-friction / hors-ligne.
+  const emailToKeep = (realAuthEmailMemory || offlineLocalResume?.email || '').trim().toLowerCase();
+  clearOfflineLocalResume();
+  hasRealAuthMemory = false;
+  realAuthEmailMemory = null;
   try {
     const { logOutRevenueCat } = await import('@/lib/revenueCat');
     void logOutRevenueCat();
   } catch (e) {
     console.warn('[auth] logOutRevenueCat', e);
   }
-  // Local d’abord (fiable hors-ligne) ; global en fond pour invalider refresh token serveur.
-  try {
-    await Promise.race([
-      supabase.auth.signOut({ scope: 'local' }),
-      new Promise<void>(resolve => setTimeout(resolve, 1500)),
-    ]);
-  } catch (e) {
-    console.warn('[auth] signOut local', e);
-  }
-  void supabase.auth.signOut({ scope: 'global' }).catch(() => {});
+  // Purge locale garantie (y compris hors-ligne) — voir clearLocalAuthSessionGuaranteed.
+  await clearLocalAuthSessionGuaranteed();
   rememberRealAuthUser(null);
+  // rememberRealAuthUser(null) ne doit pas lever le verrou — déjà intentionalSignedOut.
+  intentionalSignedOut = true;
+  await persistIntentionalSignedOut(true);
+  if (emailToKeep && !isDeviceUserEmail(emailToKeep)) {
+    await setLastRealAuthEmail(emailToKeep);
+  }
+  // Invalider le refresh token serveur si le réseau revient ; ne bloque jamais l’UX.
+  void supabase.auth.signOut({ scope: 'global' }).catch(() => {});
   try {
     const { setCaptureLockedLocal } = await import('@/lib/captureLock');
     await setCaptureLockedLocal(false);
@@ -941,8 +1233,27 @@ export async function signOutRealAccount(): Promise<void> {
     setUserTier('free'),
     clearSelectedChildAndCaptureSnapshot(),
   ]);
-  // Device-user technique en arrière-plan — ne bloque pas le retour onboarding / auth.
-  void ensureSupabaseSession();
+  try {
+    const { setFeedHydrationSnapshots } = await import('@/services/tabScreensCache');
+    setFeedHydrationSnapshots(null, [], []);
+  } catch {
+    /* */
+  }
+  DeviceEventEmitter.emit(PETITMO_AUTH_SIGNED_OUT_EVENT);
+  DeviceEventEmitter.emit('petitmo:memories-invalidate');
+  DeviceEventEmitter.emit('petitmo:books-updated');
+  // Ne PAS ensureSupabaseSession ici : device-user / session fantôme
+  // renvoyait l’UI vers Capturer (« créer un profil ») hors-ligne.
+  void (async () => {
+    try {
+      const { data } = await supabase.auth.getSession();
+      if (data.session?.user && !isDeviceUserEmail(data.session.user.email)) {
+        await clearLocalAuthSessionGuaranteed();
+      }
+    } catch (e) {
+      console.warn('[auth] post-logout session scrub', e);
+    }
+  })();
 }
 
 /**
@@ -1001,31 +1312,52 @@ export async function deleteRealAccount(): Promise<{ ok: true } | { ok: false; e
     await clearMediaLibraryOptIn(user.id);
     await clearLocationSoftPromptSeen(user.id);
     await setLastRealAuthUserId(null);
+    const { setLastRealAuthEmail } = await import('@/services/accountLocalReset');
+    await setLastRealAuthEmail(null);
+    const { clearLastEmailPassword } = await import('@/lib/lastEmailPasswordSecure');
+    await clearLastEmailPassword();
   } catch (e) {
     console.warn('[auth] clearLocalAccountWorkspace after delete', e);
   }
 
   rememberRealAuthUser(null);
+  clearOfflineLocalResume();
+  await persistIntentionalSignedOut(true);
   try {
     const { logOutRevenueCat } = await import('@/lib/revenueCat');
     await logOutRevenueCat();
   } catch (e) {
     console.warn('[auth] logOutRevenueCat after delete', e);
   }
-  try {
-    await Promise.race([
-      supabase.auth.signOut({ scope: 'local' }),
-      new Promise<void>(resolve => setTimeout(resolve, 1500)),
-    ]);
-  } catch (e) {
-    console.warn('[auth] signOut after delete', e);
-  }
+  await clearLocalAuthSessionGuaranteed();
+  rememberRealAuthUser(null);
+  clearOfflineLocalResume();
+  intentionalSignedOut = true;
+  await persistIntentionalSignedOut(true);
   void supabase.auth.signOut({ scope: 'global' }).catch(() => {});
   await Promise.all([
     setCloudAccountKind('none'),
     setUserTier('free'),
     clearSelectedChildAndCaptureSnapshot(),
   ]);
-  void ensureSupabaseSession();
+  try {
+    const { setFeedHydrationSnapshots } = await import('@/services/tabScreensCache');
+    setFeedHydrationSnapshots(null, [], []);
+  } catch {
+    /* */
+  }
+  DeviceEventEmitter.emit(PETITMO_AUTH_SIGNED_OUT_EVENT);
+  DeviceEventEmitter.emit('petitmo:memories-invalidate');
+  DeviceEventEmitter.emit('petitmo:books-updated');
+  void (async () => {
+    try {
+      const { data } = await supabase.auth.getSession();
+      if (data.session?.user && !isDeviceUserEmail(data.session.user.email)) {
+        await clearLocalAuthSessionGuaranteed();
+      }
+    } catch (e) {
+      console.warn('[auth] post-delete session scrub', e);
+    }
+  })();
   return { ok: true };
 }

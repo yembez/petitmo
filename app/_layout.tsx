@@ -20,6 +20,7 @@ import { ensureSupabaseSession } from '@/lib/ensureSupabaseSession';
 import { supabaseAnonKey, supabaseUrl } from '@/lib/supabase';
 import { PendingMediaUploadsProvider } from '@/contexts/PendingMediaUploadsContext';
 import CloudRestoreOverlay from '@/components/CloudRestoreOverlay';
+import AccountClosingOverlay from '@/components/AccountClosingOverlay';
 import { initLocalDb } from '@/lib/localDb';
 import { resetUserTierForTesting } from '@/lib/userTier';
 import { getUserTier } from '@/lib/userTier';
@@ -112,8 +113,12 @@ function RootLayoutNav() {
     void processPendingGuestRawUploads();
 
     void warmSelectedChildIdFromStorage().then(async () => {
-      const { getLastRealAuthUserId } = await import('@/services/accountLocalReset');
-      await getLastRealAuthUserId();
+      const { getLastRealAuthUserId, getLastRealAuthEmail } = await import(
+        '@/services/accountLocalReset'
+      );
+      await Promise.all([getLastRealAuthUserId(), getLastRealAuthEmail()]);
+      const { warmOfflineLocalResumeFromStorage } = await import('@/lib/authAccount');
+      await warmOfflineLocalResumeFromStorage();
       hydrateTabScreensFromSqliteSync();
     });
 
@@ -136,14 +141,21 @@ function RootLayoutNav() {
   useEffect(() => {
     const initAuth = async () => {
       try {
+        const { getLastRealAuthUserId, getLastRealAuthEmail } = await import(
+          '@/services/accountLocalReset'
+        );
+        await Promise.all([getLastRealAuthUserId(), getLastRealAuthEmail()]);
+        const { syncCloudAccountKindFromSession, warmOfflineLocalResumeFromStorage, warmIntentionalSignedOutFromStorage } =
+          await import('@/lib/authAccount');
+        // Verrou déconnexion volontaire avant toute session / reprise locale.
+        await warmIntentionalSignedOutFromStorage();
+        // Avant ensure : une reprise hors-ligne persistée doit peindre SQLite sans attendre le réseau.
+        const offlineResumed = await warmOfflineLocalResumeFromStorage();
+
         const session = await ensureSupabaseSession();
         if (session.ok) {
           console.log('User authenticated:', session.userId);
-          const { syncCloudAccountKindFromSession } = await import('@/lib/authAccount');
           await syncCloudAccountKindFromSession();
-          // Warm cache sync pour hydratation / Capture scopés au compte.
-          const { getLastRealAuthUserId } = await import('@/services/accountLocalReset');
-          await getLastRealAuthUserId();
           void hydrateTabScreensFromLocal();
         } else {
           console.error('[auth]', session.error);
@@ -152,8 +164,12 @@ function RootLayoutNav() {
               '[auth] Supabase non configuré (EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_ANON_KEY manquants).'
             );
           }
-          setFeedHydrationSnapshots(null, [], []);
-          setCaptureTabChildSnapshot(null);
+          if (!offlineResumed) {
+            setFeedHydrationSnapshots(null, [], []);
+            setCaptureTabChildSnapshot(null);
+          } else {
+            hydrateTabScreensFromSqliteSync();
+          }
         }
       } catch (error) {
         console.error('Auth initialization error:', error);
@@ -341,6 +357,9 @@ function RootLayoutNav() {
           options={{
             contentStyle: { flex: 1, backgroundColor: '#2A1A14' },
             animation: 'fade',
+            /** Pas de swipe-back vers `(tabs)` après déconnexion (compte fantôme). */
+            gestureEnabled: false,
+            fullScreenGestureEnabled: false,
           }}
         />
         <Stack.Screen
@@ -348,6 +367,8 @@ function RootLayoutNav() {
           options={{
             contentStyle: { flex: 1, backgroundColor: '#2A1A14' },
             animation: 'fade',
+            gestureEnabled: false,
+            fullScreenGestureEnabled: false,
           }}
         />
         <Stack.Screen name="auth-verify-otp" />
@@ -433,6 +454,7 @@ function RootLayoutNav() {
        * recevoir `petitmo:cloud-restore-ui` même après `router.replace('/(tabs)')`.
        */}
       <CloudRestoreOverlay />
+      <AccountClosingOverlay />
       </PendingMediaUploadsProvider>
     </GestureHandlerRootView>
   );

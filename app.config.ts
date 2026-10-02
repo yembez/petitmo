@@ -26,6 +26,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     }),
     'expo-sqlite',
     'expo-localization',
+    'expo-secure-store',
     [
       '@sentry/react-native/expo',
       {

@@ -4,6 +4,8 @@
  *
  * Unique point de demande de la photothèque : une fois accordée ici, ni l’import
  * ni les sélections de photo (profil, couverture livre/voix) ne rouvrent de boîte iOS.
+ *
+ * Compte existant / réinstall : copy « returning » (réautorisation iOS).
  */
 import { useCallback, useEffect, useState } from 'react';
 import {
@@ -16,11 +18,11 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Bell, Images } from 'lucide-react-native';
 import { THEME } from '@/constants/theme';
-import { FONT_SIZES, ICON_SIZES, SPACING } from '@/constants/sizes';
+import { FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
 import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import { scale, verticalScale } from '@/utils/responsive';
@@ -34,12 +36,14 @@ import {
 import { setMediaLibraryOptIn } from '@/lib/mediaLibraryOptIn';
 import { markOnboardingPermissionsSeen } from '@/lib/onboardingPermissionsSeen';
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
+import { listLocalChildrenForUser } from '@/lib/localDb';
 import { replaceAfterOnboardingPermissions } from '@/utils/onboardingPermissionsRoute';
 import { hydrateTabScreensFromSqliteSync } from '@/services/tabScreensHydrate';
 
 export default function OnboardingPermissionsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{ context?: string }>();
   const { t } = useAppTranslation('common');
   const { loaded: fontsLoaded, dm500, dm600, dm700 } = useDmSansFamilyFlowFonts();
 
@@ -48,6 +52,11 @@ export default function OnboardingPermissionsScreen() {
   const [photosOn, setPhotosOn] = useState(false);
   const [notifsOn, setNotifsOn] = useState(false);
   const [notifsAvailable, setNotifsAvailable] = useState(true);
+  /** Compte existant / réinstall : autre titre (réautorisation iOS). */
+  const [returningAccount, setReturningAccount] = useState(() => {
+    const raw = Array.isArray(params.context) ? params.context[0] : params.context;
+    return raw === 'returning';
+  });
 
   useEffect(() => {
     void (async () => {
@@ -62,6 +71,10 @@ export default function OnboardingPermissionsScreen() {
         }
         router.replace(path);
         return;
+      }
+      // Enfants déjà restaurés pendant le soft wait → copy returning.
+      if (uid && listLocalChildrenForUser(uid).length > 0) {
+        setReturningAccount(true);
       }
       /**
        * Opt-in style Dear You : toggles **toujours OFF** à l’arrivée.
@@ -95,52 +108,57 @@ export default function OnboardingPermissionsScreen() {
     }
   }, [busy, router]);
 
-  const onTogglePhotos = useCallback(async (next: boolean) => {
-    if (!next) {
-      // Intention d’écran seulement — révoquer vraiment = Réglages iOS (pas forcé ici).
-      setPhotosOn(false);
-      void setMediaLibraryOptIn(false, peekLastRealAuthUserId());
-      return;
-    }
-    const granted = await requestPhotoLibraryAccess();
-    setPhotosOn(granted);
-    if (granted) {
-      await setMediaLibraryOptIn(true, peekLastRealAuthUserId());
-    } else {
-      Alert.alert(t('permissions.deniedTitle'), t('permissions.photosDeniedBody'), [
-        { text: t('cancel'), style: 'cancel' },
-        {
-          text: t('permissions.openSettings'),
-          onPress: () => void Linking.openSettings(),
-        },
-      ]);
-    }
-  }, [t]);
+  const onTogglePhotos = useCallback(
+    async (next: boolean) => {
+      if (!next) {
+        setPhotosOn(false);
+        void setMediaLibraryOptIn(false, peekLastRealAuthUserId());
+        return;
+      }
+      const granted = await requestPhotoLibraryAccess();
+      setPhotosOn(granted);
+      if (granted) {
+        await setMediaLibraryOptIn(true, peekLastRealAuthUserId());
+      } else {
+        Alert.alert(t('permissions.deniedTitle'), t('permissions.photosDeniedBody'), [
+          { text: t('cancel'), style: 'cancel' },
+          {
+            text: t('permissions.openSettings'),
+            onPress: () => void Linking.openSettings(),
+          },
+        ]);
+      }
+    },
+    [t],
+  );
 
-  const onToggleNotifs = useCallback(async (next: boolean) => {
-    if (!notifsAvailable) {
-      setNotifsOn(false);
-      Alert.alert(t('permissions.deniedTitle'), t('permissions.notifsUnavailableBody'));
-      return;
-    }
-    if (!next) {
-      setNotifsOn(false);
-      return;
-    }
-    const granted = await requestNotificationsAccess();
-    setNotifsOn(granted);
-    if (granted) {
-      void import('@/services/registerPushToken').then(m => m.registerPushTokenInBackground());
-    } else {
-      Alert.alert(t('permissions.deniedTitle'), t('permissions.notifsDeniedBody'), [
-        { text: t('cancel'), style: 'cancel' },
-        {
-          text: t('permissions.openSettings'),
-          onPress: () => void Linking.openSettings(),
-        },
-      ]);
-    }
-  }, [notifsAvailable, t]);
+  const onToggleNotifs = useCallback(
+    async (next: boolean) => {
+      if (!notifsAvailable) {
+        setNotifsOn(false);
+        Alert.alert(t('permissions.deniedTitle'), t('permissions.notifsUnavailableBody'));
+        return;
+      }
+      if (!next) {
+        setNotifsOn(false);
+        return;
+      }
+      const granted = await requestNotificationsAccess();
+      setNotifsOn(granted);
+      if (granted) {
+        void import('@/services/registerPushToken').then(m => m.registerPushTokenInBackground());
+      } else {
+        Alert.alert(t('permissions.deniedTitle'), t('permissions.notifsDeniedBody'), [
+          { text: t('cancel'), style: 'cancel' },
+          {
+            text: t('permissions.openSettings'),
+            onPress: () => void Linking.openSettings(),
+          },
+        ]);
+      }
+    },
+    [notifsAvailable, t],
+  );
 
   if (!fontsLoaded || !ready) {
     return (
@@ -149,6 +167,13 @@ export default function OnboardingPermissionsScreen() {
       </View>
     );
   }
+
+  const title = returningAccount
+    ? t('permissions.titleReturning')
+    : t('permissions.title');
+  const subtitle = returningAccount
+    ? t('permissions.subtitleReturning')
+    : t('permissions.subtitle');
 
   return (
     <View
@@ -161,12 +186,8 @@ export default function OnboardingPermissionsScreen() {
       ]}
     >
       <View style={styles.content}>
-        <Text style={[styles.title, dm700 && { fontFamily: dm700 }]}>
-          {t('permissions.title')}
-        </Text>
-        <Text style={[styles.subtitle, dm500 && { fontFamily: dm500 }]}>
-          {t('permissions.subtitle')}
-        </Text>
+        <Text style={[styles.title, dm700 && { fontFamily: dm700 }]}>{title}</Text>
+        <Text style={[styles.subtitle, dm500 && { fontFamily: dm500 }]}>{subtitle}</Text>
 
         <View style={styles.rows}>
           <View style={styles.row}>
@@ -215,10 +236,6 @@ export default function OnboardingPermissionsScreen() {
             />
           </View>
         </View>
-
-        <Text style={[styles.hint, dm500 && { fontFamily: dm500 }]}>
-          {t('permissions.hint')}
-        </Text>
       </View>
 
       <View style={styles.footer}>
@@ -264,7 +281,7 @@ const styles = StyleSheet.create({
     paddingTop: verticalScale(24),
   },
   title: {
-    fontSize: FONT_SIZES['2xl'],
+    fontSize: FONT_SIZES.xxl,
     fontWeight: '700',
     color: THEME.textPrimary,
     marginBottom: verticalScale(10),
@@ -316,12 +333,6 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZES.sm,
     color: THEME.textMuted,
     lineHeight: scale(18),
-  },
-  hint: {
-    marginTop: verticalScale(20),
-    textAlign: 'center',
-    fontSize: FONT_SIZES.sm,
-    color: THEME.textSecondary,
   },
   footer: {
     paddingTop: verticalScale(8),

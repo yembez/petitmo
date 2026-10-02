@@ -20,26 +20,19 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FontAwesome } from '@expo/vector-icons';
 import {
-  BookOpen,
-  Cloud,
   ChevronLeft,
   Eye,
   EyeOff,
-  Images,
-  Infinity as InfinityIcon,
-  Lock,
 } from 'lucide-react-native';
 import { THEME } from '@/constants/theme';
 import { FONT_SIZES, SPACING } from '@/constants/sizes';
-import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
+import { PETITMO_CTA_SPINNER_COLOR } from '@/constants/petitmoCtaStyles';
 import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
-import { FREE_TIER_LIMIT } from '@/lib/limits';
 import { scale, verticalScale } from '@/utils/responsive';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
@@ -55,15 +48,25 @@ import {
   signInWithGoogleOAuth,
   signUpWithEmailPassword,
   updatePasswordAfterRecovery,
+  canResumeLastAccountOffline,
+  resumeLastAccountOffline,
 } from '@/lib/authAccount';
 import { supabase } from '@/lib/supabase';
 import { getChildren } from '@/services/children';
 import { listLocalChildrenForUser } from '@/lib/localDb';
-import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
+import {
+  getLastRealAuthEmail,
+  peekLastRealAuthUserId,
+} from '@/services/accountLocalReset';
 import type { User } from '@supabase/supabase-js';
 import { hydrateTabScreensFromSqliteSync } from '@/services/tabScreensHydrate';
 import { safeRouterBack } from '@/utils/safeRouterBack';
 import { LEGAL_PRIVACY_URL, LEGAL_TERMS_URL } from '@/lib/legalUrls';
+import { looksLikeNetworkAuthError, probeNetworkReachable } from '@/utils/networkProbe';
+
+function normalizeAuthEmail(value: string): string {
+  return value.trim().toLowerCase();
+}
 
 type AuthMode = 'signup' | 'login';
 type AuthIntent = 'free' | 'subscribe';
@@ -76,6 +79,12 @@ const AUTH_BG = require('@/assets/images/auth_mother_child.jpg');
 const HERO_RATIO = 0.44;
 /** Décale le fond vers le haut pour placer les deux visages dans la zone hero. */
 const BG_SHIFT_UP_RATIO = 0.1;
+const AUTH_CARD_RADIUS = scale(28);
+const AUTH_CARD_SIDE_MARGIN = scale(12);
+/** Noir uni sous le dégradé titre (marges autour de la carte). */
+const AUTH_SCRIM = 'rgba(0, 0, 0, 0.55)';
+/** Hauteur du fade transparent → noir au-dessus du haut de carte. */
+const AUTH_SCRIM_FADE_HEIGHT = verticalScale(150);
 
 function parseMode(raw: string | string[] | undefined): AuthMode {
   const v = Array.isArray(raw) ? raw[0] : raw;
@@ -92,6 +101,31 @@ async function openUrl(url: string) {
     await Linking.openURL(url);
   } catch (e) {
     console.warn('[auth] openUrl', e);
+  }
+}
+
+/**
+ * Réinstall / login : restore soft **avant** d’ouvrir Capturer (évite flash vide/plein).
+ * Overlay racine pendant le pull ; tabs seulement après.
+ */
+async function restoreThenEnterTabs(router: {
+  replace: (href: '/(tabs)') => void;
+}): Promise<void> {
+  const { getAllLocalMemories } = await import('@/lib/localDb');
+  if (getAllLocalMemories().length > 0) {
+    hydrateTabScreensFromSqliteSync();
+    router.replace('/(tabs)');
+    return;
+  }
+  const { restoreFamilyMemoriesFromCloudWithSoftWait } = await import(
+    '@/services/runCloudMemoriesRestore'
+  );
+  const { endCloudRestoreUi, peekCloudRestoreUi } = await import('@/lib/cloudRestoreUi');
+  await restoreFamilyMemoriesFromCloudWithSoftWait({ softUi: true, holdUi: true });
+  hydrateTabScreensFromSqliteSync();
+  router.replace('/(tabs)');
+  if (peekCloudRestoreUi().active) {
+    setTimeout(() => endCloudRestoreUi(), 220);
   }
 }
 
@@ -113,14 +147,27 @@ export default function AuthScreen() {
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
+  /** Formulaire e-mail replié derrière « Continuer avec e-mail » (carte type maquette). */
+  const [showEmailForm, setShowEmailForm] = useState(false);
   /** iOS : afficher Apple tout de suite (évite le jump Google-only → Apple+Google). */
   const [appleAvailable, setAppleAvailable] = useState(Platform.OS === 'ios');
   /** True seulement quand on quitte déjà l’écran (session existante / post-submit) — pas au 1er paint. */
   const [leavingShell, setLeavingShell] = useState(false);
+  /** Y fenêtre où commence le noir uni (≈ haut de carte + inset coins). */
+  const [scrimSolidTop, setScrimSolidTop] = useState(() => windowHeight * 0.52);
+  const cardOuterRef = useRef<View>(null);
+
+  const syncScrimSolidTop = useCallback(() => {
+    cardOuterRef.current?.measureInWindow((_x, y) => {
+      if (typeof y !== 'number' || Number.isNaN(y)) return;
+      const next = y + AUTH_CARD_RADIUS * 0.45;
+      setScrimSolidTop(prev => (Math.abs(prev - next) < 1 ? prev : next));
+    });
+  }, []);
 
   const heroHeight = useMemo(() => {
     const target = windowHeight * HERO_RATIO;
-    const minForCopy = insets.top + verticalScale(152);
+    const minForCopy = insets.top + verticalScale(120);
     return Math.max(target, minForCopy);
   }, [insets.top, windowHeight]);
 
@@ -136,7 +183,10 @@ export default function AuthScreen() {
   }, [windowHeight, windowWidth]);
 
   useEffect(() => {
-    setMode(parseMode(params.mode));
+    const next = parseMode(params.mode);
+    setMode(next);
+    // Login : le préremplissage e-mail rouvre le formulaire ; signup reste replié.
+    if (next !== 'login') setShowEmailForm(false);
   }, [params.mode]);
 
   useEffect(() => {
@@ -173,6 +223,7 @@ export default function AuthScreen() {
         : mode === 'signup'
           ? t('auth.signupSubtitle')
           : t('auth.loginSubtitle');
+  const showHeroSubtitle = subtitle.trim().length > 0;
   const primaryCta =
     uiPhase === 'reset'
       ? t('auth.resetCta')
@@ -220,41 +271,37 @@ export default function AuthScreen() {
               '@/lib/onboardingPermissionsSeen'
             );
             await markOnboardingPermissionsSeen(uid);
-            // Réinstall : tabs d’abord, restore soft en overlay (pas de gel auth prolongé).
-            router.replace('/(tabs)');
-            const { getAllLocalMemories } = await import('@/lib/localDb');
-            if (getAllLocalMemories().length === 0) {
-              void import('@/services/runCloudMemoriesRestore').then(async ({ restoreFamilyMemoriesFromCloudWithSoftWait }) => {
-                await restoreFamilyMemoriesFromCloudWithSoftWait();
-                hydrateTabScreensFromSqliteSync();
-              });
-            }
+            await restoreThenEnterTabs(router);
             return;
           }
         }
         const { replaceToOnboardingPermissionsOrCreateChild } = await import(
           '@/utils/onboardingPermissionsRoute'
         );
-        await replaceToOnboardingPermissionsOrCreateChild(router);
+        await replaceToOnboardingPermissionsOrCreateChild(router, {
+          // Login / restore : copy « réautoriser après install » (pas 1ʳᵉ création).
+          returning: opts?.assumeNewAccount !== true,
+        });
         return;
       }
 
-      // Enfants déjà en local → Capturer / fil immédiat.
-      hydrateTabScreensFromSqliteSync();
-      router.replace('/(tabs)');
+      // Enfants déjà en local → Capturer / fil immédiat (sauf restore soft si SQLite souvenirs vide).
       if (!opts?.assumeNewAccount) {
         const { getAllLocalMemories } = await import('@/lib/localDb');
         if (getAllLocalMemories().length === 0) {
-          void import('@/services/runCloudMemoriesRestore').then(async ({ restoreFamilyMemoriesFromCloudWithSoftWait }) => {
-            await restoreFamilyMemoriesFromCloudWithSoftWait();
-            hydrateTabScreensFromSqliteSync();
-          });
-        } else {
-          void getChildren().then(() => {
-            hydrateTabScreensFromSqliteSync();
-          });
+          await restoreThenEnterTabs(router);
+          return;
         }
+        hydrateTabScreensFromSqliteSync();
+        router.replace('/(tabs)');
+        void getChildren().then(() => {
+          hydrateTabScreensFromSqliteSync();
+        });
+        return;
       }
+
+      hydrateTabScreensFromSqliteSync();
+      router.replace('/(tabs)');
     },
     [goPaywall, isSubscribe, router]
   );
@@ -262,6 +309,49 @@ export default function AuthScreen() {
   const finishAfterAuthRef = useRef(finishAfterAuth);
   finishAfterAuthRef.current = finishAfterAuth;
   const passwordRecoveryActiveRef = useRef(false);
+
+  /** Dernier e-mail + MDP Keychain : préremplir (mdp = SecureStore, jamais AsyncStorage). */
+  useEffect(() => {
+    if (uiPhase !== 'auth' || mode !== 'login') return;
+    let cancelled = false;
+    void (async () => {
+      const last = normalizeAuthEmail((await getLastRealAuthEmail()) ?? '');
+      if (cancelled || !last) return;
+      setEmail(prev => (normalizeAuthEmail(prev) ? prev : last));
+      setShowEmailForm(true);
+      try {
+        const { getLastEmailPasswordFor } = await import('@/lib/lastEmailPasswordSecure');
+        const savedPassword = await getLastEmailPasswordFor(last);
+        if (cancelled || !savedPassword) return;
+        setPassword(prev => (prev ? prev : savedPassword));
+      } catch {
+        /* binaire sans SecureStore → e-mail seul */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, uiPhase]);
+
+  /**
+   * Local-first : si le SQLite du dernier compte est là et l’e-mail correspond
+   * (ou champ vide / OAuth), déverrouille sans demander « continuer hors ligne ? ».
+   */
+  const trySilentOfflineResume = useCallback(
+    async (candidateEmail?: string): Promise<boolean> => {
+      const can = await canResumeLastAccountOffline();
+      if (!can.ok) return false;
+      const typed = normalizeAuthEmail(candidateEmail ?? email);
+      if (typed && typed !== can.email) return false;
+      const result = await resumeLastAccountOffline();
+      if (!result.ok) return false;
+      setLeavingShell(true);
+      hydrateTabScreensFromSqliteSync();
+      router.replace('/(tabs)');
+      return true;
+    },
+    [email, router]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -383,6 +473,12 @@ export default function AuthScreen() {
           if (result.alreadyRegistered && mode === 'signup') {
             setMode('login');
             Alert.alert(t('auth.loginTitle'), result.error);
+          } else if (looksLikeNetworkAuthError(result.error)) {
+            // Pas d’Alert « continuer hors ligne ? » : reprise SQLite silencieuse si possible.
+            if (await trySilentOfflineResume(email)) {
+              return;
+            }
+            Alert.alert(t('error'), t('auth.offlineContinueNeedNetwork'));
           } else {
             Alert.alert(t('error'), result.error);
           }
@@ -417,16 +513,37 @@ export default function AuthScreen() {
         setLeavingShell(false);
       }
     },
-    [busy, email, finishAfterAuth, intent, leavingShell, mode, router, t]
+    [busy, email, finishAfterAuth, intent, leavingShell, mode, router, t, trySilentOfflineResume]
   );
 
-  const onEmailSubmit = () =>
-    void run(async () => {
-      if (mode === 'signup') {
-        return signUpWithEmailPassword(email, password);
+  const onEmailSubmit = () => {
+    void (async () => {
+      if (mode === 'login') {
+        // Hors réseau : pas d’appel Auth ni de décision UX — ouvrir SQLite du dernier compte.
+        const online = await probeNetworkReachable();
+        if (!online) {
+          if (busy || leavingShell) return;
+          setBusy(true);
+          try {
+            if (await trySilentOfflineResume(email)) return;
+            Alert.alert(t('error'), t('auth.offlineContinueNeedNetwork'));
+          } catch (e) {
+            console.warn('[auth] offline email submit', e);
+            Alert.alert(t('error'), t('error'));
+          } finally {
+            setBusy(false);
+          }
+          return;
+        }
       }
-      return signInWithEmailPassword(email, password);
-    });
+      void run(async () => {
+        if (mode === 'signup') {
+          return signUpWithEmailPassword(email, password);
+        }
+        return signInWithEmailPassword(email, password);
+      });
+    })();
+  };
 
   const onForgotPassword = () => {
     void (async () => {
@@ -496,12 +613,30 @@ export default function AuthScreen() {
     <View style={styles.shell}>
       <Image source={AUTH_BG} style={bgStyle} resizeMode="cover" />
 
-      <LinearGradient
-        colors={['rgba(40, 22, 18, 0.18)', 'rgba(40, 22, 18, 0.08)', 'rgba(40, 22, 18, 0.28)']}
-        locations={[0, 0.45, 1]}
-        style={[styles.heroFade, { height: heroHeight }]}
-        pointerEvents="none"
-      />
+      {/* Noir uni bas → quasi-haut carte ; dégradé au-dessus (titre). */}
+      <View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
+        <LinearGradient
+          colors={['transparent', AUTH_SCRIM]}
+          locations={[0, 1]}
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            top: Math.max(0, scrimSolidTop - AUTH_SCRIM_FADE_HEIGHT),
+            height: AUTH_SCRIM_FADE_HEIGHT,
+          }}
+        />
+        <View
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            top: scrimSolidTop - 1,
+            bottom: 0,
+            backgroundColor: AUTH_SCRIM,
+          }}
+        />
+      </View>
 
       <KeyboardAvoidingView
         style={styles.flex}
@@ -511,16 +646,23 @@ export default function AuthScreen() {
           style={styles.flex}
           contentContainerStyle={[
             styles.screenScroll,
-            { paddingBottom: Math.max(insets.bottom, verticalScale(12)) },
+            {
+              paddingBottom: Math.max(insets.bottom, verticalScale(10)),
+              flexGrow: 1,
+              justifyContent: 'flex-end',
+            },
           ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           bounces
+          onScroll={syncScrimSolidTop}
+          scrollEventThrottle={64}
         >
           <View
             style={[
               styles.heroZone,
               {
+                flexGrow: 1,
                 minHeight: heroHeight,
                 paddingTop: insets.top + verticalScale(2),
               },
@@ -536,43 +678,28 @@ export default function AuthScreen() {
               <ChevronLeft size={scale(28)} color="#FFFFFF" />
             </TouchableOpacity>
 
-            <View style={styles.heroCopy}>
-              <Text
-                style={[
-                  styles.title,
-                  isSubscribe && styles.titleCentered,
-                  { fontFamily: dm700 },
-                ]}
-              >
-                {title}
-              </Text>
-
-              {mode === 'signup' && !isSubscribe && uiPhase !== 'reset' ? (
-                <View style={styles.badge}>
-                  <Text style={[styles.badgeText, { fontFamily: dm600 }]}>
-                    {t('auth.freeBadge')}
-                  </Text>
-                </View>
-              ) : null}
-
-              <Text
-                style={[
-                  styles.subtitle,
-                  isSubscribe && styles.subtitleCentered,
-                  { fontFamily: dm500 },
-                ]}
-              >
-                {subtitle}
-              </Text>
+            <View style={styles.heroCopyWrap}>
+              <View style={styles.heroCopy}>
+                <Text style={styles.title}>{title}</Text>
+                {showHeroSubtitle ? (
+                  <Text style={styles.subtitle}>{subtitle}</Text>
+                ) : null}
+              </View>
             </View>
           </View>
 
-          <View style={styles.cardOuter}>
+          <View
+            ref={cardOuterRef}
+            style={styles.cardOuter}
+            onLayout={syncScrimSolidTop}
+          >
             <View style={styles.cardWrap}>
-              {Platform.OS === 'ios' ? (
-                <BlurView intensity={42} tint="light" style={StyleSheet.absoluteFillObject} />
-              ) : null}
-              <View style={styles.cardInner}>
+              <View
+                style={[
+                  styles.cardInner,
+                  { paddingBottom: verticalScale(20) },
+                ]}
+              >
                 {uiPhase === 'reset' ? (
                   <>
                     <Text style={[styles.label, { fontFamily: dm700 }]}>{t('auth.password')}</Text>
@@ -598,9 +725,9 @@ export default function AuthScreen() {
                         hitSlop={8}
                       >
                         {showPassword ? (
-                          <EyeOff size={scale(18)} color={THEME.textSecondary} />
+                          <EyeOff size={scale(20)} color={THEME.textSecondary} />
                         ) : (
-                          <Eye size={scale(18)} color={THEME.textSecondary} />
+                          <Eye size={scale(20)} color={THEME.textSecondary} />
                         )}
                       </TouchableOpacity>
                     </View>
@@ -632,7 +759,7 @@ export default function AuthScreen() {
                       {busy ? (
                         <ActivityIndicator color={PETITMO_CTA_SPINNER_COLOR} />
                       ) : (
-                        <Text style={[petitmoCtaStyles.primaryText, { fontFamily: dm700 }]}>
+                        <Text style={styles.primaryCtaText}>
                           {primaryCta}
                         </Text>
                       )}
@@ -640,95 +767,6 @@ export default function AuthScreen() {
                   </>
                 ) : (
                   <>
-                <View style={styles.benefitsRow}>
-                  {isSubscribe ? (
-                    <>
-                      <View style={styles.benefitCol}>
-                        <View style={styles.benefitIconWrap}>
-                          <InfinityIcon
-                            size={scale(20)}
-                            color={THEME.brandCtaOrange}
-                            strokeWidth={2}
-                          />
-                        </View>
-                        <Text style={[styles.benefitTitle, { fontFamily: dm700 }]}>
-                          {t('auth.plus.benefitUnlimitedTitle')}
-                        </Text>
-                        <Text style={[styles.benefitBody, { fontFamily: dm500 }]}>
-                          {t('auth.plus.benefitUnlimitedBody')}
-                        </Text>
-                      </View>
-                      <View style={styles.benefitCol}>
-                        <View style={styles.benefitIconWrap}>
-                          <View style={styles.cloudLockIcon}>
-                            <Cloud size={scale(18)} color={THEME.brandCtaOrange} strokeWidth={2} />
-                            <View style={styles.miniLockBadge}>
-                              <Lock
-                                size={scale(8)}
-                                color={THEME.brandCtaOrange}
-                                strokeWidth={2.5}
-                              />
-                            </View>
-                          </View>
-                        </View>
-                        <Text style={[styles.benefitTitle, { fontFamily: dm700 }]}>
-                          {t('auth.plus.benefitCloudTitle')}
-                        </Text>
-                        <Text style={[styles.benefitBody, { fontFamily: dm500 }]}>
-                          {t('auth.plus.benefitCloudBody')}
-                        </Text>
-                      </View>
-                      <View style={styles.benefitCol}>
-                        <View style={styles.benefitIconWrap}>
-                          <BookOpen size={scale(20)} color={THEME.brandCtaOrange} strokeWidth={2} />
-                        </View>
-                        <Text style={[styles.benefitTitle, { fontFamily: dm700 }]}>
-                          {t('auth.plus.benefitBookTitle')}
-                        </Text>
-                        <Text style={[styles.benefitBody, { fontFamily: dm500 }]}>
-                          {t('auth.plus.benefitBookBody')}
-                        </Text>
-                      </View>
-                    </>
-                  ) : (
-                    <>
-                      <View style={styles.benefitCol}>
-                        <View style={styles.benefitIconWrap}>
-                          <Images size={scale(20)} color={THEME.brandCtaOrange} strokeWidth={2} />
-                        </View>
-                        <Text style={[styles.benefitTitle, { fontFamily: dm700 }]}>
-                          {t('auth.benefitMemoriesTitle', { count: FREE_TIER_LIMIT })}
-                        </Text>
-                        <Text style={[styles.benefitBody, { fontFamily: dm500 }]}>
-                          {t('auth.benefitMemoriesBody')}
-                        </Text>
-                      </View>
-                      <View style={styles.benefitCol}>
-                        <View style={styles.benefitIconWrap}>
-                          <Lock size={scale(20)} color={THEME.brandCtaOrange} strokeWidth={2} />
-                        </View>
-                        <Text style={[styles.benefitTitle, { fontFamily: dm700 }]}>
-                          {t('auth.benefitSavedTitle')}
-                        </Text>
-                        <Text style={[styles.benefitBody, { fontFamily: dm500 }]}>
-                          {t('auth.benefitSavedBody')}
-                        </Text>
-                      </View>
-                      <View style={styles.benefitCol}>
-                        <View style={styles.benefitIconWrap}>
-                          <BookOpen size={scale(20)} color={THEME.brandCtaOrange} strokeWidth={2} />
-                        </View>
-                        <Text style={[styles.benefitTitle, { fontFamily: dm700 }]}>
-                          {t('auth.benefitBookTitle')}
-                        </Text>
-                        <Text style={[styles.benefitBody, { fontFamily: dm500 }]}>
-                          {t('auth.benefitBookBody')}
-                        </Text>
-                      </View>
-                    </>
-                  )}
-                </View>
-
                 {appleAvailable ? (
                   <TouchableOpacity
                     style={styles.appleBtn}
@@ -738,8 +776,8 @@ export default function AuthScreen() {
                     accessibilityRole="button"
                     accessibilityLabel={t('auth.continueApple')}
                   >
-                    <FontAwesome name="apple" size={scale(17)} color="#FFFFFF" />
-                    <Text style={[styles.appleBtnText, { fontFamily: dm600 }]}>
+                    <FontAwesome name="apple" size={scale(18)} color="#FFFFFF" />
+                    <Text style={styles.appleBtnText}>
                       {t('auth.continueApple')}
                     </Text>
                   </TouchableOpacity>
@@ -753,103 +791,123 @@ export default function AuthScreen() {
                   accessibilityRole="button"
                   accessibilityLabel={t('auth.continueGoogle')}
                 >
-                  <FontAwesome name="google" size={scale(15)} color="#4285F4" />
-                  <Text style={[styles.googleBtnText, { fontFamily: dm600 }]}>
+                  <FontAwesome name="google" size={scale(16)} color="#4285F4" />
+                  <Text style={styles.googleBtnText}>
                     {t('auth.continueGoogle')}
                   </Text>
                 </TouchableOpacity>
 
-                <View style={styles.dividerRow}>
-                  <View style={styles.dividerLine} />
-                  <Text style={[styles.dividerText, { fontFamily: dm500 }]}>
-                    {t('auth.orEmail')}
-                  </Text>
-                  <View style={styles.dividerLine} />
-                </View>
-
-                <Text style={[styles.label, { fontFamily: dm700 }]}>{t('auth.email')}</Text>
-                <TextInput
-                  style={[styles.input, { fontFamily: dm500 }]}
-                  value={email}
-                  onChangeText={setEmail}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="email-address"
-                  textContentType="emailAddress"
-                  autoComplete="email"
-                  placeholder={t('auth.emailPlaceholder')}
-                  placeholderTextColor={THEME.textTertiary}
-                  editable={!busy}
-                />
-
-                <Text style={[styles.label, { fontFamily: dm700 }]}>{t('auth.password')}</Text>
-                <View style={styles.passwordRow}>
-                  <TextInput
-                    style={[styles.input, styles.passwordInput, { fontFamily: dm500 }]}
-                    value={password}
-                    onChangeText={setPassword}
-                    secureTextEntry={!showPassword}
-                    textContentType={mode === 'signup' ? 'newPassword' : 'password'}
-                    autoComplete={mode === 'signup' ? 'password-new' : 'password'}
-                    placeholder={t('auth.passwordPlaceholder')}
-                    placeholderTextColor={THEME.textTertiary}
-                    editable={!busy}
-                  />
+                {!showEmailForm ? (
                   <TouchableOpacity
-                    style={styles.eyeBtn}
-                    onPress={() => setShowPassword(v => !v)}
+                    style={styles.emailGateBtn}
+                    onPress={() => setShowEmailForm(true)}
+                    disabled={busy}
+                    activeOpacity={0.85}
                     accessibilityRole="button"
-                    accessibilityLabel={
-                      showPassword ? t('auth.hidePassword') : t('auth.showPassword')
-                    }
-                    hitSlop={8}
+                    accessibilityLabel={t('auth.continueEmail')}
                   >
-                    {showPassword ? (
-                      <EyeOff size={scale(18)} color={THEME.textSecondary} />
-                    ) : (
-                      <Eye size={scale(18)} color={THEME.textSecondary} />
-                    )}
-                  </TouchableOpacity>
-                </View>
-
-                {mode === 'login' ? (
-                  <TouchableOpacity onPress={onForgotPassword} disabled={busy} hitSlop={8}>
-                    <Text style={[styles.forgot, { fontFamily: dm500 }]}>
-                      {t('auth.forgotPassword')}
+                    <Text style={styles.emailGateBtnText}>
+                      {t('auth.continueEmail')}
                     </Text>
                   </TouchableOpacity>
                 ) : (
-                  <View style={styles.forgotSpacer} />
+                  <>
+                    <View style={styles.dividerRow}>
+                      <View style={styles.dividerLine} />
+                      <Text style={[styles.dividerText, { fontFamily: dm500 }]}>
+                        {t('auth.orEmail')}
+                      </Text>
+                      <View style={styles.dividerLine} />
+                    </View>
+
+                    <Text style={[styles.label, { fontFamily: dm700 }]}>{t('auth.email')}</Text>
+                    <TextInput
+                      style={[styles.input, { fontFamily: dm500 }]}
+                      value={email}
+                      onChangeText={setEmail}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      keyboardType="email-address"
+                      textContentType={mode === 'login' ? 'username' : 'emailAddress'}
+                      autoComplete={mode === 'login' ? 'username' : 'email'}
+                      placeholder={t('auth.emailPlaceholder')}
+                      placeholderTextColor={THEME.textTertiary}
+                      editable={!busy}
+                    />
+
+                    <Text style={[styles.label, { fontFamily: dm700 }]}>{t('auth.password')}</Text>
+                    <View style={styles.passwordRow}>
+                      <TextInput
+                        style={[styles.input, styles.passwordInput, { fontFamily: dm500 }]}
+                        value={password}
+                        onChangeText={setPassword}
+                        secureTextEntry={!showPassword}
+                        textContentType={mode === 'signup' ? 'newPassword' : 'password'}
+                        autoComplete={mode === 'signup' ? 'password-new' : 'password'}
+                        placeholder={t('auth.passwordPlaceholder')}
+                        placeholderTextColor={THEME.textTertiary}
+                        editable={!busy}
+                      />
+                      <TouchableOpacity
+                        style={styles.eyeBtn}
+                        onPress={() => setShowPassword(v => !v)}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          showPassword ? t('auth.hidePassword') : t('auth.showPassword')
+                        }
+                        hitSlop={8}
+                      >
+                        {showPassword ? (
+                          <EyeOff size={scale(20)} color={THEME.textSecondary} />
+                        ) : (
+                          <Eye size={scale(20)} color={THEME.textSecondary} />
+                        )}
+                      </TouchableOpacity>
+                    </View>
+
+                    {mode === 'login' ? (
+                      <TouchableOpacity onPress={onForgotPassword} disabled={busy} hitSlop={8}>
+                        <Text style={[styles.forgot, { fontFamily: dm500 }]}>
+                          {t('auth.forgotPassword')}
+                        </Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <View style={styles.forgotSpacer} />
+                    )}
+
+                    <PetitmoPrimaryPressable
+                      style={styles.primaryCta}
+                      onPress={onEmailSubmit}
+                      disabled={busy}
+                      activeOpacity={0.9}
+                      accessibilityRole="button"
+                      accessibilityLabel={primaryCta}
+                    >
+                      {busy ? (
+                        <ActivityIndicator color={PETITMO_CTA_SPINNER_COLOR} />
+                      ) : (
+                        <Text style={styles.primaryCtaText}>
+                          {primaryCta}
+                        </Text>
+                      )}
+                    </PetitmoPrimaryPressable>
+                  </>
                 )}
 
-                <PetitmoPrimaryPressable
-                  style={styles.primaryCta}
-                  onPress={onEmailSubmit}
-                  disabled={busy}
-                  activeOpacity={0.9}
-                  accessibilityRole="button"
-                  accessibilityLabel={primaryCta}
-                >
-                  {busy ? (
-                    <ActivityIndicator color={PETITMO_CTA_SPINNER_COLOR} />
-                  ) : (
-                    <Text style={[petitmoCtaStyles.primaryText, { fontFamily: dm700 }]}>
-                      {primaryCta}
-                    </Text>
-                  )}
-                </PetitmoPrimaryPressable>
-
                 <TouchableOpacity
-                  onPress={() => setMode(mode === 'signup' ? 'login' : 'signup')}
+                  onPress={() => {
+                    setMode(mode === 'signup' ? 'login' : 'signup');
+                    setShowEmailForm(false);
+                  }}
                   disabled={busy}
                   style={styles.switchWrap}
                   accessibilityRole="button"
                 >
-                  <Text style={[styles.switchText, { fontFamily: dm500 }]}>
+                  <Text style={styles.switchText}>
                     {mode === 'signup'
                       ? t('auth.switchToLoginPrefix')
                       : t('auth.switchToSignupPrefix')}
-                    <Text style={[styles.switchAction, { fontFamily: dm700 }]}>
+                    <Text style={styles.switchAction}>
                       {mode === 'signup'
                         ? t('auth.switchToLoginAction')
                         : t('auth.switchToSignupAction')}
@@ -857,7 +915,7 @@ export default function AuthScreen() {
                   </Text>
                 </TouchableOpacity>
 
-                <Text style={[styles.legal, { fontFamily: dm500 }]}>
+                <Text style={styles.legal}>
                   {t('auth.legalBefore')}
                   <Text style={styles.legalLink} onPress={() => void openUrl(LEGAL_TERMS_URL)}>
                     {t('auth.legalTerms')}
@@ -894,71 +952,65 @@ const styles = StyleSheet.create({
   screenScroll: {
     flexGrow: 1,
   },
-  heroFade: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-  },
   heroZone: {
-    paddingHorizontal: SPACING.md,
+    paddingHorizontal: 0,
     justifyContent: 'flex-start',
   },
-  heroCopy: {
+  heroCopyWrap: {
     marginTop: 'auto',
-    marginBottom: verticalScale(10),
+    width: '100%',
+    zIndex: 1,
+  },
+  heroCopy: {
+    paddingHorizontal: SPACING.md,
+    paddingTop: verticalScale(36),
+    paddingBottom: verticalScale(18),
   },
   backBtn: {
     alignSelf: 'flex-start',
+    marginLeft: SPACING.md,
     marginBottom: verticalScale(4),
   },
   title: {
-    fontSize: FONT_SIZES.xxl,
+    fontSize: scale(32),
+    fontWeight: '500',
     color: '#FFFFFF',
-    marginBottom: verticalScale(8),
-    textShadowColor: 'rgba(0,0,0,0.25)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
-  },
-  titleCentered: {
     textAlign: 'center',
-    alignSelf: 'stretch',
-  },
-  badge: {
     alignSelf: 'center',
-    backgroundColor: 'rgba(255, 214, 196, 0.95)',
-    paddingHorizontal: scale(12),
-    paddingVertical: verticalScale(3),
-    borderRadius: scale(999),
-    marginBottom: verticalScale(8),
-  },
-  badgeText: {
-    fontSize: FONT_SIZES.sm,
-    color: THEME.brandCtaOrange,
+    lineHeight: scale(38),
+    letterSpacing: -0.3,
+    marginBottom: verticalScale(10),
+    maxWidth: scale(340),
+    textShadowColor: 'rgba(0, 0, 0, 0.35)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 14,
   },
   subtitle: {
-    fontSize: FONT_SIZES.md,
-    color: 'rgba(255,255,255,0.92)',
-    lineHeight: scale(22),
-    textShadowColor: 'rgba(0,0,0,0.2)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
-  },
-  subtitleCentered: {
+    fontSize: scale(18),
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.95)',
     textAlign: 'center',
-    alignSelf: 'stretch',
+    alignSelf: 'center',
+    lineHeight: scale(26),
+    letterSpacing: -0.1,
+    maxWidth: scale(320),
+    textShadowColor: 'rgba(40, 22, 18, 0.4)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 10,
   },
   cardOuter: {
-    paddingHorizontal: scale(14),
+    paddingHorizontal: AUTH_CARD_SIDE_MARGIN,
+    paddingBottom: 0,
+    zIndex: 2,
   },
   cardWrap: {
-    borderRadius: scale(28),
+    borderRadius: AUTH_CARD_RADIUS,
     overflow: 'hidden',
-    backgroundColor: Platform.OS === 'ios' ? 'rgba(255,255,255,0.88)' : 'rgba(255,255,255,0.96)',
+    backgroundColor: '#FFFFFF',
     ...Platform.select({
       ios: {
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
+        shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.1,
         shadowRadius: 12,
       },
@@ -967,75 +1019,29 @@ const styles = StyleSheet.create({
     }),
   },
   cardInner: {
-    paddingHorizontal: scale(12),
-    paddingTop: verticalScale(12),
-    paddingBottom: verticalScale(14),
-  },
-  benefitsRow: {
-    flexDirection: 'row',
-    gap: scale(4),
-    marginBottom: verticalScale(10),
-  },
-  benefitCol: {
-    flex: 1,
-    alignItems: 'center',
-    paddingHorizontal: scale(2),
-  },
-  benefitIconWrap: {
-    width: scale(40),
-    height: scale(40),
-    borderRadius: scale(20),
-    backgroundColor: 'rgba(253, 119, 100, 0.12)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: verticalScale(4),
-  },
-  cloudLockIcon: {
-    width: scale(22),
-    height: scale(22),
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  miniLockBadge: {
-    position: 'absolute',
-    right: -2,
-    bottom: -1,
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: scale(6),
-    padding: 1,
-  },
-  benefitTitle: {
-    fontSize: FONT_SIZES.xs,
-    color: THEME.textPrimary,
-    textAlign: 'center',
-    marginBottom: verticalScale(2),
-    lineHeight: scale(15),
-  },
-  benefitBody: {
-    fontSize: scale(10),
-    color: THEME.textMuted,
-    textAlign: 'center',
-    lineHeight: scale(13),
+    paddingHorizontal: scale(20),
+    paddingTop: verticalScale(20),
   },
   appleBtn: {
     width: '100%',
-    minHeight: verticalScale(46),
+    minHeight: verticalScale(52),
     borderRadius: scale(18),
     backgroundColor: '#000000',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: scale(10),
-    marginBottom: verticalScale(8),
-    paddingVertical: verticalScale(10),
+    marginBottom: verticalScale(10),
+    paddingVertical: verticalScale(14),
   },
   appleBtnText: {
-    fontSize: FONT_SIZES.md,
+    fontSize: FONT_SIZES.lg,
+    fontWeight: '400',
     color: '#FFFFFF',
   },
   googleBtn: {
     width: '100%',
-    minHeight: verticalScale(46),
+    minHeight: verticalScale(52),
     borderRadius: scale(18),
     borderWidth: 1,
     borderColor: '#E5E5EA',
@@ -1044,17 +1050,36 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: scale(10),
-    marginBottom: verticalScale(12),
-    paddingVertical: verticalScale(10),
+    marginBottom: verticalScale(10),
+    paddingVertical: verticalScale(14),
   },
   googleBtnText: {
-    fontSize: FONT_SIZES.md,
+    fontSize: FONT_SIZES.lg,
+    fontWeight: '400',
     color: THEME.textPrimary,
+  },
+  emailGateBtn: {
+    width: '100%',
+    minHeight: verticalScale(52),
+    borderRadius: scale(18),
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: verticalScale(4),
+    paddingVertical: verticalScale(14),
+  },
+  emailGateBtnText: {
+    fontSize: FONT_SIZES.lg,
+    fontWeight: '400',
+    color: THEME.brandPrimary,
   },
   dividerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: scale(10),
+    marginTop: verticalScale(4),
     marginBottom: verticalScale(10),
   },
   dividerLine: {
@@ -1063,22 +1088,23 @@ const styles = StyleSheet.create({
     backgroundColor: THEME.textTertiary,
   },
   dividerText: {
-    fontSize: FONT_SIZES.sm,
+    fontSize: FONT_SIZES.base,
     color: THEME.textSecondary,
   },
   label: {
-    fontSize: FONT_SIZES.sm,
+    fontSize: FONT_SIZES.base,
     color: THEME.textPrimary,
-    marginBottom: verticalScale(5),
+    marginBottom: verticalScale(6),
   },
   input: {
     borderWidth: 1,
     borderColor: '#E5E5EA',
     backgroundColor: '#FFFFFF',
-    borderRadius: scale(14),
-    paddingHorizontal: scale(14),
-    paddingVertical: verticalScale(11),
-    fontSize: FONT_SIZES.md,
+    borderRadius: scale(18),
+    paddingHorizontal: scale(16),
+    paddingVertical: verticalScale(14),
+    minHeight: verticalScale(52),
+    fontSize: FONT_SIZES.lg,
     color: THEME.textPrimary,
     marginBottom: verticalScale(10),
     letterSpacing: 0,
@@ -1100,7 +1126,7 @@ const styles = StyleSheet.create({
   forgot: {
     alignSelf: 'flex-end',
     color: THEME.brandPrimary,
-    fontSize: FONT_SIZES.sm,
+    fontSize: FONT_SIZES.base,
     marginTop: verticalScale(8),
     marginBottom: verticalScale(10),
   },
@@ -1108,29 +1134,38 @@ const styles = StyleSheet.create({
     height: verticalScale(10),
   },
   primaryCta: {
-    minHeight: verticalScale(50),
-    paddingVertical: verticalScale(12),
+    minHeight: verticalScale(52),
+    paddingVertical: verticalScale(14),
     width: '100%',
   },
+  primaryCtaText: {
+    fontSize: FONT_SIZES.lg,
+    fontWeight: '500',
+    color: '#FFFFFF',
+    textAlign: 'center',
+  },
   switchWrap: {
-    marginTop: verticalScale(12),
+    marginTop: verticalScale(14),
     alignItems: 'center',
   },
   switchText: {
-    fontSize: FONT_SIZES.sm,
+    fontSize: FONT_SIZES.lg,
+    fontWeight: '400',
     color: THEME.textMuted,
     textAlign: 'center',
   },
   switchAction: {
-    color: THEME.textPrimary,
+    fontWeight: '400',
+    color: THEME.brandPrimary,
     textDecorationLine: 'underline',
   },
   legal: {
     marginTop: verticalScale(12),
-    fontSize: FONT_SIZES.xs,
+    fontSize: FONT_SIZES.base,
+    fontWeight: '400',
     color: THEME.textSecondary,
     textAlign: 'center',
-    lineHeight: scale(16),
+    lineHeight: scale(22),
   },
   legalLink: {
     textDecorationLine: 'underline',
