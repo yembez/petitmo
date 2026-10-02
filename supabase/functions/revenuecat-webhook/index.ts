@@ -3,8 +3,7 @@
  *
  * BILLING_ISSUE → mail + flag app_metadata.billingIssue (pas de downgrade)
  * CANCELLATION → mail sub.cancelled uniquement (reste paid jusqu’à EXPIRATION)
- * EXPIRATION/REFUND → free + captureLocked + restore archives legacy + mail sub.downgraded
- *   (V1 : plus d’archivage >50 — ex-paid = lecture totale, 0 ajout)
+ * EXPIRATION/REFUND → free + quotas gratuits (50) ; clear captureLocked ; restore archives legacy + mail
  * RENEWAL/… → paid + clear captureLocked/billingIssue + restore + mail sub.reactivated (si venait de free)
  */
 import { createClient } from 'npm:@supabase/supabase-js@2.58.0';
@@ -224,14 +223,9 @@ Deno.serve(async (req: Request) => {
     // Plus d’abo actif → le flag « billing issue » n’a plus de sens (downgrade / restore).
     nextMeta.billingIssue = false;
     nextMeta.billingIssueAt = null;
-    if (tier === 'paid') {
-      nextMeta.captureLocked = false;
-      nextMeta.captureLockedAt = null;
-    } else {
-      // Ex-paid lecture seule (V1) — never-paid n’arrive pas ici via FREE_EVENT_TYPES sans avoir été paid.
-      nextMeta.captureLocked = true;
-      nextMeta.captureLockedAt = new Date().toISOString();
-    }
+    // Ex-paid = plan gratuit (plafond 50) : jamais de verrouillage total des ajouts.
+    nextMeta.captureLocked = false;
+    nextMeta.captureLockedAt = null;
 
     const { error: updErr } = await supabase.auth.admin.updateUserById(userId, {
       app_metadata: nextMeta,

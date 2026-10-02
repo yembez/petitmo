@@ -2,7 +2,6 @@ import { getUserTier } from '@/lib/userTier'
 import { getCachedUserMode } from '@/lib/userMode'
 import { getAllLocalMemories } from '@/lib/localDb'
 import { pullFamilyMemoriesFromRemoteToLocal } from '@/services/memoriesLocalSync'
-import { getCaptureLockedCached } from '@/lib/captureLock'
 
 /** Prod : 50. Valeur de test éventuelle à documenter ici si on baisse temporairement. */
 export const FREE_TIER_LIMIT = 50
@@ -72,7 +71,7 @@ export type LimitCheck = {
   current: number
   limit: number
   isAtLimit: boolean
-  /** Ex-paid lecture seule (V1) — distinct du plafond 50 never-paid. */
+  /** Legacy — plus utilisé pour bloquer (ex-paid = gratuit 50). Conservé pour typage. */
   reason?: 'capture_locked' | null
 }
 
@@ -124,18 +123,6 @@ export async function checkMemoryLimit(
     return paid
   }
 
-  if (await getCaptureLockedCached()) {
-    const locked: LimitCheck = {
-      canCreate: false,
-      current: 0,
-      limit: 0,
-      isAtLimit: true,
-      reason: 'capture_locked',
-    }
-    memoryLimitCache = { childId: FAMILY_LIMIT_CACHE_KEY, at: now, result: locked }
-    return locked
-  }
-
   if (!opts?.skipRemotePull) {
     try {
       if ((await getCachedUserMode()) === 'cloud') {
@@ -167,23 +154,18 @@ export async function checkVideoLimit(
   current: number
   limit: number
   isAtLimit: boolean
+  reason: LimitCheck['reason']
 }> {
   void childId
   void opts
-  if (await getCaptureLockedCached()) {
-    return {
-      canCreate: false,
-      current: 0,
-      limit: 0,
-      isAtLimit: true,
-    }
-  }
   // V2 : pas de cap nombre de vidéos — durée 20 s + plafond 50 souvenirs ailleurs.
+  // Ex-abo = même plan gratuit (plus de verrouillage total).
   return {
     canCreate: true,
     current: 0,
     limit: Infinity,
     isAtLimit: false,
+    reason: null,
   }
 }
 

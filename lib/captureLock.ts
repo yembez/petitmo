@@ -1,7 +1,10 @@
 /**
- * Flag UX « capture verrouillée » (ex-paid en lecture seule).
- * Posé par le webhook RC à EXPIRATION/REFUND (`app_metadata.captureLocked`).
- * Never-paid free : flag absent → quotas 50 / 5 vidéos inchangés.
+ * Flag UX legacy « capture verrouillée » (ancien modèle ex-paid lecture seule).
+ *
+ * **Politique actuelle** : expiration / refund → plan **gratuit** (plafond 50),
+ * pas de verrouillage total. Le webhook RC clear `app_metadata.captureLocked`.
+ * Ce module reste pour lire d’éventuels flags résiduels (CTA paywall) et les
+ * aligner en local — **les gates Capturer ne bloquent plus dessus**.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { User } from '@supabase/supabase-js';

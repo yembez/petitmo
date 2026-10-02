@@ -100,7 +100,7 @@ Décision produit (2026-07-22) : la bêta doit exercer le **modèle compte + clo
 - [x] Login « J’ai déjà un compte » → `/auth?mode=login` (plus un placeholder)
 - [x] Mot de passe oublié bout-en-bout (e-mail + deep link `petitmo://auth` + UI nouveau MDP) — **smoke manuel + Redirect URL Supabase**
 - [x] Sync cloud dès le gratuit (local-first) — `activateCloudSyncAfterRealAuth`
-- [x] Quotas : 50 souvenirs / 5×20 s vidéo / audio **60 s** (plus de cap **nombre** d’audios)
+- [x] Quotas : 50 souvenirs (tous types) / vidéo **20 s** / audio **60 s** (plus de cap **nombre** par type)
 - [x] Photos : thumb + print A5 cloud ; HD si `paid` — `services/media.ts`
 - [x] Remise print **−10 %** paid (`lib/pricingV1.ts`) — figé, pas 15 %
 - [x] Suppression de compte in-app (UI + Edge `delete-account` + purge Storage) — **Edge redéployée 2026-09-23** ; **smoke manuel TF encore ouvert**

@@ -56,6 +56,14 @@ export function freeTierLimitKindFromCheck(check: LimitCheck): FreeTierLimitKind
   return 'memories';
 }
 
+/** Même mapping pour le garde vidéo (ex-abo ne doit pas afficher « 50 souvenirs »). */
+export function freeTierLimitKindFromVideoCheck(check: {
+  reason?: LimitCheck['reason'];
+}): FreeTierLimitKind {
+  if (check.reason === 'capture_locked') return 'capture_locked';
+  return 'videos';
+}
+
 /**
  * Message explicite **avant** le paywall pour toute limite du plan gratuit / ex-paid.
  * Bouton secondaire = rester ; principal = ouvrir le paywall.

@@ -109,18 +109,18 @@ ${untilHtml}
           '',
           'Ton abonnement Petit Cœur est terminé.',
           '',
-          'Bonne nouvelle : tu gardes l’accès à tous tes souvenirs. Tu peux les revoir et les partager un par un.',
-          'En revanche, tu ne peux plus en capturer de nouveaux tant que tu n’es pas réabonnée.',
+          'Bonne nouvelle : tu gardes l’accès à tous tes souvenirs, et tu restes sur le plan gratuit',
+          '(jusqu’à 50 souvenirs). Tu peux continuer à capturer dans cette limite.',
           '',
-          'Pour continuer à capturer : ouvre l’app → Espace parent ou l’écran d’abonnement.',
+          'Pour retrouver les avantages Petit Cœur (quotas étendus, HD cloud, −10 % livre) :',
+          'ouvre l’app → Espace parent ou l’écran d’abonnement.',
           '',
           '— L’équipe Petit Cœur',
         ].join('\n'),
         html: `<p>Bonjour,</p>
 <p>Ton <strong>abonnement Petit Cœur</strong> est terminé.</p>
-<p>Bonne nouvelle : tu gardes l’accès à <strong>tous</strong> tes souvenirs. Tu peux les revoir et les partager un par un.</p>
-<p>En revanche, tu ne peux plus en capturer de nouveaux tant que tu n’es pas réabonnée.</p>
-<p>Pour continuer à capturer : ouvre l’app Petit Cœur → Espace parent ou l’écran d’abonnement.</p>
+<p>Bonne nouvelle : tu gardes l’accès à <strong>tous</strong> tes souvenirs, et tu restes sur le <strong>plan gratuit</strong> (jusqu’à 50 souvenirs). Tu peux continuer à capturer dans cette limite.</p>
+<p>Pour retrouver les avantages Petit Cœur (quotas étendus, HD cloud, −10&nbsp;% livre) : ouvre l’app → Espace parent ou l’écran d’abonnement.</p>
 <p>— L’équipe Petit Cœur</p>`,
       };
     case 'sub.reactivated':
