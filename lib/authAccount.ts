@@ -655,7 +655,7 @@ export async function signUpWithEmailPassword(
   }
 
   // Keychain même si OTP encore à valider — reconnect low-friction après.
-  void import('@/lib/lastEmailPasswordSecure').then(({ saveLastEmailPassword }) =>
+  await import('@/lib/lastEmailPasswordSecure').then(({ saveLastEmailPassword }) =>
     saveLastEmailPassword(trimmed, password)
   );
 
@@ -757,7 +757,7 @@ export async function signInWithEmailPassword(
   }
 
   scheduleCloudSyncAfterRealAuth(data.user);
-  void import('@/lib/lastEmailPasswordSecure').then(({ saveLastEmailPassword }) =>
+  await import('@/lib/lastEmailPasswordSecure').then(({ saveLastEmailPassword }) =>
     saveLastEmailPassword(trimmed, password)
   );
   return { ok: true, user: data.user, session: data.session };
@@ -949,7 +949,7 @@ export async function updatePasswordAfterRecovery(
   scheduleCloudSyncAfterRealAuth(data.user);
   const email = (data.user.email ?? '').trim().toLowerCase();
   if (email) {
-    void import('@/lib/lastEmailPasswordSecure').then(({ saveLastEmailPassword }) =>
+    await import('@/lib/lastEmailPasswordSecure').then(({ saveLastEmailPassword }) =>
       saveLastEmailPassword(email, password)
     );
   }

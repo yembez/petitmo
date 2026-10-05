@@ -153,6 +153,8 @@ export default function AuthScreen() {
   const [appleAvailable, setAppleAvailable] = useState(Platform.OS === 'ios');
   /** True seulement quand on quitte déjà l’écran (session existante / post-submit) — pas au 1er paint. */
   const [leavingShell, setLeavingShell] = useState(false);
+  /** Dernier compte connu sur l’appareil → masquer « Pas encore de compte ? ». */
+  const [knownReturningAccount, setKnownReturningAccount] = useState(false);
   /** Y fenêtre où commence le noir uni (≈ haut de carte + inset coins). */
   const [scrimSolidTop, setScrimSolidTop] = useState(() => windowHeight * 0.52);
   const cardOuterRef = useRef<View>(null);
@@ -310,20 +312,25 @@ export default function AuthScreen() {
   finishAfterAuthRef.current = finishAfterAuth;
   const passwordRecoveryActiveRef = useRef(false);
 
-  /** Dernier e-mail + MDP Keychain : préremplir (mdp = SecureStore, jamais AsyncStorage). */
+  /** Dernier e-mail + MDP Keychain : préremplir dès l’écran login. */
   useEffect(() => {
     if (uiPhase !== 'auth' || mode !== 'login') return;
     let cancelled = false;
     void (async () => {
       const last = normalizeAuthEmail((await getLastRealAuthEmail()) ?? '');
-      if (cancelled || !last) return;
+      if (cancelled || !last) {
+        if (!cancelled) setKnownReturningAccount(false);
+        return;
+      }
+      setKnownReturningAccount(true);
       setEmail(prev => (normalizeAuthEmail(prev) ? prev : last));
       setShowEmailForm(true);
       try {
         const { getLastEmailPasswordFor } = await import('@/lib/lastEmailPasswordSecure');
         const savedPassword = await getLastEmailPasswordFor(last);
         if (cancelled || !savedPassword) return;
-        setPassword(prev => (prev ? prev : savedPassword));
+        // Toujours réappliquer le Keychain (évite un état vide après navigation).
+        setPassword(savedPassword);
       } catch {
         /* binaire sans SecureStore → e-mail seul */
       }
@@ -894,28 +901,30 @@ export default function AuthScreen() {
                   </>
                 )}
 
-                <TouchableOpacity
-                  onPress={() => {
-                    setMode(mode === 'signup' ? 'login' : 'signup');
-                    setShowEmailForm(false);
-                  }}
-                  disabled={busy}
-                  style={styles.switchWrap}
-                  accessibilityRole="button"
-                >
-                  <Text style={styles.switchText}>
-                    {mode === 'signup'
-                      ? t('auth.switchToLoginPrefix')
-                      : t('auth.switchToSignupPrefix')}
-                    <Text style={styles.switchAction}>
+                {!(mode === 'login' && knownReturningAccount) ? (
+                  <TouchableOpacity
+                    onPress={() => {
+                      setMode(mode === 'signup' ? 'login' : 'signup');
+                      setShowEmailForm(false);
+                    }}
+                    disabled={busy}
+                    style={styles.switchWrap}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.switchText}>
                       {mode === 'signup'
-                        ? t('auth.switchToLoginAction')
-                        : t('auth.switchToSignupAction')}
+                        ? t('auth.switchToLoginPrefix')
+                        : t('auth.switchToSignupPrefix')}
+                      <Text style={styles.switchAction}>
+                        {mode === 'signup'
+                          ? t('auth.switchToLoginAction')
+                          : t('auth.switchToSignupAction')}
+                      </Text>
                     </Text>
-                  </Text>
-                </TouchableOpacity>
+                  </TouchableOpacity>
+                ) : null}
 
-                <Text style={styles.legal}>
+                <Text style={[styles.legal, { fontFamily: dm500 }]}>
                   {t('auth.legalBefore')}
                   <Text style={styles.legalLink} onPress={() => void openUrl(LEGAL_TERMS_URL)}>
                     {t('auth.legalTerms')}
@@ -1160,15 +1169,16 @@ const styles = StyleSheet.create({
     textDecorationLine: 'underline',
   },
   legal: {
-    marginTop: verticalScale(12),
-    fontSize: FONT_SIZES.base,
+    marginTop: verticalScale(10),
+    fontSize: FONT_SIZES.xs,
     fontWeight: '400',
     color: THEME.textSecondary,
     textAlign: 'center',
-    lineHeight: scale(22),
+    lineHeight: scale(14),
+    paddingHorizontal: scale(8),
   },
   legalLink: {
     textDecorationLine: 'underline',
-    color: THEME.textMuted,
+    color: THEME.textSecondary,
   },
 });
