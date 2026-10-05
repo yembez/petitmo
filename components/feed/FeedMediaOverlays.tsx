@@ -222,15 +222,23 @@ export function FeedAgeOverlay({
   feedAgeFontFamily?: string;
   /** Relevé supplémentaire au-dessus du bas (ex. viewer immersif + safe area). */
   bottomInset?: number;
-  /** `inline` : audio fil sans vignette. */
-  layout?: 'overlay' | 'inline';
+  /**
+   * `inline` : audio fil sans vignette.
+   * `aboveWave` : audio fil (avec/sans cover) — empilé juste au-dessus de l’onde.
+   */
+  layout?: 'overlay' | 'inline' | 'aboveWave';
 }) {
   const label = (ageLabel ?? '').trim();
   if (!label) return null;
 
-  if (layout === 'inline') {
+  if (layout === 'inline' || layout === 'aboveWave') {
     return (
-      <View style={styles.feedAgePillBarInline} pointerEvents="none">
+      <View
+        style={
+          layout === 'aboveWave' ? styles.feedAgePillBarAboveWave : styles.feedAgePillBarInline
+        }
+        pointerEvents="none"
+      >
         <FeedMetaGlassPill align="right" bare>
           <Text
             style={[styles.feedMetaPillAge, loadedFontStyle(feedAgeFontFamily)]}

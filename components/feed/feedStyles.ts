@@ -447,6 +447,14 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-end',
     maxWidth: '72%',
   },
+  /** Audio fil : pilule âge juste au-dessus de la wave (ne masque pas l’onde). */
+  feedAgePillBarAboveWave: {
+    alignSelf: 'flex-end',
+    maxWidth: '78%',
+    paddingBottom: scale(6),
+    paddingHorizontal: scale(2),
+    zIndex: 3,
+  },
   feedMetaPillWrapLeft: {
     flexShrink: 1,
     maxWidth: '52%',
@@ -597,11 +605,6 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  /** Voile blanc sur la photo de fond du vocal (lisibilité du lecteur, volontairement léger) */
-  voiceCoverScrim: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255,255,255,0.38)',
-  },
   audioForeground: {
     position: 'relative',
     zIndex: 2,
@@ -664,14 +667,15 @@ const styles = StyleSheet.create({
     marginBottom: verticalScale(12),
     textAlign: 'center',
   },
-  /** `width: '100%'` : sans largeur explicite, le `Text` peut se comporter en shrink-wrap et la justification ne s’applique pas à chaque ligne après un `\n`. */
+  /** `width: '100%'` : largeur explicite pour un rendu stable ligne à ligne. */
   textContent: {
     width: '100%',
     alignSelf: 'stretch',
     fontSize: scale(16),
     color: '#1C1C1E',
     lineHeight: FEED_TEXT_BODY_LINE_HEIGHT,
-    textAlign: 'justify',
+    /** Pas de `justify` : espaces inter-mots fixes (alinéas via `\n\n` / margin). */
+    textAlign: 'left',
     ...Platform.select({
       android: {
         textBreakStrategy: 'highQuality' as const,
@@ -698,7 +702,7 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     color: '#1C1C1E',
     lineHeight: FEED_CAPTION_LINE_HEIGHT,
-    textAlign: 'justify',
+    textAlign: 'left',
     ...Platform.select({
       android: {
         textBreakStrategy: 'highQuality' as const,

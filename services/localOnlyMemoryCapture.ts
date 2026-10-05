@@ -20,6 +20,7 @@ export type LocalCaptureMediaType = 'photo' | 'video' | 'voice';
 
 import { newPetitmoEntityId } from '@/utils/petitmoEntityId';
 import { recordAction, recordCaughtError } from '@/lib/diagnosticTrail';
+import { DEVICE_STORAGE_FULL } from '@/utils/deviceStorageFull';
 
 export function newLocalMemoryId(): string {
   return newPetitmoEntityId();
@@ -63,6 +64,7 @@ function emptyMemoryShell(params: {
     voice_cover_url: null,
     voice_cover_path: null,
     voice_playback_start_sec: null,
+    voice_wave_peaks: null,
     edited_media_url: null,
     is_favorite: false,
     duration: null,
@@ -133,6 +135,8 @@ export async function captureMemoryLocalOnly(params: {
   voiceCoverUri?: string | null;
   /** Début de l’extrait (s) si le fichier local est la prise complète. */
   voicePlaybackStartSec?: number | null;
+  /** Enveloppe metering (JSON) pour l’onde de lecture. */
+  voiceWavePeaks?: string | null;
   capturedAtIso?: string;
   locationOverride?: string | null;
   importAssetId?: string | null;
@@ -160,6 +164,7 @@ async function captureMemoryLocalOnlyInner(params: {
   duration?: number;
   voiceCoverUri?: string | null;
   voicePlaybackStartSec?: number | null;
+  voiceWavePeaks?: string | null;
   capturedAtIso?: string;
   locationOverride?: string | null;
   importAssetId?: string | null;
@@ -173,6 +178,7 @@ async function captureMemoryLocalOnlyInner(params: {
     duration,
     voiceCoverUri,
     voicePlaybackStartSec,
+    voiceWavePeaks,
     capturedAtIso,
     locationOverride,
   } = params;
@@ -322,11 +328,15 @@ async function captureMemoryLocalOnlyInner(params: {
       typeof voicePlaybackStartSec === 'number' && Number.isFinite(voicePlaybackStartSec)
         ? voicePlaybackStartSec
         : null;
+    mem.voice_wave_peaks = voiceWavePeaks?.trim() ? voiceWavePeaks.trim() : null;
     return stampLibraryAsset(mem);
   }
 
   const { localOriginalUri } = await persistOriginalToSandbox({ memoryId: id, type: 'voice', sourceUri: uri });
-  const src = (localOriginalUri ?? uri).trim();
+  if (!localOriginalUri) {
+    throw new Error(DEVICE_STORAGE_FULL);
+  }
+  const src = localOriginalUri;
   const size = await readBytesSize(src).catch(() => 0);
   let voiceCoverUrl: string | null = null;
   let voiceCoverPath: string | null = null;
@@ -364,6 +374,7 @@ async function captureMemoryLocalOnlyInner(params: {
     typeof voicePlaybackStartSec === 'number' && Number.isFinite(voicePlaybackStartSec)
       ? voicePlaybackStartSec
       : null;
+  mem.voice_wave_peaks = voiceWavePeaks?.trim() ? voiceWavePeaks.trim() : null;
   if (voiceCoverPath) {
     scheduleLocalVoiceCoverPrintDerivative(id, voiceCoverPath);
   }

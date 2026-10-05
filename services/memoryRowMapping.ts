@@ -102,6 +102,7 @@ export function mergeServerMemoryRowWithExistingLocal(
     location: preferRemoteElseLocal(base.location, existing.location),
     voice_playback_start_sec:
       existing.voice_playback_start_sec ?? base.voice_playback_start_sec ?? null,
+    voice_wave_peaks: existing.voice_wave_peaks ?? base.voice_wave_peaks ?? null,
     captured_overlay_ink: preferRemoteElseLocal(
       base.captured_overlay_ink as string | null | undefined,
       existing.captured_overlay_ink as string | null | undefined,

@@ -36,6 +36,7 @@ import {
   materializeCloudMediaToSandboxForMemory,
 } from '@/services/memoryCloudMaterialize';
 import { emitMemoriesUpdatedIfVisualChanged } from '@/services/memoriesUiNotify';
+import { DEVICE_STORAGE_FULL, isDeviceStorageFullError } from '@/utils/deviceStorageFull';
 import {
   checkMemoryLimit,
   checkVideoLimit,
@@ -111,6 +112,8 @@ interface UploadMediaParams {
   voiceCoverUri?: string | null;
   /** Début de l’extrait (s) quand le fichier uploadé est la prise complète (pas de découpe native). */
   voicePlaybackStartSec?: number | null;
+  /** Enveloppe metering micro (JSON) pour l’onde de lecture. */
+  voiceWavePeaks?: string | null;
   /** Date/heure de prise (ex. EXIF photothèque) — fixe `created_at` du souvenir */
   capturedAtIso?: string;
   /** Lieu issu des métadonnées (ex. EXIF + géocodage) ; sinon position actuelle ou null */
@@ -1465,6 +1468,7 @@ async function syncCloudVoiceMemoryInBackground(params: {
           prev?.voice_playback_start_sec ??
           voicePlaybackStartSec ??
           null,
+        voice_wave_peaks: prev?.voice_wave_peaks ?? null,
         local_media_path: prev?.local_media_path ?? localVoiceUri,
         local_original_path: prev?.local_original_path ?? localVoiceUri,
       },
@@ -1607,6 +1611,7 @@ export async function uploadMedia({
   duration,
   voiceCoverUri,
   voicePlaybackStartSec,
+  voiceWavePeaks,
   capturedAtIso,
   locationOverride,
   mimeType,
@@ -1650,6 +1655,7 @@ export async function uploadMedia({
         duration,
         voiceCoverUri,
         voicePlaybackStartSec,
+        voiceWavePeaks,
         capturedAtIso,
         locationOverride,
         importAssetId,
@@ -1930,7 +1936,10 @@ export async function uploadMedia({
         type: 'voice',
         sourceUri: uri,
       });
-      const src = (localOriginalUri ?? uri).trim();
+      if (!localOriginalUri) {
+        throw new Error(DEVICE_STORAGE_FULL);
+      }
+      const src = localOriginalUri;
 
       let fileSize = 0;
       try {
@@ -1974,6 +1983,7 @@ export async function uploadMedia({
         voice_cover_url: voiceCoverLocal,
         voice_cover_path: voiceCoverLocal,
         voice_playback_start_sec: vStart,
+        voice_wave_peaks: voiceWavePeaks?.trim() ? voiceWavePeaks.trim() : null,
         edited_media_url: null,
         is_favorite: false,
         duration: typeof duration === 'number' && Number.isFinite(duration) ? duration : null,
@@ -2149,7 +2159,9 @@ export async function uploadMedia({
         error.message === 'LIMIT_REACHED' ||
         error.message === 'CAPTURE_LOCKED' ||
         error.message === 'VIDEO_LIMIT_REACHED' ||
-        error.message === IMPORT_DUPLICATE_ASSET
+        error.message === IMPORT_DUPLICATE_ASSET ||
+        error.message === DEVICE_STORAGE_FULL ||
+        isDeviceStorageFullError(error)
       ) {
         throw error;
       }

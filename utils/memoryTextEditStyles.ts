@@ -50,7 +50,7 @@ export function memoryTextEditInputStyle(
       fontWeight: '400',
       fontStyle: 'normal',
       color: '#1C1C1E',
-      textAlign: 'justify',
+      textAlign: 'left',
       ...platformTextBreak,
     };
   }
@@ -75,7 +75,7 @@ export function memoryTextEditInputStyle(
     fontWeight: '400',
     fontStyle: 'normal',
     color: '#1C1C1E',
-    textAlign: 'justify',
+    textAlign: 'left',
     ...platformTextBreak,
   };
 }

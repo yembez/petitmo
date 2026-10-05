@@ -463,6 +463,7 @@ export default function MemoryViewScreen() {
                       uri={voicePlaybackUri}
                       duration={memory.duration || 0}
                       playbackStartSec={memory.voice_playback_start_sec ?? null}
+                      wavePeaks={memory.voice_wave_peaks ?? null}
                       variant={voiceCoverDetailUri ? 'coverBottom' : 'default'}
                       controlIconColor={voiceCoverDetailUri ? '#FFFFFF' : '#1C1C1E'}
                     />
@@ -960,7 +961,7 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     color: THEME.textPrimary,
     lineHeight: scale(29),
-    textAlign: 'justify',
+    textAlign: 'left',
     ...Platform.select({
       android: {
         textBreakStrategy: 'highQuality' as const,

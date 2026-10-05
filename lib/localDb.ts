@@ -121,6 +121,7 @@ export function initLocalDb(): void {
     add('print_px_h', 'INTEGER');
     add('sync_status', "TEXT DEFAULT 'synced'");
     add('voice_playback_start_sec', 'REAL');
+    add('voice_wave_peaks', 'TEXT');
     add('voice_cover_path', 'TEXT');
     add('import_asset_id', 'TEXT');
     add('import_source_fingerprint', 'TEXT');
@@ -418,6 +419,23 @@ export function getLocalMemoryById(id: string): Memory | null {
 }
 
 export function upsertLocalMemory(memory: Memory, uploadStatus?: UploadStatus): void {
+  try {
+    upsertLocalMemoryInner(memory, uploadStatus)
+  } catch (e) {
+    try {
+      const { Sentry } = require('@/lib/sentry') as typeof import('@/lib/sentry')
+      Sentry.captureException(e, {
+        tags: { 'app.errorScope': 'localDb.upsertMemory' },
+        extra: { memoryId: memory.id, type: memory.type },
+      })
+    } catch {
+      /* Sentry indisponible */
+    }
+    throw e
+  }
+}
+
+function upsertLocalMemoryInner(memory: Memory, uploadStatus?: UploadStatus): void {
   const resolvedUpload = uploadStatus ?? memory.upload_status ?? 'full'
   const syncStatus: MemorySyncStatus =
     memory.sync_status === 'local' || memory.sync_status === 'pending' || memory.sync_status === 'synced'
@@ -432,7 +450,7 @@ export function upsertLocalMemory(memory: Memory, uploadStatus?: UploadStatus): 
       original_px_w, original_px_h, print_px_w, print_px_h,
       media_url, media_path, thumb_url, display_url,
       print_url, poster_url, poster_print_url, thumbnail_url, thumbnail_path,
-      voice_cover_url, voice_cover_path, voice_playback_start_sec,
+      voice_cover_url, voice_cover_path, voice_playback_start_sec, voice_wave_peaks,
       edited_media_url, extra_photo_urls, extra_photo_paths, favorite_photo_urls,
       extra_thumb_urls, extra_display_urls,
       is_favorite, duration, file_size, location, captured_overlay_ink,
@@ -441,7 +459,7 @@ export function upsertLocalMemory(memory: Memory, uploadStatus?: UploadStatus): 
       import_asset_id, import_source_fingerprint, public_media_token,
       archived_at, archive_reason
     ) VALUES (
-      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
     )`,
     [
       memory.id,
@@ -472,6 +490,11 @@ export function upsertLocalMemory(memory: Memory, uploadStatus?: UploadStatus): 
       memory.voice_cover_url ?? null,
       memory.voice_cover_path ?? null,
       memory.voice_playback_start_sec ?? null,
+      typeof memory.voice_wave_peaks === 'string'
+        ? memory.voice_wave_peaks
+        : Array.isArray(memory.voice_wave_peaks)
+          ? JSON.stringify(memory.voice_wave_peaks)
+          : null,
       memory.edited_media_url ?? null,
       JSON.stringify(memory.extra_photo_urls ?? []),
       JSON.stringify(memory.extra_photo_paths ?? []),
@@ -715,6 +738,10 @@ function deserializeMemory(row: Record<string, unknown>): Memory {
     voice_playback_start_sec:
       typeof row.voice_playback_start_sec === 'number' && Number.isFinite(row.voice_playback_start_sec)
         ? row.voice_playback_start_sec
+        : null,
+    voice_wave_peaks:
+      typeof row.voice_wave_peaks === 'string' && row.voice_wave_peaks.trim()
+        ? row.voice_wave_peaks.trim()
         : null,
     edited_media_url: row.edited_media_url as string | null,
     is_favorite: row.is_favorite === 1,

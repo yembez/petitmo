@@ -1008,10 +1008,7 @@ function FilMemoryRow({
               ]}
             >
               {!hasVoiceCover ? (
-                <>
-                  <FeedPostMetaOverlay {...mediaMetaOverlayProps} layout="inline" />
-                  <FeedAgeOverlay {...ageOverlayProps} layout="inline" />
-                </>
+                <FeedPostMetaOverlay {...mediaMetaOverlayProps} layout="inline" />
               ) : null}
               {hasVoiceCover && (
                 <>
@@ -1023,7 +1020,6 @@ function FilMemoryRow({
                     cachePolicy="memory-disk"
                     recyclingKey={`${memory.id}-voice-cover-${memory.updated_at ?? ''}`}
                   />
-                  <View style={styles.voiceCoverScrim} />
                 </>
               )}
               <View
@@ -1032,6 +1028,9 @@ function FilMemoryRow({
                   hasVoiceCover ? styles.audioForegroundCover : null,
                 ]}
               >
+                {!!ageAtMemory ? (
+                  <FeedAgeOverlay {...ageOverlayProps} layout="aboveWave" />
+                ) : null}
                 <View
                   style={[
                     styles.audioPlayerWrap,
@@ -1042,6 +1041,7 @@ function FilMemoryRow({
                     uri={voicePlaybackSigned || (memory.media_url ?? '')}
                     duration={memory.duration || 0}
                     playbackStartSec={memory.voice_playback_start_sec ?? null}
+                    wavePeaks={memory.voice_wave_peaks ?? null}
                     variant={hasVoiceCover ? 'coverBottom' : 'feedRow'}
                     controlIconColor={ACTION_ICON_INK}
                     coverFlushBottom={hasVoiceCover}
@@ -1052,7 +1052,6 @@ function FilMemoryRow({
               </View>
             </View>
             </Pressable>
-            {hasVoiceCover ? mediaAgeOverlay : null}
             </View>
           )}
 

@@ -1,33 +1,44 @@
-import React, { useState, useEffect, useMemo, useRef, useId } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useId, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import { Audio } from 'expo-av';
 import { BlurView } from 'expo-blur';
 import { ensurePlaybackAudioForListening } from '@/lib/playbackAudioMode';
+import {
+  claimAudioPlayback,
+  registerAudioPlayer,
+  releaseAudioPlayback,
+} from '@/lib/audioPlaybackCoordinator';
 import { Play, Pause } from 'lucide-react-native';
-import Svg, { Defs, LinearGradient as SvgLinearGradient, Rect, Stop } from 'react-native-svg';
+import Svg, { Rect } from 'react-native-svg';
 import { scale } from '@/utils/responsive';
 import { formatDuration } from '@/utils/date';
-import { THEME } from '@/constants/theme';
-import { BRAND_ACTION_GRADIENT } from '@/constants/captureScreenPalette';
+import { organicWaveBars } from '@/utils/organicWaveBars';
+import { fitWavePeaksToDisplayRange, parseVoiceWavePeaks, resampleWavePeaks } from '@/utils/voiceWavePeaks';
 
 const PLAY = scale(50);
 const STACK = scale(104);
-/** Fil sans vignette : disque play compact, aligné sur l’onde. */
-const PLAY_FEED = scale(44);
-/** Immersif / défaut : SVG dense. */
-const BAR_COUNT = 42;
+/** Fil : disque play compact, centre = axe de la wave. */
+const PLAY_FEED = scale(34);
 /**
- * Fil : moins de barres + `View` (pas SVG) — le montage SVG+onLayout
- * saccadait le scroll surtout sur vocal + cover.
+ * Immersif / défaut : needles type D (traits un cran plus épais que v2).
+ * Moins de barres → chaque trait un peu plus large.
  */
-const FEED_BAR_COUNT = 28;
-/** Demi-hauteur de l’onde (barres centrées sur l’axe) */
-const WAVE_HALF = scale(18);
-/** Onde en lecture (portion déjà jouée) — rouge charte */
-const WAVE_PLAYING = THEME.brandPrimary;
-const WAVE_IDLE = BRAND_ACTION_GRADIENT[0];
-const RING = 'rgba(253, 119, 100, 0.28)';
-const BAR_GAP = scale(2);
+const BAR_COUNT = 72;
+/** Fil : needles View (pas SVG) — scroll fluide sur vocal + cover. */
+const FEED_BAR_COUNT = 56;
+/** Demi-hauteur immersif / défaut. */
+const WAVE_HALF = scale(32);
+/** Demi-hauteur fil. */
+const WAVE_HALF_FEED = scale(19);
+/** Portion lue — noir charte (fond clair). */
+const WAVE_PLAYING_INK = '#1C1C1E';
+/** Non lu — gris visible (fond clair). */
+const WAVE_IDLE_INK = '#AEAEB2';
+/** Immersif sombre : lu = blanc, non lu = gris clair. */
+const WAVE_PLAYING_ON_DARK = '#FFFFFF';
+const WAVE_IDLE_ON_DARK = 'rgba(255, 255, 255, 0.42)';
+const RING = 'rgba(28, 28, 30, 0.22)';
+const BAR_GAP = scale(1);
 
 interface AudioPlayerProps {
   uri: string;
@@ -49,6 +60,13 @@ interface AudioPlayerProps {
   feedPlayDiscOutline?: boolean;
   /** Fil : désactive le flou temps réel (BlurView) du disque play pour un scroll fluide. */
   disableBlurDisc?: boolean;
+  /**
+   * Palette onde : `ink` = noir/gris (fil, fond clair) ;
+   * `onDark` = blanc/gris (immersif sombre).
+   */
+  wavePalette?: 'ink' | 'onDark';
+  /** Pics metering persistés (0..1) — sinon onde organique de repli. */
+  wavePeaks?: number[] | string | null;
 }
 
 function GlassPlayDisc({
@@ -119,8 +137,13 @@ export default function AudioPlayer({
   compactPlayWave = false,
   feedPlayDiscOutline = false,
   disableBlurDisc = false,
+  wavePalette = 'ink',
+  wavePeaks = null,
 }: AudioPlayerProps) {
-  const waveGradId = `audioWaveGrad-${useId().replace(/:/g, '')}`;
+  const playerId = useId();
+  const wavePlaying = wavePalette === 'onDark' ? WAVE_PLAYING_ON_DARK : WAVE_PLAYING_INK;
+  const waveIdle = wavePalette === 'onDark' ? WAVE_IDLE_ON_DARK : WAVE_IDLE_INK;
+  const parsedPeaks = useMemo(() => parseVoiceWavePeaks(wavePeaks ?? null), [wavePeaks]);
   const [sound, setSound] = useState<Audio.Sound | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [position, setPosition] = useState(0);
@@ -133,12 +156,17 @@ export default function AudioPlayer({
   /** Lecture terminée : le prochain « play » doit reprendre au début de l’extrait */
   const finishedRef = useRef(false);
   const soundRef = useRef<Audio.Sound | null>(null);
+  /** Une seule createAsync en vol (prefetch + 1er tap). */
+  const loadPromiseRef = useRef<Promise<Audio.Sound | null> | null>(null);
+  const uriRef = useRef(uri);
+  uriRef.current = uri;
   const clipWindowRef = useRef({
     active: false,
     start: 0,
     end: 0,
     len: 0,
   });
+  const onStatusRef = useRef<(status: Audio.AVPlaybackStatus) => void>(() => {});
 
   const clipWindow =
     playbackStartSec != null && typeof duration === 'number' && duration > 0.01;
@@ -154,22 +182,45 @@ export default function AudioPlayer({
 
   const barHeights = useMemo(
     () =>
-      Array.from({ length: BAR_COUNT }, (_, i) => {
-        const t = i * 0.38 + 0.7;
-        return 0.22 + 0.78 * Math.abs(Math.sin(t)) * (0.65 + 0.35 * Math.abs(Math.sin(t * 1.3)));
-      }),
-    []
+      fitWavePeaksToDisplayRange(
+        parsedPeaks
+          ? resampleWavePeaks(parsedPeaks, BAR_COUNT)
+          : organicWaveBars(BAR_COUNT, 0x0a11d10),
+      ),
+    [parsedPeaks],
   );
-  const feedBarHeights = useMemo(() => barHeights.slice(0, FEED_BAR_COUNT), [barHeights]);
+  const feedBarHeights = useMemo(
+    () =>
+      fitWavePeaksToDisplayRange(
+        parsedPeaks
+          ? resampleWavePeaks(parsedPeaks, FEED_BAR_COUNT)
+          : organicWaveBars(FEED_BAR_COUNT, 0x0feed01),
+      ),
+    [parsedPeaks],
+  );
 
   const [waveW, setWaveW] = useState(0);
   const compact = compactPlayWave && variant !== 'feedRow';
   const isFeedWave = variant === 'coverBottom' || variant === 'feedRow';
+  const waveBarCount = isFeedWave ? FEED_BAR_COUNT : BAR_COUNT;
+  /** Fil (feedRow / coverBottom sans compact) : onde basse. Immersif compact : plus haute. */
   const waveHalf =
-    variant === 'feedRow' ? scale(12) : compact ? WAVE_HALF / 2 : WAVE_HALF;
+    variant === 'feedRow' || (variant === 'coverBottom' && !compact)
+      ? WAVE_HALF_FEED
+      : compact
+        ? WAVE_HALF * 0.92
+        : WAVE_HALF;
   const waveH = waveHalf * 2;
-  const barW =
-    waveW > 1 ? Math.max(scale(2), (waveW - BAR_GAP * (BAR_COUNT - 1)) / BAR_COUNT) : 0;
+  /**
+   * Slots égaux (largeur mesurée) — évite flex+gap qui arrondit chaque barre
+   * différemment → espaces irréguliers sur le fil.
+   */
+  const slotW =
+    waveW > 1
+      ? Math.max(1, (waveW - BAR_GAP * (waveBarCount - 1)) / waveBarCount)
+      : 0;
+  /** Trait type D — proportion fixe du slot, pas de flex. */
+  const needleW = slotW > 0 ? Math.max(1.5, Math.min(slotW * 0.7, scale(2.75))) : 0;
   const maxBarH = Math.max(scale(4), waveH - scale(2));
 
   useEffect(() => {
@@ -201,47 +252,16 @@ export default function AudioPlayer({
     soundRef.current = sound;
   }, [sound]);
 
-  useEffect(() => {
-    return () => {
-      if (sound) {
-        void sound.unloadAsync();
-      }
-    };
-  }, [sound]);
-
-  // Changement d’URI (recyclage fil) : reset état ; l’unload passe par l’effet [sound].
-  useEffect(() => {
+  const stopForCoordinator = useCallback(() => {
     setIsPlaying(false);
-    setPosition(0);
-    setDisplayFrac(0);
-    finishedRef.current = false;
-    soundRef.current = null;
-    setSound(null);
-  }, [uri]);
+    const s = soundRef.current;
+    if (s) void s.pauseAsync().catch(() => {});
+    releaseAudioPlayback(playerId);
+  }, [playerId]);
 
-  const loadSound = async () => {
-    try {
-      const { sound: newSound } = await Audio.Sound.createAsync(
-        { uri },
-        { shouldPlay: false },
-        onPlaybackStatusUpdate
-      );
-      soundRef.current = newSound;
-      setSound(newSound);
-      const w = clipWindowRef.current;
-      if (w.active) {
-        await newSound.setPositionAsync(Math.floor(w.start * 1000));
-        setPosition(w.start);
-        setTotalDuration(w.len);
-      }
-      return newSound;
-    } catch (error) {
-      console.error('Error loading sound:', error);
-      return null;
-    }
-  };
+  useEffect(() => registerAudioPlayer(playerId, stopForCoordinator), [playerId, stopForCoordinator]);
 
-  const onPlaybackStatusUpdate = (status: any) => {
+  const onPlaybackStatusUpdate = useCallback((status: Audio.AVPlaybackStatus) => {
     if (!status.isLoaded) return;
 
     const w = clipWindowRef.current;
@@ -260,11 +280,13 @@ export default function AudioPlayer({
         setDisplayFrac(0);
         anchorPosRef.current = 0;
         anchorTimeRef.current = Date.now();
+        releaseAudioPlayback(playerId);
         return;
       }
       setPosition(posSec);
       setTotalDuration(w.len);
       setIsPlaying(status.isPlaying);
+      if (!status.isPlaying) releaseAudioPlayback(playerId);
 
       if (status.didJustFinish) {
         finishedRef.current = true;
@@ -274,6 +296,7 @@ export default function AudioPlayer({
         setDisplayFrac(0);
         anchorPosRef.current = 0;
         anchorTimeRef.current = Date.now();
+        releaseAudioPlayback(playerId);
       }
       return;
     }
@@ -284,6 +307,7 @@ export default function AudioPlayer({
     setPosition(status.positionMillis / 1000);
     setTotalDuration(status.durationMillis ? status.durationMillis / 1000 : duration || 0);
     setIsPlaying(status.isPlaying);
+    if (!status.isPlaying) releaseAudioPlayback(playerId);
 
     if (status.didJustFinish) {
       finishedRef.current = true;
@@ -292,21 +316,107 @@ export default function AudioPlayer({
       setDisplayFrac(0);
       anchorPosRef.current = 0;
       anchorTimeRef.current = Date.now();
+      releaseAudioPlayback(playerId);
     }
-  };
+  }, [duration, playerId]);
+
+  useEffect(() => {
+    onStatusRef.current = onPlaybackStatusUpdate;
+  }, [onPlaybackStatusUpdate]);
+
+  const ensureSoundLoaded = useCallback(async (): Promise<Audio.Sound | null> => {
+    const existing = soundRef.current;
+    if (existing) {
+      try {
+        const st = await existing.getStatusAsync();
+        if (st.isLoaded) return existing;
+      } catch {
+        /* reload below */
+      }
+    }
+
+    if (loadPromiseRef.current) return loadPromiseRef.current;
+
+    const loadUri = uriRef.current;
+    const loadPromise = (async () => {
+      try {
+        await ensurePlaybackAudioForListening();
+        const { sound: newSound } = await Audio.Sound.createAsync(
+          { uri: loadUri },
+          { shouldPlay: false, progressUpdateIntervalMillis: 80 },
+          status => onStatusRef.current(status),
+        );
+        if (uriRef.current !== loadUri) {
+          void newSound.unloadAsync().catch(() => {});
+          return null;
+        }
+        soundRef.current = newSound;
+        setSound(newSound);
+        const w = clipWindowRef.current;
+        if (w.active) {
+          await newSound.setPositionAsync(Math.floor(w.start * 1000));
+          setPosition(w.start);
+          setTotalDuration(w.len);
+        }
+        return newSound;
+      } catch (error) {
+        console.error('Error loading sound:', error);
+        return null;
+      } finally {
+        if (loadPromiseRef.current === loadPromise) {
+          loadPromiseRef.current = null;
+        }
+      }
+    })();
+
+    loadPromiseRef.current = loadPromise;
+    return loadPromise;
+  }, []);
+
+  // Prefetch dès l’arrivée sur le fil / viewer — 1er play sans attendre createAsync.
+  useEffect(() => {
+    if (!uri?.trim()) return;
+    let cancelled = false;
+    void (async () => {
+      await ensureSoundLoaded();
+      if (cancelled) return;
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [uri, ensureSoundLoaded]);
+
+  useEffect(() => {
+    return () => {
+      const s = soundRef.current;
+      soundRef.current = null;
+      loadPromiseRef.current = null;
+      releaseAudioPlayback(playerId);
+      if (s) void s.unloadAsync().catch(() => {});
+    };
+  }, [playerId]);
+
+  // Changement d’URI (recyclage fil) : reset + unload de l’ancien son.
+  useEffect(() => {
+    setIsPlaying(false);
+    setPosition(0);
+    setDisplayFrac(0);
+    finishedRef.current = false;
+    loadPromiseRef.current = null;
+    const prev = soundRef.current;
+    soundRef.current = null;
+    setSound(null);
+    releaseAudioPlayback(playerId);
+    if (prev) void prev.unloadAsync().catch(() => {});
+  }, [uri, playerId]);
 
   const togglePlayPause = async () => {
     try {
-      let currentSound = sound ?? soundRef.current;
-
-      if (!currentSound) {
-        currentSound = await loadSound();
-        if (!currentSound) return;
-      }
+      let currentSound = await ensureSoundLoaded();
+      if (!currentSound) return;
 
       let st = await currentSound.getStatusAsync();
       if (!st.isLoaded) {
-        // Son unloadé / race (recyclage fil) : on recharge puis on joue.
         setIsPlaying(false);
         try {
           await currentSound.unloadAsync();
@@ -315,7 +425,7 @@ export default function AudioPlayer({
         }
         soundRef.current = null;
         setSound(null);
-        currentSound = await loadSound();
+        currentSound = await ensureSoundLoaded();
         if (!currentSound) return;
         st = await currentSound.getStatusAsync();
         if (!st.isLoaded) return;
@@ -324,10 +434,14 @@ export default function AudioPlayer({
       if (st.isPlaying) {
         await currentSound.pauseAsync();
         setIsPlaying(false);
+        releaseAudioPlayback(playerId);
         return;
       }
 
-      await ensurePlaybackAudioForListening();
+      claimAudioPlayback(playerId);
+      setIsPlaying(true);
+      anchorPosRef.current = positionDisplay;
+      anchorTimeRef.current = Date.now();
 
       const w = clipWindowRef.current;
       if (w.active) {
@@ -353,6 +467,7 @@ export default function AudioPlayer({
     } catch (error) {
       console.error('Error toggling play/pause:', error);
       setIsPlaying(false);
+      releaseAudioPlayback(playerId);
     }
   };
 
@@ -367,7 +482,7 @@ export default function AudioPlayer({
   const playFeedEl = (
     <GlassPlayDisc
       size={PLAY_FEED}
-      iconSize={scale(22)}
+      iconSize={scale(17)}
       isPlaying={isPlaying}
       controlIconColor={controlIconColor}
       onPress={togglePlayPause}
@@ -439,52 +554,58 @@ export default function AudioPlayer({
         styles.waveformFeedBars,
         { height: waveH },
       ]}
+      onLayout={e => setWaveW(Math.max(0, Math.floor(e.nativeEvent.layout.width)))}
     >
-      {feedBarHeights.map((amp, i) => {
-        const h = Math.max(scale(3), amp * maxBarH);
-        const isPlayed =
-          isPlaying && displayFrac > 0 && (i + 1) / FEED_BAR_COUNT <= displayFrac;
-        return (
-          <View
-            key={i}
-            style={[
-              styles.feedBar,
-              {
-                height: h,
-                backgroundColor: isPlayed ? WAVE_PLAYING : WAVE_IDLE,
-              },
-            ]}
-          />
-        );
-      })}
+      {waveW > 1 && needleW > 0
+        ? feedBarHeights.map((amp, i) => {
+            const h = Math.max(scale(2), amp * maxBarH);
+            const isPlayed = displayFrac > 0 && (i + 1) / FEED_BAR_COUNT <= displayFrac;
+            return (
+              <View
+                key={i}
+                style={[
+                  styles.feedSlot,
+                  {
+                    width: slotW,
+                    marginRight: i < FEED_BAR_COUNT - 1 ? BAR_GAP : 0,
+                    height: waveH,
+                  },
+                ]}
+              >
+                <View
+                  style={{
+                    width: needleW,
+                    height: h,
+                    borderRadius: needleW / 2,
+                    backgroundColor: isPlayed ? wavePlaying : waveIdle,
+                  }}
+                />
+              </View>
+            );
+          })
+        : null}
     </View>
   ) : (
     <View
       style={[styles.waveform, { height: waveH }]}
       onLayout={e => setWaveW(Math.max(0, Math.floor(e.nativeEvent.layout.width)))}
     >
-      {waveW > 1 && barW > 0 ? (
+      {waveW > 1 && needleW > 0 ? (
         <Svg width={waveW} height={waveH} viewBox={`0 0 ${waveW} ${waveH}`}>
-          <Defs>
-            <SvgLinearGradient id={waveGradId} x1="0" y1="0" x2="1" y2="0">
-              <Stop offset="0" stopColor={BRAND_ACTION_GRADIENT[0]} />
-              <Stop offset="1" stopColor={BRAND_ACTION_GRADIENT[BRAND_ACTION_GRADIENT.length - 1]} />
-            </SvgLinearGradient>
-          </Defs>
           {barHeights.map((amp, i) => {
-            const h = Math.max(scale(3), amp * maxBarH);
-            const x = i * (barW + BAR_GAP);
+            const h = Math.max(scale(2), amp * maxBarH);
+            const x = i * (slotW + BAR_GAP) + (slotW - needleW) / 2;
             const y = (waveH - h) / 2;
-            const isPlayed = isPlaying && displayFrac > 0 && (i + 1) / BAR_COUNT <= displayFrac;
+            const isPlayed = displayFrac > 0 && (i + 1) / BAR_COUNT <= displayFrac;
             return (
               <Rect
                 key={i}
                 x={x}
                 y={y}
-                width={barW}
+                width={needleW}
                 height={h}
-                rx={Math.min(barW / 2, scale(1.5))}
-                fill={isPlayed ? WAVE_PLAYING : `url(#${waveGradId})`}
+                rx={needleW / 2}
+                fill={isPlayed ? wavePlaying : waveIdle}
               />
             );
           })}
@@ -528,10 +649,16 @@ export default function AudioPlayer({
         </View>
       );
     }
+    /**
+     * Fil + cover : même disque compact que feedRow, centrage vertical
+     * (axe wave = pointe de la flèche) — pas de flex-end / PLAY_FLUSH.
+     */
     return (
       <View style={[styles.containerCover, coverFlushBottom && styles.containerCoverFlush]}>
-        <View style={[styles.coverBottomRow, coverFlushBottom && styles.coverBottomRowFlush]}>
-          {coverFlushBottom ? playFlushEl : playStackEl}
+        <View style={styles.coverBottomRowFeed}>
+          <View style={[styles.feedPlaySlot, { height: feedRowH, width: PLAY_FEED }]}>
+            {playFeedEl}
+          </View>
           {waveformEl}
         </View>
         {timeRowEl}
@@ -603,7 +730,14 @@ const styles = StyleSheet.create({
     width: '100%',
     gap: scale(10),
   },
-  /** Play + onde alignés sur le bas de la ligne (fil photo pleine) */
+  /** Fil + cover : axe horizontal commun play ↔ wave (pointe de la flèche). */
+  coverBottomRowFeed: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+    gap: scale(10),
+  },
+  /** Immersif : play + onde alignés sur le bas (timeRow sous l’onde). */
   coverBottomRowFlush: {
     alignItems: 'flex-end',
   },
@@ -683,16 +817,18 @@ const styles = StyleSheet.create({
     minWidth: 0,
     marginBottom: 0,
   },
-  /** Onde fil : barres flex native (pas de SVG / pas de 2ᵉ paint onLayout). */
+  /** Onde fil : slots largeur fixe + air avant le bord droit de la carte. */
   waveformFeedBars: {
-    gap: scale(1.5),
+    gap: 0,
     paddingHorizontal: 0,
+    marginRight: scale(14),
+    justifyContent: 'flex-start',
+    alignItems: 'center',
+    overflow: 'hidden',
   },
-  feedBar: {
-    flex: 1,
-    alignSelf: 'center',
-    borderRadius: scale(1.5),
-    minWidth: scale(2),
+  feedSlot: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   timeRow: {
     flexDirection: 'row',

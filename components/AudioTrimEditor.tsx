@@ -3,12 +3,16 @@ import { View, Text, StyleSheet, PanResponder, type LayoutChangeEvent } from 're
 import { Scissors } from 'lucide-react-native';
 import { THEME } from '@/constants/theme';
 import { scale } from '@/utils/responsive';
+import { organicWaveBars } from '@/utils/organicWaveBars';
+import { parseVoiceWavePeaks, resampleWavePeaks } from '@/utils/voiceWavePeaks';
 
 const THUMB_R_DEFAULT = scale(12);
-const WAVE_BARS_EDITOR = 46;
-/** Orange vif type maquette (ondes actives / poignées) */
-const TRIM_ACCENT = THEME.brandCtaOrange;
-const BAR_GREY_OUT = '#E5E7EB';
+/** Needles type D — même langage que fil / immersif. */
+const WAVE_BARS_EDITOR = 60;
+/** Sélection + poignées — noir charte. */
+const TRIM_ACCENT = '#1C1C1E';
+/** Hors sélection — gris visible. */
+const BAR_IDLE = '#AEAEB2';
 
 function fmt(seconds: number): string {
   const s = Math.max(0, Math.round(seconds));
@@ -71,6 +75,8 @@ export const AudioTrimEditor = memo(function AudioTrimEditor(props: {
   coachTitle?: string;
   /** Indique un glissement actif sur une poignée (ex. désactiver le ScrollView parent). */
   onDragActiveChange?: (active: boolean) => void;
+  /** Pics metering de la prise (sinon onde organique). */
+  wavePeaks?: number[] | string | null;
 }) {
   const presentation = props.presentation ?? 'track';
   const thumbR = props.compact ? scale(10) : THUMB_R_DEFAULT;
@@ -102,14 +108,11 @@ export const AudioTrimEditor = memo(function AudioTrimEditor(props: {
     };
   }, []);
 
-  const barEnvelope = useMemo(
-    () =>
-      Array.from({ length: WAVE_BARS_EDITOR }, (_, i) => {
-        const t = i * 0.47 + 0.35;
-        return 0.25 + 0.75 * Math.abs(Math.sin(t)) * (0.55 + 0.45 * Math.abs(Math.sin(t * 1.15)));
-      }),
-    []
-  );
+  const barEnvelope = useMemo(() => {
+    const parsed = parseVoiceWavePeaks(props.wavePeaks ?? null);
+    if (parsed) return resampleWavePeaks(parsed, WAVE_BARS_EDITOR);
+    return organicWaveBars(WAVE_BARS_EDITOR, 0xed170);
+  }, [props.wavePeaks]);
 
   const clamp = useCallback(
     (start: number, end: number): AudioTrimEditorValue => {
@@ -262,7 +265,7 @@ export const AudioTrimEditor = memo(function AudioTrimEditor(props: {
   const c = props.compact;
 
   if (presentation === 'editorCard') {
-    const barMaxH = scale(44);
+    const barMaxH = scale(58);
     return (
       <View style={styles.editorRoot}>
         {props.showCoachTitle ? (
@@ -290,8 +293,8 @@ export const AudioTrimEditor = memo(function AudioTrimEditor(props: {
                       style={[
                         styles.editorBar,
                         {
-                          height: Math.max(scale(4), h),
-                          backgroundColor: active ? TRIM_ACCENT : BAR_GREY_OUT,
+                          height: Math.max(scale(3), h),
+                          backgroundColor: active ? TRIM_ACCENT : BAR_IDLE,
                         },
                       ]}
                     />
@@ -422,28 +425,27 @@ const styles = StyleSheet.create({
   },
   editorWaveShell: {
     width: '100%',
-    minHeight: scale(88),
+    minHeight: scale(108),
     justifyContent: 'flex-end',
     paddingBottom: scale(8),
   },
   editorBarsRow: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     justifyContent: 'space-between',
     width: '100%',
-    height: scale(48),
+    height: scale(64),
     paddingHorizontal: scale(2),
+    gap: scale(0.5),
   },
   editorBarCell: {
     flex: 1,
     alignItems: 'center',
-    justifyContent: 'flex-end',
-    marginHorizontal: scale(0.5),
+    justifyContent: 'center',
   },
   editorBar: {
-    width: '100%',
-    maxWidth: scale(5),
-    borderRadius: scale(2),
+    width: scale(2.5),
+    borderRadius: scale(1.25),
   },
   editorTrimOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -451,7 +453,7 @@ const styles = StyleSheet.create({
   },
   editorTrimLine: {
     position: 'absolute',
-    top: scale(16),
+    top: scale(8),
     bottom: scale(46),
     width: scale(2),
     backgroundColor: TRIM_ACCENT,

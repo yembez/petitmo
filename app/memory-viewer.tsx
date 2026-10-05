@@ -1648,11 +1648,7 @@ function ImmersivePage({
             />
           )}
           {memory.type === 'voice' && (
-            <ImmersiveVoice
-              memory={memory}
-              width={width}
-              mountPlayer={captionFadeResizeReady}
-            />
+            <ImmersiveVoiceCover memory={memory} width={width} />
           )}
           {memory.type === 'text' && (
             <ImmersiveText
@@ -1761,7 +1757,7 @@ function ImmersivePage({
             style={styles.captionOnMediaWrap}
             pointerEvents="box-none"
           >
-            <Reanimated.View style={captionScrimStyle} pointerEvents="box-none">
+            <Reanimated.View style={captionScrimStyle} pointerEvents="none">
               <LinearGradient
                 colors={[...IMMERSIVE_BOTTOM_BLACK_FADE]}
                 locations={[...IMMERSIVE_BOTTOM_BLACK_FADE_LOCATIONS]}
@@ -1772,7 +1768,7 @@ function ImmersivePage({
                     paddingBottom: overlayBottomInset,
                   },
                 ]}
-                pointerEvents="box-none"
+                pointerEvents="none"
               >
                 <Reanimated.View
                   pointerEvents="box-none"
@@ -1785,32 +1781,48 @@ function ImmersivePage({
                         : null,
                   ]}
                 >
-                  <ScrollableTextBlock
-                    maxHeight={IMMERSIVE_CAPTION_ON_MEDIA_MAX_H}
-                    fitToContent
-                    showsVerticalScrollIndicator={false}
-                    onViewportHeightChange={onCaptionViewportHeight}
-                    onInnerScrollLock={onInnerScrollLock}
-                    onInnerScrollUnlock={onInnerScrollUnlock}
-                  >
-                    {captionParagraphs.map((para, idx) => (
-                      <Text
-                        key={idx}
-                        style={[
-                          styles.captionOnMediaText,
-                          loadedFontStyle(memoryEditorialFont),
-                          idx > 0 && { marginTop: verticalScale(8) },
-                        ]}
-                        {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
-                      >
-                        {para}
-                      </Text>
-                    ))}
-                  </ScrollableTextBlock>
+                  <View pointerEvents="auto">
+                    <ScrollableTextBlock
+                      maxHeight={IMMERSIVE_CAPTION_ON_MEDIA_MAX_H}
+                      fitToContent
+                      showsVerticalScrollIndicator={false}
+                      onViewportHeightChange={onCaptionViewportHeight}
+                      onInnerScrollLock={onInnerScrollLock}
+                      onInnerScrollUnlock={onInnerScrollUnlock}
+                    >
+                      {captionParagraphs.map((para, idx) => (
+                        <Text
+                          key={idx}
+                          style={[
+                            styles.captionOnMediaText,
+                            loadedFontStyle(memoryEditorialFont),
+                            idx > 0 && { marginTop: verticalScale(8) },
+                          ]}
+                          {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
+                        >
+                          {para}
+                        </Text>
+                      ))}
+                    </ScrollableTextBlock>
+                  </View>
                 </Reanimated.View>
               </LinearGradient>
             </Reanimated.View>
           </Reanimated.View>
+        ) : null}
+
+        {memory.type === 'voice' ? (
+          <ImmersiveChromeReveal
+            order={0}
+            withScale={false}
+            style={styles.voicePlayerOverlay}
+          >
+            <ImmersiveVoicePlayerBar
+              memory={memory}
+              mountPlayer={captionFadeResizeReady}
+              bottomInset={overlayBottomInset}
+            />
+          </ImmersiveChromeReveal>
         ) : null}
 
         {mediaChrome ? (
@@ -2168,18 +2180,12 @@ function ImmersiveVideo({
   );
 }
 
-function ImmersiveVoice({
+function ImmersiveVoiceCover({
   memory,
   width,
-  mountPlayer = true,
 }: {
   memory: Memory;
   width: number;
-  /**
-   * Pendant le zoom shared-element : ne pas monter AudioPlayer (coûteux).
-   * La cover seule porte la transition, comme une photo.
-   */
-  mountPlayer?: boolean;
 }) {
   const voiceCoverRaw = getVoiceCoverUriForFeedAndViewer(memory);
   const voiceCoverSigned = useSignedMediaUrl(voiceCoverRaw || null) ?? '';
@@ -2187,10 +2193,6 @@ function ImmersiveVoice({
     (voiceCoverSigned || voiceCoverRaw).trim(),
   );
   const hasCover = !!voiceCoverDisplayUri.trim();
-
-  const voicePlaybackSigned =
-    useSignedMediaUrl(memory.type === 'voice' ? (memory.media_url ?? null) : null) ?? '';
-  const playbackUri = (voicePlaybackSigned || (memory.media_url ?? '')).trim();
 
   return (
     <View style={[styles.voiceWrapImmersive, { width }]}>
@@ -2206,25 +2208,56 @@ function ImmersiveVoice({
         ) : (
           <View style={[StyleSheet.absoluteFillObject, { backgroundColor: THEME.bgScreen }]} />
         )}
-        <View
-          style={[
-            styles.voicePlayerImmersive,
-            hasCover && styles.voicePlayerImmersiveCompact,
-          ]}
-        >
-          {playbackUri && mountPlayer ? (
-            <AudioPlayer
-              uri={playbackUri}
-              duration={memory.duration || 0}
-              playbackStartSec={memory.voice_playback_start_sec ?? null}
-              variant={hasCover ? 'coverBottom' : 'default'}
-              compactPlayWave
-              controlIconColor={hasCover ? '#1C1C1E' : '#FFFFFF'}
-              coverFlushBottom={hasCover}
-            />
-          ) : null}
-        </View>
       </ImmersiveMediaReveal>
+    </View>
+  );
+}
+
+/**
+ * Play + onde au-dessus du dégradé légende (frère de `captionOnMediaWrap`).
+ * Un zIndex dans `mediaFill` ne suffit pas : le bandeau légende est un sibling plus haut.
+ */
+function ImmersiveVoicePlayerBar({
+  memory,
+  mountPlayer = true,
+  bottomInset,
+}: {
+  memory: Memory;
+  mountPlayer?: boolean;
+  bottomInset: number;
+}) {
+  const voiceCoverRaw = getVoiceCoverUriForFeedAndViewer(memory);
+  const voiceCoverSigned = useSignedMediaUrl(voiceCoverRaw || null) ?? '';
+  const hasCover = !!normalizeMemoryMediaUriForDisplay(
+    (voiceCoverSigned || voiceCoverRaw).trim(),
+  ).trim();
+
+  const voicePlaybackSigned =
+    useSignedMediaUrl(memory.type === 'voice' ? (memory.media_url ?? null) : null) ?? '';
+  const playbackUri = (voicePlaybackSigned || (memory.media_url ?? '')).trim();
+
+  if (!playbackUri || !mountPlayer) return null;
+
+  return (
+    <View style={{ paddingBottom: bottomInset }} pointerEvents="box-none">
+      <View
+        style={[
+          styles.voicePlayerImmersive,
+          hasCover && styles.voicePlayerImmersiveCompact,
+        ]}
+      >
+        <AudioPlayer
+          uri={playbackUri}
+          duration={memory.duration || 0}
+          playbackStartSec={memory.voice_playback_start_sec ?? null}
+          wavePeaks={memory.voice_wave_peaks ?? null}
+          variant={hasCover ? 'coverBottom' : 'default'}
+          compactPlayWave
+          controlIconColor="#FFFFFF"
+          coverFlushBottom={hasCover}
+          wavePalette="onDark"
+        />
+      </View>
     </View>
   );
 }
@@ -2730,14 +2763,23 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'flex-end',
   },
+  /**
+   * Sibling du bandeau légende (zIndex 7) — au-dessus pour play / onde visibles + tappables,
+   * sous le cœur / crayon (zIndex 12).
+   */
+  voicePlayerOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 11,
+  },
   voicePlayerImmersive: {
     width: '100%',
     paddingVertical: verticalScale(16),
     paddingLeft: scale(16),
     // Crayon bas-droite (right 12 + disque 32) + petit écart.
     paddingRight: scale(12) + scale(32) + scale(8),
-    // Au-dessus du bandeau légende (zIndex 7) pour que play / onde restent cliquables.
-    zIndex: 12,
   },
   /** Vue immersive audio : raccourcit le bandeau sombre derrière la wave. */
   voicePlayerImmersiveCompact: {
