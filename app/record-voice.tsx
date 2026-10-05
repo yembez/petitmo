@@ -5,6 +5,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   Alert,
+  Linking,
   AppState,
   AppStateStatus,
   ActivityIndicator,
@@ -50,14 +51,60 @@ import {
   shouldShowLocationSoftPrompt,
 } from '@/lib/memoryLocation';
 import { getUserTier } from '@/lib/userTier';
-import { FREE_TIER_VOICE_MAX_DURATION, PAID_TIER_VOICE_MAX_DURATION, checkMemoryLimit } from '@/lib/limits';
-import { promptFreeTierLimitThenPaywall, promptFreeTierLimitFromError, freeTierLimitKindFromCheck } from '@/utils/freeTierLimitGate';
+import { FREE_TIER_LIMIT, FREE_TIER_VOICE_MAX_DURATION, PAID_TIER_VOICE_MAX_DURATION, checkMemoryLimit } from '@/lib/limits';
+import { promptFreeTierLimitThenPaywall } from '@/utils/freeTierLimitGate';
 import { isAudioTrimAvailable, trimAudioToLocalFile } from '@/services/audioTrim';
 import { AudioTrimEditor } from '@/components/AudioTrimEditor';
+import {
+  emptyLiveMeterBars,
+  LiveRecordingEnvelope,
+  normalizeRecordingMeterDb,
+  RecordingPulseControl,
+} from '@/components/LiveRecordingVisual';
+import {
+  downsampleMeterHistory,
+  serializeVoiceWavePeaks,
+  sliceWavePeaks,
+  VOICE_WAVE_PEAKS_COUNT,
+} from '@/utils/voiceWavePeaks';
 import { isVoiceDocumentPickerAvailable } from '@/services/voiceImport';
 import { takePendingSharedVoice } from '@/lib/pendingShareMedia';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { isDeviceStorageFullError } from '@/utils/deviceStorageFull';
+import {
+  estimatedVoiceFileBytes,
+  preflightVoiceCapture,
+  readFreeDiskBytes,
+  releaseVoiceCaptureSlot,
+  voiceKeepReserveBytes,
+  type VoiceCapturePreflightFailReason,
+} from '@/utils/voiceCapturePreflight';
+import { Sentry } from '@/lib/sentry';
+import { copyAsync, getInfoAsync } from 'expo-file-system/legacy';
+
+async function voiceFileBytes(uri: string | null): Promise<number> {
+  if (!uri) return 0;
+  try {
+    const info = await getInfoAsync(uri);
+    if (info.exists && typeof info.size === 'number' && info.size > 0) return info.size;
+  } catch {
+    /* taille inconnue — le précontrôle retombe sur l’estimation */
+  }
+  return 0;
+}
+
+async function shareVoiceFile(uri: string): Promise<void> {
+  try {
+    const Sharing = await import('expo-sharing');
+    if (!(await Sharing.isAvailableAsync())) return;
+    await Sharing.shareAsync(uri, {
+      mimeType: 'audio/mp4',
+      UTI: 'public.mpeg-4-audio',
+    });
+  } catch (e) {
+    console.warn('[record-voice] share', e);
+  }
+}
 
 export default function RecordVoiceScreen() {
   const router = useRouter();
@@ -65,7 +112,16 @@ export default function RecordVoiceScreen() {
   const { t } = useAppTranslation('common');
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
+  /** Enveloppe needles live (metering expo-av) + niveau pour pulse. */
+  const [meterBars, setMeterBars] = useState(emptyLiveMeterBars);
+  const [meterLevel, setMeterLevel] = useState(0);
+  const meterLevelRef = useRef(0);
+  /** Historique metering complet → pics persistés pour la lecture. */
+  const meterHistoryRef = useRef<number[]>([]);
+  const [wavePeaks, setWavePeaks] = useState<number[] | null>(null);
   const [hasRecording, setHasRecording] = useState(false);
+  /** Prise durable, mais le souvenir ne peut pas être écrit — pas d’écran « terminé ». */
+  const [saveBlockReason, setSaveBlockReason] = useState<VoiceCapturePreflightFailReason | null>(null);
   const [tier, setTier] = useState<'free' | 'paid'>('free');
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [showPermissionModal, setShowPermissionModal] = useState(false);
@@ -106,6 +162,11 @@ export default function RecordVoiceScreen() {
   const soundRef = useRef<Audio.Sound | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const sharedVoiceConsumedRef = useRef(false);
+  const recordingDurationRef = useRef(0);
+  const stoppingRef = useRef(false);
+  const stopRecordingRef = useRef<() => Promise<void>>(async () => {});
+  /** Fichier d’accueil écrit avant le micro — libéré seulement si on n’a pas démarré. */
+  const reserveUriRef = useRef<string | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -131,6 +192,8 @@ export default function RecordVoiceScreen() {
       if (soundRef.current) {
         soundRef.current.unloadAsync().catch(() => {});
       }
+      releaseVoiceCaptureSlot(reserveUriRef.current);
+      reserveUriRef.current = null;
     };
   }, []);
 
@@ -145,6 +208,98 @@ export default function RecordVoiceScreen() {
     setHasPermission(result.granted);
   };
 
+  const blockCopy = useCallback(
+    (reason: VoiceCapturePreflightFailReason): string => {
+      switch (reason) {
+        case 'storage':
+          return t('recordVoice.preflightStorage');
+        case 'write':
+          return t('recordVoice.preflightWrite');
+        case 'auth':
+          return t('recordVoice.preflightAuth');
+        case 'no_child':
+          return t('recordVoice.preflightNoChild');
+        case 'limit':
+          return t('parent.freeTierLimit.memoriesBody', { count: FREE_TIER_LIMIT });
+        case 'capture_locked':
+          return t('parent.freeTierLimit.captureLockedBody');
+        default:
+          return t('recordVoice.preflightUnknown');
+      }
+    },
+    [t],
+  );
+
+  const promptMicSettings = useCallback(() => {
+    Alert.alert(t('recordVoice.blockedTitle'), t('recordVoice.preflightMicDenied'), [
+      { text: t('cancel'), style: 'cancel' },
+      {
+        text: t('recordVoice.preflightMicSettings'),
+        onPress: () => {
+          void Linking.openSettings();
+        },
+      },
+    ]);
+  }, [t]);
+
+  const presentVoicePreflightBlock = useCallback(
+    (
+      pre: { ok: false; reason: VoiceCapturePreflightFailReason },
+      opts: { takeKept: boolean },
+    ) => {
+      if (!opts.takeKept && (pre.reason === 'limit' || pre.reason === 'capture_locked')) {
+        promptFreeTierLimitThenPaywall({
+          kind: pre.reason === 'capture_locked' ? 'capture_locked' : 'memories',
+          router,
+          returnTo: 'fil',
+        });
+        return;
+      }
+      if (!opts.takeKept && pre.reason === 'no_child') {
+        Alert.alert(t('recordVoice.blockedTitle'), t('recordVoice.preflightNoChild'));
+        router.push('/create-child');
+        return;
+      }
+      if (!opts.takeKept) {
+        Alert.alert(t('recordVoice.blockedTitle'), blockCopy(pre.reason));
+        return;
+      }
+
+      const uri = recordingFileUriRef.current;
+      const buttons: {
+        text: string;
+        style?: 'cancel';
+        onPress?: () => void;
+      }[] = [];
+      if (uri) {
+        buttons.push({
+          text: t('recordVoice.keepInFiles'),
+          onPress: () => {
+            void shareVoiceFile(uri);
+          },
+        });
+      }
+      if (pre.reason === 'limit' || pre.reason === 'capture_locked') {
+        buttons.push({ text: t('parent.freeTierLimit.later'), style: 'cancel' });
+        buttons.push({
+          text: t('parent.freeTierLimit.ctaPlus'),
+          onPress: () => {
+            router.push({
+              pathname: '/paywall',
+              params: {
+                context: pre.reason === 'capture_locked' ? 'EX_SUBSCRIBER' : 'LIMIT_REACHED',
+              },
+            });
+          },
+        });
+      } else {
+        buttons.push({ text: t('ok'), style: 'cancel' });
+      }
+      Alert.alert(t('recordVoice.notAddedTitle'), blockCopy(pre.reason), buttons);
+    },
+    [blockCopy, router, t],
+  );
+
   const handleRequestPermission = async () => {
     const result = await Audio.requestPermissionsAsync();
     if (result.granted) {
@@ -158,28 +313,12 @@ export default function RecordVoiceScreen() {
       await startRecording();
     } else {
       setShowPermissionModal(false);
+      if (result.canAskAgain === false) promptMicSettings();
     }
   };
 
   const handleCancelPermission = () => {
     setShowPermissionModal(false);
-  };
-
-  const ensureVoiceQuotaOk = async (): Promise<string | null> => {
-    const childId = await getOrSelectFirstChild();
-    if (!childId) {
-      Alert.alert('Aucun enfant trouvé', "Crée d'abord un profil d'enfant");
-      router.push('/create-child');
-      return null;
-    }
-    if (tier === 'free') {
-      const memLimit = await checkMemoryLimit(childId, { skipRemotePull: true });
-      if (!memLimit.canCreate) {
-        promptFreeTierLimitThenPaywall({ kind: freeTierLimitKindFromCheck(memLimit), router, returnTo: 'fil' });
-        return null;
-      }
-    }
-    return childId;
   };
 
   const applyLoadedAudio = useCallback(
@@ -194,6 +333,8 @@ export default function RecordVoiceScreen() {
       setHasRecording(true);
       setIsRecording(false);
       setCoverUri(null);
+      meterHistoryRef.current = [];
+      setWavePeaks(null);
       const total = Math.max(0, durationSec);
       setRecordingDuration(total);
       const maxClip =
@@ -213,12 +354,24 @@ export default function RecordVoiceScreen() {
     void (async () => {
       try {
         setIsImporting(true);
-        const childId = await ensureVoiceQuotaOk();
-        if (!childId) return;
+        const bytes = await voiceFileBytes(pending.uri);
+        const pre = await preflightVoiceCapture({
+          reserveBytes: voiceKeepReserveBytes(
+            bytes || estimatedVoiceFileBytes(pending.durationSec),
+          ),
+        });
+        if (!pre.ok) {
+          recordingFileUriRef.current = pending.uri;
+          await applyLoadedAudio(pending.uri, pending.durationSec);
+          setSaveBlockReason(pre.reason);
+          presentVoicePreflightBlock(pre, { takeKept: true });
+          return;
+        }
+        setSaveBlockReason(null);
         await applyLoadedAudio(pending.uri, pending.durationSec);
       } catch (e) {
         if (isDeviceStorageFullError(e)) {
-          Alert.alert(t('error'), t('bookOrder.storageFull'));
+          Alert.alert(t('recordVoice.blockedTitle'), t('recordVoice.preflightStorage'));
         } else {
           console.error('[record-voice] shared voice', e);
           Alert.alert(t('error'), t('recordVoice.importFailed'));
@@ -227,19 +380,30 @@ export default function RecordVoiceScreen() {
         setIsImporting(false);
       }
     })();
-  }, [applyLoadedAudio, t]);
+  }, [applyLoadedAudio, presentVoicePreflightBlock, t]);
 
   const startRecording = async () => {
     try {
       const perm = await Audio.getPermissionsAsync();
       if (!perm.granted) {
+        if (perm.canAskAgain === false) {
+          promptMicSettings();
+          return;
+        }
         setShowPermissionModal(true);
         return;
       }
       setHasPermission(true);
 
-      const childId = await ensureVoiceQuotaOk();
-      if (!childId) return;
+      releaseVoiceCaptureSlot(reserveUriRef.current);
+      reserveUriRef.current = null;
+
+      const pre = await preflightVoiceCapture({ allocateSlot: true });
+      if (!pre.ok) {
+        presentVoicePreflightBlock(pre, { takeKept: false });
+        return;
+      }
+      reserveUriRef.current = pre.reserveUri ?? null;
 
       if (soundRef.current) {
         await soundRef.current.unloadAsync();
@@ -258,32 +422,74 @@ export default function RecordVoiceScreen() {
 
       await armAudioSession();
 
+      meterLevelRef.current = 0;
+      meterHistoryRef.current = [];
+      setMeterBars(emptyLiveMeterBars());
+      setMeterLevel(0);
+      setWavePeaks(null);
+
+      const onRecordingStatus = (status: Audio.RecordingStatus) => {
+        if (!status.isRecording || typeof status.metering !== 'number') return;
+        const norm = normalizeRecordingMeterDb(status.metering);
+        const smoothed = meterLevelRef.current * 0.55 + norm * 0.45;
+        meterLevelRef.current = smoothed;
+        meterHistoryRef.current.push(smoothed);
+        setMeterLevel(smoothed);
+        setMeterBars(prev => {
+          const next = prev.slice(1);
+          next.push(Math.max(0.06, smoothed));
+          return next;
+        });
+      };
+
       let recording: Audio.Recording;
       try {
         ({ recording } = await Audio.Recording.createAsync(
           Audio.RecordingOptionsPresets.HIGH_QUALITY,
+          onRecordingStatus,
+          50,
         ));
       } catch (firstErr) {
         console.warn('[record-voice] createAsync retry after session settle', firstErr);
         await armAudioSession();
         ({ recording } = await Audio.Recording.createAsync(
           Audio.RecordingOptionsPresets.HIGH_QUALITY,
+          onRecordingStatus,
+          50,
         ));
       }
 
       recordingRef.current = recording;
       recordingFileUriRef.current = null;
+      recordingDurationRef.current = 0;
       setIsRecording(true);
       setHasRecording(false);
+      setSaveBlockReason(null);
       setRecordingDuration(0);
       setCoverUri(null);
 
       timerRef.current = setInterval(() => {
-        setRecordingDuration((prev) => prev + 1);
+        recordingDurationRef.current += 1;
+        const sec = recordingDurationRef.current;
+        setRecordingDuration(sec);
+        if (sec % 2 !== 0) return;
+        const free = readFreeDiskBytes();
+        const need = voiceKeepReserveBytes(estimatedVoiceFileBytes(sec));
+        if (free != null && free < need) {
+          void stopRecordingRef.current();
+        }
       }, 1000);
     } catch (error) {
       console.error('Failed to start recording:', error);
-      Alert.alert('Erreur', "Impossible de démarrer l'enregistrement");
+      releaseVoiceCaptureSlot(reserveUriRef.current);
+      reserveUriRef.current = null;
+      setIsRecording(false);
+      Alert.alert(
+        t('recordVoice.blockedTitle'),
+        isDeviceStorageFullError(error)
+          ? t('recordVoice.preflightStorage')
+          : t('recordVoice.startFailed'),
+      );
     }
   };
 
@@ -294,13 +500,30 @@ export default function RecordVoiceScreen() {
       return;
     }
     try {
-      const childId = await ensureVoiceQuotaOk();
-      if (!childId) return;
+      const pre = await preflightVoiceCapture();
+      if (!pre.ok) {
+        presentVoicePreflightBlock(pre, { takeKept: false });
+        return;
+      }
 
       setIsImporting(true);
       const { pickVoiceAudioFromFiles } = await import('@/services/voiceImport');
       const picked = await pickVoiceAudioFromFiles();
       if (!picked) return;
+      const bytes = await voiceFileBytes(picked.uri);
+      const filePre = await preflightVoiceCapture({
+        reserveBytes: voiceKeepReserveBytes(
+          bytes || estimatedVoiceFileBytes(picked.durationSec),
+        ),
+      });
+      if (!filePre.ok) {
+        recordingFileUriRef.current = picked.uri;
+        await applyLoadedAudio(picked.uri, picked.durationSec);
+        setSaveBlockReason(filePre.reason);
+        presentVoicePreflightBlock(filePre, { takeKept: true });
+        return;
+      }
+      setSaveBlockReason(null);
       await applyLoadedAudio(picked.uri, picked.durationSec);
     } catch (e) {
       if (e instanceof Error && e.message === 'DOCUMENT_PICKER_UNAVAILABLE') {
@@ -308,7 +531,7 @@ export default function RecordVoiceScreen() {
         return;
       }
       if (isDeviceStorageFullError(e)) {
-        Alert.alert(t('error'), t('bookOrder.storageFull'));
+        Alert.alert(t('recordVoice.blockedTitle'), t('recordVoice.preflightStorage'));
         return;
       }
       if (e instanceof Error && e.message === 'AUDIO_TOO_SHORT') {
@@ -327,34 +550,96 @@ export default function RecordVoiceScreen() {
   };
 
   const stopRecording = async () => {
+    if (stoppingRef.current) return;
+    if (!recordingRef.current) return;
+    stoppingRef.current = true;
     try {
-      if (!recordingRef.current) return;
-
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
       }
 
       setIsRecording(false);
+      setMeterLevel(0);
+      meterLevelRef.current = 0;
+      setMeterBars(emptyLiveMeterBars());
+      const peaks = downsampleMeterHistory(meterHistoryRef.current, VOICE_WAVE_PEAKS_COUNT);
+      setWavePeaks(peaks.length >= 8 ? peaks : null);
       const fileUri = recordingRef.current.getURI() ?? null;
+      const takenSec = recordingDurationRef.current;
       await recordingRef.current.stopAndUnloadAsync();
-      recordingFileUriRef.current = fileUri;
+      recordingRef.current = null;
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
         playsInSilentModeIOS: true,
-      });
+      }).catch(() => {});
 
-      setHasRecording(true);
-      // Préremplir l’extrait : max 60 s free / 5 min paid.
+      const slot = reserveUriRef.current;
+      let durableUri: string | null = null;
+      if (fileUri && slot) {
+        try {
+          await copyAsync({ from: fileUri, to: slot });
+          durableUri = slot;
+          reserveUriRef.current = null;
+        } catch (copyErr) {
+          console.warn('[record-voice] persist take into reserved slot', copyErr);
+          durableUri = fileUri;
+        }
+      } else if (fileUri) {
+        durableUri = fileUri;
+      }
+      recordingFileUriRef.current = durableUri;
+
+      if (!durableUri) {
+        releaseVoiceCaptureSlot(slot);
+        reserveUriRef.current = null;
+        setHasRecording(false);
+        setSaveBlockReason(null);
+        setRecordingDuration(0);
+        recordingDurationRef.current = 0;
+        Alert.alert(t('recordVoice.blockedTitle'), t('recordVoice.startFailed'));
+        return;
+      }
+
+      const bytes = await voiceFileBytes(durableUri);
+      const pre = await preflightVoiceCapture({
+        reserveBytes: voiceKeepReserveBytes(bytes || estimatedVoiceFileBytes(takenSec)),
+      });
       const maxClip =
         tier === 'free' ? FREE_TIER_VOICE_MAX_DURATION : PAID_TIER_VOICE_MAX_DURATION;
       setTrimStartSec(0);
-      setTrimEndSec(Math.max(0, Math.min(recordingDuration, maxClip)));
+      setTrimEndSec(Math.max(0, Math.min(takenSec, maxClip)));
+      setHasRecording(true);
+      if (!pre.ok) {
+        setSaveBlockReason(pre.reason);
+        presentVoicePreflightBlock(pre, { takeKept: true });
+        return;
+      }
+      setSaveBlockReason(null);
     } catch (error) {
       console.error('Failed to stop recording:', error);
-      Alert.alert('Erreur', "Impossible d'arrêter l'enregistrement");
+      const fallback = recordingRef.current?.getURI() ?? recordingFileUriRef.current;
+      if (fallback) {
+        recordingFileUriRef.current = fallback;
+        setHasRecording(true);
+        setSaveBlockReason(null);
+        return;
+      }
+      releaseVoiceCaptureSlot(reserveUriRef.current);
+      reserveUriRef.current = null;
+      setHasRecording(false);
+      setSaveBlockReason(null);
+      Alert.alert(
+        t('recordVoice.blockedTitle'),
+        isDeviceStorageFullError(error)
+          ? t('recordVoice.preflightStorage')
+          : t('recordVoice.startFailed'),
+      );
+    } finally {
+      stoppingRef.current = false;
     }
   };
+  stopRecordingRef.current = stopRecording;
 
   useEffect(() => {
     if (!isRecording) return;
@@ -559,9 +844,27 @@ export default function RecordVoiceScreen() {
     return () => clearTimeout(t);
   }, [trimStartSec, trimEndSec, isExcerptPlaying, startExcerptPlayback]);
 
+  const assertVoiceCanBeSaved = async (): Promise<boolean> => {
+    const uri = recordingFileUriRef.current;
+    const bytes = await voiceFileBytes(uri);
+    const pre = await preflightVoiceCapture({
+      reserveBytes: voiceKeepReserveBytes(
+        bytes || estimatedVoiceFileBytes(recordingDurationRef.current || recordingDuration),
+      ),
+    });
+    if (!pre.ok) {
+      setSaveBlockReason(pre.reason);
+      presentVoicePreflightBlock(pre, { takeKept: true });
+      return false;
+    }
+    setSaveBlockReason(null);
+    return true;
+  };
+
   const saveRecording = async () => {
     if (!hasRecording || (!recordingFileUriRef.current && !recordingRef.current)) return;
     if (ctaPhase !== 'idle') return;
+    if (!(await assertVoiceCanBeSaved())) return;
 
     if (await shouldShowLocationSoftPrompt()) {
       pendingSaveAfterLocationRef.current = () => {
@@ -576,6 +879,7 @@ export default function RecordVoiceScreen() {
 
   const saveRecordingAfterLocationReady = async () => {
     if (!hasRecording || (!recordingFileUriRef.current && !recordingRef.current)) return;
+    if (!(await assertVoiceCanBeSaved())) return;
 
     try {
       setIsSaving(true);
@@ -583,19 +887,21 @@ export default function RecordVoiceScreen() {
 
       const childId = await getOrSelectFirstChild();
       if (!childId) {
-        Alert.alert('Aucun enfant trouvé', 'Crée d\'abord un profil d\'enfant');
         setCtaPhase('idle');
         setIsSaving(false);
-        router.push('/create-child');
+        setSaveBlockReason('no_child');
+        presentVoicePreflightBlock({ ok: false, reason: 'no_child' }, { takeKept: true });
         return;
       }
 
       if (tier === 'free') {
         const memLimit = await checkMemoryLimit(childId, { skipRemotePull: true });
         if (!memLimit.canCreate) {
-          promptFreeTierLimitThenPaywall({ kind: freeTierLimitKindFromCheck(memLimit), router, returnTo: 'fil' });
+          const reason = memLimit.reason === 'capture_locked' ? 'capture_locked' : 'limit';
+          setSaveBlockReason(reason);
           setCtaPhase('idle');
           setIsSaving(false);
+          presentVoicePreflightBlock({ ok: false, reason }, { takeKept: true });
           return;
         }
       }
@@ -666,6 +972,13 @@ export default function RecordVoiceScreen() {
           : null;
       locationForNextSaveRef.current = undefined;
 
+      const peaksForSave =
+        wavePeaks && wavePeaks.length >= 8
+          ? needsTrim
+            ? sliceWavePeaks(wavePeaks, s, e, recordingDuration)
+            : wavePeaks
+          : null;
+
       const result = await uploadMedia({
         uri: finalUri,
         type: 'voice',
@@ -673,6 +986,7 @@ export default function RecordVoiceScreen() {
         duration: finalDuration,
         voiceCoverUri: coverUri,
         voicePlaybackStartSec,
+        voiceWavePeaks: serializeVoiceWavePeaks(peaksForSave),
         locationOverride,
       });
 
@@ -686,20 +1000,28 @@ export default function RecordVoiceScreen() {
         };
         setCtaPhase('success');
       } else {
-        setCtaPhase('error');
-        Alert.alert('Erreur', 'Impossible de sauvegarder le souvenir');
+        setCtaPhase('idle');
+        Alert.alert(t('error'), t('recordVoice.saveFailedKeep'));
       }
     } catch (error) {
-      if (
-        error instanceof Error &&
-        promptFreeTierLimitFromError(error.message, { router, returnTo: 'fil' })
-      ) {
+      if (error instanceof Error && (error.message === 'LIMIT_REACHED' || error.message === 'CAPTURE_LOCKED' || error.message === 'VIDEO_LIMIT_REACHED')) {
+        const reason = error.message === 'CAPTURE_LOCKED' ? 'capture_locked' : 'limit';
+        setSaveBlockReason(reason);
         setCtaPhase('idle');
+        presentVoicePreflightBlock({ ok: false, reason }, { takeKept: true });
         return;
       }
+      Sentry.captureException(error, {
+        tags: { 'app.errorScope': 'recordVoice.save' },
+      });
       console.error('Failed to save recording:', error);
-      setCtaPhase('error');
-      Alert.alert('Erreur', 'Impossible de sauvegarder le souvenir');
+      setCtaPhase('idle');
+      if (isDeviceStorageFullError(error)) {
+        setSaveBlockReason('storage');
+        Alert.alert(t('recordVoice.notAddedTitle'), t('recordVoice.preflightStorage'));
+      } else {
+        Alert.alert(t('recordVoice.notAddedTitle'), t('recordVoice.saveFailedKeep'));
+      }
     } finally {
       setIsSaving(false);
     }
@@ -760,7 +1082,10 @@ export default function RecordVoiceScreen() {
         recordingRef.current = null;
       }
       recordingFileUriRef.current = null;
+      releaseVoiceCaptureSlot(reserveUriRef.current);
+      reserveUriRef.current = null;
       setHasRecording(false);
+      setSaveBlockReason(null);
       setIsRecording(false);
       setCoverUri(null);
       setTrimStartSec(0);
@@ -879,7 +1204,12 @@ export default function RecordVoiceScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {needsTrimCoach ? (
+          {saveBlockReason ? (
+            <View style={styles.postRecordHead}>
+              <Text style={styles.limitHint}>{t('recordVoice.subtitleBlocked')}</Text>
+              <Text style={styles.limitHint}>{blockCopy(saveBlockReason)}</Text>
+            </View>
+          ) : needsTrimCoach ? (
             <View style={styles.postRecordHead}>
               <Text style={styles.limitHint}>
                 {tier === 'free' ? t('recordVoice.limitFree') : t('recordVoice.limitPaid')}
@@ -897,6 +1227,7 @@ export default function RecordVoiceScreen() {
               value={{ startSec: trimStartSec, endSec: trimEndSec }}
               onChange={v => clampTrim(v.startSec, v.endSec)}
               onDragActiveChange={setTrimScrollLocked}
+              wavePeaks={wavePeaks}
             />
             <TouchableOpacity
               style={styles.playMaquette}
@@ -978,80 +1309,99 @@ export default function RecordVoiceScreen() {
             </View>
           </PetitmoPrimaryMorphButton>
 
-          <View style={styles.privacyRow}>
-            <Lock size={scale(14)} color={THEME.textMuted} strokeWidth={2} />
-            <Text style={styles.privacyText}>Enregistré de façon privée et sécurisée</Text>
-          </View>
+          {saveBlockReason ? null : (
+            <View style={styles.privacyRow}>
+              <Lock size={scale(14)} color={THEME.textMuted} strokeWidth={2} />
+              <Text style={styles.privacyText}>Enregistré de façon privée et sécurisée</Text>
+            </View>
+          )}
         </ScrollView>
       ) : (
         <View style={styles.preRecordBody}>
           <View style={styles.titleSection}>
             <Text style={styles.title}>{t('recordVoice.title')}</Text>
-            <Text style={styles.subtitle}>
-              {isRecording
-                ? t('recordVoice.subtitleRecording')
-                : t('recordVoice.subtitleIdle')}
-            </Text>
           </View>
 
-          <View style={styles.visualSection}>
-            <View style={styles.waveformContainer}>
-              {isRecording && (
-                <View style={styles.waveformBars}>
-                  {[...Array(5)].map((_, i) => (
-                    <View key={i} style={[styles.waveformBar, { height: 40 + Math.random() * 60 }]} />
-                  ))}
+          {isRecording ? (
+            <>
+              <View style={styles.visualSection}>
+                <View style={styles.waveformContainer}>
+                  <LiveRecordingEnvelope bars={meterBars} />
                 </View>
-              )}
-            </View>
-
-            {isRecording && (
-              <Text style={styles.duration}>{formatDuration(recordingDuration)}</Text>
-            )}
-          </View>
-
-          <View style={styles.controls}>
-            {!isRecording ? (
-              <View style={styles.preRecordActions}>
-                <View style={styles.preRecordActionCol}>
-                  <TouchableOpacity
-                    style={styles.recordButton}
-                    onPress={() => void startRecording()}
-                    accessibilityRole="button"
-                    accessibilityLabel={t('recordVoice.mic')}
-                  >
-                    <Mic size={scale(40)} color="#FFFFFF" strokeWidth={2} />
-                  </TouchableOpacity>
-                  <Text style={styles.preRecordActionLabel}>{t('recordVoice.mic')}</Text>
-                </View>
-                {importAvailable ? (
-                  <View style={styles.preRecordActionCol}>
+                <Text style={styles.duration}>{formatDuration(recordingDuration)}</Text>
+              </View>
+              <View style={styles.controls}>
+                <RecordingPulseControl
+                  level={meterLevel}
+                  onPress={() => void stopRecording()}
+                  style={styles.stopButton}
+                  accessibilityLabel={t('recordVoice.stopA11y')}
+                >
+                  <Square size={ICON_SIZES.xl} color="#FFFFFF" strokeWidth={2} fill="#FFFFFF" />
+                </RecordingPulseControl>
+              </View>
+            </>
+          ) : (
+            <View style={styles.idleCluster}>
+              <View style={styles.quotaBlock}>
+                <Text style={styles.quotaHint}>
+                  {tier === 'free' ? t('recordVoice.quotaHintFree') : t('recordVoice.quotaHintPaid')}
+                </Text>
+                {tier === 'free' ? (
+                  <>
+                    <Text style={styles.quotaHint}>{t('recordVoice.quotaHintFreeUpgrade')}</Text>
                     <TouchableOpacity
-                      style={[styles.importButton, isImporting && styles.importButtonDisabled]}
-                      onPress={onPressImport}
-                      disabled={isImporting}
-                      accessibilityRole="button"
-                      accessibilityLabel={t('recordVoice.importA11y')}
+                      onPress={() => {
+                        router.push({ pathname: '/paywall', params: { context: 'GENERAL' } });
+                      }}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      accessibilityRole="link"
+                      accessibilityLabel={t('recordVoice.subscribe')}
+                      style={styles.subscribeHit}
                     >
-                      {isImporting ? (
-                        <ActivityIndicator color={THEME.brandCtaOrange} />
-                      ) : (
-                        <FolderOpen size={scale(32)} color={THEME.brandCtaOrange} strokeWidth={2} />
-                      )}
+                      <Text style={styles.subscribeLink}>{t('recordVoice.subscribe')}</Text>
                     </TouchableOpacity>
-                    <Text style={styles.preRecordActionLabel}>{t('recordVoice.import')}</Text>
-                  </View>
+                  </>
                 ) : null}
               </View>
-            ) : (
-              <TouchableOpacity style={styles.stopButton} onPress={() => void stopRecording()}>
-                <Square size={ICON_SIZES.xl} color="#FFFFFF" strokeWidth={2} fill="#FFFFFF" />
-              </TouchableOpacity>
-            )}
-            {!isRecording && importAvailable ? (
-              <Text style={styles.importHint}>{t('recordVoice.importHintBody')}</Text>
-            ) : null}
-          </View>
+              <View style={styles.controls}>
+                <View style={styles.preRecordActions}>
+                  <View style={styles.preRecordActionCol}>
+                    <TouchableOpacity
+                      style={styles.recordButton}
+                      onPress={() => void startRecording()}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('recordVoice.mic')}
+                    >
+                      <Mic size={scale(40)} color="#FFFFFF" strokeWidth={2} />
+                    </TouchableOpacity>
+                    <Text style={styles.preRecordActionLabel}>{t('recordVoice.mic')}</Text>
+                  </View>
+                  {importAvailable ? (
+                    <View style={styles.preRecordActionCol}>
+                      <TouchableOpacity
+                        style={[styles.importButton, isImporting && styles.importButtonDisabled]}
+                        onPress={onPressImport}
+                        disabled={isImporting}
+                        accessibilityRole="button"
+                        accessibilityLabel={t('recordVoice.importA11y')}
+                      >
+                        {isImporting ? (
+                          <ActivityIndicator color={THEME.brandCtaOrange} />
+                        ) : (
+                          <FolderOpen size={scale(32)} color={THEME.brandCtaOrange} strokeWidth={2} />
+                        )}
+                      </TouchableOpacity>
+                      <Text style={styles.preRecordActionLabel}>{t('recordVoice.import')}</Text>
+                    </View>
+                  ) : null}
+                </View>
+                {importAvailable ? (
+                  <Text style={styles.importHint}>{t('recordVoice.importHintBody')}</Text>
+                ) : null}
+              </View>
+            </View>
+          )}
         </View>
       )}
     </View>
@@ -1271,38 +1621,58 @@ const styles = StyleSheet.create({
   },
   titleSection: {
     alignItems: 'center',
-    marginTop: SPACING.xl,
-    marginBottom: verticalScale(60),
+    marginTop: SPACING.lg,
+    marginBottom: SPACING.sm,
+    paddingHorizontal: SPACING.sm,
   },
   title: {
-    fontSize: FONT_SIZES.xl,
+    fontSize: FONT_SIZES.xxl,
     fontWeight: '600',
     color: '#3F4A5A',
-    marginBottom: SPACING.xs,
-  },
-  subtitle: {
-    fontSize: FONT_SIZES.base,
-    color: '#8791A1',
     textAlign: 'center',
+    lineHeight: FONT_SIZES.xxl + scale(8),
+  },
+  idleCluster: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingBottom: verticalScale(24),
+  },
+  quotaBlock: {
+    alignItems: 'center',
+    paddingHorizontal: SPACING.md,
+    marginBottom: verticalScale(28),
+  },
+  quotaHint: {
+    fontSize: FONT_SIZES.lg,
+    fontWeight: '400',
+    color: THEME.textPrimary,
+    textAlign: 'center',
+    lineHeight: FONT_SIZES.lg + scale(8),
+  },
+  subscribeHit: {
+    marginTop: SPACING.sm,
+    paddingVertical: SPACING.xs,
+  },
+  subscribeLink: {
+    fontSize: FONT_SIZES.lg,
+    fontWeight: '600',
+    color: THEME.brandPrimary,
+    textAlign: 'center',
+    textDecorationLine: 'underline',
   },
   visualSection: {
+    flex: 1,
     alignItems: 'center',
-    marginBottom: verticalScale(80),
+    justifyContent: 'center',
+    marginBottom: verticalScale(24),
   },
   waveformContainer: {
-    height: scale(120),
+    height: scale(128),
+    width: '100%',
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  waveformBars: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: scale(8),
-  },
-  waveformBar: {
-    width: scale(6),
-    backgroundColor: THEME.accent,
-    borderRadius: scale(3),
+    paddingHorizontal: SPACING.md,
   },
   duration: {
     fontSize: FONT_SIZES.xxl,
