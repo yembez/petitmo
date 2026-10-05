@@ -66,6 +66,26 @@ export function initPetitmoSentry(): void {
     environment: channel || (__DEV__ ? 'development' : 'production'),
     release,
     dist: Constants.nativeBuildVersion ?? undefined,
+    ignoreErrors: [
+      'Network request failed',
+      'Failed to fetch',
+      'NetworkError',
+      'The Internet connection appears to be offline',
+      'The network connection was lost',
+    ],
+    beforeSend(event, hint) {
+      const err = hint?.originalException;
+      const msg =
+        (typeof err === 'string' ? err : err instanceof Error ? err.message : '') ||
+        event.message ||
+        event.exception?.values?.[0]?.value ||
+        '';
+      // Hors-ligne / avion : bruit, pas un bug produit.
+      if (/network request failed|failed to fetch|networkerror|internet connection appears to be offline|network connection was lost/i.test(msg)) {
+        return null;
+      }
+      return event;
+    },
   });
 
   Sentry.setTag('app.channel', channel || 'unknown');
