@@ -8,7 +8,7 @@ import {
   ActivityIndicator,
   InteractionManager,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { ChevronLeft } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { scale, verticalScale } from '@/utils/responsive';
@@ -182,6 +182,10 @@ export default function ImportMediaScreen() {
   /** 0 = pas de plafond picker (gratuit : on gère le message 20 s après sélection). */
   const videoMaxDurationRef = useRef(0);
   const isFreeTierRef = useRef(true);
+  const [isFreeTier, setIsFreeTier] = useState(true);
+  /** Cache la modale native le temps du paywall (sinon elle reste au-dessus). */
+  const [trimPaywallOpen, setTrimPaywallOpen] = useState(false);
+  const resumeTrimAfterPaywallRef = useRef(false);
 
   /**
    * Pas de `dismiss()` ici : l’écran n’est plus un modal, et `dismiss()` après
@@ -198,10 +202,29 @@ export default function ImportMediaScreen() {
   useEffect(() => {
     void getUserTier().then(tier => {
       isFreeTierRef.current = tier === 'free';
+      setIsFreeTier(tier === 'free');
       /** Payant : pas de plafond. Gratuit : 1ʳᵉ sélection libre, puis message + trim système si > 20 s. */
       videoMaxDurationRef.current = 0;
     });
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!resumeTrimAfterPaywallRef.current) return;
+      resumeTrimAfterPaywallRef.current = false;
+      setTrimPaywallOpen(false);
+      void getUserTier().then(tier => {
+        const free = tier === 'free';
+        isFreeTierRef.current = free;
+        setIsFreeTier(free);
+        if (!free) {
+          setVideoTrimRequest(prev =>
+            prev ? { ...prev, maxDurationSec: PAID_TIER_VIDEO_MAX_DURATION } : null,
+          );
+        }
+      });
+    }, []),
+  );
 
   /**
    * Enregistre le pending + `replace` fil **sans aucun await** : tout le réseau / EXIF part dans `upload()`.
@@ -732,7 +755,7 @@ export default function ImportMediaScreen() {
 
   const videoTrimModalEl = (
     <VideoTrimModal
-      visible={videoTrimRequest != null}
+      visible={videoTrimRequest != null && !trimPaywallOpen}
       videoUri={videoTrimRequest?.asset.uri ?? ''}
       durationSec={
         videoTrimRequest?.asset.duration != null
@@ -740,7 +763,7 @@ export default function ImportMediaScreen() {
           : 0
       }
       maxDurationSec={videoTrimRequest?.maxDurationSec ?? FREE_TIER_VIDEO_MAX_DURATION}
-      isFreeTier={isFreeTierRef.current}
+      isFreeTier={isFreeTier}
       onCancel={() => {
         const req = videoTrimRequest;
         setVideoTrimRequest(null);
@@ -782,15 +805,12 @@ export default function ImportMediaScreen() {
         })();
       }}
       onUpgrade={
-        isFreeTierRef.current
+        isFreeTier
           ? () => {
-              const req = videoTrimRequest;
-              setVideoTrimRequest(null);
-              req?.resolve(null);
-              router.replace({
-                pathname: '/paywall',
-                params: { context: 'GENERAL', returnTo: 'fil' },
-              });
+              /** Ne pas resolve(null) : ça faisait replace(fil) et gagnait la course. */
+              resumeTrimAfterPaywallRef.current = true;
+              setTrimPaywallOpen(true);
+              router.push({ pathname: '/paywall', params: { context: 'GENERAL' } });
             }
           : undefined
       }

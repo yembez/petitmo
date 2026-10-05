@@ -70,6 +70,8 @@ export const VideoTrimEditor = memo(function VideoTrimEditor(props: {
   filmstripUris?: string[];
   title: string;
   subtitle: string;
+  subscribeLabel?: string;
+  onSubscribe?: () => void;
   handleStartA11y: string;
   handleEndA11y: string;
   handleRangeA11y: string;
@@ -135,11 +137,12 @@ export const VideoTrimEditor = memo(function VideoTrimEditor(props: {
   }, [durationTotal, trackW]);
 
   const onLayoutTrack = useCallback((e: LayoutChangeEvent) => {
-    const tw = Math.max(0, Math.floor(e.nativeEvent.layout.width));
+    const tw = e.nativeEvent.layout.width;
+    if (!(tw > 0)) return;
     trackWRef.current = tw;
     setTrackW(tw);
     trackMeasureRef.current?.measureInWindow((x, _y, mw) => {
-      const width = tw > 0 ? tw : Math.max(0, Math.floor(mw));
+      const width = tw > 0 ? tw : Math.max(0, mw);
       trackWinRef.current = { left: x, width };
     });
   }, []);
@@ -150,7 +153,7 @@ export const VideoTrimEditor = memo(function VideoTrimEditor(props: {
   syncTrackFromWindowRef.current = () => {
     trackMeasureRef.current?.measureInWindow((x, _y, w) => {
       const tw = trackWRef.current;
-      const width = tw > 0 ? tw : Math.max(0, Math.floor(w));
+      const width = tw > 0 ? tw : Math.max(0, w);
       trackWinRef.current = { left: x, width };
     });
   };
@@ -295,6 +298,7 @@ export const VideoTrimEditor = memo(function VideoTrimEditor(props: {
   const startPx = Math.max(0, Math.min(trackW, normalized.startSec * pxForSec));
   const endPx = Math.max(0, Math.min(trackW, normalized.endSec * pxForSec));
   const selectionW = Math.max(0, endPx - startPx);
+  const lineW = scale(2);
 
   const filmstrip = props.filmstripUris ?? [];
   const slots = useMemo(() => {
@@ -308,63 +312,82 @@ export const VideoTrimEditor = memo(function VideoTrimEditor(props: {
         <Scissors size={scale(22)} color={TRIM_ACCENT} strokeWidth={2.2} />
         <Text style={styles.title}>{props.title}</Text>
       </View>
-      <Text style={styles.sub}>{props.subtitle}</Text>
+      <Text style={styles.sub}>
+        {props.subtitle}
+        {props.subscribeLabel && props.onSubscribe ? (
+          <>
+            {' '}
+            <Text
+              style={styles.subLink}
+              onPress={props.onSubscribe}
+              accessibilityRole="link"
+            >
+              {props.subscribeLabel}
+            </Text>
+          </>
+        ) : null}
+      </Text>
 
       <View style={styles.timeRowEnds}>
         <Text style={styles.timeEnd}>{fmt(0)}</Text>
         <Text style={styles.timeEnd}>{fmt(durationTotal)}</Text>
       </View>
 
-      <View ref={trackMeasureRef} style={styles.filmstripShell} onLayout={onLayoutTrack}>
-        <View style={styles.filmstripRow}>
-          {slots.map((uri, i) => {
-            const tMid = ((i + 0.5) / slots.length) * durationTotal;
-            const active = tMid >= normalized.startSec && tMid <= normalized.endSec;
-            const source: ImageSourcePropType | undefined = uri ? { uri } : undefined;
-            return (
-              <View key={i} style={styles.filmstripCell}>
-                {source ? (
-                  <Image source={source} style={styles.filmstripThumb} resizeMode="cover" />
-                ) : (
-                  <View style={[styles.filmstripPlaceholder, active && styles.filmstripPlaceholderActive]} />
-                )}
-                {!active ? <View style={styles.filmstripDim} /> : null}
-              </View>
-            );
-          })}
+      <View ref={trackMeasureRef} style={styles.timelineBlock} onLayout={onLayoutTrack}>
+        <View style={styles.filmstripShell}>
+          <View style={styles.filmstripRow}>
+            {slots.map((uri, i) => {
+              const tMid = ((i + 0.5) / slots.length) * durationTotal;
+              const active = tMid >= normalized.startSec && tMid <= normalized.endSec;
+              const source: ImageSourcePropType | undefined = uri ? { uri } : undefined;
+              return (
+                <View key={i} style={styles.filmstripCell}>
+                  {source ? (
+                    <Image source={source} style={styles.filmstripThumb} resizeMode="cover" />
+                  ) : (
+                    <View style={[styles.filmstripPlaceholder, active && styles.filmstripPlaceholderActive]} />
+                  )}
+                  {!active ? <View style={styles.filmstripDim} /> : null}
+                </View>
+              );
+            })}
+          </View>
+
+          {trackW > 0 && durationTotal > 0 ? (
+            <View style={styles.trimOverlay} pointerEvents="box-none">
+              <View style={[styles.dimBand, { left: 0, width: startPx }]} pointerEvents="none" />
+              <View
+                style={[styles.dimBand, { left: endPx, width: Math.max(0, trackW - endPx) }]}
+                pointerEvents="none"
+              />
+              <View style={[styles.selectionBorder, { left: startPx, width: selectionW }]} pointerEvents="none" />
+              <View
+                style={[styles.rangeDragZone, { left: startPx, width: selectionW }]}
+                {...rangeResponderRef.current!.panHandlers}
+                accessibilityRole="adjustable"
+                accessibilityLabel={props.handleRangeA11y}
+              />
+              <View style={[styles.trimLine, { left: startPx - lineW / 2, width: lineW }]} pointerEvents="none" />
+              <View style={[styles.trimLine, { left: endPx - lineW / 2, width: lineW }]} pointerEvents="none" />
+            </View>
+          ) : null}
         </View>
 
         {trackW > 0 && durationTotal > 0 ? (
-          <View style={styles.trimOverlay} pointerEvents="box-none">
-            <View style={[styles.dimBand, { left: 0, width: startPx }]} pointerEvents="none" />
-            <View
-              style={[styles.dimBand, { left: endPx, width: Math.max(0, trackW - endPx) }]}
-              pointerEvents="none"
-            />
-            <View style={[styles.selectionBorder, { left: startPx, width: selectionW }]} pointerEvents="none" />
-            <View
-              style={[styles.rangeDragZone, { left: startPx, width: selectionW }]}
-              {...rangeResponderRef.current!.panHandlers}
-              accessibilityRole="adjustable"
-              accessibilityLabel={props.handleRangeA11y}
-            />
-            <View style={[styles.trimLine, { left: startPx - 1 }]} pointerEvents="none" />
-            <View style={[styles.trimLine, { left: endPx - 1 }]} pointerEvents="none" />
-            <View style={[styles.knobRow, { width: trackW }]}>
-              <View style={[styles.knobWrap, { left: startPx - knobR }]}>
-                <TrimHandleKnob
-                  knobR={knobR}
-                  panHandlers={startResponderRef.current!.panHandlers}
-                  a11yLabel={props.handleStartA11y}
-                />
-              </View>
-              <View style={[styles.knobWrap, { left: endPx - knobR }]}>
-                <TrimHandleKnob
-                  knobR={knobR}
-                  panHandlers={endResponderRef.current!.panHandlers}
-                  a11yLabel={props.handleEndA11y}
-                />
-              </View>
+          <View style={styles.knobRow} pointerEvents="box-none">
+            <View style={[styles.knobWrap, { left: startPx - knobR }]}>
+              <TrimHandleKnob
+                knobR={knobR}
+                panHandlers={startResponderRef.current!.panHandlers}
+                a11yLabel={props.handleStartA11y}
+              />
+            </View>
+            <View style={[styles.knobWrap, { left: endPx - knobR }]}>
+              <TrimHandleKnob
+                knobR={knobR}
+                panHandlers={endResponderRef.current!.panHandlers}
+                a11yLabel={props.handleEndA11y}
+              />
             </View>
           </View>
         ) : null}
@@ -398,6 +421,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: scale(18),
   },
+  subLink: {
+    fontSize: scale(13),
+    fontWeight: '600',
+    color: THEME.brandPrimary,
+    textDecorationLine: 'underline',
+  },
   timeRowEnds: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -409,9 +438,13 @@ const styles = StyleSheet.create({
     color: THEME.textMuted,
     fontVariant: ['tabular-nums'],
   },
+  timelineBlock: {
+    width: '100%',
+    overflow: 'visible',
+  },
   filmstripShell: {
     width: '100%',
-    minHeight: scale(72),
+    height: scale(56),
     borderRadius: scale(10),
     overflow: 'hidden',
     backgroundColor: '#1A1A1A',
@@ -419,7 +452,7 @@ const styles = StyleSheet.create({
   filmstripRow: {
     flexDirection: 'row',
     width: '100%',
-    height: scale(56),
+    height: '100%',
   },
   filmstripCell: {
     flex: 1,
@@ -443,7 +476,6 @@ const styles = StyleSheet.create({
   },
   trimOverlay: {
     ...StyleSheet.absoluteFillObject,
-    justifyContent: 'flex-end',
   },
   dimBand: {
     position: 'absolute',
@@ -454,7 +486,7 @@ const styles = StyleSheet.create({
   selectionBorder: {
     position: 'absolute',
     top: 0,
-    bottom: scale(34),
+    bottom: 0,
     borderWidth: scale(2),
     borderColor: TRIM_ACCENT,
     borderRadius: scale(4),
@@ -462,25 +494,25 @@ const styles = StyleSheet.create({
   rangeDragZone: {
     position: 'absolute',
     top: 0,
-    bottom: scale(34),
+    bottom: 0,
   },
   trimLine: {
     position: 'absolute',
     top: 0,
-    bottom: scale(34),
+    bottom: 0,
     width: scale(2),
     backgroundColor: TRIM_ACCENT,
     borderRadius: scale(1),
   },
   knobRow: {
-    position: 'absolute',
-    left: 0,
-    bottom: 0,
-    height: scale(34),
+    position: 'relative',
+    width: '100%',
+    height: scale(36),
+    marginTop: scale(8),
   },
   knobWrap: {
     position: 'absolute',
-    bottom: 0,
+    top: 0,
     alignItems: 'center',
   },
   knob: {

@@ -74,11 +74,31 @@ export function VideoTrimModal({
   const [isPlaying, setIsPlaying] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [filmstripUris, setFilmstripUris] = useState<string[]>([]);
+  const filmstripLoadedForRef = useRef('');
 
   trimRef.current = trim;
+  const sessionUriRef = useRef('');
 
   useEffect(() => {
-    if (!visible) return;
+    if (!visible) {
+      try {
+        playerRef.current?.pause();
+      } catch {
+        /* ignore */
+      }
+      isPlayingRef.current = false;
+      setIsPlaying(false);
+      return;
+    }
+
+    const sameSession = sessionUriRef.current === videoUri && videoUri.trim().length > 0;
+    if (sameSession) {
+      setPlaybackUri(normalizeVideoPlaybackUri(videoUri));
+      setVideoReady(false);
+      return;
+    }
+
+    sessionUriRef.current = videoUri;
     const initial = initialTrimRange(durationSec, maxDurationSec);
     trimRef.current = initial;
     setTrim(initial);
@@ -90,14 +110,7 @@ export function VideoTrimModal({
     exportingRef.current = false;
     setIsConfirming(false);
     setFilmstripUris([]);
-
-    return () => {
-      try {
-        playerRef.current?.pause();
-      } catch {
-        /* ignore */
-      }
-    };
+    filmstripLoadedForRef.current = '';
   }, [visible, videoUri, durationSec, maxDurationSec]);
 
   useEffect(() => {
@@ -114,7 +127,6 @@ export function VideoTrimModal({
    * Vignettes une fois le lecteur prêt : on évite de décoder les images en même temps
    * que le chargement de la preview. Extraction interrompue si la modale se ferme.
    */
-  const filmstripLoadedForRef = useRef('');
   useEffect(() => {
     if (!visible || !videoReady || effectiveDurationSec <= 0) return;
     if (filmstripLoadedForRef.current === videoUri) return;
@@ -230,10 +242,6 @@ export function VideoTrimModal({
     onConfirm({ startSec: range.startSec, endSec: range.endSec });
   }, [maxDurationSec, onConfirm, stopPlayback, t]);
 
-  const subtitle = isFreeTier
-    ? t('videoTrim.subtitleFree', { max: maxDurationSec })
-    : t('videoTrim.subtitlePaid', { max: maxDurationSec });
-
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onCancel}>
       <View style={[styles.screen, { paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, scale(12)) }]}>
@@ -302,18 +310,14 @@ export function VideoTrimModal({
             onChange={handleTrimChange}
             filmstripUris={filmstripUris}
             title={t('videoTrim.editorTitle')}
-            subtitle={subtitle}
+            subtitle={t('videoTrim.subtitle')}
+            subscribeLabel={isFreeTier && onUpgrade ? t('videoTrim.subscribe') : undefined}
+            onSubscribe={isFreeTier && onUpgrade && !isConfirming ? onUpgrade : undefined}
             handleStartA11y={t('videoTrim.handleStartA11y')}
             handleEndA11y={t('videoTrim.handleEndA11y')}
             handleRangeA11y={t('videoTrim.handleRangeA11y')}
           />
         </View>
-
-        {isFreeTier && onUpgrade ? (
-          <TouchableOpacity onPress={onUpgrade} style={styles.upgradeLink} disabled={isConfirming}>
-            <Text style={styles.upgradeLinkText}>{t('parent.freeTierLimit.ctaPlus')}</Text>
-          </TouchableOpacity>
-        ) : null}
 
         <View style={styles.actions}>
           <TouchableOpacity
@@ -460,16 +464,6 @@ const styles = StyleSheet.create({
   },
   editorBlock: {
     marginBottom: verticalScale(8),
-  },
-  upgradeLink: {
-    alignSelf: 'center',
-    paddingVertical: verticalScale(6),
-    marginBottom: verticalScale(4),
-  },
-  upgradeLinkText: {
-    fontSize: scale(14),
-    fontWeight: '600',
-    color: THEME.brandPrimary,
   },
   actions: {
     flexDirection: 'row',
