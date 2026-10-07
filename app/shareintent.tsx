@@ -14,11 +14,42 @@ import {
   ingestSharedVoice,
 } from '@/services/shareIntentIngest';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
+import { isSentryEnabled, Sentry } from '@/lib/sentry';
 
-const SHARE_WAIT_MS = 8000;
+/** AirDrop / Fichiers iCloud : le payload arrive souvent après le deep link. */
+const SHARE_WAIT_MS = 20000;
+
+function shareFilesMeta(files: { mimeType?: string | null; fileName?: string | null }[]) {
+  return {
+    fileCount: files.length,
+    mimes: files.map(f => (f.mimeType ?? '').slice(0, 80)),
+    exts: files.map(f => {
+      const n = (f.fileName ?? '').split('.').pop()?.toLowerCase() ?? '';
+      return n.length > 0 && n.length <= 5 ? n : '';
+    }),
+  };
+}
+
+function reportShareIntentFail(
+  reason: 'timeout' | 'context' | 'ingest' | 'unsupported' | 'empty' | 'rebuild',
+  err?: unknown,
+  extra?: Record<string, unknown>,
+) {
+  const scoped = `shareIntent.${reason}`;
+  const toCapture =
+    err instanceof Error ? err : new Error(typeof err === 'string' ? err : scoped);
+  if (!isSentryEnabled()) {
+    console.warn('[shareintent]', scoped, toCapture.message, extra);
+    return;
+  }
+  Sentry.captureException(toCapture, {
+    tags: { 'app.errorScope': scoped },
+    extra: extra ?? {},
+  });
+}
 
 /**
- * Handoff silencieux après Partager → Petitmo (Share Extension).
+ * Handoff silencieux après Partager → Petit Cœur (Share Extension).
  * Local-first : copie sandbox puis navigation Capturer ; pas d’attente cloud.
  */
 export default function ShareIntentScreen() {
@@ -33,6 +64,7 @@ export default function ShareIntentScreen() {
     if (native != null) return;
     if (handledRef.current) return;
     handledRef.current = true;
+    reportShareIntentFail('rebuild', new Error('ExpoShareIntentModule missing'));
     Alert.alert(t('error'), t('shareIntent.needsRebuild'));
     router.replace('/(tabs)');
   }, [router, t]);
@@ -42,6 +74,7 @@ export default function ShareIntentScreen() {
     const timer = setTimeout(() => {
       if (handledRef.current) return;
       handledRef.current = true;
+      reportShareIntentFail('timeout', new Error(`share_intent_wait_${SHARE_WAIT_MS}`));
       Alert.alert(t('error'), t('shareIntent.failed'));
       resetShareIntent(true);
       router.replace('/(tabs)');
@@ -54,6 +87,9 @@ export default function ShareIntentScreen() {
 
     if (error) {
       handledRef.current = true;
+      reportShareIntentFail('context', error, {
+        error: String(error).slice(0, 200),
+      });
       Alert.alert(t('error'), t('shareIntent.failed'));
       resetShareIntent(true);
       router.replace('/(tabs)');
@@ -65,9 +101,11 @@ export default function ShareIntentScreen() {
 
     handledRef.current = true;
     void (async () => {
+      const files = shareIntent.files ?? [];
       try {
-        const files = shareIntent.files ?? [];
         if (files.length === 0) {
+          reportShareIntentFail('empty', new Error('share_intent_no_files'));
+          Alert.alert(t('error'), t('shareIntent.failed'));
           resetShareIntent(true);
           router.replace('/(tabs)');
           return;
@@ -88,6 +126,11 @@ export default function ShareIntentScreen() {
         if (mediaFiles.length > 0) {
           const assets = await ingestSharedMediaFiles(mediaFiles);
           if (assets.length === 0) {
+            reportShareIntentFail(
+              'unsupported',
+              new Error('share_intent_media_ingest_empty'),
+              shareFilesMeta(files),
+            );
             Alert.alert(t('error'), t('shareIntent.unsupported'));
             resetShareIntent(true);
             router.replace('/(tabs)');
@@ -99,11 +142,17 @@ export default function ShareIntentScreen() {
           return;
         }
 
+        reportShareIntentFail(
+          'unsupported',
+          new Error('share_intent_unknown_kinds'),
+          { ...shareFilesMeta(files), kinds },
+        );
         Alert.alert(t('error'), t('shareIntent.unsupported'));
         resetShareIntent(true);
         router.replace('/(tabs)');
       } catch (e) {
         console.error('[shareintent]', e);
+        reportShareIntentFail('ingest', e, shareFilesMeta(files));
         if (e instanceof Error && e.message === 'AUDIO_TOO_SHORT') {
           Alert.alert(t('error'), t('recordVoice.importTooShort'));
         } else {

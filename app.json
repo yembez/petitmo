@@ -104,7 +104,7 @@
           "iosActivationRules": {
             "NSExtensionActivationSupportsImageWithMaxCount": 10,
             "NSExtensionActivationSupportsMovieWithMaxCount": 1,
-            "NSExtensionActivationSupportsFileWithMaxCount": 1
+            "NSExtensionActivationSupportsFileWithMaxCount": 10
           },
           "iosShareExtensionName": "PetitmoShare",
           "androidIntentFilters": ["image/*", "video/*", "audio/*"],

@@ -26,18 +26,27 @@ export function classifyShareFile(file: ShareIntentFile): ShareMediaKind {
     mime.startsWith('audio/') ||
     ['m4a', 'mp3', 'aac', 'wav', 'caf'].includes(ext) ||
     mime === 'public.mpeg-4-audio' ||
-    mime.includes('m4a')
+    mime.includes('m4a') ||
+    mime.includes('public.audio')
   ) {
     return 'audio';
   }
   if (
     mime.startsWith('image/') ||
-    ['jpg', 'jpeg', 'png', 'heic', 'heif', 'webp', 'gif'].includes(ext)
+    mime.includes('public.image') ||
+    mime.includes('public.jpeg') ||
+    mime.includes('public.png') ||
+    mime.includes('public.heic') ||
+    mime.includes('public.heif') ||
+    ['jpg', 'jpeg', 'png', 'heic', 'heif', 'webp', 'gif', 'tif', 'tiff', 'bmp'].includes(ext)
   ) {
     return 'image';
   }
   if (
     mime.startsWith('video/') ||
+    mime.includes('public.movie') ||
+    mime.includes('public.mpeg-4') ||
+    mime.includes('public.video') ||
     ['mp4', 'mov', 'm4v'].includes(ext) ||
     (ext === 'mp4' && !mime.startsWith('audio/'))
   ) {
@@ -46,6 +55,20 @@ export function classifyShareFile(file: ShareIntentFile): ShareMediaKind {
   /** Dictaphone / Fichiers : souvent `audio/mp4` déjà couvert ; sinon fichier générique .m4a. */
   if (ext === 'mp4' && (mime.includes('audio') || mime === 'public.mpeg-4')) {
     return 'audio';
+  }
+  /**
+   * AirDrop / Fichiers : souvent `application/octet-stream` ou UTI vide.
+   * Sans extension on tente une image (cas le plus fréquent depuis un Mac).
+   */
+  if (
+    !ext &&
+    (mime === '' ||
+      mime === 'application/octet-stream' ||
+      mime.includes('public.data') ||
+      mime.includes('public.item') ||
+      mime.includes('public.file-url'))
+  ) {
+    return 'image';
   }
   return 'unknown';
 }
