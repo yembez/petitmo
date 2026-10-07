@@ -244,15 +244,18 @@
     },
     "freeTierLimit": {
       "later": "Later",
-      "ctaPlus": "Go Petit Cœur",
+      "ctaPlus": "Subscribe to Petit Cœur",
       "memoriesTitle": "Memory limit reached",
-      "memoriesBody": "You’ve reached the free plan limit of {{count}} memories. Reactivate Petit Cœur to add more.",
+      "memoriesBody": "You’ve reached the free plan limit of {{count}} memories. Subscribe to Petit Cœur to add more.",
       "videosTitle": "Memory limit reached",
-      "videosBody": "You’ve reached the free plan limit of {{count}} memories. Reactivate Petit Cœur to add more.",
+      "videosBody": "You’ve reached the free plan limit of {{count}} memories. Subscribe to Petit Cœur to add more.",
       "voicesTitle": "Audio limit reached",
-      "voicesBody": "You’ve used all {{count}} free-plan audio memories. Reactivate Petit Cœur to add more.",
+      "voicesBody": "You’ve used all {{count}} free-plan audio memories. Subscribe to Petit Cœur to add more.",
       "captureLockedTitle": "Adding memories is paused",
-      "captureLockedBody": "Your subscription has ended: you can still view and share all your memories. Reactivate Petit Cœur to capture new ones."
+      "captureLockedBody": "Your subscription has ended: you can still view and share all your memories. Reactivate Petit Cœur to capture new ones.",
+      "slotsLeftTitle": "Free limit reached",
+      "slotsLeftBody_one": "You have {{count}} slot left for this profile. Reduce the number of photos, or subscribe to Petit Cœur to add memories without limits.",
+      "slotsLeftBody_other": "You have {{count}} slots left for this profile. Reduce the number of photos, or subscribe to Petit Cœur to add memories without limits."
     }
   },
   "import": {
@@ -287,6 +290,17 @@
       "title": "No memories yet",
       "subtitle": "Start capturing precious moments",
       "addA11y": "Capture a first memory"
+    },
+    "delete": {
+      "title": "Delete this moment",
+      "body": "Are you sure you want to delete this moment?",
+      "confirm": "Delete",
+      "inBookTitle": "Delete this moment?",
+      "inBookOne": "This memory is in the book “{{title}}”. If you delete it from the feed, it will also disappear from the book.",
+      "inBookMany": "This memory is in the books {{titles}}. If you delete it from the feed, it will also disappear from those books.",
+      "paidBookTitle": "Protected memory",
+      "paidBookBody": "This memory is part of the book “{{title}}”, which has already been ordered. It can’t be deleted.",
+      "paidBookMany": "This memory is part of a book that has already been ordered ({{titles}}). It can’t be deleted."
     },
     "share": {
       "a11y": "Share this memory",
@@ -363,7 +377,10 @@
     "payOpenFailed": "Couldn’t open payment. Try again.",
     "payNotConfirmed": "Payment isn’t confirmed yet. Try again in a moment.",
     "payTicketExpired": "This order session expired. Tap Order again.",
-    "storageFull": "Not enough storage on this device. Free some space (Settings → General → iPhone Storage), then try again."
+    "storageFull": "Not enough storage on this device. Free some space (Settings → General → iPhone Storage), then try again.",
+    "printPdfAfterPayTitle": "Payment received",
+    "printPdfAfterPayBody": "Preparing the book failed temporarily. Try again — you won’t be charged twice.",
+    "printPdfRetry": "Try again"
   },
   "recordVoice": {
     "title": "Capture their voice, a song, a message for later...",
@@ -374,7 +391,7 @@
     "stopA11y": "Stop recording",
     "import": "Import",
     "importA11y": "Import an audio file from Files",
-    "importHintBody": "From Voice Memos: Share → Petitmo. Or save to Files, then Import here.",
+    "importHintBody": "From Voice Memos: Share → Petit Cœur. Or save to Files, then Import here.",
     "importFailed": "Couldn’t import this audio file.",
     "importTooShort": "This audio file is too short.",
     "importNeedsRebuild": "Audio import needs an app update (Files module). You can still record with the mic.",
@@ -404,9 +421,9 @@
     "saveFailedKeep": "The voice is still on this screen, not in your memories. Tap Save again."
   },
   "shareIntent": {
-    "failed": "Couldn’t open this share in Petitmo.",
-    "unsupported": "Petitmo accepts photos, videos, and audio files.",
-    "needsRebuild": "Sharing into Petitmo needs an app update. Run npm run dev:ios:build, then try again."
+    "failed": "Couldn’t open this share in Petit Cœur.",
+    "unsupported": "Petit Cœur accepts photos, videos, and audio files.",
+    "needsRebuild": "Sharing into Petit Cœur needs an app update. Try again after updating the app."
   },
   "videoTrim": {
     "title": "Shorten video",

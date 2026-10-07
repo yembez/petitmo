@@ -448,8 +448,10 @@ export default function ParentSpaceScreen() {
   }, [deleteBusy, performDeleteAccount, signOutBusy, t]);
 
   const paid = tier === 'paid';
-  /** Accordion : une seule rubrique ouverte à la fois (défaut = toutes repliées). */
-  const [openSectionId, setOpenSectionId] = useState<string | null>(null);
+  /** Accordion : une rubrique à la fois. Gratuit → « Mon abonnement » ouvert par défaut. */
+  const [openSectionId, setOpenSectionId] = useState<string | null>(() =>
+    peekUserTier() === 'paid' ? null : 'subscription',
+  );
   const toggleSection = useCallback((id: string) => {
     setOpenSectionId(prev => (prev === id ? null : id));
   }, []);
@@ -584,7 +586,7 @@ export default function ParentSpaceScreen() {
               <View style={styles.rowIconPlaceholder} />
               <View style={styles.rowText}>
                 <Text
-                  style={[styles.rowLabel, styles.rowLabelAccent, dm500 ? { fontFamily: dm500 } : null]}
+                  style={[styles.rowLabel, styles.rowLabelAccent, dm700 ? { fontFamily: dm700 } : { fontWeight: '700' }]}
                 >
                   {t('parent.subscription.upgradeCta')}
                 </Text>
@@ -670,55 +672,6 @@ export default function ParentSpaceScreen() {
               <Text style={[styles.rowLabel, dm500 ? { fontFamily: dm500 } : null]}>
                 {t('parent.support.contactCta')}
               </Text>
-            </View>
-            <Text style={styles.rowValue}>›</Text>
-          </TouchableOpacity>
-        </Section>
-
-        <Section
-          sectionId="legal"
-          title="Informations légales"
-          titleFontFamily={dm700}
-          open={openSectionId === 'legal'}
-          onToggle={toggleSection}
-        >
-          <TouchableOpacity
-            style={styles.row}
-            onPress={() => void openUrl(LEGAL_PRIVACY_URL)}
-            activeOpacity={0.85}
-            accessibilityRole="link"
-          >
-            <View style={styles.rowIconPlaceholder} />
-            <View style={styles.rowText}>
-              <Text style={[styles.rowLabel, dm500 ? { fontFamily: dm500 } : null]}>
-                Politique de confidentialité
-              </Text>
-            </View>
-            <Text style={styles.rowValue}>›</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.row, styles.rowBorderTop]}
-            onPress={() => void openUrl(LEGAL_TERMS_URL)}
-            activeOpacity={0.85}
-            accessibilityRole="link"
-          >
-            <View style={styles.rowIconPlaceholder} />
-            <View style={styles.rowText}>
-              <Text style={[styles.rowLabel, dm500 ? { fontFamily: dm500 } : null]}>
-                Conditions d&apos;utilisation
-              </Text>
-            </View>
-            <Text style={styles.rowValue}>›</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.row, styles.rowBorderTop]}
-            onPress={() => void openUrl(LEGAL_MENTIONS_URL)}
-            activeOpacity={0.85}
-            accessibilityRole="link"
-          >
-            <View style={styles.rowIconPlaceholder} />
-            <View style={styles.rowText}>
-              <Text style={[styles.rowLabel, dm500 ? { fontFamily: dm500 } : null]}>Mentions légales</Text>
             </View>
             <Text style={styles.rowValue}>›</Text>
           </TouchableOpacity>
@@ -861,6 +814,55 @@ export default function ParentSpaceScreen() {
             <StaticRow label="Sauvegarde" value={backupStatus || 'À jour'} labelFontFamily={dm500} />
           </Section>
         ) : null}
+
+        <Section
+          sectionId="legal"
+          title="Informations légales"
+          titleFontFamily={dm700}
+          open={openSectionId === 'legal'}
+          onToggle={toggleSection}
+        >
+          <TouchableOpacity
+            style={styles.row}
+            onPress={() => void openUrl(LEGAL_PRIVACY_URL)}
+            activeOpacity={0.85}
+            accessibilityRole="link"
+          >
+            <View style={styles.rowIconPlaceholder} />
+            <View style={styles.rowText}>
+              <Text style={[styles.rowLabel, dm500 ? { fontFamily: dm500 } : null]}>
+                Politique de confidentialité
+              </Text>
+            </View>
+            <Text style={styles.rowValue}>›</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.row, styles.rowBorderTop]}
+            onPress={() => void openUrl(LEGAL_TERMS_URL)}
+            activeOpacity={0.85}
+            accessibilityRole="link"
+          >
+            <View style={styles.rowIconPlaceholder} />
+            <View style={styles.rowText}>
+              <Text style={[styles.rowLabel, dm500 ? { fontFamily: dm500 } : null]}>
+                Conditions d&apos;utilisation
+              </Text>
+            </View>
+            <Text style={styles.rowValue}>›</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.row, styles.rowBorderTop]}
+            onPress={() => void openUrl(LEGAL_MENTIONS_URL)}
+            activeOpacity={0.85}
+            accessibilityRole="link"
+          >
+            <View style={styles.rowIconPlaceholder} />
+            <View style={styles.rowText}>
+              <Text style={[styles.rowLabel, dm500 ? { fontFamily: dm500 } : null]}>Mentions légales</Text>
+            </View>
+            <Text style={styles.rowValue}>›</Text>
+          </TouchableOpacity>
+        </Section>
       </ScrollView>
 
       <SupportContactModal
@@ -1218,7 +1220,7 @@ const styles = StyleSheet.create({
   },
   rowLabelAccent: {
     color: THEME.brandCtaOrange,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   rowLabelDestructive: {
     fontSize: FONT_SIZES.base,

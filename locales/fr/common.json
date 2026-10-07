@@ -244,15 +244,18 @@
     },
     "freeTierLimit": {
       "later": "Plus tard",
-      "ctaPlus": "Passer à Petit Cœur",
+      "ctaPlus": "S’abonner à Petit Cœur",
       "memoriesTitle": "Limite de souvenirs atteinte",
-      "memoriesBody": "Tu as atteint la limite de {{count}} souvenirs du plan gratuit. Pour en ajouter d’autres, réactive ton abonnement Petit Cœur.",
+      "memoriesBody": "Tu as atteint la limite de {{count}} souvenirs du plan gratuit. Pour en ajouter d’autres, abonne-toi à Petit Cœur.",
       "videosTitle": "Limite de souvenirs atteinte",
-      "videosBody": "Tu as atteint la limite de {{count}} souvenirs du plan gratuit. Pour en ajouter d’autres, réactive ton abonnement Petit Cœur.",
+      "videosBody": "Tu as atteint la limite de {{count}} souvenirs du plan gratuit. Pour en ajouter d’autres, abonne-toi à Petit Cœur.",
       "voicesTitle": "Limite d’audios atteinte",
-      "voicesBody": "Tu as déjà utilisé tes {{count}} souvenirs audio du plan gratuit. Pour en ajouter, réactive ton abonnement Petit Cœur.",
+      "voicesBody": "Tu as déjà utilisé tes {{count}} souvenirs audio du plan gratuit. Pour en ajouter, abonne-toi à Petit Cœur.",
       "captureLockedTitle": "Ajout de souvenirs en pause",
-      "captureLockedBody": "Ton abonnement est terminé : tu peux toujours revoir et partager tous tes souvenirs. Pour en capturer de nouveaux, réactive ton abonnement Petit Cœur."
+      "captureLockedBody": "Ton abonnement est terminé : tu peux toujours revoir et partager tous tes souvenirs. Pour en capturer de nouveaux, réactive ton abonnement Petit Cœur.",
+      "slotsLeftTitle": "Limite gratuite atteinte",
+      "slotsLeftBody_one": "Il reste {{count}} emplacement pour ce profil. Réduis le nombre de photos, ou abonne-toi à Petit Cœur pour ajouter des souvenirs sans limites.",
+      "slotsLeftBody_other": "Il reste {{count}} emplacements pour ce profil. Réduis le nombre de photos, ou abonne-toi à Petit Cœur pour ajouter des souvenirs sans limites."
     }
   },
   "import": {
@@ -287,6 +290,17 @@
       "title": "Aucun souvenir pour le moment",
       "subtitle": "Commence à capturer des moments précieux",
       "addA11y": "Capturer un premier souvenir"
+    },
+    "delete": {
+      "title": "Supprimer ce moment",
+      "body": "Es-tu sûr de vouloir supprimer ce moment ?",
+      "confirm": "Supprimer",
+      "inBookTitle": "Supprimer ce moment ?",
+      "inBookOne": "Ce souvenir est dans le livre « {{title}} ». Si tu le supprimes du fil, il disparaîtra aussi du livre.",
+      "inBookMany": "Ce souvenir est dans les livres {{titles}}. Si tu le supprimes du fil, il disparaîtra aussi de ces livres.",
+      "paidBookTitle": "Souvenir protégé",
+      "paidBookBody": "Ce souvenir fait partie du livre « {{title}} », déjà commandé. Il ne peut pas être supprimé.",
+      "paidBookMany": "Ce souvenir fait partie d’un livre déjà commandé ({{titles}}). Il ne peut pas être supprimé."
     },
     "share": {
       "a11y": "Partager ce souvenir",
@@ -363,7 +377,10 @@
     "payOpenFailed": "Impossible d’ouvrir le paiement. Réessaie.",
     "payNotConfirmed": "Le paiement n’est pas encore confirmé. Réessaie dans un instant.",
     "payTicketExpired": "La session de commande a expiré. Réessaie Commander.",
-    "storageFull": "Plus assez d’espace sur l’appareil. Libère de la place (Réglages → Général → Stockage iPhone), puis réessaie."
+    "storageFull": "Plus assez d’espace sur l’appareil. Libère de la place (Réglages → Général → Stockage iPhone), puis réessaie.",
+    "printPdfAfterPayTitle": "Paiement reçu",
+    "printPdfAfterPayBody": "La préparation du livre a échoué temporairement. Réessaie — tu ne seras pas débité une seconde fois.",
+    "printPdfRetry": "Réessayer"
   },
   "recordVoice": {
     "title": "Capture sa voix, un chant, un message pour plus tard...",
@@ -374,7 +391,7 @@
     "stopA11y": "Arrêter l’enregistrement",
     "import": "Importer",
     "importA11y": "Importer un fichier audio depuis Fichiers",
-    "importHintBody": "Depuis le Dictaphone : Partager → Petitmo. Ou enregistre dans Fichiers, puis Importer ici.",
+    "importHintBody": "Depuis le Dictaphone : Partager → Petit Cœur. Ou enregistre dans Fichiers, puis Importer ici.",
     "importFailed": "Impossible d’importer ce fichier audio.",
     "importTooShort": "Ce fichier audio est trop court.",
     "importNeedsRebuild": "L’import audio nécessite une mise à jour de l’app (module Fichiers). Tu peux toujours enregistrer avec le micro.",
@@ -404,9 +421,9 @@
     "saveFailedKeep": "La voix est encore sur cet écran, pas dans tes souvenirs. Réessaie Sauvegarder."
   },
   "shareIntent": {
-    "failed": "Impossible d’ouvrir ce partage dans Petitmo.",
-    "unsupported": "Petitmo accepte les photos, vidéos et fichiers audio.",
-    "needsRebuild": "Le partage vers Petitmo nécessite une mise à jour de l’app. Relance npm run dev:ios:build, puis réessaie."
+    "failed": "Impossible d’ouvrir ce partage dans Petit Cœur.",
+    "unsupported": "Petit Cœur accepte les photos, vidéos et fichiers audio.",
+    "needsRebuild": "Le partage vers Petit Cœur nécessite une mise à jour de l’app. Réessaie après l’avoir mise à jour."
   },
   "videoTrim": {
     "title": "Raccourcir la vidéo",

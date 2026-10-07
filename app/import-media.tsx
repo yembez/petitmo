@@ -335,8 +335,20 @@ export default function ImportMediaScreen() {
             return;
           }
           Alert.alert(
-            'Limite gratuite',
-            `Il reste ${left} emplacement${left > 1 ? 's' : ''} pour ce profil. Réduis ta sélection, ou choisis « Toutes dans un seul post » pour ne créer qu’un souvenir.`
+            t('parent.freeTierLimit.slotsLeftTitle'),
+            t('parent.freeTierLimit.slotsLeftBody', { count: left }),
+            [
+              { text: t('parent.freeTierLimit.later'), style: 'cancel' },
+              {
+                text: t('parent.freeTierLimit.ctaPlus'),
+                onPress: () => {
+                  router.push({
+                    pathname: '/paywall',
+                    params: { context: 'LIMIT_REACHED', returnTo: 'fil' },
+                  });
+                },
+              },
+            ],
           );
           return;
         }

@@ -698,7 +698,7 @@ function FilScreen() {
           <Text style={localStyles.nudgeText} numberOfLines={2}>
             {timingNudge === 'DAY_30'
               ? "Tes souvenirs méritent d'être protégés ♡"
-              : 'Ne perds aucun moment — passe à Petitmo+'}
+              : 'Ne perds aucun moment — passe à Petit Cœur+'}
           </Text>
           <Text style={localStyles.nudgeCta}>Découvrir →</Text>
         </TouchableOpacity>

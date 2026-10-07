@@ -22,7 +22,7 @@ import {
   DMSans_700Bold,
 } from '@expo-google-fonts/dm-sans'
 import { BookOpen, ChevronRight, Cloud, Lock, X } from 'lucide-react-native'
-import PetitCoeurLogo, { PETIT_COEUR_LOGO_VIEWBOX } from '@/components/PetitCoeurLogo'
+import PetitCoeurWordmark from '@/components/PetitCoeurWordmark'
 import PetitmoPrimaryMorphButton, {
   type PetitmoMorphPhase,
 } from '@/components/PetitmoPrimaryMorphButton'
@@ -421,9 +421,8 @@ export default function PaywallScreen() {
   const contentPadH = { paddingLeft: 20 + insets.left, paddingRight: 20 + insets.right }
   const heroH = Math.min(Math.round(hp(32)), Math.round(screenHeight * 0.34))
 
-  const paywallCornerLogoW = scale(126)
-  const paywallCornerLogoH =
-    paywallCornerLogoW * (PETIT_COEUR_LOGO_VIEWBOX.height / PETIT_COEUR_LOGO_VIEWBOX.width)
+  /** Wordmark manuscrit seul — un cran plus grand que l’onboarding (lisibilité coin hero). */
+  const paywallWordmarkW = Math.min(screenWidth * 0.18, scale(72))
 
   /** Heure, batterie, signal… en blanc sur le hero sombre (comme Capturer / Favoris). */
   useFocusEffect(
@@ -466,12 +465,7 @@ export default function PaywallScreen() {
           accessibilityRole="image"
           accessibilityLabel={t('paywall.brandA11y')}
         >
-          <PetitCoeurLogo
-            width={paywallCornerLogoW}
-            height={paywallCornerLogoH}
-            variant="whiteSolid"
-            shadow
-          />
+          <PetitCoeurWordmark width={paywallWordmarkW} variant="white" opacity={0.92} />
         </View>
         <Pressable
           onPress={dismissPaywall}
