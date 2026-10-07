@@ -47,10 +47,7 @@ import {
   TEXT_SAVE_FAILED_ALERT_TITLE,
   TEXT_SAVE_FAILED_ALERT_MESSAGE,
 } from '@/utils/textLimits';
-import {
-  applyLeadingCapitalWhenStartingText,
-  capitalizeFirstLetterFr,
-} from '@/utils/frenchTextInput';
+import { applySentenceAndParagraphCapitals } from '@/utils/frenchTextInput';
 import { upsertLocalMemory, getLocalMemoryById } from '@/lib/localDb';
 import { buildLocalTextMemory } from '@/services/localOnlyMemoryCapture';
 import { ensureMemoryUploadedForCloud } from '@/services/migration';
@@ -172,10 +169,7 @@ export default function WriteScreen() {
             setContent(prev => {
               const prevCanon = stripTextAlineas(prev);
               const merged = prevCanon + finalTranscript;
-              const normalized =
-                !prevCanon.trim() && merged.trim()
-                  ? capitalizeFirstLetterFr(merged)
-                  : merged;
+              const normalized = applySentenceAndParagraphCapitals(merged);
               const capped = enforceTextBookLineBudgetOnInput(
                 prevCanon,
                 normalized,
@@ -241,9 +235,9 @@ export default function WriteScreen() {
     if (ctaPhase !== 'idle') return;
     setCtaPhase('busy');
     try {
-      setContent(textToSave);
-
-      const textTitle = title.trim() ? title.trim() : null;
+      const textTitle = title.trim()
+        ? applySentenceAndParagraphCapitals(title.trim())
+        : null;
       const ok = await updateMemoryText(editMemoryId, {
         content: textToSave,
         textTitle,
@@ -266,8 +260,6 @@ export default function WriteScreen() {
     if (ctaPhase !== 'idle') return;
     setCtaPhase('busy');
     try {
-      setContent(textToSave);
-
       const { data: sess } = await supabase.auth.getSession();
       const user = sess.session?.user;
       if (!user) {
@@ -302,7 +294,7 @@ export default function WriteScreen() {
         childId,
         userId: user.id,
         content: textToSave,
-        textTitle: title.trim() ? title.trim() : null,
+        textTitle: title.trim() ? applySentenceAndParagraphCapitals(title.trim()) : null,
         location: locationLabel,
         syncStatus: mode === 'local' ? 'local' : 'pending',
       });
@@ -334,7 +326,7 @@ export default function WriteScreen() {
 
   const handleSave = async () => {
     if (ctaPhase !== 'idle') return;
-    const trimmed = stripTextAlineas(content).trim();
+    const trimmed = applySentenceAndParagraphCapitals(stripTextAlineas(content).trim());
     const textToSave = clampText(trimmed);
     if (!textToSave) {
       Alert.alert(t('write.emptyTitle'), t('write.emptyBody'));
@@ -448,9 +440,7 @@ export default function WriteScreen() {
           placeholderTextColor="#AEAEB2"
           value={title}
           onChangeText={t =>
-            setTitle(prev =>
-              applyLeadingCapitalWhenStartingText(prev, t).slice(0, MAX_TEXT_MEMORY_TITLE_CHARS)
-            )
+            setTitle(applySentenceAndParagraphCapitals(t).slice(0, MAX_TEXT_MEMORY_TITLE_CHARS))
           }
           maxLength={MAX_TEXT_MEMORY_TITLE_CHARS}
           returnKeyType="next"
@@ -470,7 +460,7 @@ export default function WriteScreen() {
               const nextCanon = stripTextAlineas(reconciled);
               const capped = enforceTextBookLineBudgetOnInput(
                 prevCanon,
-                applyLeadingCapitalWhenStartingText(prevCanon, nextCanon),
+                applySentenceAndParagraphCapitals(nextCanon),
                 MAX_BOOK_LINES,
               );
               return applyTextAlineasForInput(capped);

@@ -44,9 +44,7 @@ import {
   TEXT_TRUNCATION_MODIFY_LABEL,
   TEXT_TRUNCATION_SAVE_LABEL,
 } from '@/utils/textLimits';
-import {
-  applyLeadingCapitalWhenStartingText,
-} from '@/utils/frenchTextInput';
+import { applySentenceAndParagraphCapitals } from '@/utils/frenchTextInput';
 import { applyTextAlineasForInput, reconcileTextAlineasOnChange, stripTextAlineas } from '@/utils/textAlineas';
 
 const TEXT_INPUT_WEB_LANG =
@@ -130,7 +128,7 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
     const nextCanon = stripTextAlineas(reconciled);
     const capped = enforceTextBookLineBudgetOnInput(
       prevCanon,
-      applyLeadingCapitalWhenStartingText(prevCanon, nextCanon),
+      applySentenceAndParagraphCapitals(nextCanon),
       lineBudget,
       charsPerLine,
     );
@@ -141,12 +139,12 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
     if (ctaPhase !== 'idle') return;
 
     if (props.variant === 'title-body') {
-      const bodyRaw = stripTextAlineas(fieldBody).trim();
+      const bodyRaw = applySentenceAndParagraphCapitals(stripTextAlineas(fieldBody).trim());
       const finalBody =
         lineBudget === MAX_BOOK_LINES
           ? clampText(bodyRaw)
           : clampTextToBookLineBudget(bodyRaw, lineBudget, charsPerLine);
-      const titleRaw = fieldTitle.trim();
+      const titleRaw = applySentenceAndParagraphCapitals(fieldTitle.trim());
       const finalTitle = titleRaw.slice(0, MAX_TEXT_MEMORY_TITLE_CHARS);
 
       if (finalBody !== bodyRaw) {
@@ -172,7 +170,7 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
       return;
     }
 
-    const raw = stripTextAlineas(text).trim();
+    const raw = applySentenceAndParagraphCapitals(stripTextAlineas(text).trim());
     const finalText =
       lineBudget === MAX_BOOK_LINES
         ? clampText(raw)
@@ -248,11 +246,8 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
                   style={[styles.feedTitleInCard, { fontFamily: memoryTextFont }]}
                   value={fieldTitle}
                   onChangeText={t =>
-                    setFieldTitle(prev =>
-                      applyLeadingCapitalWhenStartingText(prev, t).slice(
-                        0,
-                        MAX_TEXT_MEMORY_TITLE_CHARS
-                      )
+                    setFieldTitle(
+                      applySentenceAndParagraphCapitals(t).slice(0, MAX_TEXT_MEMORY_TITLE_CHARS)
                     )
                   }
                   placeholder={props.titleFieldLabel ?? 'Titre (optionnel)'}
@@ -302,11 +297,8 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
                 style={styles.inputTitle}
                 value={fieldTitle}
                 onChangeText={t =>
-                  setFieldTitle(prev =>
-                    applyLeadingCapitalWhenStartingText(prev, t).slice(
-                      0,
-                      MAX_TEXT_MEMORY_TITLE_CHARS
-                    )
+                  setFieldTitle(
+                    applySentenceAndParagraphCapitals(t).slice(0, MAX_TEXT_MEMORY_TITLE_CHARS)
                   )
                 }
                 placeholder="Titre…"
@@ -361,7 +353,7 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
                       ? applyBodyInput(prev, t)
                       : enforceTextBookLineBudgetOnInput(
                           prev,
-                          applyLeadingCapitalWhenStartingText(prev, t),
+                          applySentenceAndParagraphCapitals(t),
                           lineBudget,
                           charsPerLine,
                         )
