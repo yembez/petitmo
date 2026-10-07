@@ -120,6 +120,7 @@ import {
   healBookCoverIfNeeded,
   healBookMemoryIdsIfStale,
   pruneOrphanBookMemoryIds,
+  isLocalBookPaidPrintOrder,
   removeMemoriesFromBook,
   readBookPreviewLocalSnapshotSync,
   resolveBookCoverDisplayUri,
@@ -997,13 +998,16 @@ export default function BookPreviewScreen() {
           setBookSelectionKeys([]);
           return;
         }
-        const pruned = pruneOrphanBookMemoryIds(b);
-        if (
-          pruned.memoryIds.length !== b.memoryIds.length ||
-          (pruned.pageEntries?.length ?? 0) !== (b.pageEntries?.length ?? 0)
-        ) {
-          await upsertBook(pruned);
-          b = pruned;
+        /** Prune orphelins — sauf livre déjà commandé/payé (invariant pages + QR). */
+        if (!isLocalBookPaidPrintOrder(b.id)) {
+          const pruned = pruneOrphanBookMemoryIds(b);
+          if (
+            pruned.memoryIds.length !== b.memoryIds.length ||
+            (pruned.pageEntries?.length ?? 0) !== (b.pageEntries?.length ?? 0)
+          ) {
+            await upsertBook(pruned);
+            b = pruned;
+          }
         }
         // Paint immédiat depuis SQLite ; heal IDs / cover en arrière-plan.
         if (b.textEdits && Object.keys(b.textEdits).length > 0) {

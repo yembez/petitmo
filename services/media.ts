@@ -2746,27 +2746,46 @@ export async function updateMemoryLocation(memoryId: string, location: string | 
 
 export async function deleteMemory(memoryId: string) {
   try {
+    const id = memoryId.trim();
+    if (!id) return false;
+
+    /**
+     * Invariant produit (mega-strict) : souvenir dans un livre déjà commandé/payé
+     * (+ QR initial) ne doit jamais être détruit. Blocage ici aussi, pas seulement UI.
+     */
+    const { getMemoryBookDeleteImpact, pruneMemoryFromAllLocalBooks } = await import(
+      '@/services/books'
+    );
+    const impact = getMemoryBookDeleteImpact(id);
+    if (impact.paidBooks.length > 0) {
+      console.warn('[media] deleteMemory blocked — memory in paid print book', {
+        memoryId: id,
+        books: impact.paidBooks.map(b => b.id),
+      });
+      return false;
+    }
+
     // Supprimer localement en premier (optimiste)
-    const local = getLocalMemoryById(memoryId);
+    const local = getLocalMemoryById(id);
     if (local) {
       await deleteLocalMediaFiles(local);
     }
-    deleteLocalMemory(memoryId);
+    deleteLocalMemory(id);
 
-    await clearFeedLocalThumbnails(memoryId);
-    await clearFeedLocalVideo(memoryId);
+    await clearFeedLocalThumbnails(id);
+    await clearFeedLocalVideo(id);
+
+    // Livres brouillon : retirer les pages tout de suite (pas attendre l’ouverture preview).
+    void pruneMemoryFromAllLocalBooks(id);
 
     if ((await getCachedUserMode()) === 'local') {
       return true;
     }
 
-    const { error } = await supabase
-      .from('memories')
-      .delete()
-      .eq('id', memoryId);
+    const { error } = await supabase.from('memories').delete().eq('id', id);
 
     if (error) throw error;
-    void triggerDeleteMemoryAssets(memoryId);
+    void triggerDeleteMemoryAssets(id);
     return true;
   } catch (error) {
     console.error('Delete memory error:', error);

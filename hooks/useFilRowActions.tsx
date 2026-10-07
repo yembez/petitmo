@@ -9,8 +9,18 @@ import {
   deleteMemory,
   updateVoiceMemoryCover,
 } from '@/services/media';
+import { getMemoryBookDeleteImpact } from '@/services/books';
 import { Swipeable } from 'react-native-gesture-handler';
 import type { Memory } from '@/utils/feedHelpers';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
+
+function formatQuotedBookTitles(titles: string[]): string {
+  const quoted = titles.map(t => `« ${t} »`);
+  if (quoted.length <= 1) return quoted[0] ?? '';
+  if (quoted.length === 2) return `${quoted[0]} et ${quoted[1]}`;
+  const head = quoted.slice(0, -1).join(', ');
+  return `${head} et ${quoted[quoted.length - 1]}`;
+}
 
 export type FilRowActionsScrollBridge = {
   /** Offset Y courant du FlatList (avant retrait). */
@@ -24,6 +34,7 @@ export function useFilRowActions(
   scrollBridge?: FilRowActionsScrollBridge,
 ) {
   const router = useRouter();
+  const { t } = useAppTranslation('common');
   const swipeRefs = useRef<Map<string, Swipeable | null>>(new Map());
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingMemory, setEditingMemory] = useState<Memory | null>(null);
@@ -126,24 +137,52 @@ export function useFilRowActions(
 
   const handleDeleteMemory = useCallback(
     (memory: Memory) => {
-      Alert.alert('Supprimer ce moment', 'Es-tu sûr de vouloir supprimer ce moment ?', [
-        { text: 'Annuler', style: 'cancel', onPress: () => swipeRefs.current.get(memory.id)?.close() },
-        {
-          text: 'Supprimer',
-          style: 'destructive',
-          onPress: () => {
-            swipeRefs.current.get(memory.id)?.close();
-            const id = memory.id;
-            const y = Math.max(0, scrollBridgeRef.current?.getScrollOffset() ?? 0);
-            // Pin d’abord, puis retire — LinearTransition sur Animated.FlatList anime la remontée.
-            scrollBridgeRef.current?.pinScrollOffset(y);
-            setMemories(prev => prev.filter(m => m.id !== id));
-            void deleteMemory(id);
-          },
-        },
+      const closeSwipe = () => swipeRefs.current.get(memory.id)?.close();
+      const impact = getMemoryBookDeleteImpact(memory.id);
+
+      if (impact.paidBooks.length > 0) {
+        const titles = impact.paidBooks.map(b => b.title);
+        Alert.alert(
+          t('fil.delete.paidBookTitle'),
+          titles.length === 1
+            ? t('fil.delete.paidBookBody', { title: titles[0] })
+            : t('fil.delete.paidBookMany', { titles: formatQuotedBookTitles(titles) }),
+          [{ text: t('ok'), style: 'cancel', onPress: closeSwipe }],
+        );
+        return;
+      }
+
+      const runDelete = () => {
+        closeSwipe();
+        const id = memory.id;
+        const y = Math.max(0, scrollBridgeRef.current?.getScrollOffset() ?? 0);
+        // Pin d’abord, puis retire — LinearTransition sur Animated.FlatList anime la remontée.
+        scrollBridgeRef.current?.pinScrollOffset(y);
+        setMemories(prev => prev.filter(m => m.id !== id));
+        void deleteMemory(id);
+      };
+
+      if (impact.draftBooks.length > 0) {
+        const titles = impact.draftBooks.map(b => b.title);
+        Alert.alert(
+          t('fil.delete.inBookTitle'),
+          titles.length === 1
+            ? t('fil.delete.inBookOne', { title: titles[0] })
+            : t('fil.delete.inBookMany', { titles: formatQuotedBookTitles(titles) }),
+          [
+            { text: t('cancel'), style: 'cancel', onPress: closeSwipe },
+            { text: t('fil.delete.confirm'), style: 'destructive', onPress: runDelete },
+          ],
+        );
+        return;
+      }
+
+      Alert.alert(t('fil.delete.title'), t('fil.delete.body'), [
+        { text: t('cancel'), style: 'cancel', onPress: closeSwipe },
+        { text: t('fil.delete.confirm'), style: 'destructive', onPress: runDelete },
       ]);
     },
-    [setMemories],
+    [setMemories, t],
   );
 
   const closeEditModal = useCallback(() => {

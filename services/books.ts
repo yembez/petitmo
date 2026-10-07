@@ -57,6 +57,7 @@ import { peekSelectedChildIdLastKnown } from '@/services/children';
 import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 import { buildBookPages, type BookPageMemorySpec } from '@/src/book/BookEngine';
 import { formatGelatoPrintPageCountLabel } from '@/utils/bookGelatoInnerPages';
+import { peekCachedPrintOrders } from '@/lib/printOrdersCache';
 
 /**
  * Ref couverture locale **morte** : uniquement fuite Bundle (`…/Petitmo.app/…`) ou chemin
@@ -1842,6 +1843,91 @@ export async function memoryIdToBookCount(): Promise<Record<string, number>> {
     }
   }
   return counts;
+}
+
+/** True si le souvenir apparaît dans les pages / memoryIds du livre. */
+export function bookContainsMemoryId(book: Book, memoryId: string): boolean {
+  const id = memoryId.trim();
+  if (!id) return false;
+  if ((book.memoryIds ?? []).some(x => x.trim() === id)) return true;
+  return bookPageEntries(book).some(e => e.memoryId.trim() === id);
+}
+
+/** Livres locaux (brouillon) contenant ce souvenir. */
+export function listLocalBooksContainingMemory(memoryId: string): Book[] {
+  const id = memoryId.trim();
+  if (!id) return [];
+  return listLocalBooks()
+    .map(b => normalizeBook(b))
+    .filter((b): b is Book => b != null && bookContainsMemoryId(b, id));
+}
+
+/**
+ * Livre **commandé / payé** (impression) — pas Petit Cœur+.
+ * Statuts actifs : paid → delivered. Échec / remboursement = plus protégé.
+ */
+function isActivePaidPrintOrderStatus(status: string): boolean {
+  return (
+    status === 'paid' ||
+    status === 'printing' ||
+    status === 'shipped' ||
+    status === 'in_transit' ||
+    status === 'delivered'
+  );
+}
+
+/** True si ce `bookId` a une commande impression active (cache local). */
+export function isLocalBookPaidPrintOrder(bookId: string): boolean {
+  const id = bookId.trim();
+  if (!id) return false;
+  return peekCachedPrintOrders().some(
+    o => o.bookId.trim() === id && isActivePaidPrintOrderStatus(o.status),
+  );
+}
+
+export type MemoryBookDeleteImpact = {
+  /** Livres brouillon (pas encore commandés) contenant le souvenir. */
+  draftBooks: { id: string; title: string }[];
+  /**
+   * Livres déjà commandés/payés contenant le souvenir.
+   * Invariant produit : le souvenir (+ QR initial) doit rester — suppression interdite.
+   */
+  paidBooks: { id: string; title: string }[];
+};
+
+/**
+ * Impact suppression fil → livres (local-first, sync).
+ * `paidBooks` via cache commandes impression (`bookId`).
+ */
+export function getMemoryBookDeleteImpact(memoryId: string): MemoryBookDeleteImpact {
+  const containing = listLocalBooksContainingMemory(memoryId);
+  if (containing.length === 0) {
+    return { draftBooks: [], paidBooks: [] };
+  }
+
+  const draftBooks: { id: string; title: string }[] = [];
+  const paidBooks: { id: string; title: string }[] = [];
+  for (const b of containing) {
+    const title = (b.title ?? '').trim() || 'Livre';
+    const row = { id: b.id, title };
+    if (isLocalBookPaidPrintOrder(b.id)) paidBooks.push(row);
+    else draftBooks.push(row);
+  }
+  return { draftBooks, paidBooks };
+}
+
+/** Retire immédiatement le souvenir de tous les livres brouillon locaux (+ backup cloud). */
+export async function pruneMemoryFromAllLocalBooks(memoryId: string): Promise<void> {
+  const id = memoryId.trim();
+  if (!id) return;
+  const { draftBooks, paidBooks } = getMemoryBookDeleteImpact(id);
+  if (paidBooks.length > 0) {
+    // Invariant : souvenir d’un livre payé — ne pas prune (et deleteMemory doit bloquer).
+    return;
+  }
+  for (const b of draftBooks) {
+    await removeMemoriesFromBook(b.id, [id]);
+  }
 }
 
 /**
