@@ -18,6 +18,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as WebBrowser from 'expo-web-browser';
 import * as ExpoLinking from 'expo-linking';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { ChevronRight } from 'lucide-react-native';
 import { THEME } from '@/constants/theme';
 import { CAPTURE_CTA_BORDER } from '@/constants/captureScreenPalette';
@@ -31,6 +32,7 @@ import { formatAppCurrency } from '@/utils/appLocale';
 import { getUserTier } from '@/lib/userTier';
 import { getLastGuestExportEmail, setLastGuestExportEmail } from '@/lib/guestExportPrefs';
 import { PRINT_V1_INCLUDED_QR, quotePrintOrderV1 } from '@/lib/pricingV1';
+import { isSentryEnabled, Sentry } from '@/lib/sentry';
 import { PRINT_V1_PAID_DISCOUNT_PERCENT, type DiscountPercent } from '@/lib/printedBookQuote';
 import { PRINT_ORDER_CGV_URL, PRINT_ORDER_CGV_VERSION } from '@/lib/printOrderLegal';
 import {
@@ -105,6 +107,32 @@ import { rememberLocalPrintOrder } from '@/lib/printOrdersCache';
 import { isDeviceStorageFullError } from '@/utils/deviceStorageFull';
 
 WebBrowser.maybeCompleteAuthSession();
+
+const PRINT_KEEP_AWAKE_TAG = 'petitmo-print-fulfill';
+
+async function withPrintKeepAwake<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    await activateKeepAwakeAsync(PRINT_KEEP_AWAKE_TAG);
+  } catch {
+    /* ignore — module / plateforme */
+  }
+  try {
+    return await fn();
+  } finally {
+    try {
+      deactivateKeepAwake(PRINT_KEEP_AWAKE_TAG);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function isTransientPrintPdfError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err ?? '');
+  return /browserType\.launch|Target page|browser has been closed|SIGSEGV|HTTP 50[0234]|upstream|ECONNRESET|Network request failed|Service PDF|indisponible|timeout Playwright/i.test(
+    msg,
+  );
+}
 
 /** Empêche un double generate-pdf si le deep link remonte book-order pendant le fulfill. */
 let printFulfillInFlight = false;
@@ -534,108 +562,118 @@ export default function BookOrderScreen() {
       submittingRef.current = true;
       setPrintPhase('fulfilling');
       try {
-        const pendingPayload = await getPendingBookOrderPdfPayload();
-        if (!pendingPayload) {
-          throw new Error('Aucun aperçu de livre chargé. Repasse par l’aperçu du livre.');
-        }
-        const catalogPagesForGelato = gelatoCatalogPageCount(pendingPayload.pages);
-        if (catalogPagesForGelato < GELATO_MIN_INNER_PAGES) {
-          Alert.alert(
-            'Livre trop court pour l’impression',
-            gelatoMinInnerPagesAlertMessage(gelatoInnerPageCount(pendingPayload.pages)),
-          );
-          return;
-        }
+        await withPrintKeepAwake(async () => {
+          const pendingPayload = await getPendingBookOrderPdfPayload();
+          if (!pendingPayload) {
+            throw new Error('Aucun aperçu de livre chargé. Repasse par l’aperçu du livre.');
+          }
+          const catalogPagesForGelato = gelatoCatalogPageCount(pendingPayload.pages);
+          if (catalogPagesForGelato < GELATO_MIN_INNER_PAGES) {
+            Alert.alert(
+              'Livre trop court pour l’impression',
+              gelatoMinInnerPagesAlertMessage(gelatoInnerPageCount(pendingPayload.pages)),
+            );
+            return;
+          }
 
-        const payload = await withFreshBookPayloadForExport(pendingPayload);
-        void getBookExportPrepIssues({
-          pages: payload.pages,
-          localEdits: payload.localEdits,
-          coverPhotoUrl: payload.coverPhotoUrl,
-          child: payload.child,
-        });
-
-        const subscriptionTierPdf = subscriptionDb === 'paid' ? 'premium' : 'free';
-        const { localUri, response: pdfResponse } = await generateBookPdfWithExportTicket({
-          ...payload,
-          exportMode: 'print',
-          exportTicket: opts.exportTicket,
-          subscriptionTier: subscriptionTierPdf,
-        });
-
-        await setBookOrderResultPdfUri(localUri);
-        await setLastGuestExportEmail(opts.emailNorm);
-        const exportRequestId = peekExportTicketClaims(opts.exportTicket)?.export_request_id?.trim() ?? '';
-        if (exportRequestId) {
-          await rememberLocalPrintOrder({
-            id: exportRequestId,
-            createdAt: new Date().toISOString(),
-            priceCents: opts.priceCents,
-            status: 'printing',
-            shippingName: '',
-            bookId: pendingPayload.bookId || bookId,
-            childId: pendingPayload.childId || childId,
-            bookTitle: (pendingPayload.coverTitle || book?.title || '').trim(),
+          const payload = await withFreshBookPayloadForExport(pendingPayload);
+          void getBookExportPrepIssues({
+            pages: payload.pages,
+            localEdits: payload.localEdits,
+            coverPhotoUrl: payload.coverPhotoUrl,
+            child: payload.child,
           });
-        }
-        await clearPendingPrintPayment();
-        const pricePaid = opts.priceCents / 100;
 
-        const gelato = pdfResponse.gelato;
-        if (__DEV__) {
-          console.log('[book-order] gelato', gelato ?? '(absent — serveur PDF pas encore redéployé ?)');
-        }
-        if (!gelato?.ok) {
-          const detail =
-            gelato?.message?.trim() ||
-            'Le PDF a été généré mais Gelato n’a pas reçu la commande (voir logs serveur / export_requests.last_error).';
-          Alert.alert(
-            'Gelato non envoyé',
-            `${detail}${
-              gelato?.skipped ? '\n\nSouvent : GELATO_* manquant sur Railway, ou GELATO_ORDER_TYPE.' : ''
-            }\n\nLe PDF local est quand même disponible.`,
-            [{ text: 'OK' }],
-          );
-        } else if (__DEV__ && gelato.orderId) {
-          Alert.alert(
-            'Gelato OK',
-            `Order ${gelato.orderType === 'draft' ? 'draft' : ''} ${gelato.orderId}`,
-            [{ text: 'OK' }],
-          );
-        }
-
-        const memories = collectMemoriesFromPagesForPdf(payload.pages, payload.localEdits ?? {});
-        const av = memories.filter(m => m.type === 'voice' || m.type === 'video');
-        const avKeys = av.map(m => `${m.type === 'voice' ? 'audio' : 'video'}:${m.id}`);
-        const hasPendingUploads = (await getPendingGuestRawUploadsCountForKeys(avKeys)) > 0;
-        const hasLocalAvToUpload = av.some(m => {
-          const local = localUriForAvRawUpload(m);
-          if (local) return true;
-          const main = (m.media_url ?? m.edited_media_url ?? '').trim();
-          return main ? !isHttps(main) : true;
-        });
-
-        if (av.length > 0 && (hasPendingUploads || hasLocalAvToUpload)) {
-          navigateToFinalizeMedia({
-            pricePaidEuros: pricePaid,
-            emailNorm: opts.emailNorm,
+          const subscriptionTierPdf = subscriptionDb === 'paid' ? 'premium' : 'free';
+          const { localUri, response: pdfResponse } = await generateBookPdfWithExportTicket({
+            ...payload,
+            exportMode: 'print',
             exportTicket: opts.exportTicket,
+            subscriptionTier: subscriptionTierPdf,
           });
-          return;
-        }
 
-        await clearPendingBookOrderPdfPayload();
-        navigateToConfirmation({ pricePaidEuros: pricePaid, emailNorm: opts.emailNorm });
+          await setBookOrderResultPdfUri(localUri);
+          await setLastGuestExportEmail(opts.emailNorm);
+          const exportRequestId = peekExportTicketClaims(opts.exportTicket)?.export_request_id?.trim() ?? '';
+          if (exportRequestId) {
+            await rememberLocalPrintOrder({
+              id: exportRequestId,
+              createdAt: new Date().toISOString(),
+              priceCents: opts.priceCents,
+              status: 'printing',
+              shippingName: '',
+              bookId: pendingPayload.bookId || bookId,
+              childId: pendingPayload.childId || childId,
+              bookTitle: (pendingPayload.coverTitle || book?.title || '').trim(),
+            });
+          }
+          // Seulement après succès PDF : le pending sert à reprendre sans re-payer.
+          await clearPendingPrintPayment();
+          const pricePaid = opts.priceCents / 100;
+
+          const gelato = pdfResponse.gelato;
+          if (__DEV__) {
+            console.log('[book-order] gelato', gelato ?? '(absent — serveur PDF pas encore redéployé ?)');
+          }
+          if (!gelato?.ok) {
+            const detail =
+              gelato?.message?.trim() ||
+              'Le PDF a été généré mais Gelato n’a pas reçu la commande (voir logs serveur / export_requests.last_error).';
+            Alert.alert(
+              'Gelato non envoyé',
+              `${detail}${
+                gelato?.skipped ? '\n\nSouvent : GELATO_* manquant sur Railway, ou GELATO_ORDER_TYPE.' : ''
+              }\n\nLe PDF local est quand même disponible.`,
+              [{ text: 'OK' }],
+            );
+          } else if (__DEV__ && gelato.orderId) {
+            Alert.alert(
+              'Gelato OK',
+              `Order ${gelato.orderType === 'draft' ? 'draft' : ''} ${gelato.orderId}`,
+              [{ text: 'OK' }],
+            );
+          }
+
+          const memories = collectMemoriesFromPagesForPdf(payload.pages, payload.localEdits ?? {});
+          const av = memories.filter(m => m.type === 'voice' || m.type === 'video');
+          const avKeys = av.map(m => `${m.type === 'voice' ? 'audio' : 'video'}:${m.id}`);
+          const hasPendingUploads = (await getPendingGuestRawUploadsCountForKeys(avKeys)) > 0;
+          const hasLocalAvToUpload = av.some(m => {
+            const local = localUriForAvRawUpload(m);
+            if (local) return true;
+            const main = (m.media_url ?? m.edited_media_url ?? '').trim();
+            return main ? !isHttps(main) : true;
+          });
+
+          if (av.length > 0 && (hasPendingUploads || hasLocalAvToUpload)) {
+            navigateToFinalizeMedia({
+              pricePaidEuros: pricePaid,
+              emailNorm: opts.emailNorm,
+              exportTicket: opts.exportTicket,
+            });
+            return;
+          }
+
+          await clearPendingBookOrderPdfPayload();
+          navigateToConfirmation({ pricePaidEuros: pricePaid, emailNorm: opts.emailNorm });
+        });
       } finally {
         fulfillLockRef.current = false;
         printFulfillInFlight = false;
       }
     },
-    [book?.title, bookId, navigateToConfirmation, navigateToFinalizeMedia, subscriptionDb],
+    [book?.title, bookId, childId, navigateToConfirmation, navigateToFinalizeMedia, subscriptionDb],
   );
 
   const applyPrintSubmitError = useCallback(
     (e: unknown) => {
+      const err = e instanceof Error ? e : new Error(String(e ?? 'book_order_submit_failed'));
+      if (isSentryEnabled()) {
+        Sentry.captureException(err, {
+          tags: { 'app.errorScope': 'bookOrder.submit' },
+          extra: { message: err.message.slice(0, 240) },
+        });
+      }
       if (e instanceof Error && (e.message === 'PREP_NOT_READY' || e.message.startsWith('PREP_NOT_READY:'))) {
         setFieldErrors({ submit: 'Préparation des médias en cours. Attends quelques secondes puis réessaie.' });
       } else if (isDeviceStorageFullError(e)) {
@@ -663,11 +701,50 @@ export default function BookOrderScreen() {
             'Le PDF du livre est trop volumineux pour le stockage (limite actuelle trop basse). ' +
             'Contacte le support ou réessaie après mise à jour des limites Storage (books-pdf).',
         });
+      } else if (
+        e instanceof Error &&
+        (/EXPO_PUBLIC_PDF_SERVER_URL|Service PDF non configuré|n’est disponible que via le service/i.test(
+          e.message,
+        ))
+      ) {
+        setFieldErrors({
+          submit:
+            'Le service de préparation du livre est indisponible pour le moment. Réessaie dans un instant.',
+        });
+      } else if (e instanceof Error && isTransientPrintPdfError(e)) {
+        setFieldErrors({ submit: t('bookOrder.printPdfAfterPayBody') });
       } else {
         setFieldErrors({ submit: e instanceof Error ? e.message : 'Échec de la commande.' });
       }
     },
     [t],
+  );
+
+  const handlePrintFulfillError = useCallback(
+    (e: unknown, retryOpts?: { exportTicket: string; emailNorm: string; priceCents: number }) => {
+      submittingRef.current = false;
+      setSubmitting(false);
+      setPrintPhase('idle');
+      const offerRetry = !!retryOpts && isTransientPrintPdfError(e);
+      if (offerRetry && retryOpts) {
+        Alert.alert(t('bookOrder.printPdfAfterPayTitle'), t('bookOrder.printPdfAfterPayBody'), [
+          {
+            text: t('cancel'),
+            style: 'cancel',
+            onPress: () => applyPrintSubmitError(e),
+          },
+          {
+            text: t('bookOrder.printPdfRetry'),
+            onPress: () => {
+              void fulfillPrintAfterPaid(retryOpts).catch(err => handlePrintFulfillError(err, retryOpts));
+            },
+          },
+        ]);
+        return;
+      }
+      applyPrintSubmitError(e);
+    },
+    [applyPrintSubmitError, fulfillPrintAfterPaid, t],
   );
 
   const submitOrder = useCallback(async () => {
@@ -821,7 +898,11 @@ export default function BookOrderScreen() {
           customerEmail: mail,
         });
         if (pay.paymentStatus === 'paid') {
-          await fulfillPrintAfterPaid({ exportTicket, emailNorm: mail, priceCents });
+          try {
+            await fulfillPrintAfterPaid({ exportTicket, emailNorm: mail, priceCents });
+          } catch (e) {
+            handlePrintFulfillError(e, { exportTicket, emailNorm: mail, priceCents });
+          }
           return;
         }
         if (!pay.checkoutUrl) {
@@ -843,7 +924,11 @@ export default function BookOrderScreen() {
           return;
         }
         setPrintPhase('fulfilling');
-        await fulfillPrintAfterPaid({ exportTicket, emailNorm: mail, priceCents });
+        try {
+          await fulfillPrintAfterPaid({ exportTicket, emailNorm: mail, priceCents });
+        } catch (e) {
+          handlePrintFulfillError(e, { exportTicket, emailNorm: mail, priceCents });
+        }
       } catch (e) {
         applyPrintSubmitError(e);
       } finally {
@@ -916,36 +1001,12 @@ export default function BookOrderScreen() {
 
       navigateToConfirmation({ pricePaidEuros: pricePaid, emailNorm: mail });
     } catch (e) {
-      if (isDeviceStorageFullError(e)) {
-        setFieldErrors({ submit: t('bookOrder.storageFull') });
-      } else if (e instanceof Error && e.message === 'EXPORT_PAYMENT_REQUIRED') {
-        setFieldErrors({ submit: 'Achat requis (export PDF) ou compte non éligible.' });
-      } else if (e instanceof Error && (e.message === 'PREP_NOT_READY' || e.message.startsWith('PREP_NOT_READY:'))) {
-        setFieldErrors({ submit: 'Préparation des médias en cours. Attends quelques secondes puis réessaie.' });
-      } else if (
-        e instanceof Error &&
-        (e.message.includes('not readable') || e.message.includes('renderAsync'))
-      ) {
-        setFieldErrors({
-          submit:
-            'Une photo du livre est introuvable sur cet appareil. Rouvre l’aperçu du livre, attends quelques secondes, puis réessaie.',
-        });
-      } else if (
-        e instanceof Error &&
-        /exceeded the maximum allowed size|PDF trop volumineux/i.test(e.message)
-      ) {
-        setFieldErrors({
-          submit:
-            'Le PDF du livre est trop volumineux pour le stockage (limite actuelle trop basse). ' +
-            'Contacte le support ou réessaie après mise à jour des limites Storage (books-pdf).',
-        });
-      } else {
-        setFieldErrors({ submit: e instanceof Error ? e.message : 'Export impossible.' });
-      }
+      applyPrintSubmitError(e);
     } finally {
       setSubmitting(false);
     }
   }, [
+    applyPrintSubmitError,
     bookId,
     child,
     childId,
@@ -956,12 +1017,12 @@ export default function BookOrderScreen() {
     exportMode,
     fullName,
     getFieldErrors,
+    handlePrintFulfillError,
     line1,
     line2,
     memoryPageCount,
     navigateToConfirmation,
     navigateToFinalizeMedia,
-    applyPrintSubmitError,
     fulfillPrintAfterPaid,
     router,
     shippingName,
@@ -1011,7 +1072,11 @@ export default function BookOrderScreen() {
           priceCents: pending.priceCents,
         });
       } catch (e) {
-        applyPrintSubmitError(e);
+        handlePrintFulfillError(e, {
+          exportTicket: pending.exportTicket,
+          emailNorm: pending.email,
+          priceCents: pending.priceCents,
+        });
         submittingRef.current = false;
         setSubmitting(false);
         setPrintPhase('idle');
@@ -1027,7 +1092,7 @@ export default function BookOrderScreen() {
       void tryResumePaid(false);
     });
     return () => sub.remove();
-  }, [applyPrintSubmitError, bookId, exportMode, fulfillPrintAfterPaid, resumePayment]);
+  }, [bookId, exportMode, fulfillPrintAfterPaid, handlePrintFulfillError, resumePayment]);
 
   if (!bookId || !childId) {
     return (
