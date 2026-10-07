@@ -28,6 +28,7 @@ import type { GelatoCoverLayout } from '../gelato/coverDimensions';
 import { gelatoInnerPages, gelatoInnerPageNumber } from '../gelato/photobookLayout';
 import { memoryBookDisplayDateIso } from './memoryBookDisplayDate';
 import { clampMediaBookCaption } from './mediaBookCaption';
+import { stripEmojisForBook } from './stripEmojisForBook';
 import { coverCropFrameHtml } from './bookPhotoCropLayout';
 import {
   audioWaveformSvg,
@@ -117,7 +118,10 @@ function croppedFrameHtml(
 }
 
 function sanitizeText(s: string): string {
-  return s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFF0-\uFFFF\u200B-\u200F\u2028-\u202F\uFEFF]/g, '');
+  // Contrôles invisibles, puis emoji (rendu livre uniquement — pas de persistance).
+  return stripEmojisForBook(
+    s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFF0-\uFFFF\u200B-\u200F\u2028-\u202F\uFEFF]/g, ''),
+  );
 }
 
 function romanHtml(text: string): string {
@@ -257,7 +261,7 @@ function pageCover(
     ${visual}
   </div>
   <div class="cover-text" style="margin-top:${textTop}mm;padding-left:${insetX}mm;padding-right:${insetX}mm;padding-top:${COVER_TEXT_GAP_MM}mm;">
-    <div class="cover-title" style="color:${theme.ink}">${esc(title)}</div>
+    <div class="cover-title" style="color:${theme.ink}">${esc(sanitizeText(title))}</div>
     <div class="cover-period" style="color:${theme.muted}">${esc(yearLabel)}</div>
     <div class="cover-hairline" style="width:${COVER_HAIRLINE_W_MM}mm;background:${theme.line}"></div>
   </div>
@@ -402,7 +406,7 @@ function pageQuote(
   const titleBlock =
     variant === 'titled' && title
       ? `<div class="text-memory-title-block">
-      <div class="text-memory-title text-tier-${tier}">${esc(title)}</div>
+      <div class="text-memory-title text-tier-${tier}">${esc(sanitizeText(title))}</div>
       <div class="text-memory-title-rule text-tier-${tier}"></div>
     </div>`
       : '';
@@ -612,7 +616,7 @@ function pageGelatoWraparoundSpread(
       )
     : '<div class="cover-placeholder"></div>';
 
-  const spineTitle = esc(input.coverTitle.slice(0, 48));
+  const spineTitle = esc(sanitizeText(input.coverTitle).slice(0, 48));
   const backTagline = esc((input.backCoverTagline ?? '').trim() || 'Chaque moment compte.');
 
   return `<div class="page">
@@ -633,7 +637,7 @@ function pageGelatoWraparoundSpread(
     <div class="gw-panel gw-front" style="left:${contentFront.leftMm}mm;top:${contentFront.topMm}mm;width:${contentFront.widthMm}mm;height:${contentFront.heightMm}mm;background:transparent;">
       <div class="gw-front-photo-spacer" style="height:${spacerPct.toFixed(2)}%;"></div>
       <div class="gw-front-text" style="padding:${textPadTop.toFixed(2)}mm ${insetX.toFixed(2)}mm 6mm ${insetX.toFixed(2)}mm;background:transparent;">
-        <div class="cover-title" style="color:${theme.ink}">${esc(input.coverTitle)}</div>
+        <div class="cover-title" style="color:${theme.ink}">${esc(sanitizeText(input.coverTitle))}</div>
         <div class="cover-period" style="color:${theme.muted}">${esc(input.coverYearLabel)}</div>
         <div class="cover-hairline" style="width:${hairlineW.toFixed(2)}mm;background:${theme.line}"></div>
       </div>

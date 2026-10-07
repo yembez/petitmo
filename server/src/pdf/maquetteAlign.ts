@@ -7,6 +7,7 @@ import {
   formatFamilyAgesLine,
   type FamilyChildForAge,
 } from './familyAges';
+import { stripEmojisForBook } from './stripEmojisForBook';
 
 export type { FamilyChildForAge };
 
@@ -64,7 +65,7 @@ export function audioWaveformSvg(memoryId: string, viewBoxH = 24): string {
  * Miroir obligatoire : `src/book/quoteFitLevel.ts` (aperçu app) — toute divergence casse l’alignement PDF / preview.
  */
 export function normalizeQuoteBodyLikeMaquette(raw: string): string {
-  const t = raw.trim();
+  const t = stripEmojisForBook(raw).trim();
   if (!t) return '';
   const norm = t.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n');
   const lines = norm.split('\n');
@@ -143,7 +144,7 @@ export function textMemoryLayoutVariant(memory: {
   text_title?: string | null;
   content?: string | null;
 }): TextMemoryLayoutVariant {
-  if ((memory.text_title ?? '').trim()) return 'titled';
+  if (stripEmojisForBook((memory.text_title ?? '').trim()).trim()) return 'titled';
   const lines = textMemoryBookLineCount(memory.content ?? '');
   return lines <= 8 ? 'guillemet' : 'dropcap';
 }
@@ -160,12 +161,13 @@ export function resolveTextMemoryBookLayout(memory: {
 } {
   const body = normalizeQuoteBodyLikeMaquette(memory.content ?? '');
   const lines = estimateBookLines(body);
+  const title = stripEmojisForBook((memory.text_title ?? '').trim()).trim();
   return {
     body,
     lines,
     tier: textMemorySizeTierFromLineCount(lines),
     variant: textMemoryLayoutVariant(memory),
-    title: (memory.text_title ?? '').trim(),
+    title,
   };
 }
 

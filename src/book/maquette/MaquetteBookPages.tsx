@@ -32,6 +32,7 @@ import {
 } from '@/utils/memoryPhotos';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
 import { memoryBookDisplayDateIso } from '@/utils/memoryBookDisplayDate';
+import { stripEmojisForBook } from '@/utils/stripEmojisForBook';
 import {
   resolveTextMemoryBookLayout,
   textMemoryBodyAlignCenter,
@@ -1196,7 +1197,7 @@ function MaquetteCover({
               serifItalic ? { fontFamily: serifItalic } : { fontStyle: 'italic' },
             ]}
           >
-            {titleLine}
+            {stripEmojisForBook(titleLine)}
           </Text>
         </Pressable>
         <Text
@@ -1263,7 +1264,7 @@ function MaquettePhotoSimple({
   variant: PhotoFullVariant;
 }) {
   const uri = useBookMaquettePhotoDisplayUri(memory, memoryPhotoRef);
-  const caption = (memory.content ?? '').trim();
+  const caption = stripEmojisForBook((memory.content ?? '').trim()).trim();
   const mediaPad = Math.round(pdfMmToPreviewPxW(PDF_MEDIA_TEXT_PAD_X_MM, width));
   const isFp = variant === 'FP';
   const imgH = isFp
@@ -1415,7 +1416,7 @@ function MaquettePhotoNote({
   garamond?: string;
 }) {
   const uri = useBookMaquettePhotoDisplayUri(memory, memoryPhotoRef);
-  const legend = (memory.content ?? '').trim();
+  const legend = stripEmojisForBook((memory.content ?? '').trim()).trim();
   const mediaPad = Math.round(pdfMmToPreviewPxW(PDF_MEDIA_TEXT_PAD_X_MM, width));
   const imgH = pdfMmToPreviewPxH(PHOTO_NOTE_BAND_HEIGHT_MM, height);
   const bookLoc = bookMaquetteLocationLabel(memory);
@@ -1886,7 +1887,9 @@ function MaquetteMediaQr({
   garamond?: string;
   memoryTextFont: string;
 }) {
-  const captionRaw = clampMediaBookCaption((memory.content ?? '').trim());
+  const captionRaw = clampMediaBookCaption(
+    stripEmojisForBook((memory.content ?? '').trim()).trim(),
+  );
   const mediaPad = Math.round(pdfMmToPreviewPxUniform(PDF_MEDIA_TEXT_PAD_X_MM, width, height));
   const qrCard = pdfMediaQrCardLayoutPx(width, height);
   const photoInline =

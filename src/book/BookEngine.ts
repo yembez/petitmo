@@ -1,6 +1,7 @@
 import type { Child, Memory } from '@/types/local';
 export type { Memory, Child } from '@/types/local';
 import { bookChapterStarts, planBookChapters } from '@/utils/bookChapterPlan';
+import { stripEmojisForBook } from '@/utils/stripEmojisForBook';
 import { estimateBookLines } from '@/utils/textLimits';
 
 export type PhotoFullVariant = 'FP' | 'M';
@@ -103,7 +104,7 @@ function memoryToPage(memory: Memory): BookPage {
   switch (memory.type) {
     case 'photo': {
       void getResolutionFromThumbnail(memory);
-      if (estimateBookLines(memory.content ?? '') > 3) {
+      if (estimateBookLines(stripEmojisForBook(memory.content ?? '')) > 3) {
         return { type: 'photo-note', memory };
       }
       return { type: 'photo-full', memory, variant: 'M' };
