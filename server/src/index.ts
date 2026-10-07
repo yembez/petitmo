@@ -17,10 +17,18 @@ import {
   PRINT_PAGE_HEIGHT_MM,
   PRINT_PAGE_WIDTH_MM,
 } from './constants/pdfDigitalSpec';
+import { warmPdfBrowser } from './pdf/renderPdf';
+
+type BrowserWarmState = {
+  ok: boolean;
+  at: string;
+  error?: string;
+};
 
 function main(): void {
   const env = loadEnv();
   const app = express();
+  let browserWarm: BrowserWarmState | null = null;
 
   if (env.trustProxy) {
     app.set('trust proxy', 1);
@@ -41,6 +49,7 @@ function main(): void {
   // On fixe une limite globale plus haute pour éviter les PayloadTooLargeError avant le router.
   app.use(express.json({ limit: '60mb' }));
 
+  // Healthcheck Railway : rester synchrone/rapide (ne pas attendre Chromium).
   app.get('/health', (_req, res) => {
     res.status(200).json({
       ok: true,
@@ -51,6 +60,7 @@ function main(): void {
         bleedMm: PRINT_BLEED_MM,
       },
       qrWorker: '2026-09-07-petit-coeur-logo',
+      browser: browserWarm,
     });
   });
 
@@ -67,6 +77,10 @@ function main(): void {
 
   app.listen(env.port, () => {
     console.log(`petitmo-pdf-server listening on :${env.port}`);
+    void warmPdfBrowser().then(r => {
+      browserWarm = { ...r, at: new Date().toISOString() };
+      console.log('[pdf] browser warm', browserWarm);
+    });
   });
 }
 

@@ -64,6 +64,8 @@ import {
 import { isInitExportConfigured, postInitExport, postGuestUploadUrls } from '@/services/initExportApi';
 import { prepareBookQrAvUploads } from '@/services/bookQrAvUpload';
 import { publicMediaBaseUrl } from '@/lib/publicMediaBaseUrl';
+import { isPdfServerUrlFromFallback, resolvePdfServerBaseUrl } from '@/lib/pdfServerUrl';
+import { isSentryEnabled, Sentry } from '@/lib/sentry';
 
 /** Erreur HTTP / téléchargement après appel au service PDF. */
 export const EXPORT_SERVER_FAILED_CONTACT_MESSAGE =
@@ -71,12 +73,26 @@ export const EXPORT_SERVER_FAILED_CONTACT_MESSAGE =
 
 /** URL serveur absente ou export sans passer par le service — PDF livre impossible depuis l’app. */
 export const PDF_EXPORT_REQUIRES_SERVER_MESSAGE =
-  'L’export PDF livre n’est disponible que via le service Petit Cœur (même rendu que la commande). Ce service n’est pas configuré dans cette version de l’app : vérifie la configuration build (EXPO_PUBLIC_PDF_SERVER_URL) ou réessaie plus tard.';
+  'L’export PDF livre n’est disponible que via le service Petit Cœur. Réessaie dans un instant ; si ça continue, contacte le support depuis les Réglages.';
 
 function pdfServerBaseUrl(): string | null {
-  const raw = process.env.EXPO_PUBLIC_PDF_SERVER_URL?.trim();
-  if (!raw) return null;
-  return raw.replace(/\/$/, '');
+  const base = resolvePdfServerBaseUrl();
+  if (!base) {
+    if (isSentryEnabled()) {
+      Sentry.captureException(new Error('PDF_SERVER_URL_MISSING'), {
+        tags: { 'app.errorScope': 'bookPdf.config' },
+      });
+    }
+    return null;
+  }
+  if (isPdfServerUrlFromFallback() && isSentryEnabled()) {
+    Sentry.addBreadcrumb({
+      category: 'bookPdf',
+      message: 'pdf_server_url_fallback',
+      level: 'warning',
+    });
+  }
+  return base;
 }
 
 /** Tmp cover / slots album après export — évite de saturer le sandbox iOS. */
@@ -1292,7 +1308,7 @@ export async function generateBookPdfViaServer(input: GenerateBookPdfServerInput
 }> {
   const base = pdfServerBaseUrl();
   if (!base) {
-    throw new Error('Service PDF non configuré (EXPO_PUBLIC_PDF_SERVER_URL).');
+    throw new Error(PDF_EXPORT_REQUIRES_SERVER_MESSAGE);
   }
 
   const { data: sess } = await supabase.auth.getSession();
@@ -1451,7 +1467,7 @@ export async function generateBookPdfWithExportTicket(
 ): Promise<{ localUri: string; response: GenerateBookPdfResponse }> {
   const base = pdfServerBaseUrl();
   if (!base) {
-    throw new Error('Service PDF non configuré (EXPO_PUBLIC_PDF_SERVER_URL).');
+    throw new Error(PDF_EXPORT_REQUIRES_SERVER_MESSAGE);
   }
 
   const pdfTicket = input.exportTicket.trim();
@@ -1803,28 +1819,46 @@ async function generateBookPdfWithExportTicketBody(
     guestMemories,
   };
 
-  const res = await fetch(`${base}/v1/books/generate-pdf`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${pdfTicket}`,
-    },
-    body: JSON.stringify(payload),
-  });
+  const sleepMs = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+  const isRetryableGenerateStatus = (status: number) =>
+    status === 500 || status === 502 || status === 503 || status === 504;
 
-  if (res.status === 402) {
-    throw new Error('EXPORT_PAYMENT_REQUIRED');
-  }
+  let res: Response | null = null;
+  let lastDetail = '';
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    res = await fetch(`${base}/v1/books/generate-pdf`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${pdfTicket}`,
+      },
+      body: JSON.stringify(payload),
+    });
 
-  if (!res.ok) {
-    const detail = await parseGeneratePdfErrorBody(res);
+    if (res.status === 402) {
+      throw new Error('EXPORT_PAYMENT_REQUIRED');
+    }
+
+    if (res.ok) break;
+
+    lastDetail = await parseGeneratePdfErrorBody(res);
+    const retryable = isRetryableGenerateStatus(res.status);
     logPdfExportFailure('generate-pdf (export ticket)', {
       httpStatus: res.status,
-      detailPreview: detail.slice(0, 400),
+      detailPreview: lastDetail.slice(0, 400),
       pdfServerHost: base.replace(/^https?:\/\//i, '').split('/')[0],
       bookId: input.bookId,
+      attempt,
+      retryable,
     });
-    throw new Error(pdfServerHttpErrorMessage(res.status, detail));
+    if (!retryable || attempt >= 3) {
+      throw new Error(pdfServerHttpErrorMessage(res.status, lastDetail));
+    }
+    await sleepMs(1200 * attempt);
+  }
+
+  if (!res || !res.ok) {
+    throw new Error(pdfServerHttpErrorMessage(res?.status ?? 500, lastDetail));
   }
 
   const json = (await res.json()) as GenerateBookPdfResponse;
@@ -1886,7 +1920,7 @@ export async function generateBookPdfViaServerAsGuest(input: GenerateBookPdfViaG
 }> {
   const base = pdfServerBaseUrl();
   if (!base) {
-    throw new Error('Service PDF non configuré (EXPO_PUBLIC_PDF_SERVER_URL).');
+    throw new Error(PDF_EXPORT_REQUIRES_SERVER_MESSAGE);
   }
   if (!isInitExportConfigured()) {
     throw new Error('init-export indisponible (EXPO_PUBLIC_SUPABASE_URL / ANON_KEY).');

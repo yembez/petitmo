@@ -14,11 +14,10 @@ import {
   bookPortraitPerfTiming,
   isBookPortraitPerfEnabled,
 } from '@/utils/bookPortraitSpreadPerf';
+import { resolvePdfServerBaseUrl } from '@/lib/pdfServerUrl';
 
 function pdfServerBaseUrl(): string | null {
-  const raw = process.env.EXPO_PUBLIC_PDF_SERVER_URL?.trim();
-  if (!raw) return null;
-  return raw.replace(/\/$/, '');
+  return resolvePdfServerBaseUrl();
 }
 
 function mapPagesForResolve(pages: BookPage[]): BookPageServer[] {
