@@ -532,13 +532,15 @@ function FilMemoryRow({
   useEffect(() => {
     /**
      * Reset autoplay « froid » seulement (jamais joué / déjà fondu).
-     * Ne pas snaper le poster si on est en fondu de sortie ou retour immersif.
+     * Ne pas snaper le poster si on est en fondu de sortie, retour immersif,
+     * ou encore à l’écran (idle gate / remount scroll-up → sinon flash poster+play).
      */
     if (
       canAutoplayVideoInline ||
       viewerHoldsVideo ||
       handoffKeepPlayer ||
       keepPlayerForPosterFade ||
+      isFeedVideoOnScreen ||
       suppressPosterAfterImmersiveRef.current
     ) {
       return;
@@ -553,6 +555,7 @@ function FilMemoryRow({
     viewerHoldsVideo,
     handoffKeepPlayer,
     keepPlayerForPosterFade,
+    isFeedVideoOnScreen,
     feedInlinePosterFade,
     feedInlineVideoReveal,
   ]);
@@ -560,6 +563,8 @@ function FilMemoryRow({
   /**
    * Sortie de zone autoplay : fondu poster par-dessus la dernière frame,
    * puis démontage de la VideoView (évite le cut net).
+   * Si la vignette est encore ≥50 % visible (fling / idle 180 ms), on garde
+   * la dernière frame — pas de flash poster+play bord à bord au scroll-up.
    */
   useEffect(() => {
     if (canAutoplayVideoInline) {
@@ -572,6 +577,16 @@ function FilMemoryRow({
 
     if (viewerHoldsVideo || suppressPosterAfterImmersiveRef.current) {
       setKeepPlayerForPosterFade(false);
+      return;
+    }
+
+    if (isFeedVideoOnScreen) {
+      setFeedInlineVideoSoundOn(false);
+      if (feedInlineVideoDisplayReadyRef.current) {
+        setKeepPlayerForPosterFade(true);
+        feedInlinePosterFade.setValue(0);
+        feedInlineVideoReveal.setValue(1);
+      }
       return;
     }
 
@@ -627,6 +642,42 @@ function FilMemoryRow({
   }, [
     canAutoplayVideoInline,
     viewerHoldsVideo,
+    isFeedVideoOnScreen,
+    videoPosterUri,
+    feedInlinePosterFade,
+    feedInlineVideoReveal,
+  ]);
+
+  /** Fin du hold « dernière frame » une fois hors écran (sinon décodeur coincé). */
+  useEffect(() => {
+    if (canAutoplayVideoInline || viewerHoldsVideo || isFeedVideoOnScreen) return;
+    if (!keepPlayerForPosterFade) return;
+    if (feedInlineVideoDisplayReadyRef.current && videoPosterUri.trim()) {
+      const anim = RNAnimated.timing(feedInlinePosterFade, {
+        toValue: 1,
+        duration: MOTION_FEED_VIDEO_POSTER_MS,
+        useNativeDriver: true,
+      });
+      anim.start(({ finished }) => {
+        if (!finished) return;
+        setKeepPlayerForPosterFade(false);
+        setFeedInlineVideoDisplayReady(false);
+        feedInlineVideoReveal.setValue(0);
+      });
+      return () => {
+        anim.stop();
+        setKeepPlayerForPosterFade(false);
+      };
+    }
+    setKeepPlayerForPosterFade(false);
+    setFeedInlineVideoDisplayReady(false);
+    feedInlinePosterFade.setValue(1);
+    feedInlineVideoReveal.setValue(0);
+  }, [
+    canAutoplayVideoInline,
+    viewerHoldsVideo,
+    isFeedVideoOnScreen,
+    keepPlayerForPosterFade,
     videoPosterUri,
     feedInlinePosterFade,
     feedInlineVideoReveal,
@@ -978,6 +1029,7 @@ function FilMemoryRow({
                             style={StyleSheet.absoluteFillObject}
                             contentFit="cover"
                             cachePolicy="memory-disk"
+                            transition={0}
                             recyclingKey={`poster-${memory.id}`}
                           />
                         </RNAnimated.View>
@@ -990,13 +1042,22 @@ function FilMemoryRow({
                         style={StyleSheet.absoluteFillObject}
                         contentFit="cover"
                         cachePolicy="memory-disk"
+                        transition={0}
                         recyclingKey={`poster-${memory.id}`}
                       />
                     </View>
                   ) : (
                     <View style={[styles.photoImage, { backgroundColor: '#000000' }]} />
                   )}
-                  {!skipImmersive && !canAutoplayVideoInline ? (
+                  {/**
+                   * Play seulement si pas de lecture locale possible (sinon autoplay).
+                   * Au scroll-up, `canAutoplay` est false pendant l’idle gate → l’icône
+                   * + poster bord à bord = flash « plein écran avec image » (bug TF).
+                   */}
+                  {!skipImmersive &&
+                  !canAutoplayVideoInline &&
+                  !isFeedVideoOnScreen &&
+                  !videoPlaybackUri.trim() ? (
                     <View style={[styles.playOverlay, styles.videoPlayIconAboveTap]} pointerEvents="none">
                       <View style={styles.playButton}>
                         <Play size={ICON_SIZES.sm} color="#FFFFFF" fill="#FFFFFF" strokeWidth={0} />
@@ -1069,6 +1130,7 @@ function FilMemoryRow({
                     contentFit="cover"
                     cachePolicy="memory-disk"
                     recyclingKey={`${memory.id}-voice-cover`}
+                    transition={0}
                   />
                 ) : (
                   <View style={[styles.voiceCoverBg, { backgroundColor: '#ECECEF' }]} />

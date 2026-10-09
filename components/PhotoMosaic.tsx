@@ -131,6 +131,8 @@ export default function PhotoMosaic({
 
   const feedImageCache = (index: number) => ({
     cachePolicy: 'memory-disk' as const,
+    /** Pas de crossfade : au recycle FlatList le fondu montrait l’ancienne image. */
+    transition: 0,
     ...(memoryId ? { recyclingKey: `${memoryId}-${index}` } : {}),
   });
 

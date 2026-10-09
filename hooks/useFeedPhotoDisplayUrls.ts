@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { InteractionManager, Platform } from 'react-native';
 import type { Memory } from '@/types/local';
 import { resolveFeedPhotoStableCache } from '@/hooks/feedPhotoStableCache';
@@ -88,18 +88,18 @@ function isSandboxFeedDerivativeUri(u: string): boolean {
  */
 export function useFeedPhotoDisplayUrls(memory: Memory): string[] {
   const [merged, setMerged] = useState<string[]>(() => initialMergedForMemory(memory));
-  const photoIdRef = useRef(memory.id);
+  const [mergedForId, setMergedForId] = useState(memory.id);
 
-  useLayoutEffect(() => {
-    if (memory.type !== 'photo') {
-      photoIdRef.current = memory.id;
-      return;
-    }
-    if (photoIdRef.current !== memory.id) {
-      photoIdRef.current = memory.id;
-      setMerged(initialMergedForMemory(memory));
-    }
-  }, [memory.id, memory.type]);
+  /**
+   * Recycle FlatList : synchroniser dès le render (pas seulement en layout effect),
+   * sinon 1 frame avec les URLs de l’ancien souvenir → flash d’images au scroll-up.
+   */
+  if (memory.type === 'photo' && mergedForId !== memory.id) {
+    setMergedForId(memory.id);
+    setMerged(initialMergedForMemory(memory));
+  } else if (memory.type !== 'photo' && mergedForId !== memory.id) {
+    setMergedForId(memory.id);
+  }
 
   useEffect(() => {
     // Recycle FlatList photo→voice : ne pas vider `merged` (flash au retour photo).
