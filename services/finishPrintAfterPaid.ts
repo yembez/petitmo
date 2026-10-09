@@ -176,7 +176,17 @@ export async function finishPrintStashAndKickIfNeeded(): Promise<FinishPrintResu
       });
       return 'done';
     } catch (e) {
-      printCaptureError('print.stashAfterPaid', e);
+      const msg = e instanceof Error ? e.message : String(e ?? '');
+      // Course upload médias : attendu, retryable — pas une Error Sentry (onunhandledrejection).
+      if (/PREP_NOT_READY/i.test(msg)) {
+        printCaptureMessage(
+          'print.stashAfterPaid',
+          'PREP_NOT_READY during stash after paid — retryable',
+          'warning',
+        );
+      } else {
+        printCaptureError('print.stashAfterPaid', e);
+      }
       return 'error';
     } finally {
       inFlight = null;

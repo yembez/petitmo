@@ -293,7 +293,7 @@ export default function BookOrderScreen() {
   const [submitting, setSubmitting] = useState(false);
   /**
    * `opening` = init-export + session Stripe (≈2 s) · `staging` = upload bloquant avant paiement
-   * (rare : prefetch en échec) · `finishing` = paiement validé, fin d’upload + kick serveur.
+   * (rare : prefetch en échec) · `finishing` = reprise paid brève (confirm part immédiatement).
    */
   const [printPhase, setPrintPhase] = useState<
     'idle' | 'opening' | 'staging' | 'checking' | 'finishing'
@@ -907,8 +907,9 @@ export default function BookOrderScreen() {
   }, [ensurePrintTicket, runPrintStash]);
 
   /**
-   * Après paid : stash résiduel + kick 202, puis confirmation **sans** attendre Gelato.
-   * PDF/Gelato = fond serveur (retries + mail support). Low Friction.
+   * Après paid : confirmation **tout de suite** (Low Friction).
+   * Stash + kick 202 = fond (filet aussi sur l’écran confirmation). Ne bloque plus
+   * l’UI sur upload photos / PREP_NOT_READY — c’était le « Presque fini… » interminable.
    */
   const completePrintAfterPaid = useCallback(
     async (opts: {
@@ -921,9 +922,6 @@ export default function BookOrderScreen() {
       if (printFulfillInFlight || fulfillLockRef.current) return;
       printFulfillInFlight = true;
       fulfillLockRef.current = true;
-      setSubmitting(true);
-      submittingRef.current = true;
-      setPrintPhase('finishing');
       try {
         const pendingPayload = await getPendingBookOrderPdfPayload();
         const exportRequestId =
@@ -940,6 +938,28 @@ export default function BookOrderScreen() {
 
         await setLastGuestExportEmail(opts.emailNorm);
 
+        if (exportRequestId) {
+          await rememberLocalPrintOrder({
+            id: exportRequestId,
+            createdAt: new Date().toISOString(),
+            priceCents: opts.priceCents,
+            status: 'printing',
+            shippingName: '',
+            bookId: pendingPayload?.bookId || bookId,
+            childId: pendingPayload?.childId || childId,
+            bookTitle: (pendingPayload?.coverTitle || book?.title || '').trim(),
+          });
+        }
+
+        // Quitter l’overlay immédiatement — pending conservé pour le filet stash/kick.
+        submittingRef.current = false;
+        setSubmitting(false);
+        setPrintPhase('idle');
+        navigateToConfirmation({
+          pricePaidEuros: opts.priceCents / 100,
+          emailNorm: opts.emailNorm,
+        });
+
         const finishResult = await finishPrintStashAndKickIfNeeded();
         printBreadcrumb('print.complete_after_paid.result', {
           exportRequestId,
@@ -949,7 +969,7 @@ export default function BookOrderScreen() {
         if (finishResult === 'missing_payload') {
           printCaptureMessage(
             'print.complete_after_paid',
-            'paid resume without local payload — clearing pending to unblock new orders',
+            'paid without local payload — clearing pending; server/ops handle fulfill',
             'error',
             { exportRequestId, bookId },
           );
@@ -966,78 +986,18 @@ export default function BookOrderScreen() {
             });
           }
           await clearPendingPrintPayment();
-          printTicketRef.current = null;
-          printStashReadyRef.current = null;
-          if (!opts.quiet) {
-            Alert.alert(
-              t('bookOrder.printMissingPayloadTitle'),
-              t('bookOrder.printMissingPayloadBody', {
-                orderId: exportRequestId || '—',
-              }),
-              [{ text: t('bookOrder.printMissingPayloadOk') }],
-            );
-            setFieldErrors({ submit: t('bookOrder.printFulfillFailed') });
-          }
-          return;
-        }
-
-        // Stash/kick HTTP en échec : on confirme quand même si paid (webhook + retries
-        // serveur) sauf si pending reste et quiet=false → un retry stash utile.
-        if (finishResult === 'error') {
+        } else if (finishResult === 'error') {
+          // Pending laissé pour reprise confirmation / AppState ; retries serveur.
           printCaptureMessage(
             'print.complete_after_paid',
-            'stash/kick filet failed after paid — confirming; server retries own',
+            'stash/kick filet failed after paid — server retries own',
             'warning',
             { exportRequestId, bookId },
           );
         }
 
-        if (exportRequestId) {
-          await rememberLocalPrintOrder({
-            id: exportRequestId,
-            createdAt: new Date().toISOString(),
-            priceCents: opts.priceCents,
-            status: 'printing',
-            shippingName: '',
-            bookId: pendingPayload?.bookId || bookId,
-            childId: pendingPayload?.childId || childId,
-            bookTitle: (pendingPayload?.coverTitle || book?.title || '').trim(),
-          });
-        }
-
-        // Pending déjà clear par finish `done` ; sinon clear pour ne pas rebloquer le formulaire.
-        await clearPendingPrintPayment();
         printTicketRef.current = null;
         printStashReadyRef.current = null;
-
-        const pricePaid = opts.priceCents / 100;
-        let goFinalize = false;
-        if (pendingPayload) {
-          const memories = collectMemoriesFromPagesForPdf(
-            pendingPayload.pages,
-            pendingPayload.localEdits ?? {},
-          );
-          const av = memories.filter(m => m.type === 'voice' || m.type === 'video');
-          const avKeys = av.map(m => `${m.type === 'voice' ? 'audio' : 'video'}:${m.id}`);
-          const hasPendingUploads = (await getPendingGuestRawUploadsCountForKeys(avKeys)) > 0;
-          const hasLocalAvToUpload = av.some(m => {
-            const local = localUriForAvRawUpload(m);
-            if (local) return true;
-            const main = (m.media_url ?? m.edited_media_url ?? '').trim();
-            return main ? !isHttps(main) : true;
-          });
-          goFinalize = av.length > 0 && (hasPendingUploads || hasLocalAvToUpload);
-        }
-
-        if (goFinalize) {
-          navigateToFinalizeMedia({
-            pricePaidEuros: pricePaid,
-            emailNorm: opts.emailNorm,
-            exportTicket: opts.exportTicket,
-          });
-        } else {
-          navigateToConfirmation({ pricePaidEuros: pricePaid, emailNorm: opts.emailNorm });
-        }
       } catch (e) {
         printCaptureError('print.complete_after_paid', e, { bookId });
         throw e;
@@ -1049,14 +1009,7 @@ export default function BookOrderScreen() {
         setPrintPhase('idle');
       }
     },
-    [
-      book?.title,
-      bookId,
-      childId,
-      navigateToConfirmation,
-      navigateToFinalizeMedia,
-      t,
-    ],
+    [book?.title, bookId, childId, navigateToConfirmation],
   );
 
   const applyPrintSubmitError = useCallback(

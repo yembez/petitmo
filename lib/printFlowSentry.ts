@@ -33,6 +33,15 @@ export function printCaptureError(
   if (!isSentryEnabled()) return;
   try {
     const error = err instanceof Error ? err : new Error(String(err ?? scope));
+    // Course upload / guest-upload-urls : warning, pas Error (spam Sentry bêta).
+    if (/PREP_NOT_READY/i.test(error.message)) {
+      Sentry.captureMessage(`[${scope}] PREP_NOT_READY`, {
+        level: 'warning',
+        tags: { 'app.errorScope': scope },
+        extra: { message: error.message.slice(0, 400), ...extra },
+      });
+      return;
+    }
     Sentry.captureException(error, {
       tags: { 'app.errorScope': scope },
       extra: {
