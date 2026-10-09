@@ -42,7 +42,6 @@ import {
   MOTION_PRESS_IN_ANNOTATE_MS,
   MOTION_PRESS_OPACITY_DIP_ANNOTATE,
   MOTION_PRESS_SCALE_ANNOTATE,
-  MOTION_EASE,
 } from '@/constants/motion';
 import {
   FEED_CAPTION_SCROLL_MAX_H,
@@ -84,7 +83,6 @@ import { FeedMediaPrepOverlay } from '@/components/FeedMediaPrepOverlay';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { shareMemory } from '@/services/shareMemory';
 import { Swipeable, RectButton } from "react-native-gesture-handler";
-import Reanimated, { FadeOut } from 'react-native-reanimated';
 import {
   FeedAgeOverlay,
   FeedPostMetaOverlay,
@@ -1292,10 +1290,7 @@ function FilMemoryRow({
   );
 
   return (
-    <Reanimated.View
-      style={[styles.feedRowRoot, memoryIndex > 0 && styles.feedRowSpacingTop]}
-      exiting={FadeOut.duration(180).easing(MOTION_EASE.exit)}
-    >
+    <View style={[styles.feedRowRoot, memoryIndex > 0 && styles.feedRowSpacingTop]}>
       <Swipeable
         ref={(r) => {
           if (r) swipeRefs.current.set(memory.id, r);
@@ -1328,7 +1323,7 @@ function FilMemoryRow({
       >
         {postCard}
       </Swipeable>
-    </Reanimated.View>
+    </View>
   );
 }
 
