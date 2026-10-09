@@ -1941,20 +1941,13 @@ export default function BookOrderScreen() {
             accessibilityRole="button"
             accessibilityLabel={t('bookOrder.discoverPlus')}
           >
-            <Text style={[styles.plusSave, dm700 && { fontFamily: dm700 }]}>
-              {t('bookOrder.plusSave', {
+            <Text style={styles.plusPromo}>
+              {t('bookOrder.plusPromo', {
+                price: formatAppCurrency(printQuote.premiumUpsell.totalEuros, lang),
                 savings: formatAppCurrency(printQuote.premiumUpsell.savingsEuros, lang),
               })}
             </Text>
-            <Text style={[styles.plusPrice, dm500 && { fontFamily: dm500 }]}>
-              {t('bookOrder.plusPrice', {
-                price: formatAppCurrency(printQuote.premiumUpsell.totalEuros, lang),
-              })}
-            </Text>
-            <Text style={[styles.plusLink, dm600 && { fontFamily: dm600 }]}>
-              {t('bookOrder.discoverPlus')}
-              {' >'}
-            </Text>
+            <Text style={styles.plusLink}>{t('bookOrder.discoverPlus')}</Text>
           </Pressable>
         ) : null}
 
@@ -1985,7 +1978,7 @@ export default function BookOrderScreen() {
             </Text>
             <View style={styles.formCard}>
               <View style={styles.fieldBlock}>
-                <Text style={[styles.fieldLabel, dm500 && { fontFamily: dm500 }]}>
+                <Text style={styles.fieldLabel}>
                   {t('bookOrder.fieldFullName')}
                 </Text>
                 <StableTextInput
@@ -2012,7 +2005,7 @@ export default function BookOrderScreen() {
 
               <View style={styles.fieldDivider} />
               <View style={styles.fieldBlock}>
-                <Text style={[styles.fieldLabel, dm500 && { fontFamily: dm500 }]}>
+                <Text style={styles.fieldLabel}>
                   {t('bookOrder.fieldAddress')}
                 </Text>
                 <StableTextInput
@@ -2037,7 +2030,7 @@ export default function BookOrderScreen() {
 
               <View style={styles.fieldDivider} />
               <View style={styles.fieldBlock}>
-                <Text style={[styles.fieldLabel, dm500 && { fontFamily: dm500 }]}>
+                <Text style={styles.fieldLabel}>
                   {t('bookOrder.fieldAddress2')}
                 </Text>
                 <StableTextInput
@@ -2055,7 +2048,7 @@ export default function BookOrderScreen() {
               <View style={styles.fieldDivider} />
               <View style={styles.row2}>
                 <View style={[styles.grow, styles.fieldBlock]}>
-                  <Text style={[styles.fieldLabel, dm500 && { fontFamily: dm500 }]}>
+                  <Text style={styles.fieldLabel}>
                     {t('bookOrder.fieldZip')}
                   </Text>
                   <StableTextInput
@@ -2080,7 +2073,7 @@ export default function BookOrderScreen() {
                 </View>
                 <View style={styles.colDivider} />
                 <View style={[styles.grow2, styles.fieldBlock]}>
-                  <Text style={[styles.fieldLabel, dm500 && { fontFamily: dm500 }]}>
+                  <Text style={styles.fieldLabel}>
                     {t('bookOrder.fieldCity')}
                   </Text>
                   <StableTextInput
@@ -2113,7 +2106,7 @@ export default function BookOrderScreen() {
                 accessibilityLabel={t('bookOrder.fieldCountry')}
               >
                 <View style={styles.fieldBlockGrow}>
-                  <Text style={[styles.fieldLabel, dm500 && { fontFamily: dm500 }]}>
+                  <Text style={styles.fieldLabel}>
                     {t('bookOrder.fieldCountry')}
                   </Text>
                   <Text style={[styles.fieldValue, dm500 && { fontFamily: dm500 }]}>
@@ -2126,7 +2119,7 @@ export default function BookOrderScreen() {
 
             <View style={[styles.formCard, styles.emailCard]}>
               <View style={styles.emailHeader}>
-                <Text style={[styles.fieldLabel, dm500 && { fontFamily: dm500 }]}>
+                <Text style={styles.fieldLabel}>
                   {t('bookOrder.fieldEmail')}
                 </Text>
                 {showEmailDisplay ? (
@@ -2371,19 +2364,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: scale(14),
     marginBottom: scale(16),
   },
-  plusSave: {
+  plusPromo: {
     fontSize: scale(15),
-    fontWeight: '700',
+    fontWeight: '400',
+    lineHeight: scale(21),
     color: THEME.textPrimary,
-    marginBottom: scale(2),
-  },
-  plusPrice: {
-    fontSize: scale(13),
-    color: THEME.textMuted,
-    marginBottom: scale(4),
+    marginBottom: scale(6),
   },
   plusLink: {
-    fontSize: scale(17),
+    fontSize: scale(16),
     fontWeight: '600',
     lineHeight: scale(22),
     color: THEME.brandCtaOrange,
@@ -2416,18 +2405,19 @@ const styles = StyleSheet.create({
   },
   fieldBlockGrow: { flex: 1, minWidth: 0, paddingVertical: scale(10) },
   fieldLabel: {
-    fontSize: scale(12),
+    fontSize: scale(15),
+    fontWeight: '500',
     color: THEME.textMuted,
-    marginBottom: scale(4),
+    marginBottom: scale(5),
   },
   fieldInput: {
-    fontSize: scale(16),
+    fontSize: scale(17),
     color: THEME.textPrimary,
     paddingVertical: Platform.OS === 'ios' ? scale(2) : 0,
     margin: 0,
   },
   fieldValue: {
-    fontSize: scale(16),
+    fontSize: scale(17),
     color: THEME.textPrimary,
   },
   fieldDivider: {
