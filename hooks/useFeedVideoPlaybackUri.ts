@@ -24,6 +24,15 @@ async function noRemoteForFeedAutoplay(): Promise<string> {
   return '';
 }
 
+function seedUriForMemory(memory: Memory): string {
+  if (memory.type !== 'video') return '';
+  return (
+    optimisticFeedLocalVideoPlaybackUri(memory) ||
+    getCachedFeedVideoPlaybackUri(memory.id) ||
+    ''
+  );
+}
+
 /**
  * URI de lecture vidéo dans le fil : copie fil si présente, sinon sandbox `original.*`.
  * Autoplay : ne retourne jamais une URL cloud — la résolution distante sert au viewer immersif.
@@ -32,11 +41,18 @@ export function useFeedVideoPlaybackUri(
   memory: Memory,
   resolveEnabled = true,
 ): string {
-  const [uri, setUri] = useState(
-    () =>
-      optimisticFeedLocalVideoPlaybackUri(memory) ||
-      getCachedFeedVideoPlaybackUri(memory.id),
-  );
+  const slotKey = `${memory.type}:${memory.id}`;
+  const [slot, setSlot] = useState(slotKey);
+  const [uri, setUri] = useState(() => seedUriForMemory(memory));
+
+  /**
+   * Recycle FlatList : une photo ne doit jamais garder l’URI vidéo de la cellule précédente
+   * (logs TF : `playUri:true` sur des rows `type:photo` → flash média au scroll-up).
+   */
+  if (slot !== slotKey) {
+    setSlot(slotKey);
+    setUri(seedUriForMemory(memory));
+  }
 
   useEffect(() => {
     if (memory.type !== 'video') {
@@ -114,5 +130,5 @@ export function useFeedVideoPlaybackUri(
     resolveEnabled,
   ]);
 
-  return uri;
+  return memory.type === 'video' ? uri : '';
 }

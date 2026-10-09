@@ -18,7 +18,17 @@ function stickyPosterUri(prev: string, next: string): string {
  * Pas d’extraction de frame (conflit décodeur / expo-video).
  */
 export function useFeedVideoPosterDisplayUrl(memory: Memory): string {
-  const [uri, setUri] = useState(() => peekSyncFeedVideoPosterDisplayUri(memory));
+  const slotKey = `${memory.type}:${memory.id}`;
+  const [slot, setSlot] = useState(slotKey);
+  const [uri, setUri] = useState(() =>
+    memory.type === 'video' ? peekSyncFeedVideoPosterDisplayUri(memory) : '',
+  );
+
+  /** Recycle FlatList : ne pas coller le poster de la vidéo précédente sur une photo. */
+  if (slot !== slotKey) {
+    setSlot(slotKey);
+    setUri(memory.type === 'video' ? peekSyncFeedVideoPosterDisplayUri(memory) : '');
+  }
 
   useEffect(() => {
     if (memory.type !== 'video') return;

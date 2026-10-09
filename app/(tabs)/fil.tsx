@@ -79,9 +79,21 @@ function FilScreen() {
   const pendingPinOffsetRef = useRef<number | null>(null);
   const pendingScrollIntentRef = useRef<FeedScrollIntent | null>(null);
   const [feedListOpacity, setFeedListOpacity] = useState(1);
+  /**
+   * MVC pendant le scroll uniquement (logs TF : y 9545→9450 au mount/unmount vidéo).
+   * Au repos : off — sinon delete / re-mesure → saut en bas (bug Fabric).
+   */
+  const [mvcWhileScrolling, setMvcWhileScrolling] = useState(false);
+  const mvcScrollOffTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     feedFlashLog('fil.listOpacity', { opacity: feedListOpacity });
   }, [feedListOpacity]);
+  useEffect(
+    () => () => {
+      if (mvcScrollOffTimerRef.current) clearTimeout(mvcScrollOffTimerRef.current);
+    },
+    [],
+  );
   /** Hauteur réelle header glass (overlay) — padding liste + viewOffset snap. */
   const [feedHeaderHeight, setFeedHeaderHeight] = useState(0);
   const feedHeaderHeightRef = useRef(0);
@@ -284,6 +296,11 @@ function FilScreen() {
   );
 
   const onFeedScrollActive = useCallback(() => {
+    if (mvcScrollOffTimerRef.current) {
+      clearTimeout(mvcScrollOffTimerRef.current);
+      mvcScrollOffTimerRef.current = null;
+    }
+    setMvcWhileScrolling(true);
     feedFlashLog('fil.scrollBegin', { y: Math.round(feedScrollOffsetRef.current) });
     onFeedScrollBegin();
   }, [onFeedScrollBegin]);
@@ -291,6 +308,12 @@ function FilScreen() {
   const onFeedScrollStopped = useCallback(() => {
     feedFlashLog('fil.scrollEnd', { y: Math.round(feedScrollOffsetRef.current) });
     onFeedScrollIdle();
+    if (mvcScrollOffTimerRef.current) clearTimeout(mvcScrollOffTimerRef.current);
+    /** Laisser le fling / les mounts batch se stabiliser avant de couper MVC. */
+    mvcScrollOffTimerRef.current = setTimeout(() => {
+      mvcScrollOffTimerRef.current = null;
+      setMvcWhileScrolling(false);
+    }, 400);
   }, [onFeedScrollIdle]);
 
   const keyExtractor = useCallback(
@@ -608,7 +631,13 @@ function FilScreen() {
           onScrollEndDrag={onFeedScrollStopped}
           onMomentumScrollEnd={onFeedScrollStopped}
           scrollEventThrottle={16}
-          onContentSizeChange={onFeedContentSizeChange}
+          onContentSizeChange={(w, h) => {
+            feedFlashLog('fil.contentSize', {
+              h: Math.round(h),
+              y: Math.round(feedScrollOffsetRef.current),
+            });
+            onFeedContentSizeChange(w, h);
+          }}
           onScrollToIndexFailed={info => {
             /**
              * Hauteurs variables : l’approx averageItemLength est fausse.
@@ -667,22 +696,28 @@ function FilScreen() {
             ) : null
           }
           removeClippedSubviews={false}
-          // MVC seulement pendant les uploads (prepends). Au repos : off —
-          // sinon delete / re-mesure → saut en bas (bug Fabric).
+          /**
+           * MVC : uploads (prepend) + pendant le scroll (anti-saut mount/unmount hauteurs variables).
+           * Au repos strict : off — sinon delete / re-mesure → saut en bas (bug Fabric).
+           */
           maintainVisibleContentPosition={
-            pendingUploads.length > 0
+            pendingUploads.length > 0 || mvcWhileScrolling
               ? {
                   minIndexForVisible: 0,
-                  autoscrollToTopThreshold: Math.round(verticalScale(80)),
+                  ...(pendingUploads.length > 0
+                    ? { autoscrollToTopThreshold: Math.round(verticalScale(80)) }
+                    : {}),
                 }
               : undefined
           }
-          initialNumToRender={6}
-          // Lots plus petits + fenêtre plus étroite : chaque FilMemoryRow est lourd (Swipeable,
-          // mosaïque, overlays, éventuel <Video>) — monter 4 lignes d'un coup gelait le JS pendant le scroll.
-          maxToRenderPerBatch={2}
-          updateCellsBatchingPeriod={40}
-          windowSize={7}
+          initialNumToRender={8}
+          /**
+           * Fenêtre un peu plus large : logs TF montraient unmount/remount photo en rafale
+           * au scroll-up (flash « écran à images ») avec windowSize=7 / batch=2.
+           */
+          maxToRenderPerBatch={3}
+          updateCellsBatchingPeriod={50}
+          windowSize={11}
         />
       </View>
       <View style={styles.headerShell} onLayout={onFeedHeaderLayout} pointerEvents="box-none">

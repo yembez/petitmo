@@ -411,6 +411,7 @@ function FilMemoryRow({
     };
   }, [memory.id, memory.type]);
 
+  const photoUrlsSig = photoUrls.join('|');
   useEffect(() => {
     if (memory.type !== 'photo') return;
     feedFlashLog('row.photoUrls', {
@@ -418,7 +419,8 @@ function FilMemoryRow({
       n: photoUrls.length,
       u0: (photoUrls[0] ?? '').slice(-48),
     });
-  }, [memory.id, memory.type, photoUrls]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- log seulement si URLs changent vraiment
+  }, [memory.id, memory.type, photoUrlsSig]);
 
   useEffect(() => {
     if (memory.type !== 'video') return;
