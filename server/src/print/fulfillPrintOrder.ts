@@ -561,7 +561,15 @@ export async function fulfillPrintOrderFromStoredPayload(params: {
 
   const body = row.pdf_payload_json;
   if (body.bookId !== row.book_id) {
-    return { ok: false, status: 403, error: 'bookId does not match export request' };
+    const err = 'bookId does not match export request';
+    await recordPrintFulfillFailure({
+      supabase,
+      projectOrigin,
+      exportRequestId,
+      error: err,
+      forceKind: 'permanent',
+    });
+    return { ok: false, status: 403, error: err };
   }
 
   // file:// = stash incomplet ; retryable en attendant re-stash client (escalade ~45 min).
@@ -581,7 +589,15 @@ export async function fulfillPrintOrderFromStoredPayload(params: {
     (row.subscription_tier === 'paid' && body.subscriptionTier === 'premium') ||
     (row.subscription_tier === 'free' && body.subscriptionTier === 'free');
   if (!tierOk) {
-    return { ok: false, status: 400, error: 'subscriptionTier does not match export request' };
+    const err = 'subscriptionTier does not match export request';
+    await recordPrintFulfillFailure({
+      supabase,
+      projectOrigin,
+      exportRequestId,
+      error: err,
+      forceKind: 'permanent',
+    });
+    return { ok: false, status: 400, error: err };
   }
 
   return runPrintPdfAndGelato({

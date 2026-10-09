@@ -186,10 +186,15 @@ Deno.serve(async (req) => {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
+  const CONFIRMATION_EMAIL_MAX_ATTEMPTS = 8;
+  const CONFIRMATION_EMAIL_BACKOFF_SECONDS = [
+    2 * 60, 5 * 60, 15 * 60, 30 * 60, 60 * 60, 2 * 60 * 60, 3 * 60 * 60, 6 * 60 * 60,
+  ] as const;
+
   const { data: row, error: rowErr } = await admin
     .from('export_requests')
     .select(
-      'id, type, status, payment_status, crm_contact_id, shipping_name, shipping_address_json, price_cents, billable_pages, printer_order_id, pdf_payload_json, confirmation_email_sent_at',
+      'id, type, status, payment_status, crm_contact_id, shipping_name, shipping_address_json, price_cents, billable_pages, printer_order_id, pdf_payload_json, confirmation_email_sent_at, confirmation_email_attempt_count, confirmation_email_error',
     )
     .eq('id', exportRequestId)
     .maybeSingle();
@@ -206,6 +211,11 @@ Deno.serve(async (req) => {
   if (row.confirmation_email_sent_at) {
     return jsonRes({ sent: false, reason: 'already_sent' });
   }
+  const prevErr =
+    typeof row.confirmation_email_error === 'string' ? row.confirmation_email_error.trim() : '';
+  if (/^abandoned:/i.test(prevErr)) {
+    return jsonRes({ sent: false, reason: 'abandoned' });
+  }
 
   const { data: contact, error: cErr } = await admin
     .from('crm_contacts')
@@ -221,9 +231,13 @@ Deno.serve(async (req) => {
   const shippingName = typeof row.shipping_name === 'string' ? row.shipping_name.trim() : '';
 
   const fail = async (reason: string, status = 422) => {
+    // Erreurs données / config : pas de retry automatique.
     await admin
       .from('export_requests')
-      .update({ confirmation_email_error: reason.slice(0, 500) })
+      .update({
+        confirmation_email_error: reason.slice(0, 500),
+        confirmation_email_next_retry_at: null,
+      })
       .eq('id', exportRequestId);
     return jsonRes({ sent: false, reason }, status);
   };
@@ -286,16 +300,46 @@ Deno.serve(async (req) => {
   if (!resendRes.ok) {
     const detail = await resendRes.text().catch(() => '');
     console.error('[print-order-confirmation] resend', resendRes.status, detail.slice(0, 400));
-    // Libérer le claim pour permettre un nouvel essai.
+    const prevAttempts =
+      typeof row.confirmation_email_attempt_count === 'number'
+        ? Math.max(0, row.confirmation_email_attempt_count)
+        : 0;
+    const attemptCount = prevAttempts + 1;
+    const rawErr = `resend ${resendRes.status}: ${detail.slice(0, 280)}`;
+    const abandoned = attemptCount >= CONFIRMATION_EMAIL_MAX_ATTEMPTS;
+    const backoffIdx = Math.max(
+      0,
+      Math.min(CONFIRMATION_EMAIL_BACKOFF_SECONDS.length - 1, attemptCount - 1),
+    );
+    const nextRetryAt = abandoned
+      ? null
+      : new Date(Date.now() + CONFIRMATION_EMAIL_BACKOFF_SECONDS[backoffIdx]! * 1000).toISOString();
+    // Libérer le claim + backoff (ou abandon après N échecs).
     await admin
       .from('export_requests')
       .update({
         confirmation_email_sent_at: null,
-        confirmation_email_error: `resend ${resendRes.status}: ${detail.slice(0, 300)}`,
+        confirmation_email_attempt_count: attemptCount,
+        confirmation_email_next_retry_at: nextRetryAt,
+        confirmation_email_error: abandoned
+          ? `abandoned:${rawErr}`.slice(0, 500)
+          : rawErr.slice(0, 500),
       })
       .eq('id', exportRequestId);
-    return jsonRes({ sent: false, reason: 'resend_failed' }, 502);
+    return jsonRes(
+      { sent: false, reason: abandoned ? 'abandoned' : 'resend_failed', attemptCount },
+      abandoned ? 422 : 502,
+    );
   }
+
+  await admin
+    .from('export_requests')
+    .update({
+      confirmation_email_attempt_count: 0,
+      confirmation_email_next_retry_at: null,
+      confirmation_email_error: null,
+    })
+    .eq('id', exportRequestId);
 
   console.log('[print-order-confirmation] sent', exportRequestId.slice(0, 8), email.replace(/^(.).*(@.*)$/, '$1***$2'));
   return jsonRes({ sent: true });

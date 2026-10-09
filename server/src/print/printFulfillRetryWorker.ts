@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { triggerPrintFulfillOpsAlert } from '../email/triggerPrintFulfillOpsAlert';
 import { triggerPrintOrderConfirmationEmail } from '../email/triggerPrintOrderConfirmation';
 import {
   PRINT_FULFILL_MAX_ATTEMPTS,
@@ -14,24 +15,32 @@ const CONFIRMATION_EMAIL_RETRY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 function isRetryableConfirmationEmailError(err: string | null | undefined): boolean {
   if (err == null || !String(err).trim()) return true; // jamais tenté / fetch avant claim
   const e = String(err).trim();
+  if (/^abandoned:/i.test(e)) return false;
   if (/^resend\b/i.test(e)) return true;
   if (/no_resend_key/i.test(e)) return true;
-  return false; // no_email / no_address → ops
+  return false; // no_email / no_address → ops manuel
 }
 
 /**
  * Une passe : watchdog rendering stuck + retries `failed`/`retryable` dus
- * + retry e-mail confirmation cliente (Gelato OK, mail pas parti).
+ * + retry e-mail confirmation cliente (Gelato OK, mail pas parti)
+ * + re-sweep ops alert permanent sans mail.
  * Idempotent ; à appeler périodiquement depuis le process Railway.
  */
 export async function sweepPrintFulfillRetries(params: {
   supabase: SupabaseClient;
   projectOrigin: string;
-}): Promise<{ retried: number; watchdog: number; confirmationEmails: number }> {
+}): Promise<{
+  retried: number;
+  watchdog: number;
+  confirmationEmails: number;
+  opsAlerts: number;
+}> {
   const { supabase, projectOrigin } = params;
   let watchdog = 0;
   let retried = 0;
   let confirmationEmails = 0;
+  let opsAlerts = 0;
 
   const stuckBefore = new Date(Date.now() - PRINT_FULFILL_RENDERING_STUCK_MS).toISOString();
   const { data: stuckRows, error: stuckErr } = await supabase
@@ -84,7 +93,6 @@ export async function sweepPrintFulfillRetries(params: {
       const id = typeof row.id === 'string' ? row.id : '';
       if (!id) continue;
       console.log('[printFulfillRetry] kick', id);
-      // fulfillPrintOrderFromStoredPayload reset failed→created puis rejoue.
       const result = await fulfillPrintOrderFromStoredPayload({
         supabase,
         projectOrigin,
@@ -92,24 +100,25 @@ export async function sweepPrintFulfillRetries(params: {
       });
       retried += 1;
       if (!result.ok && result.code !== 'IN_PROGRESS') {
-        // recordPrintFulfillFailure déjà appelé dans fulfill si chemin run/catch ;
-        // pour early returns (PAYLOAD_*) on a déjà recordé. No-op ici.
         console.warn('[printFulfillRetry] result', id, result.status, result.error);
       }
     }
   }
 
-  // P1.2 — Gelato OK mais mail confirmation jamais envoyé (Resend / réseau).
+  // Mail confirmation : dû (next_retry null ou passé) + pas abandoned.
   const paidSince = new Date(Date.now() - CONFIRMATION_EMAIL_RETRY_MAX_AGE_MS).toISOString();
   const { data: emailRows, error: emailErr } = await supabase
     .from('export_requests')
-    .select('id, confirmation_email_error')
+    .select(
+      'id, confirmation_email_error, confirmation_email_attempt_count, confirmation_email_next_retry_at, print_ops_alert_sent_at',
+    )
     .eq('type', 'print_order')
     .eq('payment_status', 'paid')
     .eq('status', 'sent_to_printer')
     .not('printer_order_id', 'is', null)
     .is('confirmation_email_sent_at', null)
     .gte('paid_at', paidSince)
+    .or(`confirmation_email_next_retry_at.is.null,confirmation_email_next_retry_at.lte.${nowIso}`)
     .order('paid_at', { ascending: true })
     .limit(SWEEP_LIMIT);
 
@@ -121,6 +130,27 @@ export async function sweepPrintFulfillRetries(params: {
       if (!id) continue;
       const err =
         typeof row.confirmation_email_error === 'string' ? row.confirmation_email_error : null;
+      if (/^abandoned:/i.test(err ?? '')) {
+        // Gelato OK, mail abandonné → un seul mail ops (claim print_ops_alert_sent_at).
+        const already =
+          typeof row.print_ops_alert_sent_at === 'string' && !!row.print_ops_alert_sent_at;
+        if (!already) {
+          const attempts =
+            typeof row.confirmation_email_attempt_count === 'number'
+              ? row.confirmation_email_attempt_count
+              : 0;
+          console.log('[printFulfillRetry] confirmation email abandoned → ops', id);
+          triggerPrintFulfillOpsAlert({
+            projectOrigin,
+            exportRequestId: id,
+            lastError: err || 'confirmation email abandoned',
+            attemptCount: attempts,
+            alertKind: 'confirmation_email',
+          });
+          opsAlerts += 1;
+        }
+        continue;
+      }
       if (!isRetryableConfirmationEmailError(err)) continue;
       console.log('[printFulfillRetry] confirmation email', id);
       triggerPrintOrderConfirmationEmail({ projectOrigin, exportRequestId: id });
@@ -128,7 +158,42 @@ export async function sweepPrintFulfillRetries(params: {
     }
   }
 
-  return { retried, watchdog, confirmationEmails };
+  // Re-sweep ops : permanent fulfill sans mail support (Resend KO au 1er essai).
+  const { data: opsRows, error: opsErr } = await supabase
+    .from('export_requests')
+    .select('id, last_error, fulfill_attempt_count')
+    .eq('type', 'print_order')
+    .eq('payment_status', 'paid')
+    .eq('status', 'failed')
+    .eq('fulfill_failed_kind', 'permanent')
+    .is('printer_order_id', null)
+    .is('print_ops_alert_sent_at', null)
+    .gte('paid_at', paidSince)
+    .order('paid_at', { ascending: true })
+    .limit(SWEEP_LIMIT);
+
+  if (opsErr) {
+    console.error('[printFulfillRetry] ops alert query', opsErr.message);
+  } else {
+    for (const row of opsRows ?? []) {
+      const id = typeof row.id === 'string' ? row.id : '';
+      if (!id) continue;
+      const attempts =
+        typeof row.fulfill_attempt_count === 'number' ? row.fulfill_attempt_count : 0;
+      console.log('[printFulfillRetry] ops alert', id);
+      triggerPrintFulfillOpsAlert({
+        projectOrigin,
+        exportRequestId: id,
+        lastError:
+          (typeof row.last_error === 'string' && row.last_error.trim()) || 'permanent fulfill',
+        attemptCount: attempts,
+        alertKind: 'fulfill_permanent',
+      });
+      opsAlerts += 1;
+    }
+  }
+
+  return { retried, watchdog, confirmationEmails, opsAlerts };
 }
 
 export function startPrintFulfillRetryScheduler(params: {
@@ -140,7 +205,7 @@ export function startPrintFulfillRetryScheduler(params: {
   const tick = () => {
     void sweepPrintFulfillRetries(params)
       .then(r => {
-        if (r.retried > 0 || r.watchdog > 0 || r.confirmationEmails > 0) {
+        if (r.retried > 0 || r.watchdog > 0 || r.confirmationEmails > 0 || r.opsAlerts > 0) {
           console.log('[printFulfillRetry] sweep', r);
         }
       })

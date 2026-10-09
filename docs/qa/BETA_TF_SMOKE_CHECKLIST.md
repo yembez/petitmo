@@ -42,7 +42,9 @@ Scripts QA déjà OK (print PDF, QR audio, Gelato draft `printer_order_id`). Sur
 - [x] Scanner QR PDF en 4G → lecture OK
 - [ ] **Print fond post-pay** : après bypass, confirmation en quelques secondes (pas d’attente « garde l’app ouverte »)
 - [ ] Kill app juste après confirmation → `export_requests` passe `rendering` → `sent_to_printer` (Railway + Gelato draft) sans rouvrir l’app
-- [ ] Prérequis deploy : migration `pdf_payload_json`, Railway (stash + `/v1/internal/print-fulfill`), Edge `stripe-webhook` + `print-payment`
+- [ ] Mail confirmation cliente reçu (ou erreur Resend → abandon + mail ops, **pas** de boucle Railway)
+- [ ] Mes commandes : pendant retries → « En préparation » ; si permanent → « À vérifier »
+- [x] Prérequis deploy : migrations print + Railway fulfill/retry + Edges print (2026-10-09)
 
 
 

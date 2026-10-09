@@ -7,6 +7,8 @@ export function triggerPrintFulfillOpsAlert(params: {
   exportRequestId: string;
   lastError: string;
   attemptCount: number;
+  /** fulfill_permanent (défaut) | confirmation_email (Gelato OK, mail cliente KO). */
+  alertKind?: 'fulfill_permanent' | 'confirmation_email';
 }): void {
   const serviceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY ?? '').trim();
   const sharedSecret = (process.env.PRINT_ORDER_EMAIL_SECRET ?? '').trim();
@@ -30,6 +32,7 @@ export function triggerPrintFulfillOpsAlert(params: {
       exportRequestId: params.exportRequestId,
       lastError: params.lastError.slice(0, 2000),
       attemptCount: params.attemptCount,
+      alertKind: params.alertKind ?? 'fulfill_permanent',
     }),
     signal: controller.signal,
   })

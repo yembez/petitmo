@@ -36,7 +36,12 @@ Deno.serve(async (req) => {
     return jsonRes({ error: 'Server misconfiguration' }, 500);
   }
 
-  let body: { exportRequestId?: unknown; lastError?: unknown; attemptCount?: unknown };
+  let body: {
+    exportRequestId?: unknown;
+    lastError?: unknown;
+    attemptCount?: unknown;
+    alertKind?: unknown;
+  };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -52,6 +57,8 @@ Deno.serve(async (req) => {
     typeof body.attemptCount === 'number' && Number.isFinite(body.attemptCount)
       ? Math.max(0, Math.round(body.attemptCount))
       : 0;
+  const alertKind =
+    body.alertKind === 'confirmation_email' ? 'confirmation_email' : 'fulfill_permanent';
 
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, serviceKey, {
     auth: { autoRefreshToken: false, persistSession: false },
@@ -60,7 +67,7 @@ Deno.serve(async (req) => {
   const { data: row, error: rowErr } = await admin
     .from('export_requests')
     .select(
-      'id, type, status, payment_status, book_id, crm_contact_id, shipping_name, price_cents, printer_order_id, last_error, fulfill_attempt_count, fulfill_failed_kind, print_ops_alert_sent_at',
+      'id, type, status, payment_status, book_id, crm_contact_id, shipping_name, price_cents, printer_order_id, last_error, fulfill_attempt_count, fulfill_failed_kind, print_ops_alert_sent_at, confirmation_email_error',
     )
     .eq('id', exportRequestId)
     .maybeSingle();
@@ -74,8 +81,12 @@ Deno.serve(async (req) => {
   if (row.payment_status !== 'paid') {
     return jsonRes({ sent: false, reason: 'not_paid' }, 409);
   }
-  if (row.printer_order_id) {
+  // fulfill_permanent : pas encore chez Gelato. confirmation_email : Gelato OK, mail cliente KO.
+  if (alertKind === 'fulfill_permanent' && row.printer_order_id) {
     return jsonRes({ sent: false, reason: 'already_gelato' }, 409);
+  }
+  if (alertKind === 'confirmation_email' && !row.printer_order_id) {
+    return jsonRes({ sent: false, reason: 'not_sent_to_printer' }, 409);
   }
 
   // Claim atomique — un seul mail même si retry concurrent.
@@ -101,19 +112,38 @@ Deno.serve(async (req) => {
   const customerEmail =
     typeof contact?.email === 'string' ? contact.email.trim().toLowerCase() : '';
 
-  const errText = lastError || (typeof row.last_error === 'string' ? row.last_error : '') || '—';
+  const errText =
+    lastError ||
+    (typeof row.last_error === 'string' ? row.last_error : '') ||
+    (typeof (row as { confirmation_email_error?: unknown }).confirmation_email_error === 'string'
+      ? (row as { confirmation_email_error: string }).confirmation_email_error
+      : '') ||
+    '—';
   const attempts =
     attemptCount ||
     (typeof row.fulfill_attempt_count === 'number' ? row.fulfill_attempt_count : 0);
 
-  const subject = `[Petitmo] Print fulfill permanent — ${exportRequestId.slice(0, 8)}`;
+  const subject =
+    alertKind === 'confirmation_email'
+      ? `[Petitmo] Mail confirmation cliente KO — ${exportRequestId.slice(0, 8)}`
+      : `[Petitmo] Print fulfill permanent — ${exportRequestId.slice(0, 8)}`;
+  const headline =
+    alertKind === 'confirmation_email'
+      ? 'Gelato OK mais e-mail confirmation cliente abandonné (Resend).'
+      : 'Échec permanent PDF / Gelato après paiement.';
+  const action =
+    alertKind === 'confirmation_email'
+      ? 'Action: vérifier Resend + e-mail CRM ; renvoyer manuellement si besoin. Ne pas re-débiter.'
+      : 'Action: inspecter Railway logs + payload stash / Gelato dashboard. Ne pas re-débiter la cliente.';
   const text = [
-    'Échec permanent PDF / Gelato après paiement.',
+    headline,
     '',
+    `alert_kind: ${alertKind}`,
     `export_request_id: ${exportRequestId}`,
     `book_id: ${row.book_id ?? '—'}`,
     `status: ${row.status}`,
-    `fulfill_failed_kind: ${row.fulfill_failed_kind ?? 'permanent'}`,
+    `printer_order_id: ${row.printer_order_id ?? '—'}`,
+    `fulfill_failed_kind: ${row.fulfill_failed_kind ?? '—'}`,
     `attempts: ${attempts}`,
     `customer_email: ${customerEmail || '—'}`,
     `shipping_name: ${typeof row.shipping_name === 'string' ? row.shipping_name : '—'}`,
@@ -122,7 +152,7 @@ Deno.serve(async (req) => {
     `last_error:`,
     errText,
     '',
-    'Action: inspecter Railway logs + payload stash / Gelato dashboard. Ne pas re-débiter la cliente.',
+    action,
   ].join('\n');
 
   const html = `<pre style="font-family:ui-monospace,monospace;font-size:13px;white-space:pre-wrap">${text
@@ -133,7 +163,11 @@ Deno.serve(async (req) => {
   const resendKey = (Deno.env.get('RESEND_API_KEY') ?? '').trim();
   if (!resendKey) {
     console.error('[print-fulfill-ops-alert] RESEND_API_KEY missing');
-    // Claim déjà posé — on laisse la trace pour éviter spam ; ops verra Sentry/logs.
+    // Relâcher le claim pour que le sweep ops puisse réessayer.
+    await admin
+      .from('export_requests')
+      .update({ print_ops_alert_sent_at: null })
+      .eq('id', exportRequestId);
     return jsonRes({ sent: false, reason: 'no_resend_key' }, 503);
   }
 
