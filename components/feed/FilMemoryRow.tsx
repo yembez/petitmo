@@ -363,12 +363,20 @@ function FilMemoryRow({
     FEED_MEDIA_ASPECT_DEFAULT;
   const voiceCoverRaw = getVoiceCoverUriForFeedAndViewer(memory);
   const voiceCoverSigned = useSignedMediaUrl(voiceCoverRaw || null) ?? '';
+  /**
+   * Bust cache seulement si la cover change — pas sur `updated_at` (print/sync)
+   * sinon flash Image à chaque bump SQLite.
+   */
+  const voiceCoverRev =
+    (memory.voice_cover_path ?? '').trim() ||
+    (memory.voice_cover_url ?? '').trim() ||
+    null;
   const voiceCoverDisplayUri = appendLocalMediaCacheBuster(
     normalizeMemoryMediaUriForDisplay((voiceCoverSigned || voiceCoverRaw).trim()),
-    memory.updated_at,
+    voiceCoverRev,
   );
-  const hasVoiceCover =
-    memoryHasExplicitVoiceCover(memory) && !!voiceCoverDisplayUri.trim();
+  /** Présence cover = intention produit ; URI peut arriver 1 frame plus tard (pas de collapse layout). */
+  const hasVoiceCover = memoryHasExplicitVoiceCover(memory);
   const voicePlaybackSigned =
     useSignedMediaUrl(memory.type === 'voice' ? (memory.media_url ?? null) : null) ?? '';
   const videoPlaybackUri = useFeedVideoPlaybackUri(memory);
@@ -1055,18 +1063,19 @@ function FilMemoryRow({
               {!hasVoiceCover ? (
                 <FeedPostMetaOverlay {...mediaMetaOverlayProps} layout="inline" />
               ) : null}
-              {hasVoiceCover && (
-                <>
+              {hasVoiceCover ? (
+                voiceCoverDisplayUri.trim() ? (
                   <Image
-                    key={`voice-cover-${memory.id}-${memory.updated_at ?? ''}`}
                     source={{ uri: voiceCoverDisplayUri }}
                     style={styles.voiceCoverBg}
                     contentFit="cover"
                     cachePolicy="memory-disk"
-                    recyclingKey={`${memory.id}-voice-cover-${memory.updated_at ?? ''}`}
+                    recyclingKey={`${memory.id}-voice-cover`}
                   />
-                </>
-              )}
+                ) : (
+                  <View style={[styles.voiceCoverBg, { backgroundColor: '#ECECEF' }]} />
+                )
+              ) : null}
               <View
                 style={[
                   styles.audioForeground,

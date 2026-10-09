@@ -678,10 +678,14 @@ export function appendLocalMediaCacheBuster(
   return base;
 }
 
-/** URI affichage cover vocal fil / viewer (cache-buster local sur `updated_at`). */
+/** URI affichage cover vocal fil / viewer (bust si le chemin cover change, pas tout `updated_at`). */
 export function getVoiceCoverDisplayUriForFeedAndViewer(memory: Memory): string {
   const raw = getVoiceCoverUriForFeedAndViewer(memory);
-  return appendLocalMediaCacheBuster(raw, memory.updated_at);
+  const rev =
+    (memory.voice_cover_path ?? '').trim() ||
+    (memory.voice_cover_url ?? '').trim() ||
+    null;
+  return appendLocalMediaCacheBuster(raw, rev);
 }
 
 export function isDeviceLocalMediaUri(u: string | null | undefined): boolean {

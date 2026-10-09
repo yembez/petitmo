@@ -102,8 +102,8 @@ export function useFeedPhotoDisplayUrls(memory: Memory): string[] {
   }, [memory.id, memory.type]);
 
   useEffect(() => {
+    // Recycle FlatList photo→voice : ne pas vider `merged` (flash au retour photo).
     if (memory.type !== 'photo') {
-      setMerged([]);
       return;
     }
 
