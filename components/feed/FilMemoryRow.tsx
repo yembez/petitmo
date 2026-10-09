@@ -63,11 +63,9 @@ import {
 import { useFeedPhotoDisplayUrls } from '@/hooks/useFeedPhotoDisplayUrls';
 import { useFeedVideoPlaybackUri } from '@/hooks/useFeedVideoPlaybackUri';
 import { useFeedVideoPosterDisplayUrl } from '@/hooks/useFeedVideoPosterDisplayUrl';
-import { useImagePixelSize } from '@/hooks/useImagePixelSize';
 import {
   FEED_MEDIA_ASPECT_DEFAULT,
   feedMediaAspectFromMemory,
-  feedMediaAspectFromPixels,
 } from '@/utils/feedMediaAspect';
 import { useVideoShouldPlay } from '@/hooks/useVideoShouldPlay';
 import { normalizeVideoPlaybackUri } from '@/utils/videoMediaUri';
@@ -108,6 +106,7 @@ import { memoryEditorialTextStyle } from '@/constants/memoryTextFont';
 import { ensurePlaybackAudioForListening } from '@/lib/playbackAudioMode';
 import { useIsFeedVideoAutoplay, useIsFeedVideoOnScreen } from '@/lib/feedAutoplayStore';
 import { feedFlashLog } from '@/lib/feedFlashDebug';
+import { setFeedRowMeasuredHeight } from '@/lib/feedRowHeightCache';
 import { loadedFontStyle } from '@/utils/loadedFontStyle';
 import {
   measureViewInWindow,
@@ -340,26 +339,10 @@ function FilMemoryRow({
   })();
   const videoPosterUri = useFeedVideoPosterDisplayUrl(memory);
   /**
-   * Cadre média portrait / paysage — figer tôt pour éviter les sauts mid-scroll :
-   * 1) `print_px_*` SQLite (sync)
-   * 2) sinon mesure URI (une fois, cache module)
-   * 3) sinon 4/5
-   * On ne laisse plus la mesure écraser un print_px déjà connu.
+   * Cadre média — sync only (`print_px_*` ou défaut).
+   * Plus de `Image.getSize` async : ça recalait le ratio mid-scroll (micro-sauts TF).
    */
-  const syncMediaAspect = feedMediaAspectFromMemory(memory);
-  const measureMediaUri =
-    syncMediaAspect != null
-      ? null
-      : memory.type === 'photo'
-        ? photoUrls[0]?.trim() || null
-        : memory.type === 'video'
-          ? videoPosterUri.trim() || null
-          : null;
-  const measuredMediaPx = useImagePixelSize(measureMediaUri);
-  const mediaAspectRatio =
-    syncMediaAspect ??
-    feedMediaAspectFromPixels(measuredMediaPx?.w, measuredMediaPx?.h) ??
-    FEED_MEDIA_ASPECT_DEFAULT;
+  const mediaAspectRatio = feedMediaAspectFromMemory(memory) ?? FEED_MEDIA_ASPECT_DEFAULT;
   const voiceCoverRaw = getVoiceCoverUriForFeedAndViewer(memory);
   const voiceCoverSigned = useSignedMediaUrl(voiceCoverRaw || null) ?? '';
   /**
@@ -1340,7 +1323,13 @@ function FilMemoryRow({
   );
 
   return (
-    <View style={[styles.feedRowRoot, memoryIndex > 0 && styles.feedRowSpacingTop]}>
+    <View
+      style={[styles.feedRowRoot, memoryIndex > 0 && styles.feedRowSpacingTop]}
+      onLayout={e => {
+        const h = e.nativeEvent.layout.height;
+        if (h > 0) setFeedRowMeasuredHeight(memory.id, h);
+      }}
+    >
       <Swipeable
         ref={(r) => {
           if (r) swipeRefs.current.set(memory.id, r);

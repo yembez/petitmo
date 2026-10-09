@@ -8,6 +8,7 @@ import {
   StyleSheet,
   InteractionManager,
   DeviceEventEmitter,
+  useWindowDimensions,
 } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { StatusBar } from 'expo-status-bar';
@@ -16,6 +17,8 @@ import { Plus } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { scale, verticalScale } from '@/utils/responsive';
+import { estimateFeedRowHeight } from '@/utils/estimateFeedRowHeight';
+import { getFeedRowMeasuredHeight } from '@/lib/feedRowHeightCache';
 import EditTextModal from '@/components/EditTextModal';
 import { feedMemoryTextEditPreviewVariant } from '@/utils/memoryTextEditStyles';
 import { bookLineBudgetForMemoryType, bookCharsPerLineForMemoryType } from '@/utils/textLimits';
@@ -72,6 +75,7 @@ function FilScreen() {
   const { t } = useAppTranslation('common');
   const { pending: pendingUploads } = usePendingMediaUploads();
   const insets = useSafeAreaInsets();
+  const { width: screenW } = useWindowDimensions();
   const [timingNudge, setTimingNudge] = useState<'DAY_30' | 'DAY_60' | null>(null);
   const listRef = useRef<FlatList<FeedListItem> | null>(null);
   const feedScrollOffsetRef = useRef(0);
@@ -324,6 +328,38 @@ function FilScreen() {
           ? `${item.parentTempId}:slot:${item.slotIndex}`
           : memoryFlatListKeyByIdRef.current.get(item.memory.id) ?? item.memory.id,
     [memoryFlatListKeyByIdRef],
+  );
+
+  const rowLengthAt = useCallback(
+    (item: FeedListItem, index: number): number => {
+      const measureKey =
+        item.rowKind === 'memory'
+          ? item.memory.id
+          : item.rowKind === 'pending' && item.row.committedMemory
+            ? item.row.committedMemory.id
+            : keyExtractor(item);
+      return getFeedRowMeasuredHeight(measureKey) ?? estimateFeedRowHeight(item, screenW, index);
+    },
+    [keyExtractor, screenW],
+  );
+
+  /**
+   * Hauteurs connues (mesure onLayout) ou estimées — évite le spike contentSize
+   * ~+100 px à chaque mount (logs TF scroll down vitesse moyenne).
+   */
+  const getItemLayout = useCallback(
+    (data: ArrayLike<FeedListItem> | null | undefined, index: number) => {
+      const items = data ?? feedData;
+      if (!items || index < 0 || index >= items.length) {
+        return { length: 0, offset: 0, index };
+      }
+      let offset = 0;
+      for (let i = 0; i < index; i++) {
+        offset += rowLengthAt(items[i] as FeedListItem, i);
+      }
+      return { length: rowLengthAt(items[index] as FeedListItem, index), offset, index };
+    },
+    [feedData, rowLengthAt],
   );
 
   const applyPendingFeedScrollIntent = useCallback((opts?: { reveal?: boolean }) => {
@@ -622,6 +658,7 @@ function FilScreen() {
           data={feedData}
           keyExtractor={keyExtractor}
           renderItem={renderItem}
+          getItemLayout={getItemLayout}
           CellRendererComponentStyle={renderFilListCellStyle}
           /** Pas de `itemLayoutAnimation` : anime les sauts de hauteur (aspect) pendant le scroll. */
           viewabilityConfigCallbackPairs={feedViewabilityPairs}
@@ -636,7 +673,7 @@ function FilScreen() {
               h: Math.round(h),
               y: Math.round(feedScrollOffsetRef.current),
             });
-            onFeedContentSizeChange(w, h);
+            onFeedContentSizeChange();
           }}
           onScrollToIndexFailed={info => {
             /**
@@ -715,9 +752,9 @@ function FilScreen() {
            * Fenêtre un peu plus large : logs TF montraient unmount/remount photo en rafale
            * au scroll-up (flash « écran à images ») avec windowSize=7 / batch=2.
            */
-          maxToRenderPerBatch={3}
+          maxToRenderPerBatch={4}
           updateCellsBatchingPeriod={50}
-          windowSize={11}
+          windowSize={13}
         />
       </View>
       <View style={styles.headerShell} onLayout={onFeedHeaderLayout} pointerEvents="box-none">
