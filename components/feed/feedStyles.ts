@@ -4,8 +4,6 @@ import { THEME } from '@/constants/theme';
 import { PETITMO_CTA_BORDER_WIDTH } from '@/constants/petitmoCtaStyles';
 import { FONT_SIZES } from '@/constants/sizes';
 import {
-  FEED_POST_CARD_RADIUS,
-  FEED_POST_CARD_RADIUS_BL,
   MEDIA_CARD_INSET,
   MEDIA_CARD_RADIUS,
   TEXT_POST_CARD_INSET,
@@ -210,42 +208,34 @@ const styles = StyleSheet.create({
   },
   /**
    * Enveloppe ombre (sans `overflow: hidden` — sinon iOS ne dessine pas l’ombre).
-   * Le contenu clipé vit dans `post`.
-   * Halo : offset nul + rayon large (relief tout autour, pas seulement en bas).
+   * Bord à bord ; ombre portée vers le bas pour séparer les posts (style journal).
    */
   postShell: {
     alignSelf: 'stretch',
-    marginHorizontal: scale(8),
-    borderTopLeftRadius: FEED_POST_CARD_RADIUS,
-    borderTopRightRadius: FEED_POST_CARD_RADIUS,
-    borderBottomRightRadius: FEED_POST_CARD_RADIUS,
-    borderBottomLeftRadius: FEED_POST_CARD_RADIUS_BL,
+    marginHorizontal: 0,
+    borderRadius: 0,
     backgroundColor: '#FFFFFF',
     ...Platform.select({
       ios: {
         shadowColor: '#000000',
-        shadowOffset: { width: 0, height: 0 },
-        shadowOpacity: 0.11,
-        shadowRadius: scale(16),
+        shadowOffset: { width: 0, height: verticalScale(3) },
+        shadowOpacity: 0.18,
+        shadowRadius: scale(5),
       },
       android: {
-        /** Android reste surtout « bas » ; on atténue pour ne pas rivaliser avec le halo iOS. */
-        elevation: 5,
+        elevation: 7,
       },
       default: {
         shadowColor: '#000000',
-        shadowOffset: { width: 0, height: 0 },
-        shadowOpacity: 0.11,
-        shadowRadius: scale(16),
+        shadowOffset: { width: 0, height: verticalScale(3) },
+        shadowOpacity: 0.18,
+        shadowRadius: scale(5),
       },
     }),
   },
   post: {
     backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: FEED_POST_CARD_RADIUS,
-    borderTopRightRadius: FEED_POST_CARD_RADIUS,
-    borderBottomRightRadius: FEED_POST_CARD_RADIUS,
-    borderBottomLeftRadius: FEED_POST_CARD_RADIUS_BL,
+    borderRadius: 0,
     overflow: 'hidden',
   },
   /**
@@ -255,8 +245,9 @@ const styles = StyleSheet.create({
   feedRowRoot: {
     overflow: 'visible',
   },
+  /** Serré pour laisser l’ombre bas du post précédent marquer la séparation. */
   feedRowSpacingTop: {
-    marginTop: verticalScale(24),
+    marginTop: verticalScale(8),
   },
   /** Cellule FlatList : ne pas clipper l’ombre portée des cartes. */
   feedListCell: {
@@ -324,7 +315,10 @@ const styles = StyleSheet.create({
   postBody: {
     overflow: 'visible',
   },
-  /** Photo / vidéo : pleine largeur, coins inchangés (fil social). */
+  /**
+   * Photo / vidéo : pleine largeur, coins droits.
+   * `aspectRatio` override par post (portrait / paysage) — défaut 4/5.
+   */
   mediaCard: {
     marginHorizontal: MEDIA_CARD_INSET,
     alignSelf: 'stretch',

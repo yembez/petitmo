@@ -33,6 +33,11 @@ type Props = {
   memoryId?: string;
   favoritePhotoUrls?: string[];
   onFavoritePhotoUrlsUpdated?: (urls: string[]) => void;
+  /**
+   * Ratio `width/height` pour photo unique (portrait / paysage).
+   * Ignoré pour les grilles multi-photos (reste 4/5).
+   */
+  mediaAspectRatio?: number;
   /** Au tap : ouvre le viewer immersif à l’index donné (1 ou N photos). */
   onPhotoImmersive?: (args: {
     index: number;
@@ -111,6 +116,7 @@ export default function PhotoMosaic({
   memoryId,
   favoritePhotoUrls: _favoritePhotoUrls,
   onFavoritePhotoUrlsUpdated: _onFavoritePhotoUrlsUpdated,
+  mediaAspectRatio,
   onPhotoImmersive,
   onSinglePhotoImmersive,
   memoryForFavoriteVariants: _memoryForFavoriteVariants = null,
@@ -118,6 +124,10 @@ export default function PhotoMosaic({
   const { width: screenW } = useWindowDimensions();
   const W = Math.max(0, screenW - 2 * MEDIA_CARD_INSET);
   const n = urls.length;
+  const singleAspect =
+    typeof mediaAspectRatio === 'number' && mediaAspectRatio > 0
+      ? mediaAspectRatio
+      : 4 / 5;
 
   const feedImageCache = (index: number) => ({
     cachePolicy: 'memory-disk' as const,
@@ -167,7 +177,10 @@ export default function PhotoMosaic({
         immersiveKey={cellKey(0)}
         cornerRadius={cellCorner}
         onOpen={openImmersive}
-        style={[styles.wrap, { borderRadius: MEDIA_CARD_RADIUS }]}
+        style={[
+          styles.wrap,
+          { borderRadius: MEDIA_CARD_RADIUS, aspectRatio: singleAspect },
+        ]}
       >
         <Image
           source={{ uri: urls[0] }}
@@ -322,7 +335,7 @@ const styles = StyleSheet.create({
   },
   singleImg: {
     width: '100%',
-    aspectRatio: 4 / 5,
+    height: '100%',
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,

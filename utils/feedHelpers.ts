@@ -78,7 +78,10 @@ export function filMemoryVisualEqual(a: Memory, b: Memory): boolean {
     JSON.stringify(a.extra_photo_paths ?? []) === JSON.stringify(b.extra_photo_paths ?? []) &&
     JSON.stringify(a.favorite_photo_urls ?? []) === JSON.stringify(b.favorite_photo_urls ?? []) &&
     (a.duration ?? null) === (b.duration ?? null) &&
-    (a.captured_overlay_ink ?? null) === (b.captured_overlay_ink ?? null)
+    (a.captured_overlay_ink ?? null) === (b.captured_overlay_ink ?? null) &&
+    // Cadre média fil (portrait / paysage) — visuel dès que print_px est connu.
+    (a.print_px_w ?? null) === (b.print_px_w ?? null) &&
+    (a.print_px_h ?? null) === (b.print_px_h ?? null)
   );
 }
 

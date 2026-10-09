@@ -1,14 +1,17 @@
 import { scale, verticalScale } from '@/utils/responsive';
 
 /**
- * Fil : photos / vidéos bord à bord, sans coins arrondis (style type fil social).
+ * Fil : posts photo/vidéo bord à bord, coins droits ; ratio natif (portrait / paysage).
  * Les posts « texte » utilisent `TEXT_POST_CARD_*` pour garder des marges lisibles.
  */
 export const MEDIA_CARD_INSET = 0;
 export const MEDIA_CARD_RADIUS = 0;
 
-/** Carte post fil : coins arrondis sauf bas-gauche droit (rappel appendice logo). */
-export const FEED_POST_CARD_RADIUS = scale(12);
+/**
+ * Carte post fil photo/vidéo : coins droits, bord à bord (style journal).
+ * Les posts texte gardent `TEXT_POST_CARD_RADIUS`.
+ */
+export const FEED_POST_CARD_RADIUS = 0;
 export const FEED_POST_CARD_RADIUS_BL = 0;
 
 /** Marge latérale carte texte fil — plus faible = carte plus large à l’écran. */
