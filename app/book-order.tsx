@@ -110,7 +110,6 @@ import {
   BOOK_SERIF_FONT_SOURCES,
   BOOK_SERIF_ITALIC_FONT_FAMILY,
 } from '@/constants/bookSerifFont';
-import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
 import { rememberLocalPrintOrder } from '@/lib/printOrdersCache';
 import { isDeviceStorageFullError } from '@/utils/deviceStorageFull';
 import { getEmailHint } from '@/utils/emailSanity';
@@ -135,7 +134,7 @@ const COUNTRY_OPTIONS = [
   { code: 'FR' as const, label: 'France' },
   { code: 'BE' as const, label: 'Belgique' },
   { code: 'CH' as const, label: 'Suisse' },
-  { code: 'LU' as const, label: 'Luxembourg' },
+  { code: 'LU' as const, label: 'Luxembourg' }
 ] as const;
 
 type CountryCode = (typeof COUNTRY_OPTIONS)[number]['code'];
@@ -263,7 +262,6 @@ export default function BookOrderScreen() {
   const insets = useSafeAreaInsets();
   const { t } = useAppTranslation('common');
   const lang = useAppLanguage();
-  const { dm500, dm600, dm700 } = useDmSansFamilyFlowFonts();
   const [coverFontsLoaded] = useFonts({ ...BOOK_SERIF_FONT_SOURCES });
   const coverTitleFontFamily = coverFontsLoaded ? BOOK_SERIF_ITALIC_FONT_FAMILY : undefined;
   const coverPeriodFontFamily = coverFontsLoaded ? BOOK_SERIF_FONT_FAMILY : undefined;
@@ -465,7 +463,7 @@ export default function BookOrderScreen() {
           getBook(bookId),
           getUserTier(),
           getLastGuestExportEmail(),
-          getLastPrintOrderForm(),
+          getLastPrintOrderForm()
         ]);
         setTier(t);
         if (book) setBook(book);
@@ -480,7 +478,7 @@ export default function BookOrderScreen() {
             emptyBookAlertShownRef.current = true;
             setBlockedEmptyMemories(true);
             Alert.alert('Livre vide', 'Ajoute au moins un souvenir pour créer un livre.', [
-              { text: 'OK', onPress: () => router.replace('/(tabs)/fil') },
+              { text: 'OK', onPress: () => router.replace('/(tabs)/fil') }
             ]);
           }
           return;
@@ -887,7 +885,7 @@ export default function BookOrderScreen() {
     readLiveForm,
     shippingName,
     subscriptionDb,
-    zip,
+    zip
   ]);
 
   /**
@@ -1156,7 +1154,7 @@ export default function BookOrderScreen() {
     if (!bookId || !childId || !child) return;
     if (memoryPageCount < 1) {
       Alert.alert('Livre vide', 'Ajoute au moins un souvenir pour créer un livre.', [
-        { text: 'OK', onPress: () => router.replace('/(tabs)/fil') },
+        { text: 'OK', onPress: () => router.replace('/(tabs)/fil') }
       ]);
       return;
     }
@@ -1309,7 +1307,7 @@ export default function BookOrderScreen() {
                 onPress: () => {
                   void Linking.openURL(checkoutUrl);
                 },
-              },
+              }
             ]);
             return;
           }
@@ -1324,7 +1322,7 @@ export default function BookOrderScreen() {
               onPress: () => {
                 void Linking.openURL(checkoutUrl);
               },
-            },
+            }
           ]);
           setFieldErrors({ submit: t('bookOrder.payNotConfirmed') });
           return;
@@ -1433,7 +1431,7 @@ export default function BookOrderScreen() {
     readLiveForm,
     router,
     subscriptionDb,
-    t,
+    t
   ]);
 
   useEffect(() => {
@@ -1565,7 +1563,7 @@ export default function BookOrderScreen() {
     printAddressReady,
     loading,
     printFormFingerprint,
-    submitting,
+    submitting
   ]);
 
   useEffect(() => {
@@ -1634,10 +1632,10 @@ export default function BookOrderScreen() {
     return (
       <View style={[styles.root, { paddingTop: insets.top + scale(12) }]}>
         <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backRow}>
-          <Text style={[styles.backText, dm500 && { fontFamily: dm500 }]}>← Retour</Text>
+          <Text style={styles.backText}>← Retour</Text>
         </Pressable>
-        <Text style={[styles.title, dm700 && { fontFamily: dm700 }]}>{t('bookOrder.title')}</Text>
-        <Text style={[styles.muted, dm500 && { fontFamily: dm500 }]}>
+        <Text style={styles.title}>{t('bookOrder.title')}</Text>
+        <Text style={styles.muted}>
           Ouvre cette page depuis l’aperçu d’un livre (commande PDF ou impression).
         </Text>
       </View>
@@ -1657,8 +1655,7 @@ export default function BookOrderScreen() {
         <Text
           style={[
             styles.muted,
-            { marginTop: scale(20), textAlign: 'center' },
-            dm500 && { fontFamily: dm500 },
+            { marginTop: scale(20), textAlign: 'center' }
           ]}
         >
           {t('bookOrder.formLoadingTitle')}
@@ -1666,8 +1663,7 @@ export default function BookOrderScreen() {
         <Text
           style={[
             styles.muted,
-            { marginTop: scale(8), textAlign: 'center' },
-            dm500 && { fontFamily: dm500 },
+            { marginTop: scale(8), textAlign: 'center' }
           ]}
         >
           {loadingBody}
@@ -1693,14 +1689,14 @@ export default function BookOrderScreen() {
           text: o.label,
           onPress: () => setCountry(o.code),
         })),
-        { text: 'Annuler', style: 'cancel' as const },
+        { text: 'Annuler', style: 'cancel' as const }
       ],
     );
   };
 
   const emailHintNode = emailHint ? (
     <View style={styles.emailHintRow}>
-      <Text style={[styles.emailHint, dm500 && { fontFamily: dm500 }]}>
+      <Text style={styles.emailHint}>
         {emailHint.kind === 'typo'
           ? t('bookOrder.emailHintTypo', { suggestion: emailHint.suggestion })
           : emailHint.kind === 'short'
@@ -1716,7 +1712,7 @@ export default function BookOrderScreen() {
             clearError('email');
           }}
         >
-          <Text style={[styles.emailHintAction, dm600 && { fontFamily: dm600 }]}>
+          <Text style={styles.emailHintAction}>
             {emailHint.kind === 'typo'
               ? t('bookOrder.emailHintUse')
               : t('bookOrder.emailHintUseAccount')}
@@ -1729,7 +1725,7 @@ export default function BookOrderScreen() {
   /** Ville ≠ communes du code postal — suggestion douce, saisie libre conservée. */
   const cityHintNode = cityHint ? (
     <View style={styles.emailHintRow}>
-      <Text style={[styles.emailHint, dm500 && { fontFamily: dm500 }]}>
+      <Text style={styles.emailHint}>
         {t('bookOrder.cityHint', { zip: zip.trim(), suggestion: cityHint.suggestion })}
       </Text>
       <Pressable
@@ -1739,7 +1735,7 @@ export default function BookOrderScreen() {
           clearError('city');
         }}
       >
-        <Text style={[styles.emailHintAction, dm600 && { fontFamily: dm600 }]}>
+        <Text style={styles.emailHintAction}>
           {t('bookOrder.cityHintUse')}
         </Text>
       </Pressable>
@@ -1772,7 +1768,7 @@ export default function BookOrderScreen() {
           petitmoCtaStyles.primaryFullWidth,
           styles.cta,
           styles.ctaOrderBlack,
-          (submitting || !formIsComplete) && petitmoCtaStyles.primaryDisabled,
+          (submitting || !formIsComplete) && petitmoCtaStyles.primaryDisabled
         ]}
         disabled={submitting || !formIsComplete}
         onPress={() => void submitOrder()}
@@ -1787,8 +1783,7 @@ export default function BookOrderScreen() {
             style={[
               petitmoCtaStyles.primaryText,
               styles.ctaText,
-              styles.ctaOrderBlackText,
-              dm700 && { fontFamily: dm700 },
+              styles.ctaOrderBlackText
             ]}
           >
             {ctaLabel}
@@ -1810,16 +1805,16 @@ export default function BookOrderScreen() {
           {
             paddingTop: insets.top + scale(8),
             paddingBottom: scale(24),
-          },
+          }
         ]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
         <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backRow}>
-          <Text style={[styles.backText, dm500 && { fontFamily: dm500 }]}>← Retour</Text>
+          <Text style={styles.backText}>← Retour</Text>
         </Pressable>
 
-        <Text style={[styles.title, dm700 && { fontFamily: dm700 }]}>
+        <Text style={styles.title}>
           {exportMode === 'print' ? t('bookOrder.title') : t('bookOrder.titlePdf')}
         </Text>
         {/* Pas de sous-titre : carte de résumé à côté de la cover */}
@@ -1833,7 +1828,7 @@ export default function BookOrderScreen() {
                   {
                     width: BOOK_COVER_THUMB_WIDTH * ORDER_COVER_SCALE,
                     height: BOOK_COVER_THUMB_HEIGHT * ORDER_COVER_SCALE,
-                  },
+                  }
                 ]}
               >
                 <View
@@ -1861,18 +1856,18 @@ export default function BookOrderScreen() {
               </View>
               <View style={styles.summaryInfo}>
                 <Text
-                  style={[styles.summaryTitle, dm700 && { fontFamily: dm700 }]}
+                  style={styles.summaryTitle}
                   numberOfLines={2}
                 >
                   {bookTitle || 'Ton livre'}
                 </Text>
-                <Text style={[styles.summaryMeta, dm500 && { fontFamily: dm500 }]}>
+                <Text style={styles.summaryMeta}>
                   {pagesQrMeta}
                 </Text>
-                <Text style={[styles.summaryPrice, dm700 && { fontFamily: dm700 }]}>
+                <Text style={styles.summaryPrice}>
                   {t('bookOrder.priceTtc', { price: priceLabel })}
                 </Text>
-                <Text style={[styles.summaryDelivery, dm500 && { fontFamily: dm500 }]}>
+                <Text style={styles.summaryDelivery}>
                   {t('bookOrder.deliveryIncluded')}
                 </Text>
               </View>
@@ -1886,21 +1881,21 @@ export default function BookOrderScreen() {
                 priceDetailOpen ? t('bookOrder.hidePriceDetail') : t('bookOrder.seePriceDetail')
               }
             >
-              <Text style={[styles.priceDetailLinkText, dm600 && { fontFamily: dm600 }]}>
+              <Text style={styles.priceDetailLinkText}>
                 {priceDetailOpen ? t('bookOrder.hidePriceDetail') : t('bookOrder.seePriceDetail')}
                 {' >'}
               </Text>
             </Pressable>
             {priceDetailOpen ? (
               <View style={styles.priceDetailBox}>
-                <Text style={[styles.priceDetailLine, dm500 && { fontFamily: dm500 }]}>
+                <Text style={styles.priceDetailLine}>
                   Livre : {formatAppCurrency(printQuote.bookPartEuros, lang)}
                   {printQuote.extraPages > 0
                     ? ` (39 € + ${printQuote.extraPages} × 0,70 €)`
                     : ' (forfait 30 pages)'}
                 </Text>
                 {tier === 'free' ? (
-                  <Text style={[styles.priceDetailLine, dm500 && { fontFamily: dm500 }]}>
+                  <Text style={styles.priceDetailLine}>
                     QR audio/vidéo : {printQuote.qrCount} (
                     {PRINT_V1_INCLUDED_QR} inclus
                     {printQuote.extraQr > 0
@@ -1909,12 +1904,12 @@ export default function BookOrderScreen() {
                     )
                   </Text>
                 ) : (
-                  <Text style={[styles.priceDetailLine, dm500 && { fontFamily: dm500 }]}>
+                  <Text style={styles.priceDetailLine}>
                     QR audio/vidéo : {printQuote.qrCount} · inclus Petit Cœur+
                   </Text>
                 )}
                 {tier === 'paid' ? (
-                  <Text style={[styles.priceDetailLine, dm500 && { fontFamily: dm500 }]}>
+                  <Text style={styles.priceDetailLine}>
                     Remise abonnée −10 % sur le livre
                   </Text>
                 ) : null}
@@ -1928,13 +1923,13 @@ export default function BookOrderScreen() {
           </View>
         ) : (
           <View style={styles.summaryCard}>
-            <Text style={[styles.summaryTitle, dm700 && { fontFamily: dm700 }]}>Livre PDF</Text>
-            <Text style={[styles.summaryMeta, dm500 && { fontFamily: dm500 }]}>
+            <Text style={styles.summaryTitle}>Livre PDF</Text>
+            <Text style={styles.summaryMeta}>
               {pdfEntitled.premium || pdfEntitled.digitalPaid
                 ? 'Inclus dans ton forfait ou achat actuel.'
                 : 'Tarif hors forfait : l’achat est pris en compte au moment de la commande.'}
             </Text>
-            <Text style={[styles.summaryPrice, dm700 && { fontFamily: dm700 }]}>
+            <Text style={styles.summaryPrice}>
               {t('bookOrder.priceTtc', { price: priceLabel })}
             </Text>
             {prepHint ? (
@@ -1984,10 +1979,10 @@ export default function BookOrderScreen() {
 
         {exportMode === 'print' ? (
           <>
-            <Text style={[styles.section, dm600 && { fontFamily: dm600 }]}>
+            <Text style={styles.section}>
               {t('bookOrder.sectionDelivery')}
             </Text>
-            <View style={styles.formCard}>
+            <View style={styles.fieldsStack}>
               <View style={styles.fieldBlock}>
                 <Text style={styles.fieldLabel}>
                   {t('bookOrder.fieldFullName')}
@@ -1995,7 +1990,6 @@ export default function BookOrderScreen() {
                 <StableTextInput
                   style={[
                     styles.fieldInput,
-                    dm500 && { fontFamily: dm500 },
                     fieldErrors.shippingName && styles.inputError,
                   ]}
                   value={shippingName}
@@ -2009,12 +2003,11 @@ export default function BookOrderScreen() {
                   placeholder={t('bookOrder.fieldFullName')}
                   placeholderTextColor={THEME.textSecondary}
                 />
+                {fieldErrors.shippingName ? (
+                  <Text style={styles.err}>{fieldErrors.shippingName}</Text>
+                ) : null}
               </View>
-              {fieldErrors.shippingName ? (
-                <Text style={styles.err}>{fieldErrors.shippingName}</Text>
-              ) : null}
 
-              <View style={styles.fieldDivider} />
               <View style={styles.fieldBlock}>
                 <Text style={styles.fieldLabel}>
                   {t('bookOrder.fieldAddress')}
@@ -2022,7 +2015,6 @@ export default function BookOrderScreen() {
                 <StableTextInput
                   style={[
                     styles.fieldInput,
-                    dm500 && { fontFamily: dm500 },
                     fieldErrors.line1 && styles.inputError,
                   ]}
                   value={line1}
@@ -2036,16 +2028,15 @@ export default function BookOrderScreen() {
                   placeholder={t('bookOrder.placeholderAddress')}
                   placeholderTextColor={THEME.textSecondary}
                 />
+                {fieldErrors.line1 ? <Text style={styles.err}>{fieldErrors.line1}</Text> : null}
               </View>
-              {fieldErrors.line1 ? <Text style={styles.err}>{fieldErrors.line1}</Text> : null}
 
-              <View style={styles.fieldDivider} />
               <View style={styles.fieldBlock}>
                 <Text style={styles.fieldLabel}>
                   {t('bookOrder.fieldAddress2')}
                 </Text>
                 <StableTextInput
-                  style={[styles.fieldInput, dm500 && { fontFamily: dm500 }]}
+                  style={styles.fieldInput}
                   value={line2}
                   onChangeTextImmediate={v => {
                     liveFormRef.current.line2 = v;
@@ -2056,7 +2047,6 @@ export default function BookOrderScreen() {
                 />
               </View>
 
-              <View style={styles.fieldDivider} />
               <View style={styles.row2}>
                 <View style={[styles.grow, styles.fieldBlock]}>
                   <Text style={styles.fieldLabel}>
@@ -2065,7 +2055,6 @@ export default function BookOrderScreen() {
                   <StableTextInput
                     style={[
                       styles.fieldInput,
-                      dm500 && { fontFamily: dm500 },
                       fieldErrors.zip && styles.inputError,
                     ]}
                     value={zip}
@@ -2082,7 +2071,6 @@ export default function BookOrderScreen() {
                   />
                   {fieldErrors.zip ? <Text style={styles.err}>{fieldErrors.zip}</Text> : null}
                 </View>
-                <View style={styles.colDivider} />
                 <View style={[styles.grow2, styles.fieldBlock]}>
                   <Text style={styles.fieldLabel}>
                     {t('bookOrder.fieldCity')}
@@ -2090,7 +2078,6 @@ export default function BookOrderScreen() {
                   <StableTextInput
                     style={[
                       styles.fieldInput,
-                      dm500 && { fontFamily: dm500 },
                       fieldErrors.city && styles.inputError,
                     ]}
                     value={city}
@@ -2109,9 +2096,8 @@ export default function BookOrderScreen() {
                 </View>
               </View>
 
-              <View style={styles.fieldDivider} />
               <Pressable
-                style={styles.countryRow}
+                style={[styles.fieldBlock, styles.countryRow]}
                 onPress={openCountryPicker}
                 accessibilityRole="button"
                 accessibilityLabel={t('bookOrder.fieldCountry')}
@@ -2120,36 +2106,67 @@ export default function BookOrderScreen() {
                   <Text style={styles.fieldLabel}>
                     {t('bookOrder.fieldCountry')}
                   </Text>
-                  <Text style={[styles.fieldValue, dm500 && { fontFamily: dm500 }]}>
-                    {countryLabel}
-                  </Text>
+                  <Text style={styles.fieldValue}>{countryLabel}</Text>
                 </View>
                 <ChevronRight size={scale(18)} color={THEME.textSecondary} strokeWidth={2} />
               </Pressable>
-            </View>
 
-            <View style={[styles.formCard, styles.emailCard]}>
-              <View style={styles.emailHeader}>
-                <Text style={styles.fieldLabel}>
-                  {t('bookOrder.fieldEmail')}
-                </Text>
+              <View style={styles.fieldBlock}>
+                <View style={styles.emailHeader}>
+                  <Text style={[styles.fieldLabel, styles.fieldLabelInline]}>
+                    {t('bookOrder.fieldEmail')}
+                  </Text>
+                  {showEmailDisplay ? (
+                    <Pressable onPress={() => setEmailEditing(true)} hitSlop={8}>
+                      <Text style={styles.emailEdit}>{t('bookOrder.emailEdit')}</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
                 {showEmailDisplay ? (
-                  <Pressable onPress={() => setEmailEditing(true)} hitSlop={8}>
-                    <Text style={[styles.emailEdit, dm600 && { fontFamily: dm600 }]}>
-                      {t('bookOrder.emailEdit')}
-                    </Text>
-                  </Pressable>
-                ) : null}
+                  <Text style={styles.fieldValue} numberOfLines={1}>
+                    {email.trim()}
+                  </Text>
+                ) : (
+                  <StableTextInput
+                    style={[
+                      styles.fieldInput,
+                      fieldErrors.email && styles.inputError,
+                    ]}
+                    value={email}
+                    onChangeTextImmediate={v => {
+                      liveFormRef.current.email = v;
+                    }}
+                    onChangeText={v => {
+                      applyField('email', v);
+                      clearError('email');
+                    }}
+                    onEndEditing={e => {
+                      // Texte natif (l’état parent peut avoir 1 frappe de retard).
+                      if (isValidEmail(e.nativeEvent.text)) setEmailEditing(false);
+                    }}
+                    placeholder="email@exemple.com"
+                    placeholderTextColor={THEME.textSecondary}
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                    autoFocus={emailEditing}
+                  />
+                )}
+                {fieldErrors.email ? <Text style={styles.err}>{fieldErrors.email}</Text> : null}
+                {emailHintNode}
               </View>
-              {showEmailDisplay ? (
-                <Text style={[styles.fieldValue, dm500 && { fontFamily: dm500 }]} numberOfLines={1}>
-                  {email.trim()}
-                </Text>
-              ) : (
+            </View>
+          </>
+        ) : (
+          <>
+            <Text style={styles.section}>
+              {t('bookOrder.fieldEmail')}
+            </Text>
+            <View style={styles.fieldsStack}>
+              <View style={styles.fieldBlock}>
+                <Text style={styles.fieldLabel}>{t('bookOrder.fieldEmail')}</Text>
                 <StableTextInput
                   style={[
                     styles.fieldInput,
-                    dm500 && { fontFamily: dm500 },
                     fieldErrors.email && styles.inputError,
                   ]}
                   value={email}
@@ -2160,55 +2177,21 @@ export default function BookOrderScreen() {
                     applyField('email', v);
                     clearError('email');
                   }}
-                  onEndEditing={e => {
-                    // Texte natif (l’état parent peut avoir 1 frappe de retard).
-                    if (isValidEmail(e.nativeEvent.text)) setEmailEditing(false);
-                  }}
                   placeholder="email@exemple.com"
                   placeholderTextColor={THEME.textSecondary}
                   autoCapitalize="none"
                   keyboardType="email-address"
-                  autoFocus={emailEditing}
                 />
-              )}
-              {fieldErrors.email ? <Text style={styles.err}>{fieldErrors.email}</Text> : null}
-              {emailHintNode}
-            </View>
-          </>
-        ) : (
-          <>
-            <Text style={[styles.section, dm600 && { fontFamily: dm600 }]}>
-              {t('bookOrder.fieldEmail')}
-            </Text>
-            <View style={styles.formCard}>
-              <StableTextInput
-                style={[
-                  styles.fieldInput,
-                  dm500 && { fontFamily: dm500 },
-                  fieldErrors.email && styles.inputError,
-                ]}
-                value={email}
-                onChangeTextImmediate={v => {
-                  liveFormRef.current.email = v;
-                }}
-                onChangeText={v => {
-                  applyField('email', v);
-                  clearError('email');
-                }}
-                placeholder="email@exemple.com"
-                placeholderTextColor={THEME.textSecondary}
-                autoCapitalize="none"
-                keyboardType="email-address"
-              />
-              {fieldErrors.email ? <Text style={styles.err}>{fieldErrors.email}</Text> : null}
-              {emailHintNode}
+                {fieldErrors.email ? <Text style={styles.err}>{fieldErrors.email}</Text> : null}
+                {emailHintNode}
+              </View>
             </View>
           </>
         )}
 
         {exportMode === 'print' ? (
           <>
-            <Text style={[styles.section, dm600 && { fontFamily: dm600 }]}>
+            <Text style={styles.section}>
               {t('bookOrder.sectionBeforeOrder')}
             </Text>
             <View style={styles.formCard}>
@@ -2224,7 +2207,7 @@ export default function BookOrderScreen() {
                 accessibilityRole="button"
                 accessibilityLabel={t('bookOrder.reviewBook')}
               >
-                <Text style={[styles.reviewRowText, dm500 && { fontFamily: dm500 }]}>
+                <Text style={styles.reviewRowText}>
                   {t('bookOrder.reviewBook')}
                 </Text>
                 <ChevronRight size={scale(18)} color={THEME.textSecondary} strokeWidth={2} />
@@ -2247,17 +2230,17 @@ export default function BookOrderScreen() {
                     <Text style={styles.checkboxMark}>✓</Text>
                   ) : null}
                 </View>
-                <Text style={[styles.checkLabel, dm500 && { fontFamily: dm500 }]}>
+                <Text style={styles.checkLabel}>
                   {t('bookOrder.legalCheckbox')}
                 </Text>
               </Pressable>
 
               <View style={styles.fieldDivider} />
 
-              <Text style={[styles.legalBody, dm500 && { fontFamily: dm500 }]}>
+              <Text style={styles.legalBody}>
                 {t('bookOrder.legalBody')}
                 <Text
-                  style={[styles.legalCgvLink, dm600 && { fontFamily: dm600 }]}
+                  style={styles.legalCgvLink}
                   onPress={() => void Linking.openURL(PRINT_ORDER_CGV_URL)}
                 >
                   {t('bookOrder.legalCgvLink')}
@@ -2390,14 +2373,15 @@ const styles = StyleSheet.create({
   },
 
   section: {
-    fontSize: scale(12),
-    fontWeight: '700',
+    fontSize: scale(13),
+    fontWeight: '600',
     color: THEME.textMuted,
     textTransform: 'uppercase',
-    letterSpacing: 0.6,
-    marginBottom: scale(8),
-    marginTop: scale(4),
+    letterSpacing: 0.4,
+    marginBottom: scale(10),
+    marginTop: scale(6),
   },
+  /** Carte groupée (légal / revue) — liste à séparateurs. */
   formCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: scale(16),
@@ -2408,39 +2392,47 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(0,0,0,0.08)',
     overflow: 'hidden',
   },
-  emailCard: {
-    paddingVertical: scale(12),
+  /** Coordonnées : un bloc blanc par champ, écartés pour se lire clairement. */
+  fieldsStack: {
+    gap: scale(10),
+    marginBottom: scale(14),
   },
   fieldBlock: {
-    paddingVertical: scale(10),
+    backgroundColor: '#FFFFFF',
+    borderRadius: scale(14),
+    paddingHorizontal: scale(14),
+    paddingVertical: scale(12),
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,0,0,0.10)',
   },
-  fieldBlockGrow: { flex: 1, minWidth: 0, paddingVertical: scale(10) },
+  fieldBlockGrow: { flex: 1, minWidth: 0 },
   fieldLabel: {
-    fontSize: scale(15),
+    fontSize: scale(13),
     fontWeight: '500',
-    color: THEME.textMuted,
-    marginBottom: scale(5),
+    color: THEME.textSecondary,
+    marginBottom: scale(6),
+  },
+  fieldLabelInline: {
+    marginBottom: 0,
   },
   fieldInput: {
     fontSize: scale(17),
+    fontWeight: '400',
     color: THEME.textPrimary,
-    paddingVertical: Platform.OS === 'ios' ? scale(2) : 0,
+    paddingVertical: Platform.OS === 'ios' ? scale(4) : scale(2),
     margin: 0,
   },
   fieldValue: {
     fontSize: scale(17),
+    fontWeight: '400',
     color: THEME.textPrimary,
+    paddingVertical: scale(2),
   },
   fieldDivider: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: 'rgba(0,0,0,0.08)',
   },
-  colDivider: {
-    width: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(0,0,0,0.08)',
-    marginVertical: scale(8),
-  },
-  row2: { flexDirection: 'row', alignItems: 'stretch' },
+  row2: { flexDirection: 'row', alignItems: 'stretch', gap: scale(10) },
   grow: { flex: 1, minWidth: 0 },
   grow2: { flex: 1.35, minWidth: 0 },
   countryRow: {
@@ -2520,8 +2512,7 @@ const styles = StyleSheet.create({
   err: {
     fontSize: scale(13),
     color: 'rgba(180, 60, 60, 0.9)',
-    marginBottom: scale(8),
-    marginTop: scale(2),
+    marginTop: scale(6),
   },
   emailHintRow: {
     flexDirection: 'row',
