@@ -107,6 +107,7 @@ import { styles, TEXT_POST_GUTTER } from "@/components/feed/feedStyles";
 import { memoryEditorialTextStyle } from '@/constants/memoryTextFont';
 import { ensurePlaybackAudioForListening } from '@/lib/playbackAudioMode';
 import { useIsFeedVideoAutoplay, useIsFeedVideoOnScreen } from '@/lib/feedAutoplayStore';
+import { feedFlashLog } from '@/lib/feedFlashDebug';
 import { loadedFontStyle } from '@/utils/loadedFontStyle';
 import {
   measureViewInWindow,
@@ -393,6 +394,50 @@ function FilMemoryRow({
   const canOpenImmersiveWhilePending =
     memory.type === 'video' && !!videoPlaybackUri.trim();
 
+  useEffect(() => {
+    feedFlashLog('row.mount', {
+      id: memory.id.slice(0, 8),
+      type: memory.type,
+      aspect: Number(mediaAspectRatio.toFixed(3)),
+      photos: photoUrls.length,
+      poster: !!videoPosterUri.trim(),
+      playUri: !!videoPlaybackUri.trim(),
+    });
+    return () => {
+      feedFlashLog('row.unmount', {
+        id: memory.id.slice(0, 8),
+        type: memory.type,
+      });
+    };
+  }, [memory.id, memory.type]);
+
+  useEffect(() => {
+    if (memory.type !== 'photo') return;
+    feedFlashLog('row.photoUrls', {
+      id: memory.id.slice(0, 8),
+      n: photoUrls.length,
+      u0: (photoUrls[0] ?? '').slice(-48),
+    });
+  }, [memory.id, memory.type, photoUrls]);
+
+  useEffect(() => {
+    if (memory.type !== 'video') return;
+    feedFlashLog('row.video', {
+      id: memory.id.slice(0, 8),
+      autoplay: isFeedVideoAutoplay,
+      onScreen: isFeedVideoOnScreen,
+      poster: !!videoPosterUri.trim(),
+      playUri: !!videoPlaybackUri.trim(),
+    });
+  }, [
+    memory.id,
+    memory.type,
+    isFeedVideoAutoplay,
+    isFeedVideoOnScreen,
+    videoPosterUri,
+    videoPlaybackUri,
+  ]);
+
   const [feedInlineVideoSoundOn, setFeedInlineVideoSoundOn] = useState(false);
   const [feedInlineVideoDisplayReady, setFeedInlineVideoDisplayReady] = useState(false);
   /** Poster au-dessus de la vidéo : fondu 1→0 une fois la vidéo décodée (évite le « saut » thumbnail → frame). */
@@ -532,15 +577,13 @@ function FilMemoryRow({
   useEffect(() => {
     /**
      * Reset autoplay « froid » seulement (jamais joué / déjà fondu).
-     * Ne pas snaper le poster si on est en fondu de sortie, retour immersif,
-     * ou encore à l’écran (idle gate / remount scroll-up → sinon flash poster+play).
+     * Ne pas snaper le poster si on est en fondu de sortie ou retour immersif.
      */
     if (
       canAutoplayVideoInline ||
       viewerHoldsVideo ||
       handoffKeepPlayer ||
       keepPlayerForPosterFade ||
-      isFeedVideoOnScreen ||
       suppressPosterAfterImmersiveRef.current
     ) {
       return;
@@ -555,7 +598,6 @@ function FilMemoryRow({
     viewerHoldsVideo,
     handoffKeepPlayer,
     keepPlayerForPosterFade,
-    isFeedVideoOnScreen,
     feedInlinePosterFade,
     feedInlineVideoReveal,
   ]);
@@ -563,8 +605,6 @@ function FilMemoryRow({
   /**
    * Sortie de zone autoplay : fondu poster par-dessus la dernière frame,
    * puis démontage de la VideoView (évite le cut net).
-   * Si la vignette est encore ≥50 % visible (fling / idle 180 ms), on garde
-   * la dernière frame — pas de flash poster+play bord à bord au scroll-up.
    */
   useEffect(() => {
     if (canAutoplayVideoInline) {
@@ -577,16 +617,6 @@ function FilMemoryRow({
 
     if (viewerHoldsVideo || suppressPosterAfterImmersiveRef.current) {
       setKeepPlayerForPosterFade(false);
-      return;
-    }
-
-    if (isFeedVideoOnScreen) {
-      setFeedInlineVideoSoundOn(false);
-      if (feedInlineVideoDisplayReadyRef.current) {
-        setKeepPlayerForPosterFade(true);
-        feedInlinePosterFade.setValue(0);
-        feedInlineVideoReveal.setValue(1);
-      }
       return;
     }
 
@@ -642,42 +672,6 @@ function FilMemoryRow({
   }, [
     canAutoplayVideoInline,
     viewerHoldsVideo,
-    isFeedVideoOnScreen,
-    videoPosterUri,
-    feedInlinePosterFade,
-    feedInlineVideoReveal,
-  ]);
-
-  /** Fin du hold « dernière frame » une fois hors écran (sinon décodeur coincé). */
-  useEffect(() => {
-    if (canAutoplayVideoInline || viewerHoldsVideo || isFeedVideoOnScreen) return;
-    if (!keepPlayerForPosterFade) return;
-    if (feedInlineVideoDisplayReadyRef.current && videoPosterUri.trim()) {
-      const anim = RNAnimated.timing(feedInlinePosterFade, {
-        toValue: 1,
-        duration: MOTION_FEED_VIDEO_POSTER_MS,
-        useNativeDriver: true,
-      });
-      anim.start(({ finished }) => {
-        if (!finished) return;
-        setKeepPlayerForPosterFade(false);
-        setFeedInlineVideoDisplayReady(false);
-        feedInlineVideoReveal.setValue(0);
-      });
-      return () => {
-        anim.stop();
-        setKeepPlayerForPosterFade(false);
-      };
-    }
-    setKeepPlayerForPosterFade(false);
-    setFeedInlineVideoDisplayReady(false);
-    feedInlinePosterFade.setValue(1);
-    feedInlineVideoReveal.setValue(0);
-  }, [
-    canAutoplayVideoInline,
-    viewerHoldsVideo,
-    isFeedVideoOnScreen,
-    keepPlayerForPosterFade,
     videoPosterUri,
     feedInlinePosterFade,
     feedInlineVideoReveal,
@@ -1049,15 +1043,7 @@ function FilMemoryRow({
                   ) : (
                     <View style={[styles.photoImage, { backgroundColor: '#000000' }]} />
                   )}
-                  {/**
-                   * Play seulement si pas de lecture locale possible (sinon autoplay).
-                   * Au scroll-up, `canAutoplay` est false pendant l’idle gate → l’icône
-                   * + poster bord à bord = flash « plein écran avec image » (bug TF).
-                   */}
-                  {!skipImmersive &&
-                  !canAutoplayVideoInline &&
-                  !isFeedVideoOnScreen &&
-                  !videoPlaybackUri.trim() ? (
+                  {!skipImmersive && !canAutoplayVideoInline ? (
                     <View style={[styles.playOverlay, styles.videoPlayIconAboveTap]} pointerEvents="none">
                       <View style={styles.playButton}>
                         <Play size={ICON_SIZES.sm} color="#FFFFFF" fill="#FFFFFF" strokeWidth={0} />

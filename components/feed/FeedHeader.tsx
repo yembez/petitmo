@@ -1,5 +1,5 @@
 import { memo, type ReactNode } from 'react';
-import { View, Text, TouchableOpacity, Platform, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, Platform, StyleSheet, Alert } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { CAPTURE_CTA_ICON_CORAL } from '@/constants/captureScreenPalette';
 import { calculateAge } from '@/utils/date';
@@ -11,6 +11,10 @@ import { childDisplayGivenName } from '@/utils/childDisplayName';
 import { ChildAvatar } from '@/components/ChildAvatar';
 import SettingsHeaderButton from '@/components/SettingsHeaderButton';
 import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
+import {
+  isFeedFlashDebugEnabled,
+  setFeedFlashDebugEnabled,
+} from '@/lib/feedFlashDebug';
 
 export type FeedHeaderProps = {
   familyChildren: Child[];
@@ -134,7 +138,24 @@ export const FeedHeader = memo(function FeedHeader({
       <View style={styles.headerLeft}>
         <FeedHeaderAvatarStack familyChildren={sorted} onPressChild={onPressChild} />
         {showHeaderNames && (
-          <View style={styles.headerNameBlock}>
+          <TouchableOpacity
+            style={styles.headerNameBlock}
+            activeOpacity={1}
+            delayLongPress={1200}
+            onLongPress={() => {
+              const next = !isFeedFlashDebugEnabled();
+              void setFeedFlashDebugEnabled(next).then(() => {
+                Alert.alert(
+                  'Debug flash fil',
+                  next
+                    ? 'Activé. Reproduis le flash, appuie sur « J’ai vu le flash », puis Exporter et colle le texte dans Cursor.'
+                    : 'Désactivé.',
+                );
+              });
+            }}
+            accessibilityRole="text"
+            accessibilityLabel={familyTitle}
+          >
             <Text style={styles.headerTitleLine} numberOfLines={2}>
               <Text style={styles.headerChildName}>{familyTitle}</Text>
               {isSolo && !!agePresent && (
@@ -144,7 +165,7 @@ export const FeedHeader = memo(function FeedHeader({
                 </>
               )}
             </Text>
-          </View>
+          </TouchableOpacity>
         )}
       </View>
       <View style={styles.headerRight}>

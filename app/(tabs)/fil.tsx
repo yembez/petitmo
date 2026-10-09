@@ -36,8 +36,10 @@ import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
 import { FeedHeader } from '@/components/feed/FeedHeader';
+import FeedFlashDebugBar from '@/components/feed/FeedFlashDebugBar';
 import SettingsHeaderButton from '@/components/SettingsHeaderButton';
 import type { FeedListItem } from '@/components/feed/FilMemoryRow';
+import { feedFlashLog } from '@/lib/feedFlashDebug';
 import { peekSilentInitialFilLoadArmed } from '@/services/feedAfterImportFlags';
 import { setMemoryViewerSession } from '@/services/memoryViewerSession';
 import { claimVideoKeepAlive, isAnyVideoKeepAlive } from '@/lib/videoPlayerPool';
@@ -77,6 +79,9 @@ function FilScreen() {
   const pendingPinOffsetRef = useRef<number | null>(null);
   const pendingScrollIntentRef = useRef<FeedScrollIntent | null>(null);
   const [feedListOpacity, setFeedListOpacity] = useState(1);
+  useEffect(() => {
+    feedFlashLog('fil.listOpacity', { opacity: feedListOpacity });
+  }, [feedListOpacity]);
   /** Hauteur réelle header glass (overlay) — padding liste + viewOffset snap. */
   const [feedHeaderHeight, setFeedHeaderHeight] = useState(0);
   const feedHeaderHeightRef = useRef(0);
@@ -279,10 +284,12 @@ function FilScreen() {
   );
 
   const onFeedScrollActive = useCallback(() => {
+    feedFlashLog('fil.scrollBegin', { y: Math.round(feedScrollOffsetRef.current) });
     onFeedScrollBegin();
   }, [onFeedScrollBegin]);
 
   const onFeedScrollStopped = useCallback(() => {
+    feedFlashLog('fil.scrollEnd', { y: Math.round(feedScrollOffsetRef.current) });
     onFeedScrollIdle();
   }, [onFeedScrollIdle]);
 
@@ -727,6 +734,7 @@ function FilScreen() {
         onClose={closeEditLocationModal}
         onSave={handleSaveLocation}
       />
+      <FeedFlashDebugBar />
     </View>
   );
 }
