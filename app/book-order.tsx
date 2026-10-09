@@ -30,7 +30,11 @@ import { scale } from '@/utils/responsive';
 import { formatAppCurrency } from '@/utils/appLocale';
 import { getUserTier } from '@/lib/userTier';
 import { getLastGuestExportEmail, setLastGuestExportEmail } from '@/lib/guestExportPrefs';
-import { getLastPrintOrderForm, setLastPrintOrderForm } from '@/lib/printOrderFormPrefs';
+import {
+  getLastPrintOrderForm,
+  peekLastPrintOrderForm,
+  setLastPrintOrderForm,
+} from '@/lib/printOrderFormPrefs';
 import { PRINT_V1_INCLUDED_QR, quotePrintOrderV1 } from '@/lib/pricingV1';
 import { isSentryEnabled, Sentry } from '@/lib/sentry';
 import { PRINT_V1_PAID_DISCOUNT_PERCENT, type DiscountPercent } from '@/lib/printedBookQuote';
@@ -281,7 +285,8 @@ export default function BookOrderScreen() {
   const exportMode = params.exportMode === 'pdf' ? 'pdf' : 'print';
   const resumePayment = params.resumePayment === '1';
 
-  const [loading, setLoading] = useState(true);
+  /** Si cache form déjà en mémoire : peindre le formulaire tout de suite (pas d’écran spinner). */
+  const [loading, setLoading] = useState(() => !peekLastPrintOrderForm());
   const [child, setChild] = useState<Child | null>(null);
   const [book, setBook] = useState<Book | null>(null);
   const [memoryPageCount, setMemoryPageCount] = useState(0);
@@ -320,16 +325,21 @@ export default function BookOrderScreen() {
   const [priceDetailOpen, setPriceDetailOpen] = useState(false);
   const [emailEditing, setEmailEditing] = useState(false);
 
-  const [email, setEmail] = useState('');
-  const [fullName, setFullName] = useState('');
+  /** Prefill synchrone (mémoire) — évite formulaire vide puis « pop » AsyncStorage/CRM. */
+  const seedForm = peekLastPrintOrderForm();
+  const [email, setEmail] = useState(seedForm?.email ?? '');
+  const [fullName, setFullName] = useState(seedForm?.fullName ?? '');
   /** Case légale impression — décochée par défaut. */
   const [contentVerified, setContentVerified] = useState(false);
-  const [shippingName, setShippingName] = useState('');
-  const [line1, setLine1] = useState('');
-  const [line2, setLine2] = useState('');
-  const [city, setCity] = useState('');
-  const [zip, setZip] = useState('');
-  const [country, setCountry] = useState<CountryCode>('FR');
+  const [shippingName, setShippingName] = useState(seedForm?.shippingName ?? '');
+  const [line1, setLine1] = useState(seedForm?.line1 ?? '');
+  const [line2, setLine2] = useState(seedForm?.line2 ?? '');
+  const [city, setCity] = useState(seedForm?.city ?? '');
+  const [zip, setZip] = useState(seedForm?.zip ?? '');
+  const [country, setCountry] = useState<CountryCode>(() => {
+    const c = (seedForm?.country ?? 'FR').toUpperCase();
+    return COUNTRY_OPTIONS.some(x => x.code === c) ? (c as CountryCode) : 'FR';
+  });
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<FieldKey, string>>>({});
 
   /**
@@ -339,13 +349,13 @@ export default function BookOrderScreen() {
    * jamais l’état — c’est ce qui part au serveur / Gelato.
    */
   const liveFormRef = useRef<Record<LiveTextField, string>>({
-    email: '',
-    fullName: '',
-    shippingName: '',
-    line1: '',
-    line2: '',
-    city: '',
-    zip: '',
+    email: seedForm?.email ?? '',
+    fullName: seedForm?.fullName ?? '',
+    shippingName: seedForm?.shippingName ?? '',
+    line1: seedForm?.line1 ?? '',
+    line2: seedForm?.line2 ?? '',
+    city: seedForm?.city ?? '',
+    zip: seedForm?.zip ?? '',
   });
   const liveSetters = useRef<Record<LiveTextField, (v: string) => void>>({
     email: setEmail,

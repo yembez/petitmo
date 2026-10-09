@@ -1,5 +1,6 @@
 /**
  * Dernier formulaire commande print — cache local confort (Low Friction).
+ * Mémoire synchrone + AsyncStorage : paint formulaire sans attendre le disque.
  * Pas de secret : AsyncStorage OK (comme l’e-mail guest export).
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -17,6 +18,10 @@ export type PrintOrderFormPrefs = {
   country: string;
 };
 
+/** Cache process — peindre le formulaire au 1er frame sans await. */
+let memoryCache: PrintOrderFormPrefs | null = null;
+let hydrateStarted = false;
+
 function trimStr(v: unknown): string {
   return typeof v === 'string' ? v.trim() : '';
 }
@@ -30,7 +35,6 @@ function parsePrefs(raw: string | null): PrintOrderFormPrefs | null {
     const line1 = trimStr(o.line1);
     const city = trimStr(o.city);
     const zip = trimStr(o.zip);
-    // Au moins une donnée utile (sinon inutile de peindre).
     if (!email && !line1 && !city && !zip && !trimStr(o.shippingName)) return null;
     return {
       email,
@@ -47,11 +51,23 @@ function parsePrefs(raw: string | null): PrintOrderFormPrefs | null {
   }
 }
 
+/** Lecture synchrone (mémoire). Hydrate AsyncStorage en fond au 1er appel. */
+export function peekLastPrintOrderForm(): PrintOrderFormPrefs | null {
+  if (!hydrateStarted) {
+    hydrateStarted = true;
+    void getLastPrintOrderForm();
+  }
+  return memoryCache;
+}
+
 export async function getLastPrintOrderForm(): Promise<PrintOrderFormPrefs | null> {
+  if (memoryCache) return memoryCache;
   try {
-    return parsePrefs(await AsyncStorage.getItem(KEY));
+    const parsed = parsePrefs(await AsyncStorage.getItem(KEY));
+    if (parsed) memoryCache = parsed;
+    return parsed;
   } catch {
-    return null;
+    return memoryCache;
   }
 }
 
@@ -67,9 +83,13 @@ export async function setLastPrintOrderForm(form: PrintOrderFormPrefs): Promise<
     country: (form.country.trim() || 'FR').toUpperCase().slice(0, 2),
   };
   if (!next.email && !next.line1 && !next.city && !next.zip && !next.shippingName) return;
+  memoryCache = next;
   try {
     await AsyncStorage.setItem(KEY, JSON.stringify(next));
   } catch {
     /* ignore */
   }
 }
+
+/** Warm au chargement du module (navigation livre → commande). */
+void getLastPrintOrderForm();

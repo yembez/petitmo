@@ -185,6 +185,7 @@ import { mergeBookMemoriesPreservingMaquetteRefs } from '@/utils/feedHelpers';
 import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 import { canExportBookPdfViaServer } from '@/lib/digitalExportPurchase';
 import { setLastGuestExportEmail } from '@/lib/guestExportPrefs';
+import { peekLastPrintOrderForm } from '@/lib/printOrderFormPrefs';
 import { setPendingBookOrderPdfPayload } from '@/lib/pendingBookOrderPdf';
 import { isDeviceStorageFullError } from '@/utils/deviceStorageFull';
 import { THEME } from '@/constants/theme';
@@ -481,9 +482,8 @@ export default function BookPreviewScreen() {
   const [allMemories, setAllMemories] = useState<Memory[]>([]);
   const [guestExportModalVisible, setGuestExportModalVisible] = useState(false);
   const [guestExportSubmitting, setGuestExportSubmitting] = useState(false);
-  /** Préparation pending AsyncStorage avant navigation book-order (messages progressifs). */
+  /** Prep silencieuse pending → book-order (pas d’overlay noir). */
   const [preparingPrintOrder, setPreparingPrintOrder] = useState(false);
-  const [preparePrintMsgStep, setPreparePrintMsgStep] = useState(0);
   const pendingGuestExportMode = useRef<'screen' | 'print'>('screen');
   const [coverPickerOpen, setCoverPickerOpen] = useState(false);
   const [coverPickerRefreshing, setCoverPickerRefreshing] = useState(false);
@@ -3412,17 +3412,10 @@ export default function BookPreviewScreen() {
     t,
   ]);
 
+  // Warm cache formulaire commande pendant la lecture du livre (paint sync au tap Commander).
   useEffect(() => {
-    if (!preparingPrintOrder) {
-      setPreparePrintMsgStep(0);
-      return;
-    }
-    setPreparePrintMsgStep(0);
-    const id = setInterval(() => {
-      setPreparePrintMsgStep(s => Math.min(s + 1, 1));
-    }, 4500);
-    return () => clearInterval(id);
-  }, [preparingPrintOrder]);
+    peekLastPrintOrderForm();
+  }, []);
 
   const goToBookOrderPrint = useCallback(() => {
     if (exporting || guestExportSubmitting || preparingPrintOrder || !child) return;
@@ -3441,6 +3434,7 @@ export default function BookPreviewScreen() {
     ).length;
     const avPageCountForOrder = pages.filter(p => p.type === 'audio' || p.type === 'video').length;
     void (async () => {
+      // Pas d’overlay noir « Ton livre prend vie » : prep silencieuse (Low Friction).
       setPreparingPrintOrder(true);
       try {
         // Flush maquette → AsyncStorage avant pending (crops / rotations = vérité commande).
@@ -3541,16 +3535,20 @@ export default function BookPreviewScreen() {
 
   const handleExportBook = useCallback(() => {
     if (exporting || guestExportSubmitting || preparingPrintOrder || !child) return;
-    // V1 : export PDF monétisé hors scope — impression (+ aperçu PDF impression en QA).
-    Alert.alert('Exporter', 'Choisis un format.', [
-      { text: 'Annuler', style: 'cancel' },
-      {
-        text: 'Aperçu PDF impression',
-        onPress: () => void doExportPdf('print'),
-      },
-      { text: 'Livre imprimé', onPress: () => goToBookOrderPrint() },
-    ]);
-  }, [child, doExportPdf, exporting, goToBookOrderPrint, guestExportSubmitting]);
+    // Low Friction : Commander → formulaire print. Aperçu PDF = QA seulement.
+    if (__DEV__) {
+      Alert.alert('Commander', 'Choisis un format.', [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Aperçu PDF impression',
+          onPress: () => void doExportPdf('print'),
+        },
+        { text: 'Livre imprimé', onPress: () => goToBookOrderPrint() },
+      ]);
+      return;
+    }
+    goToBookOrderPrint();
+  }, [child, doExportPdf, exporting, goToBookOrderPrint, guestExportSubmitting, preparingPrintOrder]);
 
   const onGuestExportSubmit = useCallback(
     async ({ email, marketingOptIn }: { email: string; marketingOptIn: boolean }) => {
@@ -3764,13 +3762,18 @@ export default function BookPreviewScreen() {
             hitSlop={12}
             style={[
               styles.headerCtaOrange,
-              (exporting || guestExportSubmitting) && { opacity: 0.5 },
+              (exporting || guestExportSubmitting || preparingPrintOrder) && { opacity: 0.5 },
             ]}
-            disabled={exporting || guestExportSubmitting}
+            disabled={exporting || guestExportSubmitting || preparingPrintOrder}
             accessibilityRole="button"
+            accessibilityLabel="Commander le livre imprimé"
           >
             <Text style={[styles.headerCtaText, dm700 && { fontFamily: dm700 }]}>
-              {exporting || guestExportSubmitting ? 'Export…' : 'Exporter'}
+              {exporting || guestExportSubmitting
+                ? 'Export…'
+                : preparingPrintOrder
+                  ? '…'
+                  : 'Commander'}
             </Text>
           </PetitmoPrimaryPressable>
         )}
@@ -4195,17 +4198,7 @@ export default function BookPreviewScreen() {
         onSubmit={onGuestExportSubmit}
       />
 
-      <BookPdfGeneratingModalOverlay
-        visible={exporting || guestExportSubmitting || preparingPrintOrder}
-        title={preparingPrintOrder ? t('bookOrder.printPrepareOrderTitle') : undefined}
-        subtitle={
-          preparingPrintOrder
-            ? preparePrintMsgStep === 0
-              ? t('bookOrder.printPrepareOrderBody1')
-              : t('bookOrder.printPrepareOrderBody2')
-            : undefined
-        }
-      />
+      <BookPdfGeneratingModalOverlay visible={exporting || guestExportSubmitting} />
     </View>
   );
 }
@@ -4325,7 +4318,7 @@ const styles = StyleSheet.create({
     color: THEME.textPrimary,
     fontSize: 14,
   },
-  /** Équilibre le header quand le CTA Exporter est masqué (paysage). */
+  /** Équilibre le header quand le CTA Commander est masqué (paysage). */
   headerRightSpacer: {
     minWidth: 88,
     height: 1,
