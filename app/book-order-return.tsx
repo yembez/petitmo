@@ -1,12 +1,12 @@
-import { View } from 'react-native';
+import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { useEffect } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import { BookPdfGeneratingView } from '@/components/BookPdfGeneratingOverlay';
+import { THEME } from '@/constants/theme';
 import { getPendingBookOrderPdfPayload } from '@/lib/pendingBookOrderPdf';
 import { getPendingPrintPayment } from '@/lib/pendingPrintPayment';
 
-/** Retour Safari / Stripe Checkout → écran cœur, puis reprise de la commande. */
+/** Retour Safari / Stripe Checkout → reprise commande (sans écran cœur long). */
 export default function BookOrderReturnScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ canceled?: string; paid?: string }>();
@@ -45,8 +45,21 @@ export default function BookOrderReturnScreen() {
   }, [canceled, router]);
 
   if (canceled) {
-    return <View style={{ flex: 1, backgroundColor: '#1C1C1E' }} />;
+    return <View style={styles.root} />;
   }
 
-  return <BookPdfGeneratingView />;
+  return (
+    <View style={styles.root}>
+      <ActivityIndicator size="large" color={THEME.brandCtaOrange} />
+    </View>
+  );
 }
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: THEME.bgScreen,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+});

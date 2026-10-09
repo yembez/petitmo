@@ -1,6 +1,11 @@
 /**
  * Paiement livre imprimé (Checkout Stripe, PaymentSheet plus tard).
- * Body JSON : { action: 'create' | 'status', exportTicket, returnUrl? }
+ * Body JSON : { action: 'create' | 'status', exportTicket, returnUrl?, customerEmail?,
+ *               shippingName?, shippingAddress?, fullName? }
+ *
+ * `create` **fige l’adresse finale** : le ticket (init-export) peut avoir été créé en fond
+ * pendant la saisie (brouillon tronqué) ; au tap Commander le client renvoie le formulaire
+ * complet et on met à jour `export_requests` (source Gelato) avant Checkout / bypass.
  *
  * Secrets : STRIPE_SECRET_KEY, EXPORT_PDF_JWT_SECRET
  * QA Gelato sans Stripe : STRIPE_PRINT_BYPASS=1 (jamais en prod).
@@ -16,6 +21,8 @@ import {
   stripePost,
   stripeSecretKey,
 } from '../_shared/stripeApi.ts';
+import { triggerPrintFulfillInBackground } from '../_shared/triggerPrintFulfill.ts';
+import { parseShippingAddress } from '../_shared/parseShippingAddress.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -75,7 +82,16 @@ Deno.serve(async (req: Request) => {
     return jsonRes({ error: 'Server misconfiguration' }, 500);
   }
 
-  let body: { action?: string; exportTicket?: string; returnUrl?: string; customerEmail?: string };
+  let body: {
+    action?: string;
+    exportTicket?: string;
+    returnUrl?: string;
+    customerEmail?: string;
+    /** Adresse finale (tap Commander) — remplace le brouillon du ticket. */
+    shippingName?: string;
+    shippingAddress?: Record<string, unknown>;
+    fullName?: string | null;
+  };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -114,14 +130,49 @@ Deno.serve(async (req: Request) => {
 
   const paymentStatus = asPaymentStatus(row.payment_status);
   if (action === 'status') {
+    // Pas de kick fulfill ici : le client poll souvent pendant Checkout.
     return jsonRes({ paymentStatus }, 200);
   }
 
   if (paymentStatus === 'paid') {
+    // create sur commande déjà paid (reprise) → filet kick une fois.
+    triggerPrintFulfillInBackground(row.id);
     return jsonRes({ paymentStatus: 'paid' }, 200);
   }
   if (paymentStatus === 'refunded') {
     return jsonRes({ error: 'Order refunded', paymentStatus: 'refunded' }, 409);
+  }
+
+  // Adresse finale : écrase le brouillon figé à l’init-export (saisie encore en cours à ce
+  // moment-là). Validée comme à l’init ; une adresse incomplète est refusée **avant** paiement.
+  const shipNameFinal = typeof body.shippingName === 'string' ? body.shippingName.trim() : '';
+  if (body.shippingAddress !== undefined || shipNameFinal) {
+    if (!shipNameFinal) {
+      return jsonRes({ error: 'shippingName required', code: 'SHIPPING_INVALID' }, 400);
+    }
+    const addrParsed = parseShippingAddress(body.shippingAddress);
+    if (!addrParsed.ok) {
+      return jsonRes({ error: addrParsed.message, code: 'SHIPPING_INVALID' }, 400);
+    }
+    const { error: shipErr } = await supabase
+      .from('export_requests')
+      .update({ shipping_name: shipNameFinal, shipping_address_json: addrParsed.value })
+      .eq('id', row.id)
+      .eq('payment_status', 'unpaid');
+    if (shipErr) {
+      console.error('[print-payment] shipping update', shipErr.message);
+      return jsonRes({ error: 'Database error' }, 500);
+    }
+    // Mémorise pour le préremplissage de la prochaine commande (crm-prefill) — fond, non bloquant.
+    const fullNameFinal = typeof body.fullName === 'string' ? body.fullName.trim() : '';
+    const { error: crmErr } = await supabase
+      .from('crm_contacts')
+      .update({
+        address_json: { ...addrParsed.value, shipping_name: shipNameFinal },
+        ...(fullNameFinal ? { full_name: fullNameFinal } : {}),
+      })
+      .eq('id', row.crm_contact_id);
+    if (crmErr) console.warn('[print-payment] crm address memo', crmErr.message);
   }
 
   if (isStripePrintBypass()) {
@@ -135,6 +186,7 @@ Deno.serve(async (req: Request) => {
       console.error('[print-payment] bypass', upErr.message);
       return jsonRes({ error: 'Database error' }, 500);
     }
+    triggerPrintFulfillInBackground(row.id);
     return jsonRes({ paymentStatus: 'paid', bypassed: true }, 200);
   }
 
@@ -166,6 +218,7 @@ Deno.serve(async (req: Request) => {
           })
           .eq('id', row.id)
           .neq('payment_status', 'refunded');
+        triggerPrintFulfillInBackground(row.id);
         return jsonRes({ paymentStatus: 'paid' }, 200);
       }
       const checkoutUrl = typeof existing.json.url === 'string' ? existing.json.url : '';

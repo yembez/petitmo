@@ -88,8 +88,16 @@ export async function uploadFileToSignedPutUrlIosBackground(params: {
           finish(() => resolve());
         } else {
           const body = typeof data.responseBody === 'string' ? data.responseBody : '';
+          const summary =
+            /<\s*!?\s*doctype|<\s*html/i.test(body) || body.length > 180
+              ? code === 520 || code >= 500
+                ? 'STORAGE_TRANSIENT'
+                : 'STORAGE_ERROR'
+              : body.slice(0, 160);
           finish(() =>
-            reject(new Error(`SIGNED_UPLOAD_FAILED (${code}) ${body}`.trim())),
+            reject(
+              new Error(`SIGNED_UPLOAD_FAILED (${code})${summary ? ` ${summary}` : ''}`.trim()),
+            ),
           );
         }
       }),

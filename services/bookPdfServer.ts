@@ -7,10 +7,6 @@ import { readAsStringAsync, EncodingType } from 'expo-file-system/legacy';
 import { uploadAsync as uploadAsyncLegacy } from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { Image, Platform } from 'react-native';
-import {
-  isIosBackgroundSignedPutUploadAvailable,
-  uploadFileToSignedPutUrlIosBackground,
-} from '@/services/signedUrlIosBackgroundUpload';
 import { persistQrTokensFromPdfResponse } from '@/services/bookQrPreview';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import { getInfoAsync } from 'expo-file-system/legacy';
@@ -639,49 +635,51 @@ async function buildPagePhotoRefHttpsMap(
   const out = new Map<string, string>();
   if (Platform.OS === 'web') return out;
 
+  // Dédup par slot, puis upload en parallèle (pool borné).
+  const slots: Array<{ mapKey: string; memory: Memory; ref: string }> = [];
+  const seen = new Set<string>();
   for (const p of pages) {
     if (p.type !== 'photo-full' && p.type !== 'photo-note') continue;
     const m = p.memory;
     const ref = p.photoRef?.trim();
     if (!m || m.type !== 'photo' || !ref) continue;
     const mapKey = `${m.id}::${normalizePhotoUrlForCompare(ref)}`;
-    if (out.has(mapKey)) continue;
+    if (seen.has(mapKey)) continue;
+    seen.add(mapKey);
     if (isHttps(ref)) {
       out.set(mapKey, ref);
       continue;
     }
+    slots.push({ mapKey, memory: m, ref });
+  }
+
+  await mapWithConcurrency(slots, GUEST_PDF_MEDIA_UPLOAD_CONCURRENCY, async ({ mapKey, memory: m, ref }) => {
     const local = await resolveAlbumSlotLocalUriForPdf(m, ref);
     if (!local) {
-      if (__DEV__) {
-        console.warn(
-          '[bookPdfServer] album slot: aucun fichier pour photoRef (pas de fallback primaire)',
-          m.id,
-          ref.slice(0, 80),
-        );
-      }
-      continue;
-    }
-    try {
-      const compressed = await compressLocalJpegForGuestUpload(local, {
-        maxWidth: MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH,
-        quality: MEDIA_BOOK_PDF_JPEG_QUALITY,
-      });
-      const slotKey = albumPdfSlotAssetKey(
-        m.id,
-        ref,
-        indexOfPhotoUrlInFeed(m, ref),
+      throw new Error(
+        appendDevExportHint(
+          'Impossible d’envoyer toutes les photos du livre. Vérifie ta connexion et réessaie.',
+          `ALBUM_SLOT_NOT_READABLE memory=${m.id} ref=${ref.slice(0, 64)}`,
+        ),
       );
-      const { readUrl } = await guestUploadMediaImageThenReadUrl({
-        pdfTicket,
-        asset: { kind: 'photo', memoryId: slotKey },
-        localUri: compressed,
-        mimeType: 'image/jpeg',
-      });
-      out.set(mapKey, readUrl);
-    } catch (e) {
-      if (__DEV__) console.warn('[bookPdfServer] album slot upload', m.id, e);
     }
-  }
+    const compressed = await compressLocalJpegForGuestUpload(local, {
+      maxWidth: MEDIA_BOOK_LOCAL_PRINT_MAX_WIDTH,
+      quality: MEDIA_BOOK_PDF_JPEG_QUALITY,
+    });
+    const slotKey = albumPdfSlotAssetKey(
+      m.id,
+      ref,
+      indexOfPhotoUrlInFeed(m, ref),
+    );
+    const { readUrl } = await guestUploadMediaImageThenReadUrl({
+      pdfTicket,
+      asset: { kind: 'photo', memoryId: slotKey },
+      localUri: compressed,
+      mimeType: 'image/jpeg',
+    });
+    out.set(mapKey, readUrl);
+  });
   return out;
 }
 
@@ -703,16 +701,17 @@ function assertAlbumSlotsHaveDistinctHttpsPhotoRefs(
     byMemory.set(mid, list);
   }
   for (const [mid, refs] of byMemory) {
-    if (refs.length < 2) continue;
     const httpsRefs = refs.filter(r => isHttps(r));
+    // Une seule page avec file:// doit aussi échouer (sinon Gelato reçoit du local).
     if (httpsRefs.length !== refs.length) {
       throw new Error(
         appendDevExportHint(
-          'Impossible de préparer toutes les photos de cet album pour le PDF. Rouvre l’aperçu, vérifie les photos du livre, puis réessaie.',
+          'Impossible de préparer toutes les photos de cet album pour le PDF. Vérifie ta connexion et réessaie.',
           `ALBUM_SLOT_PDF_INCOMPLETE memory=${mid} slots=${refs.length} https=${httpsRefs.length}`,
         ),
       );
     }
+    if (refs.length < 2) continue;
     const uniq = new Set(httpsRefs.map(r => r.split('?')[0]));
     if (uniq.size < httpsRefs.length) {
       throw new Error(
@@ -722,6 +721,39 @@ function assertAlbumSlotsHaveDistinctHttpsPhotoRefs(
         ),
       );
     }
+  }
+}
+
+/** Interdit file:// / chemins locaux dans le payload print (Chromium Railway ne les lit pas). */
+function assertPrintPayloadRemoteOnly(payload: GenerateBookPdfPayload): void {
+  if (payload.exportMode !== 'print') return;
+  const bad: string[] = [];
+  const check = (raw: string | null | undefined, label: string) => {
+    const t = (raw ?? '').trim();
+    if (!t) return;
+    if (isHttps(t) || isBareMediaBucketPath(t)) return;
+    bad.push(`${label}=${t.slice(0, 48)}`);
+  };
+  check(payload.coverPhotoUrl, 'cover');
+  for (const m of payload.guestMemories ?? []) {
+    check(m.print_url, `m:${m.id}:print`);
+    check(m.display_url, `m:${m.id}:display`);
+    check(m.media_url, `m:${m.id}:media`);
+    check(m.thumbnail_url, `m:${m.id}:thumb`);
+    check(m.poster_url, `m:${m.id}:poster`);
+    check(m.poster_print_url, `m:${m.id}:poster_print`);
+    check(m.voice_cover_url, `m:${m.id}:voice_cover`);
+  }
+  for (const p of payload.pages) {
+    if ('photoRef' in p) check((p as { photoRef?: string }).photoRef, `page:${p.memoryId}:photoRef`);
+  }
+  if (bad.length > 0) {
+    throw new Error(
+      appendDevExportHint(
+        'Envoi des photos incomplet (connexion instable). Réessaie — tu ne seras pas débité une seconde fois si le paiement est déjà passé.',
+        `PRINT_PAYLOAD_LOCAL_URLS ${bad.slice(0, 6).join(' | ')}`,
+      ),
+    );
   }
 }
 
@@ -779,17 +811,49 @@ async function compressLocalJpegForGuestUpload(
   }
   const maxWidth = opts?.maxWidth ?? MEDIA_BOOK_PRINT_MAX_WIDTH;
   const quality = opts?.quality ?? MEDIA_BOOK_PDF_JPEG_QUALITY;
-  try {
-    const manipulated = await ImageManipulator.manipulateAsync(
-      src,
-      [{ resize: { width: maxWidth } }],
-      { compress: quality, format: ImageManipulator.SaveFormat.JPEG }
-    );
-    return manipulated?.uri || src;
-  } catch {
-    return src;
-  }
+  // Un seul décodage image à la fois (natif, ~40 Mo par photo 3200 px) : le réseau est
+  // parallèle, pas la RAM. Crash Hermes EXC_BAD_ACCESS observé avec décodages concurrents.
+  return imageCompressSerial(async () => {
+    try {
+      const manipulated = await ImageManipulator.manipulateAsync(
+        src,
+        [{ resize: { width: maxWidth } }],
+        { compress: quality, format: ImageManipulator.SaveFormat.JPEG }
+      );
+      return manipulated?.uri || src;
+    } catch {
+      return src;
+    }
+  });
 }
+
+/** Sémaphore minimal : au plus `n` tâches en vol (partagé entre cover / souvenirs / slots). */
+function createAsyncLimiter(n: number): <T>(task: () => Promise<T>) => Promise<T> {
+  let active = 0;
+  const queue: Array<() => void> = [];
+  const next = () => {
+    if (active >= n) return;
+    const run = queue.shift();
+    if (run) run();
+  };
+  return <T,>(task: () => Promise<T>) =>
+    new Promise<T>((resolve, reject) => {
+      const start = () => {
+        active += 1;
+        task()
+          .then(resolve, reject)
+          .finally(() => {
+            active -= 1;
+            next();
+          });
+      };
+      if (active < n) start();
+      else queue.push(start);
+    });
+}
+
+/** Décodage / recompression image : strictement séquentiel (mémoire native). */
+const imageCompressSerial = createAsyncLimiter(1);
 
 /** Pool async borné — évite Promise.all sur N photos print (jetsam ~50+ pages). */
 async function mapWithConcurrency<T, R>(
@@ -813,8 +877,45 @@ async function mapWithConcurrency<T, R>(
   return out;
 }
 
-/** Concurrence guest PDF : 1 = sûr mémoire ; 2 = un peu plus rapide si RAM ok. */
-const GUEST_PDF_MEDIA_UPLOAD_CONCURRENCY = 1;
+/**
+ * Concurrence upload guest (print / PDF).
+ * 2 PUT max : au-delà, Cloudflare/Supabase Storage renvoie 520 sous charge
+ * (constaté en prod : SIGNED_UPLOAD_FAILED pendant stash print).
+ * Décodage image **séquentiel** (`imageCompressSerial`) + plafond réseau global.
+ */
+const GUEST_PDF_MEDIA_UPLOAD_CONCURRENCY = 2;
+const guestUploadNetworkLimiter = createAsyncLimiter(GUEST_PDF_MEDIA_UPLOAD_CONCURRENCY);
+
+/** Corps d’erreur Storage (souvent page HTML Cloudflare) — jamais dans l’UI / Sentry. */
+function summarizeUploadErrorBody(status: number, body: string): string {
+  const trimmed = (body ?? '').trim();
+  if (!trimmed) return '';
+  if (/<\s*!?\s*doctype|<\s*html/i.test(trimmed) || trimmed.length > 180) {
+    if (status === 520 || status === 521 || status === 522 || status === 523 || status === 524) {
+      return 'STORAGE_TRANSIENT';
+    }
+    if (status === 429) return 'RATE_LIMITED';
+    if (status >= 500) return 'STORAGE_SERVER_ERROR';
+    return 'STORAGE_ERROR';
+  }
+  return trimmed.slice(0, 160);
+}
+
+function isRetryableSignedUploadStatus(status: number): boolean {
+  return (
+    status === 408 ||
+    status === 429 ||
+    status === 500 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504 ||
+    status === 520 ||
+    status === 521 ||
+    status === 522 ||
+    status === 523 ||
+    status === 524
+  );
+}
 
 /** Même règle que le bucket `media` côté serveur : ce n’est pas un fichier local à ré-uploader. */
 const BARE_MEDIA_PATH_RE =
@@ -905,26 +1006,33 @@ async function uploadGuestAssetMultipart(params: {
   return { url: j.url, path: j.path };
 }
 
+/**
+ * PUT image vers URL signée — expo-file-system (streaming fichier).
+ * Retry sur 5xx/520 Cloudflare (URL signée encore valide quelques secondes).
+ */
 async function uploadFileToSignedUrl(params: {
   signedUrl: string;
   localUri: string;
   mimeType: string;
 }): Promise<void> {
-  if (isIosBackgroundSignedPutUploadAvailable()) {
-    await uploadFileToSignedPutUrlIosBackground(params);
-    return;
+  let lastStatus = 0;
+  let lastBody = '';
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const res = await uploadAsyncLegacy(params.signedUrl, params.localUri, {
+      httpMethod: 'PUT',
+      uploadType: 0 as unknown as number, // BINARY_CONTENT (legacy enum value)
+      headers: {
+        'Content-Type': params.mimeType,
+      },
+    });
+    if (res.status >= 200 && res.status < 300) return;
+    lastStatus = res.status;
+    lastBody = typeof res.body === 'string' ? res.body : '';
+    if (!isRetryableSignedUploadStatus(res.status) || attempt >= 3) break;
+    await new Promise<void>(r => setTimeout(r, 400 * attempt));
   }
-
-  const res = await uploadAsyncLegacy(params.signedUrl, params.localUri, {
-    httpMethod: 'PUT',
-    uploadType: 0 as unknown as number, // BINARY_CONTENT (legacy enum value)
-    headers: {
-      'Content-Type': params.mimeType,
-    },
-  });
-  if (res.status < 200 || res.status >= 300) {
-    throw new Error(`SIGNED_UPLOAD_FAILED (${res.status}) ${res.body || ''}`.trim());
-  }
+  const summary = summarizeUploadErrorBody(lastStatus, lastBody);
+  throw new Error(`SIGNED_UPLOAD_FAILED (${lastStatus})${summary ? ` ${summary}` : ''}`.trim());
 }
 
 type GuestImageAssetForUploadUrls =
@@ -960,23 +1068,42 @@ async function guestUploadMediaImageThenReadUrl(params: {
   mimeType: string;
 }): Promise<{ readUrl: string; path: string }> {
   const { pdfTicket, asset, localUri, mimeType } = params;
-  const first = await postGuestUploadUrls({ pdfTicket, assets: [asset] });
-  const row = guestUploadRowFromJson(first.json);
-  if (first.status !== 200 || !row?.signedUrl?.trim() || !row.path?.trim()) {
-    throw new Error('PREP_NOT_READY');
-  }
-  await uploadFileToSignedUrl({ signedUrl: row.signedUrl, localUri, mimeType });
-  const readFromFirst = (row.publicUrl ?? '').trim();
-  if (readFromFirst) {
-    return { readUrl: readFromFirst, path: row.path };
-  }
-  const second = await postGuestUploadUrls({ pdfTicket, assets: [asset] });
-  const row2 = guestUploadRowFromJson(second.json);
-  const readUrl = (row2?.publicUrl ?? '').trim();
-  if (second.status !== 200 || !readUrl) {
-    throw new Error('PREP_NOT_READY');
-  }
-  return { readUrl, path: row.path };
+  return guestUploadNetworkLimiter(async () => {
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        const first = await postGuestUploadUrls({ pdfTicket, assets: [asset] });
+        const row = guestUploadRowFromJson(first.json);
+        if (first.status !== 200 || !row?.signedUrl?.trim() || !row.path?.trim()) {
+          throw new Error('PREP_NOT_READY');
+        }
+        await uploadFileToSignedUrl({ signedUrl: row.signedUrl, localUri, mimeType });
+        const readFromFirst = (row.publicUrl ?? '').trim();
+        if (readFromFirst) {
+          return { readUrl: readFromFirst, path: row.path };
+        }
+        const second = await postGuestUploadUrls({ pdfTicket, assets: [asset] });
+        const row2 = guestUploadRowFromJson(second.json);
+        const readUrl = (row2?.publicUrl ?? '').trim();
+        if (second.status !== 200 || !readUrl) {
+          throw new Error('PREP_NOT_READY');
+        }
+        return { readUrl, path: row.path };
+      } catch (e) {
+        lastErr = e;
+        const msg = e instanceof Error ? e.message : String(e);
+        const transient =
+          msg.includes('STORAGE_TRANSIENT') ||
+          msg.includes('SIGNED_UPLOAD_FAILED (520') ||
+          msg.includes('SIGNED_UPLOAD_FAILED (502') ||
+          msg.includes('SIGNED_UPLOAD_FAILED (503') ||
+          msg.includes('SIGNED_UPLOAD_FAILED (429');
+        if (!transient || attempt >= 3) break;
+        await new Promise<void>(r => setTimeout(r, 600 * attempt));
+      }
+    }
+    throw lastErr instanceof Error ? lastErr : new Error(String(lastErr ?? 'SIGNED_UPLOAD_FAILED'));
+  });
 }
 
 /** URI fichier local pour upload brut (sandbox / repli `file:` après JSON AsyncStorage). */
@@ -1491,17 +1618,233 @@ export async function generateBookPdfWithExportTicket(
   }
 }
 
-async function generateBookPdfWithExportTicketBody(
-  base: string,
+/**
+ * Avant Checkout print : upload médias + stash `pdf_payload_json` sur export_requests.
+ * Pas de rendu Chromium / Gelato ici.
+ */
+export async function stashPrintBookPayloadWithExportTicket(
+  input: GenerateBookPdfWithExportTicketInput,
+): Promise<{ exportRequestId: string; alreadyPaid: boolean }> {
+  const { printBreadcrumb, printCaptureError } = await import('@/lib/printFlowSentry');
+  const base = pdfServerBaseUrl();
+  if (!base) {
+    throw new Error(PDF_EXPORT_REQUIRES_SERVER_MESSAGE);
+  }
+  const pdfTicket = input.exportTicket.trim();
+  if (!pdfTicket) {
+    throw new Error('Ticket export manquant.');
+  }
+  if (input.exportMode !== 'print') {
+    throw new Error('stashPrintBookPayloadWithExportTicket requires exportMode=print');
+  }
+
+  printBreadcrumb('print.stash.http_start', {
+    bookId: input.bookId,
+    pages: input.pages?.length ?? 0,
+  });
+  await clearPdfExportTempDirs();
+  try {
+    try {
+      const claims = peekExportTicketClaims(pdfTicket);
+      await setPendingExportUploadTicket(pdfTicket, {
+        exportRequestId: claims?.export_request_id,
+      });
+    } catch {
+      /* ignore */
+    }
+    const { payload } = await assembleExportTicketGuestPayload(pdfTicket, input);
+    const res = await fetch(`${base}/v1/books/stash-print-payload`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${pdfTicket}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const detail = await parseGeneratePdfErrorBody(res);
+      const err = new Error(pdfServerHttpErrorMessage(res.status, detail));
+      printCaptureError('print.stash.http', err, { status: res.status });
+      throw err;
+    }
+    const json = (await res.json().catch(() => null)) as
+      | { exportRequestId?: string; alreadyPaid?: boolean }
+      | null;
+    const exportRequestId =
+      peekExportTicketClaims(pdfTicket)?.export_request_id?.trim() ||
+      json?.exportRequestId?.trim() ||
+      '';
+    if (!exportRequestId) {
+      throw new Error('stash-print-payload: exportRequestId manquant');
+    }
+    printBreadcrumb('print.stash.http_ok', {
+      exportRequestId,
+      alreadyPaid: json?.alreadyPaid === true,
+    });
+    // `alreadyPaid` : le serveur a déjà lancé PDF + Gelato en fond (paiement fini avant le stash).
+    return { exportRequestId, alreadyPaid: json?.alreadyPaid === true };
+  } finally {
+    await clearPdfExportTempDirs();
+  }
+}
+
+export type PrintFulfillStatus = {
+  exportRequestId: string;
+  status: string;
+  paymentStatus: string | null;
+  printerOrderId: string | null;
+  lastError: string | null;
+  gelatoReady: boolean;
+  phase: string;
+};
+
+/** Poll vérité Gelato — ne jamais traiter un 202 kick comme succès. */
+export async function fetchPrintFulfillStatusWithExportTicket(
+  exportTicket: string,
+): Promise<PrintFulfillStatus> {
+  const base = pdfServerBaseUrl();
+  if (!base) {
+    throw new Error('PDF server URL missing');
+  }
+  const ticket = exportTicket.trim();
+  if (!ticket) {
+    throw new Error('Export ticket missing');
+  }
+  const res = await fetch(`${base}/v1/books/print-fulfill-status`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${ticket}`,
+    },
+  });
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!res.ok) {
+    throw new Error(
+      typeof json.error === 'string' ? json.error : `print-fulfill-status ${res.status}`,
+    );
+  }
+  return {
+    exportRequestId: typeof json.exportRequestId === 'string' ? json.exportRequestId : '',
+    status: typeof json.status === 'string' ? json.status : '',
+    paymentStatus: typeof json.paymentStatus === 'string' ? json.paymentStatus : null,
+    printerOrderId: typeof json.printerOrderId === 'string' ? json.printerOrderId : null,
+    lastError: typeof json.lastError === 'string' ? json.lastError : null,
+    gelatoReady: json.gelatoReady === true,
+    phase: typeof json.phase === 'string' ? json.phase : '',
+  };
+}
+
+/**
+ * Kick PDF+Gelato : **202 accepté** = filet client OK.
+ * Ne poll **pas** gelatoReady — PDF/Gelato tournent serveur→serveur (retries fond).
+ * L’UI confirme dès `paid`, pas dès Gelato.
+ */
+export async function kickPrintFulfillAcceptedOnly(exportTicket: string): Promise<void> {
+  const { printBreadcrumb, printCaptureError } = await import('@/lib/printFlowSentry');
+  const base = pdfServerBaseUrl();
+  if (!base) {
+    throw new Error('PDF server URL missing');
+  }
+  const ticket = exportTicket.trim();
+  if (!ticket) {
+    throw new Error('Export ticket missing');
+  }
+  printBreadcrumb('print.kick.http_start');
+  const res = await fetch(`${base}/v1/books/print-fulfill`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${ticket}`,
+    },
+  });
+  if (!res.ok && res.status !== 202) {
+    const detail = await res.text().catch(() => '');
+    const err = new Error(
+      `print-fulfill ${res.status}${detail ? `: ${detail.slice(0, 120)}` : ''}`,
+    );
+    printCaptureError('print.kick.http', err, { status: res.status });
+    throw err;
+  }
+  printBreadcrumb('print.kick.http_accepted', { status: res.status });
+}
+
+/**
+ * @deprecated Préférer `kickPrintFulfillAcceptedOnly` + retries serveur.
+ * Conservé pour debug / outils qui veulent attendre Gelato.
+ */
+export async function kickPrintFulfillWithExportTicket(exportTicket: string): Promise<{
+  printerOrderId: string;
+}> {
+  const { printBreadcrumb, printCaptureError, printCaptureMessage } = await import(
+    '@/lib/printFlowSentry'
+  );
+  await kickPrintFulfillAcceptedOnly(exportTicket);
+  const ticket = exportTicket.trim();
+
+  const attempts = 90;
+  const intervalMs = 2000;
+  let last: PrintFulfillStatus | null = null;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      last = await fetchPrintFulfillStatusWithExportTicket(ticket);
+    } catch (e) {
+      if (i === attempts - 1) {
+        printCaptureError('print.kick.poll', e);
+        throw e instanceof Error ? e : new Error(String(e));
+      }
+      await new Promise(r => setTimeout(r, intervalMs));
+      continue;
+    }
+    printBreadcrumb('print.kick.poll', {
+      attempt: i + 1,
+      phase: last.phase,
+      gelatoReady: last.gelatoReady,
+      status: last.status,
+    });
+    if (last.gelatoReady && last.printerOrderId) {
+      printBreadcrumb('print.kick.gelato_ready', {
+        printerOrderId: last.printerOrderId,
+        exportRequestId: last.exportRequestId,
+      });
+      return { printerOrderId: last.printerOrderId };
+    }
+    if (last.phase === 'failed' || last.status === 'failed') {
+      const err = new Error(last.lastError || 'Préparation livre / Gelato échouée');
+      printCaptureError('print.kick.gelato_failed', err, {
+        exportRequestId: last.exportRequestId,
+        status: last.status,
+      });
+      throw err;
+    }
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+
+  printCaptureMessage(
+    'print.kick.timeout',
+    'print fulfill timed out without gelatoReady',
+    'error',
+    {
+      exportRequestId: last?.exportRequestId ?? '',
+      phase: last?.phase ?? '',
+      status: last?.status ?? '',
+    },
+  );
+  throw new Error(
+    last?.lastError?.trim() ||
+      'Délai dépassé : le livre n’est pas encore chez l’imprimeur. Réessaie — tu ne seras pas débité une seconde fois.',
+  );
+}
+
+async function assembleExportTicketGuestPayload(
   pdfTicket: string,
   input: GenerateBookPdfWithExportTicketInput,
-): Promise<{ localUri: string; response: GenerateBookPdfResponse }> {
+): Promise<{ payload: GenerateBookPdfPayload; memories: Memory[] }> {
   const { subscriptionTier, digitalExportPaid = false } = input;
   const pages = refreshBookPdfPagesMemoriesFromSqlite(input.pages);
   const memories = collectMemoriesFromPagesForPdf(pages, input.localEdits);
 
   let coverPhotoUrlOut: string | null = input.coverPhotoUrl ?? null;
   const coverLocal = (coverPhotoUrlOut ?? '').trim();
+  // Cover, souvenirs et slots album partent **en parallèle** (le temps = PUT réseau).
+  const coverTask = (async () => {
   if (coverLocal && !isHttps(coverLocal) && Platform.OS !== 'web') {
     try {
       /**
@@ -1615,8 +1958,9 @@ async function generateBookPdfWithExportTicketBody(
       );
     }
   }
+  })();
 
-  const guestMemories = await mapWithConcurrency(
+  const memoriesTask = mapWithConcurrency(
     memories,
     GUEST_PDF_MEDIA_UPLOAD_CONCURRENCY,
     async m => {
@@ -1664,10 +2008,12 @@ async function generateBookPdfWithExportTicketBody(
           /* remote — may still need local custom upload below */
         } else if (Platform.OS !== 'web' && local && !thumbLocal) {
           try {
-            const { uri: t } = await VideoThumbnails.getThumbnailAsync(local, {
-              time: 0,
-              quality: VIDEO_POSTER_PRINT_JPEG_QUALITY,
-            });
+            const { uri: t } = await imageCompressSerial(() =>
+              VideoThumbnails.getThumbnailAsync(local, {
+                time: 0,
+                quality: VIDEO_POSTER_PRINT_JPEG_QUALITY,
+              }),
+            );
             thumbLocal = t;
           } catch {
             thumbLocal = '';
@@ -1775,7 +2121,11 @@ async function generateBookPdfWithExportTicketBody(
     },
   );
 
-  const slotHttps = await buildPagePhotoRefHttpsMap(pages, pdfTicket);
+  const [, guestMemories, slotHttps] = await Promise.all([
+    coverTask,
+    memoriesTask,
+    buildPagePhotoRefHttpsMap(pages, pdfTicket),
+  ]);
   const cropImgPxByMemoryId = await resolveCropImgPxByMemoryIdForPdf(
     pages,
     input.localEdits,
@@ -1818,6 +2168,19 @@ async function generateBookPdfWithExportTicketBody(
     guestFamilyChildren: guestFamilyChildrenForPdfPayload(input.child, input.familyChildren),
     guestMemories,
   };
+
+  assertPrintPayloadRemoteOnly(payload);
+
+  return { payload, memories };
+}
+
+async function generateBookPdfWithExportTicketBody(
+  base: string,
+  pdfTicket: string,
+  input: GenerateBookPdfWithExportTicketInput,
+): Promise<{ localUri: string; response: GenerateBookPdfResponse }> {
+  const { payload, memories } = await assembleExportTicketGuestPayload(pdfTicket, input);
+
 
   const sleepMs = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
   const isRetryableGenerateStatus = (status: number) =>

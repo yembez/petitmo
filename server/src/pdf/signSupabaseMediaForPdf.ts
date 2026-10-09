@@ -65,14 +65,25 @@ export async function signUrlForPdfRender(
   if (!trimmed) return url;
   const ref = parseStoragePathFromUrl(projectOrigin, trimmed);
   if (!ref) return url;
-  const { data, error } = await supabase.storage
-    .from(ref.bucket)
-    .createSignedUrl(ref.path, PDF_RENDER_MEDIA_SIGNED_SEC);
-  if (error || !data?.signedUrl) {
-    console.warn('[pdf-sign]', ref.bucket, ref.path, error?.message);
-    return url;
+  // Retry léger : pool Supabase saturé → « Too many connections » → URL morte dans Chromium.
+  let lastErr: string | undefined;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const { data, error } = await supabase.storage
+      .from(ref.bucket)
+      .createSignedUrl(ref.path, PDF_RENDER_MEDIA_SIGNED_SEC);
+    if (!error && data?.signedUrl) {
+      return data.signedUrl;
+    }
+    lastErr = error?.message ?? 'no signedUrl';
+    console.warn('[pdf-sign]', ref.bucket, ref.path, lastErr, `attempt=${attempt}`);
+    if (/too many connections/i.test(lastErr) && attempt < 3) {
+      await new Promise(r => setTimeout(r, 200 * attempt));
+      continue;
+    }
+    break;
   }
-  return data.signedUrl;
+  // Ne pas renvoyer une URL signée expirée / morte : Chromium échoue en PDF_CROP_IMAGE_LOAD_FAILED.
+  throw new Error(`PDF_SIGN_FAILED ${ref.bucket}/${ref.path}: ${lastErr ?? 'unknown'}`);
 }
 
 const MEMORY_URL_FIELDS: Array<keyof MemoryRow> = [
@@ -121,15 +132,33 @@ export async function signMemoryRowForPdfRender(
   return out;
 }
 
+/** Limite la concurrence des createSignedUrl — évite « Too many connections » Supabase. */
+async function mapPool<T, R>(items: T[], concurrency: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(concurrency, Math.max(1, items.length)) }, async () => {
+    while (true) {
+      const i = next;
+      next += 1;
+      if (i >= items.length) return;
+      out[i] = await fn(items[i]!);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
 export async function signMemoriesMapForPdfRender(
   supabase: SupabaseClient,
   projectOrigin: string,
   map: Map<string, MemoryRow>
 ): Promise<Map<string, MemoryRow>> {
-  const entries = await Promise.all(
-    [...map.entries()].map(async ([id, row]) => [id, await signMemoryRowForPdfRender(supabase, projectOrigin, row)] as const)
-  );
-  return new Map(entries);
+  const items = [...map.entries()];
+  const signed = await mapPool(items, 4, async ([id, row]) => {
+    const next = await signMemoryRowForPdfRender(supabase, projectOrigin, row);
+    return [id, next] as const;
+  });
+  return new Map(signed);
 }
 
 export async function signChildRowForPdfRender(

@@ -6,6 +6,7 @@ import {
   PRINT_V1_PAID_DISCOUNT_PERCENT,
   type DiscountPercent,
 } from './calculateBookPrice.ts';
+import { parseShippingAddress } from '../_shared/parseShippingAddress.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -74,24 +75,6 @@ type InitBody = {
   /** refresh_upload_ticket */
   export_request_id?: string;
 };
-
-function parseShippingAddress(raw: unknown): { ok: true; value: Record<string, string> } | { ok: false; message: string } {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    return { ok: false, message: 'shipping_address_json must be an object' };
-  }
-  const o = raw as Record<string, unknown>;
-  const line1 = typeof o.line1 === 'string' ? o.line1.trim() : '';
-  const city = typeof o.city === 'string' ? o.city.trim() : '';
-  const zip = typeof o.zip === 'string' ? o.zip.trim() : '';
-  const country = typeof o.country === 'string' ? o.country.trim() : '';
-  if (!line1 || !city || !zip || !country) {
-    return { ok: false, message: 'shipping_address_json requires line1, city, zip, country' };
-  }
-  const line2 = typeof o.line2 === 'string' ? o.line2.trim() : '';
-  const value: Record<string, string> = { line1, city, zip, country };
-  if (line2) value.line2 = line2;
-  return { ok: true, value };
-}
 
 /** Compte produit authentifié (pas device-user) — pour rattacher `export_requests.user_id`. */
 async function resolveAuthUserId(req: Request): Promise<string | null> {

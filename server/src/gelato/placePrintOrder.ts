@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { formatGelatoApiError } from './apiError';
 import { gelatoOrderApiUrl, loadGelatoConfig, type GelatoConfig } from '../gelato/config';
+import { resolveGelatoShipmentMethodUid } from '../gelato/resolveShipmentMethod';
 import { gelatoShippingAddress, parsePetitmoShippingAddress } from '../gelato/shippingAddress';
 import { createSignedBooksPdfUrl } from '../pdf/pdfStorage';
 import { GELATO_MIN_INNER_PAGES } from './photobookLayout';
@@ -154,13 +155,30 @@ export async function submitGelatoPrintOrder(
     pageCount: gelatoPageCount,
   };
 
+  // Alias `standard` → souvent `api_fallback_delivery` à 0 €. Quote = UID transporteur réel.
+  let shipmentMethodUid = config.shipmentMethodUid;
+  try {
+    const resolved = await resolveGelatoShipmentMethodUid({
+      config,
+      address: addr,
+      email,
+      shippingName: shipName,
+      pageCount: gelatoPageCount,
+      orderReferenceId: params.exportRequestId,
+    });
+    shipmentMethodUid = resolved.shipmentMethodUid;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn('[gelato] shipment quote failed — fallback to config uid', msg.slice(0, 200));
+  }
+
   const body = {
     orderType: config.orderType,
     orderReferenceId: params.exportRequestId,
     customerReferenceId: String(row.crm_contact_id),
     currency: config.currency,
     items: [item],
-    shipmentMethodUid: config.shipmentMethodUid,
+    shipmentMethodUid,
     shippingAddress: gelatoShippingAddress({
       shippingName: shipName,
       address: addr,
@@ -170,6 +188,7 @@ export async function submitGelatoPrintOrder(
     metadata: [
       { key: 'petitmo_export_request_id', value: params.exportRequestId },
       { key: 'petitmo_book_id', value: params.bookId },
+      { key: 'petitmo_shipment_method_uid', value: shipmentMethodUid },
     ],
   };
 

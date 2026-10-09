@@ -2,8 +2,7 @@ import type { Express, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { verifyExportTicket, type VerifiedExportTicket } from '../auth/exportPdfTicket';
-import { buildBookHtml, buildGelatoSpreadHtml, buildGelatoBlockHtml } from '../pdf/htmlBook';
-import { renderGelatoPhotobookPdf } from '../pdf/gelatoPhotobookPdf';
+import { buildBookHtml } from '../pdf/htmlBook';
 import { countRenderedBookPages } from '../pdf/bookPageCount';
 import { htmlToDigitalPdfBuffer, htmlToPdfBuffer } from '../pdf/renderPdf';
 import { saveBookPdfAndSign, saveBookPdfForExportRequest } from '../pdf/pdfStorage';
@@ -15,11 +14,7 @@ import {
   signMemoriesMapForPdfRender,
   signUrlForPdfRender,
 } from '../pdf/signSupabaseMediaForPdf';
-import { submitGelatoPrintOrder } from '../gelato/placePrintOrder';
-import { fetchGelatoCoverLayout, assertGelatoCoverLayoutMatchesPetitmo } from '../gelato/coverDimensions';
-import { gelatoCatalogPageCount, validateGelatoInnerPageCount } from '../gelato/photobookLayout';
-import { loadGelatoConfig } from '../gelato/config';
-import { countPdfPages } from '../pdf/countPdfPages';
+import { runPrintPdfAndGelato } from '../print/fulfillPrintOrder';
 import type {
   GenerateBookPdfPayload,
   GenerateBookPdfResponse,
@@ -695,196 +690,36 @@ async function handleTicketPrintPdf(
     return;
   }
 
-  const memoryIds = [
-    ...new Set(
-      body.pages.flatMap((p): string[] => (typeof p.memoryId === 'string' && p.memoryId ? [p.memoryId] : []))
-    ),
-  ];
-
-  const memoriesById = mapGuestMemories(body.guestMemories, ticket.export_request_id);
-  for (const id of memoryIds) {
-    if (!memoriesById.has(id)) {
-      res.status(400).json({ error: 'guestMemories missing entry', memoryId: id });
-      return;
-    }
-  }
-
-  if (countRenderedBookPages(body.pages, memoriesById) < 1) {
-    res.status(400).json({ error: 'Aucune page livre à rendre (pages vides ou souvenirs manquants).' });
-    return;
-  }
-
-  const { data: lockRows, error: lockErr } = await supabase
+  // Préférer le snapshot stashé (parité webhook) si présent et valide.
+  const { data: stashRow } = await supabase
     .from('export_requests')
-    .update({ status: 'rendering' })
+    .select('pdf_payload_json')
     .eq('id', ticket.export_request_id)
-    .eq('status', 'created')
-    .select('id');
+    .maybeSingle();
+  const stashed = stashRow?.pdf_payload_json;
+  const payloadForRun =
+    stashed &&
+    typeof stashed === 'object' &&
+    (stashed as GenerateBookPdfPayload).exportMode === 'print' &&
+    Array.isArray((stashed as GenerateBookPdfPayload).pages)
+      ? (stashed as GenerateBookPdfPayload)
+      : body;
 
-  if (lockErr) {
-    console.error('[generate-pdf] export lock (print)', lockErr.message);
-    res.status(500).json({ error: 'Database error' });
+  const result = await runPrintPdfAndGelato({
+    supabase,
+    projectOrigin,
+    exportRequestId: ticket.export_request_id,
+    body: payloadForRun,
+    subscriptionTierRow: row.subscription_tier,
+  });
+
+  if (!result.ok) {
+    res.status(result.status).json({
+      error: result.error,
+      ...(result.code ? { code: result.code } : {}),
+      ...(result.detail ? { detail: result.detail } : {}),
+    });
     return;
   }
-  if (!lockRows?.length) {
-    res.status(409).json({ error: 'Export request already used or in progress', code: 'EXPORT_STATE' });
-    return;
-  }
-
-  const qrTier = row.subscription_tier === 'paid' ? 'premium' : 'free';
-
-  try {
-    const qrResult = await preparePublicTokensForExportRequest({
-      supabase,
-      exportRequestId: ticket.export_request_id,
-      bookId: body.bookId,
-      pages: body.pages,
-      memoriesById,
-      subscriptionTier: qrTier,
-      childBirthdate: body.guestChild.birthdate ?? null,
-    });
-
-    if (!qrResult.ok) {
-      await supabase
-        .from('export_requests')
-        .update({ status: 'failed', last_error: qrResult.message.slice(0, 2000) })
-        .eq('id', ticket.export_request_id);
-      res.status(qrResult.status).json({ error: qrResult.message });
-      return;
-    }
-
-    const qrWorkerPromise = startBookQrWorkers(supabase, qrResult.tokensByMemoryId);
-
-    const child: ChildRow = {
-      id: body.childId,
-      user_id: ticket.export_request_id,
-      name: body.guestChild.name,
-      photo_url: body.guestChild.photo_url ?? null,
-      birthdate: body.guestChild.birthdate ?? null,
-    };
-
-    const memoriesForHtmlPrint = await signMemoriesMapForPdfRender(supabase, projectOrigin, memoriesById);
-    const childForHtmlPrint = await signChildRowForPdfRender(supabase, projectOrigin, child);
-    const coverRawPrint = body.coverPhotoUrl ?? null;
-    const coverForHtmlPrint =
-      typeof coverRawPrint === 'string' && coverRawPrint.trim()
-        ? ((await signUrlForPdfRender(supabase, projectOrigin, coverRawPrint)) ?? coverRawPrint)
-        : null;
-
-    const gelatoConfig = loadGelatoConfig();
-    const gelatoLayoutError = gelatoConfig ? validateGelatoInnerPageCount(body.pages) : null;
-    if (gelatoLayoutError) {
-      await supabase
-        .from('export_requests')
-        .update({ status: 'failed', last_error: gelatoLayoutError.slice(0, 2000) })
-        .eq('id', ticket.export_request_id);
-      res.status(400).json({ error: gelatoLayoutError });
-      return;
-    }
-
-    const bookHtmlInput = {
-      coverTitle: body.coverTitle,
-      coverYearLabel: body.coverYearLabel,
-      coverColorId: body.coverColorId ?? null,
-      chapterTitle: body.chapterTitle,
-      backCoverTagline: body.backCoverTagline ?? null,
-      qrBaseUrl: body.qrBaseUrl,
-      exportMode: 'print' as const,
-      pages: body.pages,
-      child: childForHtmlPrint,
-      coverPhotoUrl: coverForHtmlPrint,
-      coverPhotoImgPxW: body.coverPhotoImgPxW,
-      coverPhotoImgPxH: body.coverPhotoImgPxH,
-      memoriesById: memoriesForHtmlPrint,
-      qrTokensByMemoryId: qrResult.tokensByMemoryId,
-      familyChildren: resolveFamilyChildrenForPdf(body, body.guestChild),
-    };
-
-    let pdf: Buffer;
-    if (gelatoConfig) {
-      const catalogPageCount = gelatoCatalogPageCount(body.pages);
-      const coverLayout = await fetchGelatoCoverLayout(gelatoConfig, catalogPageCount);
-      assertGelatoCoverLayoutMatchesPetitmo(coverLayout);
-      console.log(
-        '[generate-pdf] gelato product',
-        coverLayout.productUid,
-        `front ${coverLayout.contentFront.widthMm.toFixed(0)}×${coverLayout.contentFront.heightMm.toFixed(0)} mm`,
-        `spread ${coverLayout.spreadWidthMm.toFixed(0)}×${coverLayout.spreadHeightMm.toFixed(0)} mm`,
-      );
-      const spreadHtml = buildGelatoSpreadHtml(bookHtmlInput, coverLayout);
-      const blockHtml = buildGelatoBlockHtml(bookHtmlInput);
-      pdf = await renderGelatoPhotobookPdf(spreadHtml, blockHtml, coverLayout);
-    } else {
-      pdf = await htmlToPdfBuffer(buildBookHtml(bookHtmlInput));
-    }
-    await qrWorkerPromise;
-    const pdfPageCount = await countPdfPages(pdf);
-    const saved = await saveBookPdfForExportRequest(supabase, {
-      exportRequestId: ticket.export_request_id,
-      bookId: body.bookId,
-      exportMode: 'print',
-      subscriptionPaid: true,
-      pdfBytes: pdf,
-    });
-
-    await supabase
-      .from('export_requests')
-      .update({
-        status: 'done',
-        pdf_storage_path: saved.pdfStoragePath,
-        last_error: null,
-      })
-      .eq('id', ticket.export_request_id);
-
-    // Attendre Gelato avant le 200 : sinon l’app affiche succès alors que l’order draft n’est jamais parti.
-    const gelatoResult = await submitGelatoPrintOrder(supabase, {
-      exportRequestId: ticket.export_request_id,
-      bookId: body.bookId,
-      pdfStoragePath: saved.uploadedStoragePath,
-      pdfPageCount,
-      catalogPageCount: gelatoCatalogPageCount(body.pages),
-    });
-    const gelatoOrderType = gelatoConfig?.orderType;
-    let gelatoOut: GenerateBookPdfResponse['gelato'];
-    if (!gelatoResult.ok) {
-      console.error('[generate-pdf] gelato', ticket.export_request_id, gelatoResult.message);
-      gelatoOut = { ok: false, message: gelatoResult.message };
-    } else if (gelatoResult.skipped) {
-      console.warn('[generate-pdf] gelato skipped', ticket.export_request_id, gelatoResult.reason);
-      gelatoOut = {
-        ok: false,
-        skipped: true,
-        message: gelatoResult.reason,
-        ...(gelatoOrderType ? { orderType: gelatoOrderType } : {}),
-      };
-    } else {
-      console.log(
-        '[generate-pdf] gelato ok',
-        ticket.export_request_id,
-        gelatoResult.gelatoOrderId,
-        gelatoOrderType === 'draft' ? '(draft)' : '',
-      );
-      gelatoOut = {
-        ok: true,
-        orderId: gelatoResult.gelatoOrderId,
-        ...(gelatoOrderType ? { orderType: gelatoOrderType } : {}),
-      };
-    }
-
-    const out: GenerateBookPdfResponse = {
-      pdfUrlSigned: saved.pdfUrlSigned,
-      pdfStoragePath: saved.pdfStoragePath,
-      qrTokensByMemoryId: qrTokensRecord(qrResult.tokensByMemoryId),
-      gelato: gelatoOut,
-    };
-    res.status(200).json(out);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.error('[generate-pdf] ticket print path', msg, e instanceof Error ? e.stack : '');
-    await supabase
-      .from('export_requests')
-      .update({ status: 'failed', last_error: msg.slice(0, 2000) })
-      .eq('id', ticket.export_request_id);
-    res.status(500).json({ error: 'PDF generation or storage failed', detail: msg });
-  }
+  res.status(200).json(result.response);
 }

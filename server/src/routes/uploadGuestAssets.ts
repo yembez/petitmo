@@ -33,7 +33,7 @@ export function registerUploadGuestAssetsRoutes(app: Express, supabase: Supabase
       }
 
       const ticket = await verifyExportTicket(bearer);
-      if (!ticket || ticket.kind !== 'pdf') {
+      if (!ticket || (ticket.kind !== 'pdf' && ticket.kind !== 'print')) {
         res.status(401).json({ error: 'Invalid ticket' });
         return;
       }

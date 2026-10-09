@@ -40,13 +40,18 @@ function orderStatusLabel(row: {
   shipped_at: string | null;
   delivered_at: string | null;
   printer_order_json: unknown;
+  fulfill_failed_kind: string | null;
 }): string {
   if (row.payment_status === 'refunded') return 'refunded';
   const gelato = gelatoFulfillmentStatus(row.printer_order_json);
   if (row.delivered_at || gelato.includes('delivered')) return 'delivered';
   if (gelato.includes('returned')) return 'returned';
+  // Soft UX : failed retryable (course stash / Chromium) = encore « En préparation ».
+  // Seul permanent (ou Gelato failed) → « À vérifier ».
+  const fulfillPermanent =
+    row.status === 'failed' && (row.fulfill_failed_kind === 'permanent' || !row.fulfill_failed_kind);
   if (
-    row.status === 'failed' ||
+    fulfillPermanent ||
     gelato === 'failed' ||
     gelato === 'canceled' ||
     gelato === 'cancelled' ||
@@ -67,6 +72,7 @@ function orderStatusLabel(row: {
   ) {
     return 'printing';
   }
+  // paid / rendering / failed+retryable → même libellé soft côté app.
   if (row.payment_status === 'paid') return 'paid';
   return 'paid';
 }
@@ -99,6 +105,7 @@ type ExportOrderRow = {
   book_id: string | null;
   child_local_id: string | null;
   printer_order_json: unknown;
+  fulfill_failed_kind: string | null;
 };
 
 Deno.serve(async (req: Request) => {
@@ -137,7 +144,7 @@ Deno.serve(async (req: Request) => {
   const supabase = createClient(url, serviceKey);
 
   const selectCols =
-    'id, created_at, paid_at, price_cents, payment_status, status, printer_order_id, shipped_at, delivered_at, shipping_name, book_id, child_local_id, printer_order_json';
+    'id, created_at, paid_at, price_cents, payment_status, status, printer_order_id, shipped_at, delivered_at, shipping_name, book_id, child_local_id, printer_order_json, fulfill_failed_kind';
 
   const byId = new Map<string, ExportOrderRow>();
 

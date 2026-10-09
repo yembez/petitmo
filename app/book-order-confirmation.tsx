@@ -9,7 +9,6 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useFonts, DMSans_400Regular, DMSans_400Regular_Italic, DMSans_500Medium } from '@expo-google-fonts/dm-sans';
 import { THEME } from '@/constants/theme';
 import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import { scale } from '@/utils/responsive';
@@ -19,6 +18,9 @@ import {
   getBookOrderResultPdfUri,
 } from '@/lib/pendingBookOrderPdf';
 import { shareBookPdf } from '@/services/bookPdf';
+import { finishPrintStashAndKickIfNeeded } from '@/services/finishPrintAfterPaid';
+import { printBreadcrumb, printCaptureMessage } from '@/lib/printFlowSentry';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
 
 type ExportModeParam = 'pdf' | 'print';
 
@@ -48,17 +50,12 @@ export default function BookOrderConfirmationScreen() {
     marketingOptIn?: string;
   }>();
 
-  const [fontsLoaded] = useFonts({
-    DMSans_400Regular,
-    DMSans_500Medium,
-    DMSans_400Regular_Italic,
-  });
-
   const exportMode = useMemo(() => parseMode(params.exportMode), [params.exportMode]);
   const priceEuros = useMemo(() => parsePriceEuros(params.priceEuros), [params.priceEuros]);
   const email = typeof params.email === 'string' ? params.email.trim() : '';
   const marketingFromForm = params.marketingOptIn === '1';
 
+  const { t } = useAppTranslation('common');
   const [optInLoading, setOptInLoading] = useState(false);
   const [optInDone, setOptInDone] = useState(false);
   const [resultPdfUri, setResultPdfUri] = useState<string | null>(null);
@@ -69,6 +66,24 @@ export default function BookOrderConfirmationScreen() {
       setResultPdfUri(uri);
     })();
   }, []);
+
+  // Filet unique : kick 202 si pending paid encore là (webhook raté / kill app).
+  // Ne poll **pas** Gelato — retries serveur.
+  useEffect(() => {
+    if (exportMode !== 'print') return;
+    void (async () => {
+      printBreadcrumb('print.confirmation.resume_finish');
+      const result = await finishPrintStashAndKickIfNeeded();
+      printBreadcrumb('print.confirmation.resume_result', { result });
+      if (result === 'error' || result === 'missing_payload') {
+        printCaptureMessage(
+          'print.confirmation',
+          `confirmation screen finish=${result}`,
+          'warning',
+        );
+      }
+    })();
+  }, [exportMode]);
 
   const onConfirmMarketing = useCallback(async () => {
     if (!email) return;
@@ -96,19 +111,15 @@ export default function BookOrderConfirmationScreen() {
     if (resultPdfUri) void shareBookPdf(resultPdfUri);
   }, [resultPdfUri]);
 
-  const garamondItalic = fontsLoaded ? 'DMSans_400Regular_Italic' : undefined;
-  const dm400 = fontsLoaded ? 'DMSans_400Regular' : undefined;
-  const dm500 = fontsLoaded ? 'DMSans_500Medium' : undefined;
-
   const showMarketingBlock = !marketingFromForm && !optInDone;
   const subtitle =
     exportMode === 'print'
-      ? resultPdfUri
-        ? "Ton livre part à l'impression. Tu peux aussi ouvrir le PDF impression (fond perdu Gelato) pour contrôle qualité."
-        : "Ton livre est en cours d'impression. Tu recevras un email de suivi."
+      ? email
+        ? t('bookOrder.confirmationPrintBodyEmail', { email })
+        : t('bookOrder.confirmationPrintBody')
       : resultPdfUri
-        ? 'Le PDF a été généré. Tu peux le partager maintenant, ou le retrouver dans l’app.'
-        : 'Ton PDF arrive dans quelques instants.';
+        ? t('bookOrder.confirmationPdfReady')
+        : t('bookOrder.confirmationPdfPending');
 
   return (
     <ScrollView
@@ -120,12 +131,12 @@ export default function BookOrderConfirmationScreen() {
     >
       <Text style={styles.checkMark}>✓</Text>
       <Text
-        style={[styles.title, garamondItalic && { fontFamily: garamondItalic }]}
+        style={styles.title}
         accessibilityRole="header"
       >
         Ta commande est confirmée !
       </Text>
-      <Text style={[styles.sub, dm400 && { fontFamily: dm400 }]}>{subtitle}</Text>
+      <Text style={styles.sub}>{subtitle}</Text>
 
       {resultPdfUri ? (
         <PetitmoPrimaryPressable
@@ -133,23 +144,23 @@ export default function BookOrderConfirmationScreen() {
           onPress={onSharePdf}
           disabled={!resultPdfUri}
         >
-          <Text style={[styles.terracottaCtaText, dm500 && { fontFamily: dm500 }]}>
+          <Text style={styles.terracottaCtaText}>
             {exportMode === 'print' ? 'Ouvrir le PDF impression' : 'Partager le PDF'}
           </Text>
         </PetitmoPrimaryPressable>
       ) : null}
 
       <View style={styles.recap}>
-        <Text style={[styles.recapLine, dm400 && { fontFamily: dm400 }]}>
+        <Text style={styles.recapLine}>
           <Text style={styles.recapLabel}>Type : </Text>
           {exportMode === 'print' ? 'Livre imprimé' : 'PDF numérique'}
         </Text>
-        <Text style={[styles.recapLine, dm400 && { fontFamily: dm400 }]}>
+        <Text style={styles.recapLine}>
           <Text style={styles.recapLabel}>Prix payé : </Text>
           {formatEuros(priceEuros)}
         </Text>
         {email ? (
-          <Text style={[styles.recapLine, dm400 && { fontFamily: dm400 }]}>
+          <Text style={styles.recapLine}>
             <Text style={styles.recapLabel}>Email de confirmation : </Text>
             {email}
           </Text>
@@ -160,7 +171,7 @@ export default function BookOrderConfirmationScreen() {
 
       {showMarketingBlock ? (
         <View style={styles.marketingBlock}>
-          <Text style={[styles.marketingQuestion, dm400 && { fontFamily: dm400 }]}>
+          <Text style={styles.marketingQuestion}>
             Tu veux recevoir nos conseils pour capturer encore plus de souvenirs ?
           </Text>
           <PetitmoPrimaryPressable
@@ -171,13 +182,13 @@ export default function BookOrderConfirmationScreen() {
             {optInLoading ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={[styles.terracottaCtaText, dm500 && { fontFamily: dm500 }]}>
+              <Text style={styles.terracottaCtaText}>
                 Oui, j'adorerais
               </Text>
             )}
           </PetitmoPrimaryPressable>
           <Pressable onPress={onNoMarketing} hitSlop={12} style={styles.mutedLinkWrap}>
-            <Text style={[styles.mutedLink, dm400 && { fontFamily: dm400 }]}>Non merci</Text>
+            <Text style={styles.mutedLink}>Non merci</Text>
           </Pressable>
         </View>
       ) : null}
@@ -185,7 +196,7 @@ export default function BookOrderConfirmationScreen() {
       {showMarketingBlock ? <View style={styles.sep} /> : null}
 
       <Pressable style={styles.secondaryCta} onPress={onBackMemories} hitSlop={8}>
-        <Text style={[styles.secondaryCtaText, dm500 && { fontFamily: dm500 }]}>
+        <Text style={styles.secondaryCtaText}>
           Retour à mes souvenirs
         </Text>
       </Pressable>
@@ -203,9 +214,12 @@ const styles = StyleSheet.create({
     color: THEME.brandCtaOrange,
     marginBottom: scale(12),
   },
+  // Typo système (SF sur iOS) — plus moderne que la serif/DM Sans sur cet écran.
   title: {
     fontSize: scale(26),
     lineHeight: scale(32),
+    fontWeight: '700',
+    letterSpacing: -0.4,
     textAlign: 'center',
     color: THEME.textPrimary,
     marginBottom: scale(12),
@@ -237,7 +251,7 @@ const styles = StyleSheet.create({
     borderRadius: scale(12),
     alignItems: 'center',
   },
-  terracottaCtaText: { color: THEME.captureScreenCtaForeground, fontSize: scale(16) },
+  terracottaCtaText: { color: THEME.captureScreenCtaForeground, fontSize: scale(16), fontWeight: '600' },
   mutedLinkWrap: { alignSelf: 'center', paddingVertical: scale(4) },
   mutedLink: { fontSize: scale(15), color: THEME.textSecondary },
   secondaryCta: {
@@ -247,5 +261,5 @@ const styles = StyleSheet.create({
     borderRadius: scale(12),
     alignItems: 'center',
   },
-  secondaryCtaText: { fontSize: scale(16), color: THEME.textPrimary },
+  secondaryCtaText: { fontSize: scale(16), fontWeight: '600', color: THEME.textPrimary },
 });

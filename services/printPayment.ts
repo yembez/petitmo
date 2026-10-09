@@ -2,6 +2,17 @@ import { Linking } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import { supabaseAnonKey, supabaseUrl } from '@/lib/supabase';
 import { isInitExportConfigured } from '@/services/initExportApi';
+import { isSentryEnabled, Sentry } from '@/lib/sentry';
+
+/** Fil d’Ariane Sentry — diagnostiquer un Checkout qui ne s’ouvre pas (sans exception). */
+function addPrintBreadcrumb(message: string): void {
+  if (!isSentryEnabled()) return;
+  try {
+    Sentry.addBreadcrumb({ category: 'print.checkout', message, level: 'info' });
+  } catch {
+    /* ignore */
+  }
+}
 
 function printPaymentUrl(): string {
   const base = (supabaseUrl ?? '').replace(/\/$/, '');
@@ -45,19 +56,42 @@ function parseStatus(raw: unknown): PrintPaymentStatus {
   return 'unpaid';
 }
 
+export type PrintShippingAddressInput = {
+  line1: string;
+  line2?: string;
+  city: string;
+  zip: string;
+  country: string;
+};
+
 export async function createPrintPayment(input: {
   exportTicket: string;
   returnUrl: string;
   customerEmail?: string;
+  /**
+   * Adresse **finale** du formulaire au tap Commander. Le ticket a pu être créé en fond
+   * pendant la saisie (brouillon tronqué) : le serveur remplace l’adresse avant le Checkout.
+   */
+  shipping?: { shippingName: string; address: PrintShippingAddressInput; fullName?: string | null };
 }): Promise<CreatePrintPaymentResult> {
   const { status, json } = await postPrintPayment({
     action: 'create',
     exportTicket: input.exportTicket,
     returnUrl: input.returnUrl,
     ...(input.customerEmail ? { customerEmail: input.customerEmail } : {}),
+    ...(input.shipping
+      ? {
+          shippingName: input.shipping.shippingName,
+          shippingAddress: input.shipping.address,
+          ...(input.shipping.fullName ? { fullName: input.shipping.fullName } : {}),
+        }
+      : {}),
   });
   if (status === 503 || json.code === 'STRIPE_UNCONFIGURED') {
     throw new Error('STRIPE_UNCONFIGURED');
+  }
+  if (status === 400 && json.code === 'SHIPPING_INVALID') {
+    throw new Error('SHIPPING_INVALID');
   }
   if (status !== 200) {
     const msg = typeof json.error === 'string' ? json.error : `print-payment (${status})`;
@@ -161,13 +195,46 @@ export async function openPrintCheckoutAndWaitPaid(input: {
   })();
 
   try {
-    await WebBrowser.openBrowserAsync(input.checkoutUrl, {
-      enableBarCollapsing: false,
-      showTitle: true,
-      dismissButtonStyle: 'close',
-    });
-  } catch {
-    /* statut ci-dessous */
+    // L’overlay d’attente est une `View` (pas un `Modal` natif) : aucun UIViewController en
+    // cours de dismiss ne peut bloquer la présentation de SFSafariViewController.
+    try {
+      addPrintBreadcrumb('openBrowserAsync start');
+      const openedAt = Date.now();
+      const result = await WebBrowser.openBrowserAsync(input.checkoutUrl, {
+        enableBarCollapsing: false,
+        showTitle: true,
+        dismissButtonStyle: 'close',
+        presentationStyle: WebBrowser.WebBrowserPresentationStyle.FULL_SCREEN,
+      });
+      // iOS : la promesse se résout à la fermeture (cancel/dismiss). Android : souvent `opened`.
+      const elapsedMs = Date.now() - openedAt;
+      addPrintBreadcrumb(`openBrowserAsync result=${result.type} after ${elapsedMs}ms`);
+      if (__DEV__) console.log('[printPayment] openBrowserAsync', result.type, elapsedMs);
+      if (
+        elapsedMs < 1500 &&
+        result.type !== WebBrowser.WebBrowserResultType.OPENED &&
+        !sawReturnUrl &&
+        isSentryEnabled()
+      ) {
+        // Fermé « tout seul » sans que l’utilisatrice ait pu voir Stripe → à diagnostiquer.
+        Sentry.captureMessage('print checkout browser closed immediately', {
+          level: 'warning',
+          tags: { 'app.errorScope': 'bookOrder.checkoutOpen' },
+          extra: { resultType: result.type, elapsedMs },
+        });
+      }
+      if (result.type === WebBrowser.WebBrowserResultType.LOCKED) {
+        throw new Error('PRINT_CHECKOUT_LOCKED');
+      }
+    } catch (e) {
+      addPrintBreadcrumb(`openBrowserAsync failed: ${e instanceof Error ? e.message : String(e)}`);
+      if (__DEV__) console.warn('[printPayment] openBrowserAsync failed', e);
+      try {
+        await Linking.openURL(input.checkoutUrl);
+      } catch {
+        throw new Error('PRINT_CHECKOUT_OPEN_FAILED');
+      }
+    }
   } finally {
     stopPoll = true;
     sub.remove();
@@ -182,7 +249,8 @@ export async function openPrintCheckoutAndWaitPaid(input: {
   }
 
   void pollPromise;
-  const extraAttempts = sawReturnUrl && !sawCanceled ? 12 : 6;
+  // Retour via success URL : laisser le webhook arriver. Fermeture manuelle : court.
+  const extraAttempts = sawReturnUrl && !sawCanceled ? 12 : 3;
   return waitUntilPrintPaid(input.exportTicket, {
     attempts: extraAttempts,
     intervalMs: 1000,

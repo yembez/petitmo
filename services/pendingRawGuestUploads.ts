@@ -141,7 +141,14 @@ async function putUploadToSignedUrl(params: {
     headers: { 'Content-Type': params.mimeType },
   });
   if (res.status < 200 || res.status >= 300) {
-    throw new Error(`SIGNED_UPLOAD_FAILED (${res.status}) ${res.body || ''}`.trim());
+    const body = typeof res.body === 'string' ? res.body : '';
+    const summary =
+      /<\s*!?\s*doctype|<\s*html/i.test(body) || body.length > 180
+        ? res.status === 520 || res.status >= 500
+          ? 'STORAGE_TRANSIENT'
+          : 'STORAGE_ERROR'
+        : body.slice(0, 160);
+    throw new Error(`SIGNED_UPLOAD_FAILED (${res.status})${summary ? ` ${summary}` : ''}`.trim());
   }
 }
 

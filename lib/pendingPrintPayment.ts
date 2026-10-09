@@ -11,6 +11,12 @@ export type PendingPrintPayment = {
   bookId: string;
   childId: string;
   createdAt: string;
+  /**
+   * Payload (médias + pages) déjà stashé côté serveur pour ce ticket.
+   * Le Checkout s’ouvre pendant l’upload : si l’app est tuée entre paiement et fin du stash,
+   * la reprise doit terminer l’upload avant de kicker PDF + Gelato.
+   */
+  stashed?: boolean;
 };
 
 function parse(raw: string): PendingPrintPayment | null {
@@ -26,7 +32,16 @@ function parse(raw: string): PendingPrintPayment | null {
     if (!exportRequestId || !exportTicket || !email || !bookId || !Number.isFinite(priceCents)) {
       return null;
     }
-    return { exportRequestId, exportTicket, email, priceCents, bookId, childId, createdAt };
+    return {
+      exportRequestId,
+      exportTicket,
+      email,
+      priceCents,
+      bookId,
+      childId,
+      createdAt,
+      stashed: o.stashed === true,
+    };
   } catch {
     return null;
   }
@@ -39,6 +54,20 @@ export async function setPendingPrintPayment(rec: PendingPrintPayment): Promise<
     rethrowIfDeviceStorageFull(e);
     throw e;
   }
+}
+
+/** Marque le stash serveur terminé pour le ticket courant (no-op si le ticket a changé). */
+export async function markPendingPrintPaymentStashed(exportTicket: string): Promise<void> {
+  const cur = await getPendingPrintPayment();
+  if (!cur || cur.exportTicket !== exportTicket.trim()) return;
+  await setPendingPrintPayment({ ...cur, stashed: true });
+}
+
+/** Force un re-stash (payload serveur pourri / file://) pour le ticket courant. */
+export async function clearPendingPrintPaymentStashed(exportTicket: string): Promise<void> {
+  const cur = await getPendingPrintPayment();
+  if (!cur || cur.exportTicket !== exportTicket.trim()) return;
+  await setPendingPrintPayment({ ...cur, stashed: false });
 }
 
 export async function getPendingPrintPayment(): Promise<PendingPrintPayment | null> {

@@ -10,6 +10,8 @@ import { registerResolvePublicMediaTokensRoute } from './routes/resolvePublicMed
 import { registerRemapPublicMediaTokensRoute } from './routes/remapPublicMediaTokens';
 import { registerGelatoWebhookRoute } from './routes/gelatoWebhook';
 import { registerPrintCheckoutReturnRoute } from './routes/printCheckoutReturn';
+import { registerStashPrintPayloadRoute } from './routes/stashPrintPayload';
+import { registerPrintFulfillRoutes } from './routes/printFulfill';
 import {
   DIGITAL_PAGE_HEIGHT_MM,
   DIGITAL_PAGE_WIDTH_MM,
@@ -18,6 +20,7 @@ import {
   PRINT_PAGE_WIDTH_MM,
 } from './constants/pdfDigitalSpec';
 import { warmPdfBrowser } from './pdf/renderPdf';
+import { startPrintFulfillRetryScheduler } from './print/printFulfillRetryWorker';
 
 type BrowserWarmState = {
   ok: boolean;
@@ -70,6 +73,8 @@ function main(): void {
   registerResolvePublicMediaTokensRoute(app, supabase);
   registerRemapPublicMediaTokensRoute(app, supabase);
   registerGeneratePdfRoute(app, supabase, env.supabaseUrl);
+  registerStashPrintPayloadRoute(app, supabase, env.supabaseUrl);
+  registerPrintFulfillRoutes(app, supabase, env.supabaseUrl, env.supabaseServiceRoleKey);
   registerGelatoWebhookRoute(app, supabase);
   registerPrintCheckoutReturnRoute(app);
   registerUploadGuestAssetsRoutes(app, supabase);
@@ -80,6 +85,10 @@ function main(): void {
     void warmPdfBrowser().then(r => {
       browserWarm = { ...r, at: new Date().toISOString() };
       console.log('[pdf] browser warm', browserWarm);
+    });
+    startPrintFulfillRetryScheduler({
+      supabase,
+      projectOrigin: env.supabaseUrl.replace(/\/$/, ''),
     });
   });
 }

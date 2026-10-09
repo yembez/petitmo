@@ -12,6 +12,7 @@ import {
   stripeWebhookSecret,
   verifyStripeWebhookSignature,
 } from '../_shared/stripeApi.ts';
+import { triggerPrintFulfillInBackground } from '../_shared/triggerPrintFulfill.ts';
 
 type StripeEvent = {
   id?: string;
@@ -132,6 +133,8 @@ Deno.serve(async (req: Request) => {
     if (Object.keys(patch).length > 0) {
       await supabase.from('export_requests').update(patch).eq('id', row.id);
     }
+    // Idempotent : re-kick si le 1er fulfill a raté / app killée avant stash+fulfill.
+    triggerPrintFulfillInBackground(row.id);
     return jsonRes({ received: true, already: 'paid' }, 200);
   }
 
@@ -177,5 +180,6 @@ Deno.serve(async (req: Request) => {
     return jsonRes({ error: 'Database error' }, 500);
   }
 
+  triggerPrintFulfillInBackground(row.id);
   return jsonRes({ received: true, paid: row.id }, 200);
 });

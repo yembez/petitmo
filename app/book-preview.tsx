@@ -146,7 +146,7 @@ import {
   isInitExportConfigured,
   PDF_EXPORT_REQUIRES_SERVER_MESSAGE,
 } from '@/services/bookPdfServer';
-import { BookPdfGeneratingOverlay } from '@/components/BookPdfGeneratingOverlay';
+import { BookPdfGeneratingModalOverlay } from '@/components/BookPdfGeneratingOverlay';
 import { GuestPdfExportModal } from '@/components/GuestPdfExportModal';
 import {
   normalizeMemoryMediaUriForDisplay,
@@ -481,6 +481,9 @@ export default function BookPreviewScreen() {
   const [allMemories, setAllMemories] = useState<Memory[]>([]);
   const [guestExportModalVisible, setGuestExportModalVisible] = useState(false);
   const [guestExportSubmitting, setGuestExportSubmitting] = useState(false);
+  /** Préparation pending AsyncStorage avant navigation book-order (messages progressifs). */
+  const [preparingPrintOrder, setPreparingPrintOrder] = useState(false);
+  const [preparePrintMsgStep, setPreparePrintMsgStep] = useState(0);
   const pendingGuestExportMode = useRef<'screen' | 'print'>('screen');
   const [coverPickerOpen, setCoverPickerOpen] = useState(false);
   const [coverPickerRefreshing, setCoverPickerRefreshing] = useState(false);
@@ -3409,8 +3412,20 @@ export default function BookPreviewScreen() {
     t,
   ]);
 
+  useEffect(() => {
+    if (!preparingPrintOrder) {
+      setPreparePrintMsgStep(0);
+      return;
+    }
+    setPreparePrintMsgStep(0);
+    const id = setInterval(() => {
+      setPreparePrintMsgStep(s => Math.min(s + 1, 1));
+    }, 4500);
+    return () => clearInterval(id);
+  }, [preparingPrintOrder]);
+
   const goToBookOrderPrint = useCallback(() => {
-    if (exporting || guestExportSubmitting || !child) return;
+    if (exporting || guestExportSubmitting || preparingPrintOrder || !child) return;
     const innerPagesForGelato = gelatoInnerPageCount(pages);
     if (gelatoCatalogPageCount(pages) < GELATO_MIN_INNER_PAGES) {
       Alert.alert('Livre trop court pour l’impression', gelatoMinInnerPagesAlertMessage(innerPagesForGelato));
@@ -3426,67 +3441,79 @@ export default function BookPreviewScreen() {
     ).length;
     const avPageCountForOrder = pages.filter(p => p.type === 'audio' || p.type === 'video').length;
     void (async () => {
-      // Flush maquette → AsyncStorage avant pending (crops / rotations = vérité commande).
-      if (bookId) {
-        try {
-          if (saveTimerRef.current) {
-            clearTimeout(saveTimerRef.current);
-            saveTimerRef.current = null;
-          }
-          const b = await getBook(bookId);
-          if (b) {
-            const hasRotations = Object.keys(rotations).some(k => rotations[k] !== 0);
-            const hasCrops = Object.keys(photoCrops).length > 0;
-            await upsertBook({
-              ...b,
-              rotations: hasRotations ? rotations : undefined,
-              photoCrops: hasCrops ? photoCrops : undefined,
-              textEdits: undefined,
-              chapterTitle: chapterTitleLine ?? undefined,
-              backCoverTagline: backCoverTaglineLine ?? undefined,
-            });
-          }
-        } catch (e) {
-          console.warn('[book-preview] flush before print order', e);
-        }
-      }
+      setPreparingPrintOrder(true);
       try {
-        await setPendingBookOrderPdfPayload({
-        bookId: bookId ?? `draft-${child.id}`,
-        childId: child.id,
-        child,
-        familyChildren,
-        coverPhotoUrl: coverPhotoPrintUri || bookSnapshot?.coverPhotoUrl?.trim() || null,
-        coverPhotoImgPxW: coverPhotoImgPxForPdf?.w,
-        coverPhotoImgPxH: coverPhotoImgPxForPdf?.h,
-        coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
-        coverYearLabel,
+        // Flush maquette → AsyncStorage avant pending (crops / rotations = vérité commande).
+        if (bookId) {
+          try {
+            if (saveTimerRef.current) {
+              clearTimeout(saveTimerRef.current);
+              saveTimerRef.current = null;
+            }
+            const b = await getBook(bookId);
+            if (b) {
+              const hasRotations = Object.keys(rotations).some(k => rotations[k] !== 0);
+              const hasCrops = Object.keys(photoCrops).length > 0;
+              await upsertBook({
+                ...b,
+                rotations: hasRotations ? rotations : undefined,
+                photoCrops: hasCrops ? photoCrops : undefined,
+                textEdits: undefined,
+                chapterTitle: chapterTitleLine ?? undefined,
+                backCoverTagline: backCoverTaglineLine ?? undefined,
+              });
+            }
+          } catch (e) {
+            console.warn('[book-preview] flush before print order', e);
+          }
+        }
+        try {
+          await setPendingBookOrderPdfPayload({
+            bookId: bookId ?? `draft-${child.id}`,
+            childId: child.id,
+            child,
+            familyChildren,
+            coverPhotoUrl: coverPhotoPrintUri || bookSnapshot?.coverPhotoUrl?.trim() || null,
+            coverPhotoImgPxW: coverPhotoImgPxForPdf?.w,
+            coverPhotoImgPxH: coverPhotoImgPxForPdf?.h,
+            coverTitle: coverTitleLine ?? `Journal de ${child.name}`,
+            coverYearLabel,
             coverColorId,
             chapterTitle: chapterTitleLine ?? 'Notre histoire',
             backCoverTagline: backCoverTaglineLine ?? 'Chaque moment compte.',
-        pages,
-        rotations,
-        photoCrops,
-        localEdits: EMPTY_MEMORY_EDITS,
-        memoryPhotoRefs: bookSnapshot?.memoryPhotoRefs,
-        cropImgPxByMemoryId: cropImgPxByMemoryIdFromDpiMeta(cropDpiMetaByKey),
-        exportMode: 'print',
-      });
-      } catch (e) {
-        Alert.alert('Petit Cœur', isDeviceStorageFullError(e) ? t('bookOrder.storageFull') : (e instanceof Error ? e.message : 'Impossible de préparer la commande.'));
-        return;
+            pages,
+            rotations,
+            photoCrops,
+            localEdits: EMPTY_MEMORY_EDITS,
+            memoryPhotoRefs: bookSnapshot?.memoryPhotoRefs,
+            cropImgPxByMemoryId: cropImgPxByMemoryIdFromDpiMeta(cropDpiMetaByKey),
+            exportMode: 'print',
+          });
+        } catch (e) {
+          Alert.alert(
+            'Petit Cœur',
+            isDeviceStorageFullError(e)
+              ? t('bookOrder.storageFull')
+              : e instanceof Error
+                ? e.message
+                : 'Impossible de préparer la commande.',
+          );
+          return;
+        }
+        router.push({
+          pathname: '/book-order',
+          params: {
+            bookId: bookId ?? `draft-${child.id}`,
+            childId: child.id,
+            memoryPageCount: String(memoryPageCountForOrder),
+            avPageCount: String(avPageCountForOrder),
+            gelatoPageCount: String(gelatoCatalogPageCount(pages)),
+            exportMode: 'print',
+          },
+        });
+      } finally {
+        setPreparingPrintOrder(false);
       }
-      router.push({
-        pathname: '/book-order',
-        params: {
-          bookId: bookId ?? `draft-${child.id}`,
-          childId: child.id,
-          memoryPageCount: String(memoryPageCountForOrder),
-          avPageCount: String(avPageCountForOrder),
-          gelatoPageCount: String(gelatoCatalogPageCount(pages)),
-          exportMode: 'print',
-        },
-      });
     })();
   }, [
     bookId,
@@ -3502,15 +3529,18 @@ export default function BookPreviewScreen() {
     cropDpiMetaByKey,
     exporting,
     guestExportSubmitting,
+    preparingPrintOrder,
     pages,
     photoCrops,
     rotations,
     router,
     t,
+    familyChildren,
+    backCoverTaglineLine,
   ]);
 
   const handleExportBook = useCallback(() => {
-    if (exporting || guestExportSubmitting || !child) return;
+    if (exporting || guestExportSubmitting || preparingPrintOrder || !child) return;
     // V1 : export PDF monétisé hors scope — impression (+ aperçu PDF impression en QA).
     Alert.alert('Exporter', 'Choisis un format.', [
       { text: 'Annuler', style: 'cancel' },
@@ -4165,7 +4195,17 @@ export default function BookPreviewScreen() {
         onSubmit={onGuestExportSubmit}
       />
 
-      <BookPdfGeneratingOverlay visible={exporting || guestExportSubmitting} />
+      <BookPdfGeneratingModalOverlay
+        visible={exporting || guestExportSubmitting || preparingPrintOrder}
+        title={preparingPrintOrder ? t('bookOrder.printPrepareOrderTitle') : undefined}
+        subtitle={
+          preparingPrintOrder
+            ? preparePrintMsgStep === 0
+              ? t('bookOrder.printPrepareOrderBody1')
+              : t('bookOrder.printPrepareOrderBody2')
+            : undefined
+        }
+      />
     </View>
   );
 }

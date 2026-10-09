@@ -5,9 +5,9 @@ import {
   StyleSheet,
   Pressable,
   ScrollView,
-  TextInput,
   ActivityIndicator,
   Alert,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Linking,
@@ -18,7 +18,6 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as WebBrowser from 'expo-web-browser';
 import * as ExpoLinking from 'expo-linking';
-import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { ChevronRight } from 'lucide-react-native';
 import { THEME } from '@/constants/theme';
 import { CAPTURE_CTA_BORDER } from '@/constants/captureScreenPalette';
@@ -41,9 +40,11 @@ import {
   resolveBookListRowCoverUri,
   type Book,
 } from '@/services/books';
-import { listLocalChildren } from '@/lib/localDb';
+import { listLocalChildren, listLocalChildrenForUser } from '@/lib/localDb';
 import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 import { getChildren } from '@/services/children';
+import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
+import { printBreadcrumb, printCaptureError, printCaptureMessage } from '@/lib/printFlowSentry';
 import { isInitExportConfigured } from '@/services/initExportApi';
 import { initPrintOrderExport } from '@/services/printBookOrder';
 import {
@@ -55,15 +56,16 @@ import {
 import { fetchCrmPrefillByEmail } from '@/services/crmEdge';
 import {
   generateBookPdfViaServerAsGuest,
-  generateBookPdfWithExportTicket,
+  stashPrintBookPayloadWithExportTicket,
   collectMemoriesFromPagesForPdf,
   refreshBookPdfPagesMemoriesFromSqlite,
   type GenerateBookPdfServerInput,
 } from '@/services/bookPdfServer';
-import {
-  BookPdfGeneratingOverlay,
-  BookPdfGeneratingView,
-} from '@/components/BookPdfGeneratingOverlay';
+import { BookPdfGeneratingOverlay } from '@/components/BookPdfGeneratingOverlay';
+import { StableTextInput } from '@/components/StableTextInput';
+import { getFrenchCommunesForPostalCode, isFrenchPostalCode } from '@/services/frenchCommunes';
+import { finishPrintStashAndKickIfNeeded, trackPrintStashPromise } from '@/services/finishPrintAfterPaid';
+import { getCityHint, uniqueCommuneForAutofill } from '@/utils/cityMatch';
 import BookCoverThumbnail from '@/components/BookCoverThumbnail';
 import { getBookExportPrepIssues } from '@/services/bookExportPrep';
 import {
@@ -79,6 +81,7 @@ import {
 import {
   clearPendingPrintPayment,
   getPendingPrintPayment,
+  markPendingPrintPaymentStashed,
   setPendingPrintPayment,
 } from '@/lib/pendingPrintPayment';
 import { canExportBookPdfViaServer, grantDigitalExportPurchase, resolveServerPdfEntitlements } from '@/lib/digitalExportPurchase';
@@ -105,37 +108,20 @@ import {
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
 import { rememberLocalPrintOrder } from '@/lib/printOrdersCache';
 import { isDeviceStorageFullError } from '@/utils/deviceStorageFull';
+import { getEmailHint } from '@/utils/emailSanity';
+import { peekRealAuthEmail } from '@/lib/authAccount';
 
 WebBrowser.maybeCompleteAuthSession();
 
-const PRINT_KEEP_AWAKE_TAG = 'petitmo-print-fulfill';
-
-async function withPrintKeepAwake<T>(fn: () => Promise<T>): Promise<T> {
-  try {
-    await activateKeepAwakeAsync(PRINT_KEEP_AWAKE_TAG);
-  } catch {
-    /* ignore — module / plateforme */
-  }
-  try {
-    return await fn();
-  } finally {
-    try {
-      deactivateKeepAwake(PRINT_KEEP_AWAKE_TAG);
-    } catch {
-      /* ignore */
-    }
-  }
-}
-
-function isTransientPrintPdfError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err ?? '');
-  return /browserType\.launch|Target page|browser has been closed|SIGSEGV|HTTP 50[0234]|upstream|ECONNRESET|Network request failed|Service PDF|indisponible|timeout Playwright/i.test(
-    msg,
-  );
-}
-
-/** Empêche un double generate-pdf si le deep link remonte book-order pendant le fulfill. */
+/** Empêche un double post-pay (deep link + AppState) pendant la confirmation. */
 let printFulfillInFlight = false;
+
+/** Ticket print (init-export) + prix figé — partagé entre Checkout et stash en fond. */
+type PrintTicketInfo = {
+  exportTicket: string;
+  exportRequestId: string;
+  priceCents: number;
+};
 
 /** Miniature couverture carte commande — même composant que l’onglet Livres, un cran plus petit. */
 const ORDER_COVER_SCALE = 0.78;
@@ -148,6 +134,9 @@ const COUNTRY_OPTIONS = [
 ] as const;
 
 type CountryCode = (typeof COUNTRY_OPTIONS)[number]['code'];
+
+/** Champs texte libres du formulaire (miroir synchrone `liveFormRef`). */
+type LiveTextField = 'email' | 'fullName' | 'shippingName' | 'line1' | 'line2' | 'city' | 'zip';
 
 type FieldKey =
   | 'email'
@@ -224,18 +213,26 @@ async function withFreshBookPayloadForExport(
 
 function pickAddressFromJson(
   j: unknown
-): { line1: string; line2: string; city: string; zip: string; country: CountryCode } | null {
+): {
+  line1: string;
+  line2: string;
+  city: string;
+  zip: string;
+  country: CountryCode;
+  shippingName: string;
+} | null {
   if (j == null || typeof j !== 'object' || Array.isArray(j)) return null;
   const o = j as Record<string, unknown>;
   const line1 = typeof o.line1 === 'string' ? o.line1 : '';
   const line2 = typeof o.line2 === 'string' ? o.line2 : '';
   const city = typeof o.city === 'string' ? o.city : '';
   const zip = typeof o.zip === 'string' ? o.zip : '';
+  const shippingName = typeof o.shipping_name === 'string' ? o.shipping_name.trim() : '';
   const rawC = typeof o.country === 'string' ? o.country.toUpperCase() : '';
   const isCountry = (c: string): c is CountryCode => COUNTRY_OPTIONS.some(x => x.code === c);
   const country: CountryCode = isCountry(rawC) ? rawC : 'FR';
   if (!line1.trim() || !city.trim() || !zip.trim()) return null;
-  return { line1: line1.trim(), line2, city: city.trim(), zip: zip.trim(), country };
+  return { line1: line1.trim(), line2, city: city.trim(), zip: zip.trim(), country, shippingName };
 }
 
 function parseIntParam(v: string | string[] | undefined, fallback: number): number {
@@ -294,9 +291,27 @@ export default function BookOrderScreen() {
   );
   const [tier, setTier] = useState<'free' | 'paid'>('free');
   const [submitting, setSubmitting] = useState(false);
-  const [printPhase, setPrintPhase] = useState<'idle' | 'paying' | 'fulfilling'>('idle');
+  /**
+   * `opening` = init-export + session Stripe (≈2 s) · `staging` = upload bloquant avant paiement
+   * (rare : prefetch en échec) · `finishing` = paiement validé, fin d’upload + kick serveur.
+   */
+  const [printPhase, setPrintPhase] = useState<
+    'idle' | 'opening' | 'staging' | 'checking' | 'finishing'
+  >('idle');
+  /** Messages progressifs pendant chargement formulaire / finalisation post-pay. */
+  const [waitMsgStep, setWaitMsgStep] = useState(0);
   const fulfillLockRef = useRef(false);
   const submittingRef = useRef(false);
+  /** Ticket print (init-export) pour l’empreinte adresse courante — obtenu avant le Checkout. */
+  const printTicketRef = useRef<(PrintTicketInfo & { fingerprint: string }) | null>(null);
+  const printTicketInFlightRef = useRef<Promise<PrintTicketInfo> | null>(null);
+  /** Stash serveur (médias + pages) terminé pour ce ticket — l’upload tourne pendant le Checkout. */
+  const printStashReadyRef = useRef<(PrintTicketInfo & { fingerprint: string }) | null>(null);
+  const printStashInFlightRef = useRef<{ exportTicket: string; promise: Promise<PrintTicketInfo> } | null>(
+    null,
+  );
+  /** Dernier échec de stash en fond (prefetch) → on bloque avant paiement plutôt qu’après. */
+  const printStashErrorRef = useRef<{ exportTicket: string; error: unknown } | null>(null);
   const [pdfEntitled, setPdfEntitled] = useState({ premium: false, digitalPaid: false });
   const [blockedEmptyMemories, setBlockedEmptyMemories] = useState(false);
   const emptyBookAlertShownRef = useRef(false);
@@ -315,6 +330,50 @@ export default function BookOrderScreen() {
   const [zip, setZip] = useState('');
   const [country, setCountry] = useState<CountryCode>('FR');
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<FieldKey, string>>>({});
+
+  /**
+   * « Vérité clavier » : valeurs texte **synchrones** (chaque frappe via `onChangeTextImmediate`,
+   * et chaque mise à jour programmatique via `applyField`). L’état React ci-dessus sert à
+   * l’affichage et peut avoir ~160 ms de retard (`StableTextInput`) : le submit lit **cette ref**,
+   * jamais l’état — c’est ce qui part au serveur / Gelato.
+   */
+  const liveFormRef = useRef<Record<LiveTextField, string>>({
+    email: '',
+    fullName: '',
+    shippingName: '',
+    line1: '',
+    line2: '',
+    city: '',
+    zip: '',
+  });
+  const liveSetters = useRef<Record<LiveTextField, (v: string) => void>>({
+    email: setEmail,
+    fullName: setFullName,
+    shippingName: setShippingName,
+    line1: setLine1,
+    line2: setLine2,
+    city: setCity,
+    zip: setZip,
+  });
+  const applyField = useCallback((k: LiveTextField, v: string) => {
+    liveFormRef.current[k] = v;
+    liveSetters.current[k](v);
+  }, []);
+  const readLiveForm = useCallback(() => {
+    const f = liveFormRef.current;
+    return {
+      email: f.email.trim().toLowerCase(),
+      fullName: f.fullName.trim(),
+      shippingName: f.shippingName.trim(),
+      line1: f.line1.trim(),
+      line2: f.line2.trim(),
+      city: f.city.trim(),
+      zip: f.zip.trim(),
+    };
+  }, []);
+
+  /** Communes du code postal saisi (France) — hint ville + préremplissage silencieux. */
+  const [zipCommunes, setZipCommunes] = useState<{ zip: string; names: string[] } | null>(null);
 
   const coverRaw = book ? resolveBookListRowCoverUri(book) : '';
   const coverSigned = useSignedMediaUrl(coverRaw || null) ?? '';
@@ -373,6 +432,10 @@ export default function BookOrderScreen() {
     });
   }, []);
 
+  /**
+   * Local-first : peindre SQLite + e-mail local **avant** tout pull cloud / CRM.
+   * `getChildren()` + `fetchCrmPrefillByEmail` tournent en fond (Low Friction).
+   */
   useEffect(() => {
     void (async () => {
       if (!bookId || !childId) {
@@ -380,26 +443,21 @@ export default function BookOrderScreen() {
         return;
       }
       try {
-        const [ent, tLast] = await Promise.all([
-          resolveServerPdfEntitlements(),
+        const scopeUid = (peekLastRealAuthUserId() ?? '').trim();
+        const localKids = scopeUid
+          ? listLocalChildrenForUser(scopeUid)
+          : listLocalChildren();
+        const localChild = localKids.find(c => c.id === childId) ?? null;
+        if (localChild) setChild(localChild);
+
+        const [book, t, tLast] = await Promise.all([
+          getBook(bookId),
+          getUserTier(),
           getLastGuestExportEmail(),
         ]);
-        setPdfEntitled({
-          premium: ent.subscriptionTier === 'premium',
-          digitalPaid: ent.digitalExportPaid,
-        });
-
-        const [book, children, t] = await Promise.all([
-          getBook(bookId),
-          getChildren(),
-          getUserTier(),
-        ]);
         setTier(t);
-        const ch = children.find(c => c.id === childId) ?? null;
-        setChild(ch);
-        if (book) {
-          setBook(book);
-        }
+        if (book) setBook(book);
+
         const mpc =
           memoryPageCountParam >= 0
             ? memoryPageCountParam
@@ -420,33 +478,90 @@ export default function BookOrderScreen() {
 
         const startEmail = tLast?.trim() ?? '';
         if (startEmail) {
-          setEmail(startEmail);
+          applyField('email', startEmail);
           setEmailEditing(false);
-          const pre = await fetchCrmPrefillByEmail(startEmail);
-          if (pre) {
-            if (pre.full_name) {
-              setFullName(pre.full_name);
-              setShippingName(prev => (prev.trim() ? prev : pre.full_name!.trim()));
-            }
-            const addr = pickAddressFromJson(
-              pre.address_json && typeof pre.address_json === 'object' ? pre.address_json : null
-            );
-            if (addr) {
-              setLine1(addr.line1);
-              setLine2(addr.line2);
-              setCity(addr.city);
-              setZip(addr.zip);
-              setCountry(addr.country);
-            }
-          }
+        }
+
+        // Formulaire visible tout de suite — pas d’attente réseau.
+        setLoading(false);
+        printBreadcrumb('print.form.painted_local', { bookId, childId });
+
+        // Fond : entitlements + enfants cloud + CRM (n’écrase jamais une saisie en cours).
+        void resolveServerPdfEntitlements()
+          .then(ent => {
+            setPdfEntitled({
+              premium: ent.subscriptionTier === 'premium',
+              digitalPaid: ent.digitalExportPaid,
+            });
+          })
+          .catch(() => undefined);
+
+        void getChildren()
+          .then(children => {
+            const ch = children.find(c => c.id === childId) ?? null;
+            if (ch) setChild(ch);
+          })
+          .catch(() => undefined);
+
+        if (startEmail) {
+          void fetchCrmPrefillByEmail(startEmail)
+            .then(pre => {
+              if (!pre) return;
+              if (pre.full_name) {
+                if (!liveFormRef.current.fullName.trim()) {
+                  applyField('fullName', pre.full_name);
+                }
+                if (!liveFormRef.current.shippingName.trim()) {
+                  applyField('shippingName', pre.full_name.trim());
+                }
+              }
+              const addr = pickAddressFromJson(
+                pre.address_json && typeof pre.address_json === 'object'
+                  ? pre.address_json
+                  : null,
+              );
+              if (!addr) return;
+              const live = liveFormRef.current;
+              if (!live.line1.trim() && !live.city.trim() && !live.zip.trim()) {
+                applyField('line1', addr.line1);
+                applyField('line2', addr.line2);
+                applyField('city', addr.city);
+                applyField('zip', addr.zip);
+                setCountry(addr.country);
+                if (addr.shippingName && !live.shippingName.trim()) {
+                  applyField('shippingName', addr.shippingName);
+                }
+              }
+            })
+            .catch(() => undefined);
         }
       } catch {
-        /* ignore */
-      } finally {
         setLoading(false);
       }
     })();
-  }, [bookId, childId, memoryPageCountParam, router]);
+  }, [applyField, bookId, childId, memoryPageCountParam, router]);
+
+  /** Messages progressifs si le paint local traîne ou pendant la finalisation post-pay. */
+  useEffect(() => {
+    const rotating =
+      loading || (exportMode === 'print' && submitting && printPhase === 'finishing');
+    if (!rotating) {
+      setWaitMsgStep(0);
+      return;
+    }
+    setWaitMsgStep(0);
+    const id = setInterval(() => {
+      setWaitMsgStep(s => Math.min(s + 1, 2));
+    }, 4500);
+    return () => clearInterval(id);
+  }, [exportMode, loading, printPhase, submitting]);
+
+  /** Overlay « Ton livre prend vie » : fermer le clavier (reprise paid / focus champ). */
+  useEffect(() => {
+    if (exportMode === 'print' && submitting) {
+      Keyboard.dismiss();
+    }
+  }, [exportMode, submitting, printPhase]);
 
   /** Au retour de la revue livre : recalcule pages / QR / prix depuis le pending rafraîchi. */
   useFocusEffect(
@@ -487,18 +602,19 @@ export default function BookOrderScreen() {
 
   const getFieldErrors = useCallback((): Partial<Record<FieldKey, string>> => {
     const e: Partial<Record<FieldKey, string>> = {};
-    const em = email.trim();
-    if (!em) e.email = 'Requis';
-    else if (!isValidEmail(em)) e.email = 'Email invalide';
+    // Vérité clavier (pas l’état React, qui peut avoir une frappe de retard au tap Commander).
+    const f = readLiveForm();
+    if (!f.email) e.email = 'Requis';
+    else if (!isValidEmail(f.email)) e.email = 'Email invalide';
 
     if (exportMode === 'print') {
-      if (!shippingName?.trim()) e.shippingName = 'Nom sur le colis requis';
-      if (!line1?.trim()) e.line1 = 'Adresse requise';
-      if (!city?.trim()) e.city = 'Ville requise';
-      if (!zip?.trim()) e.zip = 'Code postal requis';
+      if (!f.shippingName) e.shippingName = 'Nom sur le colis requis';
+      if (!f.line1) e.line1 = 'Adresse requise';
+      if (!f.city) e.city = 'Ville requise';
+      if (!f.zip) e.zip = 'Code postal requis';
     }
     return e;
-  }, [email, city, country, exportMode, line1, shippingName, zip]);
+  }, [exportMode, readLiveForm]);
 
   const formIsComplete = useMemo(() => {
     if (!email.trim() || !isValidEmail(email)) return false;
@@ -553,88 +669,354 @@ export default function BookOrderScreen() {
     [exportMode, router]
   );
 
-  const fulfillPrintAfterPaid = useCallback(
-    async (opts: { exportTicket: string; emailNorm: string; priceCents: number }) => {
+  /**
+   * Empreinte ticket / stash : livre + e-mail + remise seulement.
+   * L’adresse **n’y figure plus** : elle est figée au Checkout (`createPrintPayment`), pas à
+   * l’init-export. Sinon chaque frappe (« Mont » → « Montpellier ») invalidait le prefetch,
+   * relançait l’upload, et après paiement l’overlay attendait tout l’upload d’un coup.
+   * Ne pas inclure `contentVerified` non plus (même piège sur la case légale).
+   */
+  const printFormFingerprint = useCallback(() => {
+    return [bookId, childId, email.trim().toLowerCase(), String(discountPercent)].join('\0');
+  }, [bookId, childId, discountPercent, email]);
+
+  /** Assez d’infos pour init-export + stash en fond (sans attendre la case légale). */
+  const printAddressReady = useMemo(() => {
+    if (exportMode !== 'print') return false;
+    return (
+      email.trim().length > 0 &&
+      isValidEmail(email) &&
+      shippingName.trim().length > 0 &&
+      line1.trim().length > 0 &&
+      city.trim().length > 0 &&
+      zip.trim().length > 0
+    );
+  }, [city, email, exportMode, line1, shippingName, zip]);
+
+  /**
+   * Étape 1 — ticket print (init-export) : un seul aller-retour Edge, prix figé.
+   * Réutilise un pending non expiré (même livre) ; sinon crée la demande.
+   * Ne lance **pas** l’upload : le Checkout doit s’ouvrir sans attendre les photos.
+   */
+  const ensurePrintTicket = useCallback(async (): Promise<PrintTicketInfo> => {
+    const fingerprint = printFormFingerprint();
+    const cached = printTicketRef.current;
+    if (cached && cached.fingerprint === fingerprint && !isExportTicketExpired(cached.exportTicket)) {
+      return {
+        exportTicket: cached.exportTicket,
+        exportRequestId: cached.exportRequestId,
+        priceCents: cached.priceCents,
+      };
+    }
+    if (printTicketInFlightRef.current) {
+      return await printTicketInFlightRef.current;
+    }
+
+    const run = (async (): Promise<PrintTicketInfo> => {
+      const pendingPayload = await getPendingBookOrderPdfPayload();
+      if (!pendingPayload) {
+        throw new Error('Aucun aperçu de livre chargé. Repasse par l’aperçu du livre.');
+      }
+      const catalogPagesForGelato = gelatoCatalogPageCount(pendingPayload.pages);
+      if (catalogPagesForGelato < GELATO_MIN_INNER_PAGES) {
+        throw new Error(gelatoMinInnerPagesAlertMessage(gelatoInnerPageCount(pendingPayload.pages)));
+      }
+
+      // Vérité clavier : l’état `email` peut avoir une frappe de retard.
+      const mail = readLiveForm().email || email.trim().toLowerCase();
+      let info: PrintTicketInfo | null = null;
+      let reusedStashed = false;
+
+      // Le ticket est rattaché au contact CRM (e-mail) : un pending avec un autre e-mail n’est
+      // pas réutilisable. L’adresse, elle, est re-figée au Checkout (`createPrintPayment`).
+      const existingPay = await getPendingPrintPayment();
+      if (
+        existingPay &&
+        existingPay.bookId === bookId &&
+        existingPay.email === mail &&
+        !isExportTicketExpired(existingPay.exportTicket)
+      ) {
+        try {
+          const st = await fetchPrintPaymentStatus(existingPay.exportTicket);
+          // Un ticket **paid** n’est pas un ticket Checkout : reprise via `completePrintAfterPaid`.
+          // Le réutiliser ici empêchait toute nouvelle commande et fake-confirmait sans Gelato.
+          if (st === 'paid') {
+            printBreadcrumb('print.ticket.skip_paid_reuse', {
+              exportRequestId: existingPay.exportRequestId,
+            });
+            throw new Error('PRINT_ALREADY_PAID');
+          }
+          if (st === 'unpaid') {
+            info = {
+              exportTicket: existingPay.exportTicket,
+              exportRequestId: existingPay.exportRequestId,
+              priceCents: existingPay.priceCents,
+            };
+            reusedStashed = existingPay.stashed === true;
+          }
+        } catch (e) {
+          if (e instanceof Error && e.message === 'PRINT_ALREADY_PAID') throw e;
+          await clearPendingPrintPayment();
+        }
+      }
+
+      if (!info) {
+        const nowIso = new Date().toISOString();
+        const contactFullName = fullName.trim() || shippingName.trim() || null;
+        const gelatoPages = catalogPagesForGelato;
+        const qrCount = pendingPayload.pages.filter(
+          (p: { type: string }) => p.type === 'audio' || p.type === 'video',
+        ).length;
+        const res = await initPrintOrderExport({
+          bookId,
+          childLocalId: childId,
+          subscriptionTierDb: subscriptionDb,
+          audioVideoPageCount: qrCount,
+          email: mail,
+          gdprConsentAtIso: nowIso,
+          contentVerifiedAtIso: nowIso,
+          cgvVersion: PRINT_ORDER_CGV_VERSION,
+          fullName: contactFullName,
+          marketingOptIn: false,
+          shippingName: shippingName.trim(),
+          shippingAddress: {
+            line1: line1.trim(),
+            ...(line2.trim() ? { line2: line2.trim() } : {}),
+            city: city.trim(),
+            zip: zip.trim(),
+            country,
+          },
+          gelatoPages,
+          discountPercent,
+          printerName: 'gelato',
+        });
+        info = {
+          exportTicket: res.exportTicket,
+          exportRequestId: res.exportRequestId,
+          priceCents: res.priceCents,
+        };
+      }
+
+      try {
+        await setPendingExportUploadTicket(info.exportTicket, {
+          exportRequestId: info.exportRequestId,
+          email: mail,
+        });
+      } catch {
+        /* ignore */
+      }
+      await setPendingPrintPayment({
+        exportRequestId: info.exportRequestId,
+        exportTicket: info.exportTicket,
+        email: mail,
+        priceCents: info.priceCents,
+        bookId,
+        childId,
+        createdAt: new Date().toISOString(),
+        stashed: reusedStashed,
+      });
+
+      printTicketRef.current = { fingerprint, ...info };
+      return info;
+    })();
+
+    printTicketInFlightRef.current = run;
+    try {
+      return await run;
+    } finally {
+      printTicketInFlightRef.current = null;
+    }
+  }, [
+    bookId,
+    childId,
+    city,
+    country,
+    discountPercent,
+    email,
+    fullName,
+    line1,
+    line2,
+    printFormFingerprint,
+    readLiveForm,
+    shippingName,
+    subscriptionDb,
+    zip,
+  ]);
+
+  /**
+   * Étape 2 — upload médias + stash serveur pour un ticket donné.
+   * Dédupliqué (prefetch fond / Checkout / reprise). Tourne **pendant** le Checkout Stripe ;
+   * `completePrintAfterPaid` attend seulement le reliquat.
+   */
+  const runPrintStash = useCallback(
+    async (ticket: PrintTicketInfo): Promise<PrintTicketInfo> => {
+      const ready = printStashReadyRef.current;
+      if (ready && ready.exportTicket === ticket.exportTicket) return ticket;
+      const inFlight = printStashInFlightRef.current;
+      if (inFlight && inFlight.exportTicket === ticket.exportTicket) {
+        return await inFlight.promise;
+      }
+
+      const run = (async (): Promise<PrintTicketInfo> => {
+        const pendingPayload = await getPendingBookOrderPdfPayload();
+        if (!pendingPayload) {
+          throw new Error('Aucun aperçu de livre chargé. Repasse par l’aperçu du livre.');
+        }
+        const payload = await withFreshBookPayloadForExport(pendingPayload);
+        void getBookExportPrepIssues({
+          pages: payload.pages,
+          localEdits: payload.localEdits,
+          coverPhotoUrl: payload.coverPhotoUrl,
+          child: payload.child,
+        });
+
+        const subscriptionTierPdf = subscriptionDb === 'paid' ? 'premium' : 'free';
+        await stashPrintBookPayloadWithExportTicket({
+          ...payload,
+          exportMode: 'print',
+          exportTicket: ticket.exportTicket,
+          subscriptionTier: subscriptionTierPdf,
+        });
+        await markPendingPrintPaymentStashed(ticket.exportTicket);
+
+        printStashReadyRef.current = { fingerprint: printFormFingerprint(), ...ticket };
+        printStashErrorRef.current = null;
+        return ticket;
+      })();
+
+      printStashInFlightRef.current = { exportTicket: ticket.exportTicket, promise: run };
+      trackPrintStashPromise(run);
+      try {
+        return await run;
+      } catch (e) {
+        printStashErrorRef.current = { exportTicket: ticket.exportTicket, error: e };
+        throw e;
+      } finally {
+        if (printStashInFlightRef.current?.promise === run) {
+          printStashInFlightRef.current = null;
+        }
+      }
+    },
+    [printFormFingerprint, subscriptionDb],
+  );
+
+  /** Prefetch fond : ticket + stash dès que l’adresse est prête. */
+  const ensurePrintStashed = useCallback(async (): Promise<PrintTicketInfo> => {
+    const ticket = await ensurePrintTicket();
+    return await runPrintStash(ticket);
+  }, [ensurePrintTicket, runPrintStash]);
+
+  /**
+   * Après paid : stash résiduel + kick 202, puis confirmation **sans** attendre Gelato.
+   * PDF/Gelato = fond serveur (retries + mail support). Low Friction.
+   */
+  const completePrintAfterPaid = useCallback(
+    async (opts: {
+      exportTicket: string;
+      emailNorm: string;
+      priceCents: number;
+      /** Reprise AppState : pas d’Alert spam ; le tap Commander reste verbeux. */
+      quiet?: boolean;
+    }) => {
       if (printFulfillInFlight || fulfillLockRef.current) return;
       printFulfillInFlight = true;
       fulfillLockRef.current = true;
       setSubmitting(true);
       submittingRef.current = true;
-      setPrintPhase('fulfilling');
+      setPrintPhase('finishing');
       try {
-        await withPrintKeepAwake(async () => {
-          const pendingPayload = await getPendingBookOrderPdfPayload();
-          if (!pendingPayload) {
-            throw new Error('Aucun aperçu de livre chargé. Repasse par l’aperçu du livre.');
-          }
-          const catalogPagesForGelato = gelatoCatalogPageCount(pendingPayload.pages);
-          if (catalogPagesForGelato < GELATO_MIN_INNER_PAGES) {
-            Alert.alert(
-              'Livre trop court pour l’impression',
-              gelatoMinInnerPagesAlertMessage(gelatoInnerPageCount(pendingPayload.pages)),
-            );
-            return;
-          }
+        const pendingPayload = await getPendingBookOrderPdfPayload();
+        const exportRequestId =
+          peekExportTicketClaims(opts.exportTicket)?.export_request_id?.trim() ||
+          (await getPendingPrintPayment())?.exportRequestId?.trim() ||
+          '';
 
-          const payload = await withFreshBookPayloadForExport(pendingPayload);
-          void getBookExportPrepIssues({
-            pages: payload.pages,
-            localEdits: payload.localEdits,
-            coverPhotoUrl: payload.coverPhotoUrl,
-            child: payload.child,
-          });
+        printBreadcrumb('print.complete_after_paid.start', {
+          exportRequestId,
+          hasPayload: !!pendingPayload,
+          bookId,
+          quiet: opts.quiet === true,
+        });
 
-          const subscriptionTierPdf = subscriptionDb === 'paid' ? 'premium' : 'free';
-          const { localUri, response: pdfResponse } = await generateBookPdfWithExportTicket({
-            ...payload,
-            exportMode: 'print',
-            exportTicket: opts.exportTicket,
-            subscriptionTier: subscriptionTierPdf,
-          });
+        await setLastGuestExportEmail(opts.emailNorm);
 
-          await setBookOrderResultPdfUri(localUri);
-          await setLastGuestExportEmail(opts.emailNorm);
-          const exportRequestId = peekExportTicketClaims(opts.exportTicket)?.export_request_id?.trim() ?? '';
+        const finishResult = await finishPrintStashAndKickIfNeeded();
+        printBreadcrumb('print.complete_after_paid.result', {
+          exportRequestId,
+          result: finishResult,
+        });
+
+        if (finishResult === 'missing_payload') {
+          printCaptureMessage(
+            'print.complete_after_paid',
+            'paid resume without local payload — clearing pending to unblock new orders',
+            'error',
+            { exportRequestId, bookId },
+          );
           if (exportRequestId) {
             await rememberLocalPrintOrder({
               id: exportRequestId,
               createdAt: new Date().toISOString(),
               priceCents: opts.priceCents,
-              status: 'printing',
+              status: 'failed',
               shippingName: '',
-              bookId: pendingPayload.bookId || bookId,
-              childId: pendingPayload.childId || childId,
-              bookTitle: (pendingPayload.coverTitle || book?.title || '').trim(),
+              bookId,
+              childId,
+              bookTitle: (pendingPayload?.coverTitle || book?.title || '').trim(),
             });
           }
-          // Seulement après succès PDF : le pending sert à reprendre sans re-payer.
           await clearPendingPrintPayment();
-          const pricePaid = opts.priceCents / 100;
-
-          const gelato = pdfResponse.gelato;
-          if (__DEV__) {
-            console.log('[book-order] gelato', gelato ?? '(absent — serveur PDF pas encore redéployé ?)');
-          }
-          if (!gelato?.ok) {
-            const detail =
-              gelato?.message?.trim() ||
-              'Le PDF a été généré mais Gelato n’a pas reçu la commande (voir logs serveur / export_requests.last_error).';
+          printTicketRef.current = null;
+          printStashReadyRef.current = null;
+          if (!opts.quiet) {
             Alert.alert(
-              'Gelato non envoyé',
-              `${detail}${
-                gelato?.skipped ? '\n\nSouvent : GELATO_* manquant sur Railway, ou GELATO_ORDER_TYPE.' : ''
-              }\n\nLe PDF local est quand même disponible.`,
-              [{ text: 'OK' }],
+              t('bookOrder.printMissingPayloadTitle'),
+              t('bookOrder.printMissingPayloadBody', {
+                orderId: exportRequestId || '—',
+              }),
+              [{ text: t('bookOrder.printMissingPayloadOk') }],
             );
-          } else if (__DEV__ && gelato.orderId) {
-            Alert.alert(
-              'Gelato OK',
-              `Order ${gelato.orderType === 'draft' ? 'draft' : ''} ${gelato.orderId}`,
-              [{ text: 'OK' }],
-            );
+            setFieldErrors({ submit: t('bookOrder.printFulfillFailed') });
           }
+          return;
+        }
 
-          const memories = collectMemoriesFromPagesForPdf(payload.pages, payload.localEdits ?? {});
+        // Stash/kick HTTP en échec : on confirme quand même si paid (webhook + retries
+        // serveur) sauf si pending reste et quiet=false → un retry stash utile.
+        if (finishResult === 'error') {
+          printCaptureMessage(
+            'print.complete_after_paid',
+            'stash/kick filet failed after paid — confirming; server retries own',
+            'warning',
+            { exportRequestId, bookId },
+          );
+        }
+
+        if (exportRequestId) {
+          await rememberLocalPrintOrder({
+            id: exportRequestId,
+            createdAt: new Date().toISOString(),
+            priceCents: opts.priceCents,
+            status: 'printing',
+            shippingName: '',
+            bookId: pendingPayload?.bookId || bookId,
+            childId: pendingPayload?.childId || childId,
+            bookTitle: (pendingPayload?.coverTitle || book?.title || '').trim(),
+          });
+        }
+
+        // Pending déjà clear par finish `done` ; sinon clear pour ne pas rebloquer le formulaire.
+        await clearPendingPrintPayment();
+        printTicketRef.current = null;
+        printStashReadyRef.current = null;
+
+        const pricePaid = opts.priceCents / 100;
+        let goFinalize = false;
+        if (pendingPayload) {
+          const memories = collectMemoriesFromPagesForPdf(
+            pendingPayload.pages,
+            pendingPayload.localEdits ?? {},
+          );
           const av = memories.filter(m => m.type === 'voice' || m.type === 'video');
           const avKeys = av.map(m => `${m.type === 'voice' ? 'audio' : 'video'}:${m.id}`);
           const hasPendingUploads = (await getPendingGuestRawUploadsCountForKeys(avKeys)) > 0;
@@ -644,25 +1026,37 @@ export default function BookOrderScreen() {
             const main = (m.media_url ?? m.edited_media_url ?? '').trim();
             return main ? !isHttps(main) : true;
           });
+          goFinalize = av.length > 0 && (hasPendingUploads || hasLocalAvToUpload);
+        }
 
-          if (av.length > 0 && (hasPendingUploads || hasLocalAvToUpload)) {
-            navigateToFinalizeMedia({
-              pricePaidEuros: pricePaid,
-              emailNorm: opts.emailNorm,
-              exportTicket: opts.exportTicket,
-            });
-            return;
-          }
-
-          await clearPendingBookOrderPdfPayload();
+        if (goFinalize) {
+          navigateToFinalizeMedia({
+            pricePaidEuros: pricePaid,
+            emailNorm: opts.emailNorm,
+            exportTicket: opts.exportTicket,
+          });
+        } else {
           navigateToConfirmation({ pricePaidEuros: pricePaid, emailNorm: opts.emailNorm });
-        });
+        }
+      } catch (e) {
+        printCaptureError('print.complete_after_paid', e, { bookId });
+        throw e;
       } finally {
         fulfillLockRef.current = false;
         printFulfillInFlight = false;
+        submittingRef.current = false;
+        setSubmitting(false);
+        setPrintPhase('idle');
       }
     },
-    [book?.title, bookId, childId, navigateToConfirmation, navigateToFinalizeMedia, subscriptionDb],
+    [
+      book?.title,
+      bookId,
+      childId,
+      navigateToConfirmation,
+      navigateToFinalizeMedia,
+      t,
+    ],
   );
 
   const applyPrintSubmitError = useCallback(
@@ -680,10 +1074,22 @@ export default function BookOrderScreen() {
         setFieldErrors({ submit: t('bookOrder.storageFull') });
       } else if (e instanceof Error && e.message === 'STRIPE_UNCONFIGURED') {
         setFieldErrors({ submit: t('bookOrder.payUnconfigured') });
+      } else if (e instanceof Error && e.message === 'SHIPPING_INVALID') {
+        setFieldErrors({ submit: t('bookOrder.shippingInvalid') });
+      } else if (e instanceof Error && e.message === 'PRINT_STASH_OR_FULFILL_FAILED') {
+        setFieldErrors({ submit: t('bookOrder.printFulfillFailed') });
       } else if (e instanceof Error && e.message === 'EXPORT_PAYMENT_REQUIRED') {
         setFieldErrors({ submit: t('bookOrder.payNotConfirmed') });
       } else if (e instanceof Error && /Invalid export ticket/i.test(e.message)) {
         setFieldErrors({ submit: t('bookOrder.payTicketExpired') });
+      } else if (
+        e instanceof Error &&
+        (/SIGNED_UPLOAD_FAILED|STORAGE_TRANSIENT|STORAGE_SERVER_ERROR|RATE_LIMITED|PRINT_PAYLOAD_LOCAL|ALBUM_SLOT/i.test(
+          e.message,
+        ) ||
+          /Envoi des photos incomplet|connexion instable|toutes les photos/i.test(e.message))
+      ) {
+        setFieldErrors({ submit: t('bookOrder.printUploadTransient') });
       } else if (
         e instanceof Error &&
         (e.message.includes('not readable') || e.message.includes('renderAsync'))
@@ -711,40 +1117,26 @@ export default function BookOrderScreen() {
           submit:
             'Le service de préparation du livre est indisponible pour le moment. Réessaie dans un instant.',
         });
-      } else if (e instanceof Error && isTransientPrintPdfError(e)) {
-        setFieldErrors({ submit: t('bookOrder.printPdfAfterPayBody') });
+      } else if (e instanceof Error && /<\s*!?\s*doctype|<\s*html/i.test(e.message)) {
+        setFieldErrors({ submit: t('bookOrder.printUploadTransient') });
       } else {
-        setFieldErrors({ submit: e instanceof Error ? e.message : 'Échec de la commande.' });
+        const msg = e instanceof Error ? e.message : 'Échec de la commande.';
+        setFieldErrors({
+          submit: msg.length > 220 || /<\s*html/i.test(msg) ? t('bookOrder.printUploadTransient') : msg,
+        });
       }
     },
     [t],
   );
 
-  const handlePrintFulfillError = useCallback(
-    (e: unknown, retryOpts?: { exportTicket: string; emailNorm: string; priceCents: number }) => {
+  const handlePrintAfterPaidError = useCallback(
+    (e: unknown) => {
       submittingRef.current = false;
       setSubmitting(false);
       setPrintPhase('idle');
-      const offerRetry = !!retryOpts && isTransientPrintPdfError(e);
-      if (offerRetry && retryOpts) {
-        Alert.alert(t('bookOrder.printPdfAfterPayTitle'), t('bookOrder.printPdfAfterPayBody'), [
-          {
-            text: t('cancel'),
-            style: 'cancel',
-            onPress: () => applyPrintSubmitError(e),
-          },
-          {
-            text: t('bookOrder.printPdfRetry'),
-            onPress: () => {
-              void fulfillPrintAfterPaid(retryOpts).catch(err => handlePrintFulfillError(err, retryOpts));
-            },
-          },
-        ]);
-        return;
-      }
       applyPrintSubmitError(e);
     },
-    [applyPrintSubmitError, fulfillPrintAfterPaid, t],
+    [applyPrintSubmitError],
   );
 
   const submitOrder = useCallback(async () => {
@@ -771,10 +1163,23 @@ export default function BookOrderScreen() {
       return;
     }
 
-    const mail = email.trim().toLowerCase();
+    // Vérité clavier : ce qui part au serveur (et à Gelato) = exactement ce qui est à l’écran.
+    const live = readLiveForm();
+    const mail = live.email;
     const nowIso = new Date().toISOString();
     // Contact CRM : prénom/nom connu (préremplissage) sinon nom sur le colis.
-    const contactFullName = fullName.trim() || shippingName.trim() || null;
+    const contactFullName = live.fullName || live.shippingName || null;
+    const finalShipping = {
+      shippingName: live.shippingName,
+      fullName: contactFullName,
+      address: {
+        line1: live.line1,
+        ...(live.line2 ? { line2: live.line2 } : {}),
+        city: live.city,
+        zip: live.zip,
+        country,
+      },
+    };
 
     // V1 : pas de plafond 5+5 A/V — facturation QR au checkout uniquement.
     const pendingPayload = await getPendingBookOrderPdfPayload();
@@ -791,8 +1196,12 @@ export default function BookOrderScreen() {
           return;
         }
       }
+      // Overlay cœur dès le tap (≈2 s : ticket + session Stripe), puis Checkout **tout de suite**.
+      // L’upload des photos tourne en fond pendant le paiement.
+      Keyboard.dismiss();
       setSubmitting(true);
       submittingRef.current = true;
+      setPrintPhase('opening');
       try {
         if (!pendingPayload) {
           setFieldErrors({ submit: 'Aucun aperçu de livre chargé. Repasse par l’aperçu du livre.' });
@@ -800,108 +1209,52 @@ export default function BookOrderScreen() {
         }
 
         const existingPay = await getPendingPrintPayment();
-        let exportTicket = '';
-        let exportRequestId = '';
-        let priceCents = 0;
-
-        const canReusePending =
-          !!existingPay &&
+        if (
+          existingPay &&
           existingPay.bookId === bookId &&
-          !isExportTicketExpired(existingPay.exportTicket);
-
-        if (canReusePending && existingPay) {
+          !isExportTicketExpired(existingPay.exportTicket)
+        ) {
           try {
-            const st = await fetchPrintPaymentStatus(existingPay.exportTicket);
-            if (st === 'paid') {
-              await fulfillPrintAfterPaid({
+            const stPaid = await fetchPrintPaymentStatus(existingPay.exportTicket);
+            if (stPaid === 'paid') {
+              await completePrintAfterPaid({
                 exportTicket: existingPay.exportTicket,
                 emailNorm: mail,
                 priceCents: existingPay.priceCents,
               });
               return;
             }
-            exportTicket = existingPay.exportTicket;
-            exportRequestId = existingPay.exportRequestId;
-            priceCents = existingPay.priceCents;
           } catch {
             await clearPendingPrintPayment();
+            printStashReadyRef.current = null;
+            printTicketRef.current = null;
           }
-        } else if (existingPay) {
-          await clearPendingPrintPayment();
         }
 
-        if (!exportTicket) {
-          const payload = await withFreshBookPayloadForExport(pendingPayload);
-          void getBookExportPrepIssues({
-            pages: payload.pages,
-            localEdits: payload.localEdits,
-            coverPhotoUrl: payload.coverPhotoUrl,
-            child: payload.child,
-          });
+        const ticket = await ensurePrintTicket();
+        const { exportTicket, priceCents } = ticket;
 
-          const gelatoPages = gelatoCatalogPageCount(payload.pages);
-          const qrCount = payload.pages.filter(
-            (p: { type: string }) => p.type === 'audio' || p.type === 'video',
-          ).length;
-
-          const res = await initPrintOrderExport({
-            bookId,
-            childLocalId: childId,
-            subscriptionTierDb: subscriptionDb,
-            audioVideoPageCount: qrCount,
-            email: mail,
-            gdprConsentAtIso: nowIso,
-            contentVerifiedAtIso: nowIso,
-            cgvVersion: PRINT_ORDER_CGV_VERSION,
-            fullName: contactFullName,
-            marketingOptIn: false,
-            shippingName: shippingName.trim(),
-            shippingAddress: {
-              line1: line1.trim(),
-              ...(line2.trim() ? { line2: line2.trim() } : {}),
-              city: city.trim(),
-              zip: zip.trim(),
-              country,
-            },
-            gelatoPages,
-            discountPercent,
-            printerName: 'gelato',
-          });
-          exportTicket = res.exportTicket;
-          exportRequestId = res.exportRequestId;
-          priceCents = res.priceCents;
-        }
-
-        try {
-          await setPendingExportUploadTicket(exportTicket, {
-            exportRequestId,
-            email: mail,
-          });
-        } catch {
-          /* disk plein éventuel — finalize tentera encore */
-        }
-        await setPendingPrintPayment({
-          exportRequestId,
-          exportTicket,
-          email: mail,
-          priceCents,
-          bookId,
-          childId,
-          createdAt: new Date().toISOString(),
+        // Checkout **tout de suite** : l’upload continue en fond (prefetch + cette promesse).
+        // On n’attend le stash qu’après `paid` (completePrintAfterPaid joint la même promesse).
+        // Bloquer ici = overlay « Ton livre prend vie » interminable avant Stripe.
+        setPrintPhase('opening');
+        void runPrintStash(ticket).catch(() => {
+          /* surface après paid */
         });
 
-        setPrintPhase('paying');
         const returnUrl = ExpoLinking.createURL('book-order-return');
+        // Adresse **finale** figée ici (le ticket a pu être créé en fond pendant la saisie).
         const pay = await createPrintPayment({
           exportTicket,
           returnUrl,
           customerEmail: mail,
+          shipping: finalShipping,
         });
         if (pay.paymentStatus === 'paid') {
           try {
-            await fulfillPrintAfterPaid({ exportTicket, emailNorm: mail, priceCents });
+            await completePrintAfterPaid({ exportTicket, emailNorm: mail, priceCents });
           } catch (e) {
-            handlePrintFulfillError(e, { exportTicket, emailNorm: mail, priceCents });
+            handlePrintAfterPaidError(e);
           }
           return;
         }
@@ -909,37 +1262,80 @@ export default function BookOrderScreen() {
           throw new Error(t('bookOrder.payOpenFailed'));
         }
 
-        const st = await openPrintCheckoutAndWaitPaid({
-          checkoutUrl: pay.checkoutUrl,
-          exportTicket,
-          onBrowserClosed: ({ canceled }) => {
-            if (canceled) return;
-            setPrintPhase('fulfilling');
-            setSubmitting(true);
-            submittingRef.current = true;
-          },
-        });
+        // Checkout : l’overlay (View, pas Modal) reste affiché sous SFSafariViewController —
+        // pas de flash du formulaire, et aucune présentation iOS en conflit.
+        const checkoutUrl = pay.checkoutUrl;
+        const hideWait = () => {
+          submittingRef.current = false;
+          setSubmitting(false);
+          setPrintPhase('idle');
+        };
+
+        let st: 'unpaid' | 'paid' | 'failed' | 'refunded' = 'unpaid';
+        try {
+          st = await openPrintCheckoutAndWaitPaid({
+            checkoutUrl,
+            exportTicket,
+            onBrowserClosed: ({ canceled }) => {
+              if (canceled) {
+                hideWait();
+                return;
+              }
+              setSubmitting(true);
+              submittingRef.current = true;
+              setPrintPhase('checking');
+            },
+          });
+        } catch (e) {
+          hideWait();
+          if (e instanceof Error && e.message === 'PRINT_CHECKOUT_OPEN_FAILED') {
+            Alert.alert(t('bookOrder.payCheckoutTitle'), t('bookOrder.payOpenFailed'), [
+              { text: t('cancel'), style: 'cancel' },
+              {
+                text: t('bookOrder.payCheckoutReopen'),
+                onPress: () => {
+                  void Linking.openURL(checkoutUrl);
+                },
+              },
+            ]);
+            return;
+          }
+          throw e;
+        }
         if (st !== 'paid') {
+          hideWait();
+          Alert.alert(t('bookOrder.payCheckoutTitle'), t('bookOrder.payCheckoutNotDone'), [
+            { text: t('cancel'), style: 'cancel' },
+            {
+              text: t('bookOrder.payCheckoutReopen'),
+              onPress: () => {
+                void Linking.openURL(checkoutUrl);
+              },
+            },
+          ]);
           setFieldErrors({ submit: t('bookOrder.payNotConfirmed') });
           return;
         }
-        setPrintPhase('fulfilling');
         try {
-          await fulfillPrintAfterPaid({ exportTicket, emailNorm: mail, priceCents });
+          await completePrintAfterPaid({ exportTicket, emailNorm: mail, priceCents });
         } catch (e) {
-          handlePrintFulfillError(e, { exportTicket, emailNorm: mail, priceCents });
+          handlePrintAfterPaidError(e);
         }
       } catch (e) {
         applyPrintSubmitError(e);
       } finally {
-        submittingRef.current = false;
-        setSubmitting(false);
-        setPrintPhase('idle');
+        // Si la finalisation tourne déjà via la reprise (deep link / AppState), garder l’overlay.
+        if (!fulfillLockRef.current) {
+          submittingRef.current = false;
+          setSubmitting(false);
+          setPrintPhase('idle');
+        }
       }
       return;
     }
 
     // PDF
+    Keyboard.dismiss();
     setSubmitting(true);
     setPrepHint(null);
     try {
@@ -1012,34 +1408,159 @@ export default function BookOrderScreen() {
     childId,
     contentVerified,
     country,
-    discountPercent,
-    email,
     exportMode,
-    fullName,
     getFieldErrors,
-    handlePrintFulfillError,
-    line1,
-    line2,
+    handlePrintAfterPaidError,
     memoryPageCount,
     navigateToConfirmation,
     navigateToFinalizeMedia,
-    fulfillPrintAfterPaid,
+    completePrintAfterPaid,
+    ensurePrintTicket,
+    runPrintStash,
+    readLiveForm,
     router,
-    shippingName,
     subscriptionDb,
     t,
-    zip,
-    city,
   ]);
 
   useEffect(() => {
     submittingRef.current = submitting;
   }, [submitting]);
 
+  // Code postal FR → communes (fond, cache) : préremplit la ville si vide et unique ; sinon
+  // alimente un hint doux sous le champ ville. Jamais bloquant, jamais d’attente visible.
+  useEffect(() => {
+    if (exportMode !== 'print' || country !== 'FR') {
+      setZipCommunes(null);
+      return;
+    }
+    const z = zip.trim();
+    if (!isFrenchPostalCode(z)) {
+      setZipCommunes(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void getFrenchCommunesForPostalCode(z).then(names => {
+        if (cancelled) return;
+        setZipCommunes({ zip: z, names });
+        const unique = uniqueCommuneForAutofill(names);
+        if (unique && !liveFormRef.current.city.trim()) {
+          applyField('city', unique);
+          clearError('city');
+        }
+      });
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [applyField, clearError, country, exportMode, zip]);
+
+  const cityHint = useMemo(() => {
+    if (!zipCommunes || zipCommunes.zip !== zip.trim()) return null;
+    return getCityHint(city, zipCommunes.names);
+  }, [city, zip, zipCommunes]);
+
+  // Invalide ticket / stash seulement si livre / e-mail / remise change (plus l’adresse).
+  // Ne jamais clear un pending **paid** (sinon on perd la reprise Gelato).
+  useEffect(() => {
+    const fp = printFormFingerprint();
+    const ticket = printTicketRef.current;
+    if (ticket && ticket.fingerprint !== fp) {
+      printTicketRef.current = null;
+      printStashReadyRef.current = null;
+      printStashErrorRef.current = null;
+      if (!printStashInFlightRef.current && !printTicketInFlightRef.current) {
+        void (async () => {
+          const pending = await getPendingPrintPayment();
+          if (!pending) return;
+          try {
+            const st = await fetchPrintPaymentStatus(pending.exportTicket);
+            if (st === 'paid') {
+              printBreadcrumb('print.ticket.keep_paid_pending', {
+                exportRequestId: pending.exportRequestId,
+              });
+              return;
+            }
+          } catch {
+            /* si status illisible, ne pas wipe un pending récent */
+            return;
+          }
+          await clearPendingPrintPayment();
+        })();
+      }
+    }
+  }, [printFormFingerprint]);
+
+  // Low Friction : ticket + stash dès que l’adresse est prête (pendant que tu coches la case légale).
+  // L’empreinte ignore l’adresse : une fois le prefetch lancé, taper la ville ne le relance pas.
+  useEffect(() => {
+    if (exportMode !== 'print' || !printAddressReady || loading || submitting) return;
+    const fp = printFormFingerprint();
+    if (
+      printStashReadyRef.current?.fingerprint === fp &&
+      printStashReadyRef.current &&
+      !isExportTicketExpired(printStashReadyRef.current.exportTicket)
+    ) {
+      return;
+    }
+    if (
+      printStashInFlightRef.current &&
+      printTicketRef.current?.fingerprint === fp
+    ) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      void (async () => {
+        // Pending paid → finaliser Gelato, ne pas créer un nouveau ticket en prefetch.
+        const pending = await getPendingPrintPayment();
+        if (pending && pending.bookId === bookId && !isExportTicketExpired(pending.exportTicket)) {
+          try {
+            const st = await fetchPrintPaymentStatus(pending.exportTicket);
+            if (st === 'paid') {
+              printBreadcrumb('print.prefetch.paid_finish', {
+                exportRequestId: pending.exportRequestId,
+              });
+              // Ne pas laisser le formulaire « mort » : finaliser Gelato (re-stash si failed).
+              void completePrintAfterPaid({
+                exportTicket: pending.exportTicket,
+                emailNorm: pending.email,
+                priceCents: pending.priceCents,
+                quiet: true,
+              });
+              return;
+            }
+          } catch {
+            /* continue prefetch unpaid */
+          }
+        }
+        try {
+          await ensurePrintStashed();
+        } catch (e) {
+          if (e instanceof Error && e.message === 'PRINT_ALREADY_PAID') return;
+          if (__DEV__) console.warn('[book-order] prefetch stash', e);
+        }
+      })();
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [
+    bookId,
+    completePrintAfterPaid,
+    ensurePrintStashed,
+    exportMode,
+    printAddressReady,
+    loading,
+    printFormFingerprint,
+    submitting,
+  ]);
+
   useEffect(() => {
     if (exportMode !== 'print' || !bookId) return;
 
     const tryResumePaid = async (waitForPaid: boolean) => {
+      // Si un kick est déjà en cours (souvent gelé après background iOS), on le laisse
+      // finir — `finishPrint` re-stashera si le serveur est en failed.
       if (printFulfillInFlight || fulfillLockRef.current) return;
       const pending = await getPendingPrintPayment();
       if (!pending || pending.bookId !== bookId) return;
@@ -1048,7 +1569,7 @@ export default function BookOrderScreen() {
         if (waitForPaid) {
           setSubmitting(true);
           submittingRef.current = true;
-          setPrintPhase('fulfilling');
+          setPrintPhase('finishing');
           const st = await waitUntilPrintPaid(pending.exportTicket, {
             attempts: 15,
             intervalMs: 1000,
@@ -1065,34 +1586,38 @@ export default function BookOrderScreen() {
           if (st !== 'paid') return;
           setSubmitting(true);
           submittingRef.current = true;
+          setPrintPhase('finishing');
         }
-        await fulfillPrintAfterPaid({
+        await completePrintAfterPaid({
           exportTicket: pending.exportTicket,
           emailNorm: pending.email,
           priceCents: pending.priceCents,
+          quiet: !waitForPaid,
         });
       } catch (e) {
-        handlePrintFulfillError(e, {
-          exportTicket: pending.exportTicket,
-          emailNorm: pending.email,
-          priceCents: pending.priceCents,
-        });
+        handlePrintAfterPaidError(e);
         submittingRef.current = false;
         setSubmitting(false);
         setPrintPhase('idle');
       }
     };
 
-    if (resumePayment) {
-      void tryResumePaid(true);
-    }
+    // Mount : reprise paid même sans deep link (évite formulaire bloqué sans AppState).
+    void tryResumePaid(!!resumePayment);
 
     const sub = AppState.addEventListener('change', (next) => {
       if (next !== 'active') return;
       void tryResumePaid(false);
     });
     return () => sub.remove();
-  }, [bookId, exportMode, fulfillPrintAfterPaid, handlePrintFulfillError, resumePayment]);
+  }, [bookId, exportMode, completePrintAfterPaid, handlePrintAfterPaidError, resumePayment]);
+
+  /**
+   * E-mail suspect / différent du compte — rappel doux, jamais bloquant (Low Friction).
+   * Doit rester **avant** les `return` anticipés (spinner) : un hook après un early return
+   * casse l’ordre des hooks (« Rendered more hooks… ») → crash fatal en prod.
+   */
+  const emailHint = useMemo(() => getEmailHint(email, peekRealAuthEmail()), [email]);
 
   if (!bookId || !childId) {
     return (
@@ -1109,12 +1634,33 @@ export default function BookOrderScreen() {
   }
 
   if (loading) {
-    if (resumePayment && exportMode === 'print') {
-      return <BookPdfGeneratingView />;
-    }
+    const loadingBody =
+      waitMsgStep <= 0
+        ? t('bookOrder.formLoadingBody1')
+        : waitMsgStep === 1
+          ? t('bookOrder.formLoadingBody2')
+          : t('bookOrder.formLoadingBody3');
     return (
-      <View style={[styles.center, { paddingTop: insets.top }]}>
+      <View style={[styles.center, { paddingTop: insets.top, paddingHorizontal: scale(28) }]}>
         <ActivityIndicator size="large" color={THEME.brandCtaOrange} />
+        <Text
+          style={[
+            styles.muted,
+            { marginTop: scale(20), textAlign: 'center' },
+            dm500 && { fontFamily: dm500 },
+          ]}
+        >
+          {t('bookOrder.formLoadingTitle')}
+        </Text>
+        <Text
+          style={[
+            styles.muted,
+            { marginTop: scale(8), textAlign: 'center' },
+            dm500 && { fontFamily: dm500 },
+          ]}
+        >
+          {loadingBody}
+        </Text>
       </View>
     );
   }
@@ -1141,6 +1687,72 @@ export default function BookOrderScreen() {
     );
   };
 
+  const emailHintNode = emailHint ? (
+    <View style={styles.emailHintRow}>
+      <Text style={[styles.emailHint, dm500 && { fontFamily: dm500 }]}>
+        {emailHint.kind === 'typo'
+          ? t('bookOrder.emailHintTypo', { suggestion: emailHint.suggestion })
+          : emailHint.kind === 'short'
+            ? t('bookOrder.emailHintShort')
+            : t('bookOrder.emailHintAccount', { accountEmail: emailHint.accountEmail })}
+      </Text>
+      {emailHint.kind !== 'short' ? (
+        <Pressable
+          hitSlop={8}
+          onPress={() => {
+            applyField('email', emailHint.kind === 'typo' ? emailHint.suggestion : emailHint.accountEmail);
+            setEmailEditing(false);
+            clearError('email');
+          }}
+        >
+          <Text style={[styles.emailHintAction, dm600 && { fontFamily: dm600 }]}>
+            {emailHint.kind === 'typo'
+              ? t('bookOrder.emailHintUse')
+              : t('bookOrder.emailHintUseAccount')}
+          </Text>
+        </Pressable>
+      ) : null}
+    </View>
+  ) : null;
+
+  /** Ville ≠ communes du code postal — suggestion douce, saisie libre conservée. */
+  const cityHintNode = cityHint ? (
+    <View style={styles.emailHintRow}>
+      <Text style={[styles.emailHint, dm500 && { fontFamily: dm500 }]}>
+        {t('bookOrder.cityHint', { zip: zip.trim(), suggestion: cityHint.suggestion })}
+      </Text>
+      <Pressable
+        hitSlop={8}
+        onPress={() => {
+          applyField('city', cityHint.suggestion);
+          clearError('city');
+        }}
+      >
+        <Text style={[styles.emailHintAction, dm600 && { fontFamily: dm600 }]}>
+          {t('bookOrder.cityHintUse')}
+        </Text>
+      </Pressable>
+    </View>
+  ) : null;
+
+  const printWaitVisible = exportMode === 'print' && submitting;
+  const printWaitTitle =
+    printPhase === 'opening' || printPhase === 'checking'
+      ? t('bookOrder.printOpeningTitle')
+      : t('bookOrder.printWaitTitle');
+  const printWaitSubtitle =
+    printPhase === 'opening'
+      ? t('bookOrder.printOpeningBody')
+      : printPhase === 'checking'
+        ? t('bookOrder.printCheckingBody')
+        : printPhase === 'finishing'
+          ? waitMsgStep <= 0
+            ? t('bookOrder.printFinishingBody1')
+            : waitMsgStep === 1
+              ? t('bookOrder.printFinishingBody2')
+              : t('bookOrder.printFinishingBody3')
+          : t('bookOrder.printWaitStagingBody');
+
   const stickyCta = (
     <View style={[styles.stickyCtaWrap, { paddingBottom: Math.max(insets.bottom, scale(12)) }]}>
       <Pressable
@@ -1156,7 +1768,8 @@ export default function BookOrderScreen() {
         accessibilityRole="button"
         accessibilityLabel={ctaLabel}
       >
-        {submitting ? (
+        {/* Print : attente = overlay cœur (pas de spinner dans le CTA). PDF : spinner OK. */}
+        {submitting && exportMode === 'pdf' ? (
           <ActivityIndicator color="#FFFFFF" />
         ) : (
           <Text
@@ -1350,13 +1963,13 @@ export default function BookOrderScreen() {
             style={styles.devFillBtn}
             onPress={() => {
               const stamp = Date.now().toString(36);
-              setEmail(`qa+gelato-${stamp}@example.com`);
+              applyField('email', `qa+gelato-${stamp}@example.com`);
               setEmailEditing(false);
-              setShippingName('Test Petit Cœur Gelato');
-              setLine1('12 rue Example');
-              setLine2('');
-              setCity('Paris');
-              setZip('75001');
+              applyField('shippingName', 'Test Petit Cœur Gelato');
+              applyField('line1', '12 rue Example');
+              applyField('line2', '');
+              applyField('city', 'Paris');
+              applyField('zip', '75001');
               setCountry('FR');
               setFieldErrors({});
             }}
@@ -1375,15 +1988,18 @@ export default function BookOrderScreen() {
                 <Text style={[styles.fieldLabel, dm500 && { fontFamily: dm500 }]}>
                   {t('bookOrder.fieldFullName')}
                 </Text>
-                <TextInput
+                <StableTextInput
                   style={[
                     styles.fieldInput,
                     dm500 && { fontFamily: dm500 },
                     fieldErrors.shippingName && styles.inputError,
                   ]}
                   value={shippingName}
+                  onChangeTextImmediate={v => {
+                    liveFormRef.current.shippingName = v;
+                  }}
                   onChangeText={v => {
-                    setShippingName(v);
+                    applyField('shippingName', v);
                     clearError('shippingName');
                   }}
                   placeholder={t('bookOrder.fieldFullName')}
@@ -1399,15 +2015,18 @@ export default function BookOrderScreen() {
                 <Text style={[styles.fieldLabel, dm500 && { fontFamily: dm500 }]}>
                   {t('bookOrder.fieldAddress')}
                 </Text>
-                <TextInput
+                <StableTextInput
                   style={[
                     styles.fieldInput,
                     dm500 && { fontFamily: dm500 },
                     fieldErrors.line1 && styles.inputError,
                   ]}
                   value={line1}
+                  onChangeTextImmediate={v => {
+                    liveFormRef.current.line1 = v;
+                  }}
                   onChangeText={v => {
-                    setLine1(v);
+                    applyField('line1', v);
                     clearError('line1');
                   }}
                   placeholder={t('bookOrder.placeholderAddress')}
@@ -1421,10 +2040,13 @@ export default function BookOrderScreen() {
                 <Text style={[styles.fieldLabel, dm500 && { fontFamily: dm500 }]}>
                   {t('bookOrder.fieldAddress2')}
                 </Text>
-                <TextInput
+                <StableTextInput
                   style={[styles.fieldInput, dm500 && { fontFamily: dm500 }]}
                   value={line2}
-                  onChangeText={setLine2}
+                  onChangeTextImmediate={v => {
+                    liveFormRef.current.line2 = v;
+                  }}
+                  onChangeText={v => applyField('line2', v)}
                   placeholder={t('bookOrder.placeholderAddress2')}
                   placeholderTextColor={THEME.textSecondary}
                 />
@@ -1436,15 +2058,18 @@ export default function BookOrderScreen() {
                   <Text style={[styles.fieldLabel, dm500 && { fontFamily: dm500 }]}>
                     {t('bookOrder.fieldZip')}
                   </Text>
-                  <TextInput
+                  <StableTextInput
                     style={[
                       styles.fieldInput,
                       dm500 && { fontFamily: dm500 },
                       fieldErrors.zip && styles.inputError,
                     ]}
                     value={zip}
+                    onChangeTextImmediate={v => {
+                      liveFormRef.current.zip = v;
+                    }}
                     onChangeText={v => {
-                      setZip(v);
+                      applyField('zip', v);
                       clearError('zip');
                     }}
                     placeholder={t('bookOrder.fieldZip')}
@@ -1458,21 +2083,25 @@ export default function BookOrderScreen() {
                   <Text style={[styles.fieldLabel, dm500 && { fontFamily: dm500 }]}>
                     {t('bookOrder.fieldCity')}
                   </Text>
-                  <TextInput
+                  <StableTextInput
                     style={[
                       styles.fieldInput,
                       dm500 && { fontFamily: dm500 },
                       fieldErrors.city && styles.inputError,
                     ]}
                     value={city}
+                    onChangeTextImmediate={v => {
+                      liveFormRef.current.city = v;
+                    }}
                     onChangeText={v => {
-                      setCity(v);
+                      applyField('city', v);
                       clearError('city');
                     }}
                     placeholder={t('bookOrder.fieldCity')}
                     placeholderTextColor={THEME.textSecondary}
                   />
                   {fieldErrors.city ? <Text style={styles.err}>{fieldErrors.city}</Text> : null}
+                  {cityHintNode}
                 </View>
               </View>
 
@@ -1513,19 +2142,23 @@ export default function BookOrderScreen() {
                   {email.trim()}
                 </Text>
               ) : (
-                <TextInput
+                <StableTextInput
                   style={[
                     styles.fieldInput,
                     dm500 && { fontFamily: dm500 },
                     fieldErrors.email && styles.inputError,
                   ]}
                   value={email}
+                  onChangeTextImmediate={v => {
+                    liveFormRef.current.email = v;
+                  }}
                   onChangeText={v => {
-                    setEmail(v);
+                    applyField('email', v);
                     clearError('email');
                   }}
-                  onBlur={() => {
-                    if (isValidEmail(email)) setEmailEditing(false);
+                  onEndEditing={e => {
+                    // Texte natif (l’état parent peut avoir 1 frappe de retard).
+                    if (isValidEmail(e.nativeEvent.text)) setEmailEditing(false);
                   }}
                   placeholder="email@exemple.com"
                   placeholderTextColor={THEME.textSecondary}
@@ -1535,6 +2168,7 @@ export default function BookOrderScreen() {
                 />
               )}
               {fieldErrors.email ? <Text style={styles.err}>{fieldErrors.email}</Text> : null}
+              {emailHintNode}
             </View>
           </>
         ) : (
@@ -1543,15 +2177,18 @@ export default function BookOrderScreen() {
               {t('bookOrder.fieldEmail')}
             </Text>
             <View style={styles.formCard}>
-              <TextInput
+              <StableTextInput
                 style={[
                   styles.fieldInput,
                   dm500 && { fontFamily: dm500 },
                   fieldErrors.email && styles.inputError,
                 ]}
                 value={email}
+                onChangeTextImmediate={v => {
+                  liveFormRef.current.email = v;
+                }}
                 onChangeText={v => {
-                  setEmail(v);
+                  applyField('email', v);
                   clearError('email');
                 }}
                 placeholder="email@exemple.com"
@@ -1560,6 +2197,7 @@ export default function BookOrderScreen() {
                 keyboardType="email-address"
               />
               {fieldErrors.email ? <Text style={styles.err}>{fieldErrors.email}</Text> : null}
+              {emailHintNode}
             </View>
           </>
         )}
@@ -1632,7 +2270,14 @@ export default function BookOrderScreen() {
       {stickyCta}
 
       <BookPdfGeneratingOverlay
-        visible={submitting && (exportMode === 'pdf' || printPhase === 'fulfilling')}
+        visible={printWaitVisible || (submitting && exportMode === 'pdf')}
+        title={printWaitVisible ? printWaitTitle : undefined}
+        subtitle={printWaitVisible ? printWaitSubtitle : undefined}
+        note={
+          printWaitVisible && printPhase !== 'finishing'
+            ? t('bookOrder.printWaitKeepOpen')
+            : undefined
+        }
       />
     </KeyboardAvoidingView>
   );
@@ -1876,6 +2521,25 @@ const styles = StyleSheet.create({
     color: 'rgba(180, 60, 60, 0.9)',
     marginBottom: scale(8),
     marginTop: scale(2),
+  },
+  emailHintRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: scale(8),
+    marginTop: scale(6),
+  },
+  emailHint: {
+    fontSize: scale(13),
+    lineHeight: scale(18),
+    color: THEME.textSecondary,
+    flexShrink: 1,
+  },
+  emailHintAction: {
+    fontSize: scale(13),
+    lineHeight: scale(18),
+    fontWeight: '600',
+    color: THEME.brandCtaOrange,
   },
   stickyCtaWrap: {
     paddingHorizontal: scale(20),

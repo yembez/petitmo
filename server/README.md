@@ -67,7 +67,16 @@ Créer le bucket privé **`qr-media`** (si absent) ; les lignes `qr_links` et `q
    - **`type: "print_order"`** : … → réponse `exportRequestId`, `exportTicket`, `flow: "print_order"`.
 3. `POST /v1/books/generate-pdf` avec `Authorization: Bearer <pdfTicket|exportTicket>` …
 
+### Print — PDF + Gelato en fond après paiement
+
+1. App : `init-export` (ticket `export_print`) → Stripe Checkout s’ouvre **tout de suite** ; l’upload médias + `POST /v1/books/stash-print-payload` tourne **en parallèle** du paiement (concurrence 3).
+2. Stripe webhook / bypass `print-payment` → `payment_status=paid` → kick `POST /v1/internal/print-fulfill` (Bearer = `SUPABASE_SERVICE_ROLE_KEY`, 202). Si le payload n’est pas encore stashé → `409 PAYLOAD_MISSING` (normal).
+3. `stash-print-payload` relit `payment_status` après écriture : si déjà `paid`, il lance lui-même PDF + Gelato en fond (`alreadyPaid: true` dans la réponse).
+4. Railway : PDF Playwright + Gelato depuis `export_requests.pdf_payload_json` (migration `20261007210000_export_requests_pdf_payload.sql`).
+5. Filet client : après paid, l’app attend la fin du stash (overlay « Paiement validé — on finalise tes pages… ») puis `POST /v1/books/print-fulfill` (même ticket). Reprise après kill : `pendingPrintPayment.stashed` indique si l’upload doit être terminé avant le kick.
+5. Env Edge optionnelle : `PDF_SERVER_URL` (repli prod Railway). Optionnel serveur : `PRINT_FULFILL_SECRET`.
+
 ### App — commande livre imprimé
 
-- Écran **`/book-order`** (params `bookId`, `childId`, `memoryPageCount`, `avPageCount`) : tarif spec §6 (`lib/printedBookQuote.ts`), formulaire livraison + consentement, appel **`init-export`** `print_order` via `services/printBookOrder.ts`.
+- Écran **`/book-order`** : staging pré-pay → Checkout → confirmation dès `paid` (sans attendre Chromium).
 - Depuis **`/book-preview`** : action **« Commander l’imprimé »** dans la même alerte que les exports PDF.

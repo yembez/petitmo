@@ -1,7 +1,7 @@
 # Exécution smoke TF — bêta FR (fondateur)
 
 Cocher au fur et à mesure sur **TestFlight build 24** (ou plus récent).  
-Infra / scripts déjà verts côté agent : voir [`BETA_FR_GO_NOGO.md`](./BETA_FR_GO_NOGO.md).
+Infra / scripts déjà verts côté agent : voir `[BETA_FR_GO_NOGO.md](./BETA_FR_GO_NOGO.md)`.
 
 **Règle** : un bug P0 du parcours en cours seulement. Pas de polish UI.
 
@@ -11,33 +11,46 @@ Infra / scripts déjà verts côté agent : voir [`BETA_FR_GO_NOGO.md`](./BETA_F
 
 Infra déjà OK (migration, Edge, HITL mail agent 2026-09-24).
 
-- [ ] **Sentry Alert** : webhook `…/functions/v1/sentry-issue-notify` + header `X-Sentry-Webhook-Secret` (secret = celui posé sur Supabase `SENTRY_WEBHOOK_SECRET` — le récupérer via `supabase secrets` / rotation récente ; ne pas committer). Trigger = **New issue**.
-- [ ] TF → Espace parent → **Signaler un problème** → mail reçu + `Sentry event:` dans le bloc tech + issue `user_report` dans Sentry.
+- [x] **Sentry Alert** : webhook `…/functions/v1/sentry-issue-notify` + header `X-Sentry-Webhook-Secret` (secret = celui posé sur Supabase `SENTRY_WEBHOOK_SECRET` — le récupérer via `supabase secrets` / rotation récente ; ne pas committer). Trigger = **New issue**.
+- [x] TF → Espace parent → **Signaler un problème** → mail reçu + `Sentry event:` dans le bloc tech + issue `user_report` dans Sentry.
+
+
 
 ## Phase 2 — Auth
 
-- [ ] Install frais → onboarding → création compte (Google **ou** Apple **ou** email)
-- [ ] Profil enfant → entrée fil
-- [ ] Déconnexion → « J’ai déjà un compte » → login OK
-- [ ] Mot de passe oublié (si email) → mail + deep link `petitmo://auth` → nouveau MDP
+- [x] Install frais → onboarding → création compte (Google **ou** Apple **ou** email)
+- [x] Profil enfant → entrée fil
+- [x] Déconnexion → « J’ai déjà un compte » → login OK
+- [x] Mot de passe oublié (si email) → mail + deep link `petitmo://auth` → nouveau MDP
+
+
 
 ## Phase 3 — Capture + sync + restore
 
-- [ ] Texte + photo + audio (+ 1 vidéo)
-- [ ] Sync silencieuse (pas de flash fil / Capturer)
-- [ ] Restore : supprimer l’app **ou** second device → même e-mail → souvenirs revenus
+- [x] Texte + photo + audio (+ 1 vidéo)
+- [x] Sync silencieuse (pas de flash fil / Capturer)
+- [x] Restore : supprimer l’app **ou** second device → même e-mail → souvenirs revenus
+
+
 
 ## Phase 4 — Livre + QR (app)
 
 Scripts QA déjà OK (print PDF, QR audio, Gelato draft `printer_order_id`). Sur TF :
 
-- [ ] Favoris → livre ≥ 30 pages + ≥ 1 audio
-- [ ] Commander impression jusqu’à confirmation (**pas de débit** — bypass bêta)
-- [ ] Scanner QR PDF en 4G → lecture OK
+- [x] Favoris → livre ≥ 30 pages + ≥ 1 audio
+- [x] Commander impression jusqu’à confirmation (**pas de débit** — bypass bêta)
+- [x] Scanner QR PDF en 4G → lecture OK
+- [ ] **Print fond post-pay** : après bypass, confirmation en quelques secondes (pas d’attente « garde l’app ouverte »)
+- [ ] Kill app juste après confirmation → `export_requests` passe `rendering` → `sent_to_printer` (Railway + Gelato draft) sans rouvrir l’app
+- [ ] Prérequis deploy : migration `pdf_payload_json`, Railway (stash + `/v1/internal/print-fulfill`), Edge `stripe-webhook` + `print-payment`
+
+
 
 ## Phase 5 — Quota
 
 - [ ] Approcher 50 souvenirs (ou compte QA dédié) : 50ᵉ OK, 51ᵉ → paywall `LIMIT_REACHED`
+
+
 
 ## Phase 6 — Delete compte
 
@@ -45,11 +58,15 @@ Scripts QA déjà OK (print PDF, QR audio, Gelato draft `printer_order_id`). Sur
 - [ ] Relog impossible / workspace vide
 - [ ] (Option) vérifier purge Storage côté dashboard
 
+
+
 ## Phase 8 — GO interne
 
 - [ ] Privacy `https://petitcoeur.app/#/privacy` ouverte depuis l’app
-- [ ] Envoyer [`BETA_INTERNAL_BRIEF.md`](./BETA_INTERNAL_BRIEF.md) à 2–3 proches
+- [ ] Envoyer `[BETA_INTERNAL_BRIEF.md](./BETA_INTERNAL_BRIEF.md)` à 2–3 proches
 - [ ] Noter retours / bugs P0
+
+
 
 ## Phase 9 — IAP (après GO interne)
 
@@ -60,16 +77,21 @@ Scripts QA déjà OK (print PDF, QR audio, Gelato draft `printer_order_id`). Sur
 
 ---
 
+
+
 ## Preuves agent (2026-09-24)
 
-| Check | Résultat |
-|-------|----------|
-| Railway `/health` | `ok: true` |
-| `bug_outreach_drafts` | table présente |
-| Edge `sentry-issue-notify` | deploy + smoke `{emailed:true}` |
-| `smoke-qr-audio.sh` | OK |
-| `smoke-print.sh` | OK (priceCents 3510 paid −10 %) |
-| `smoke-gelato-draft.sh` | `sent_to_printer` + `printer_order_id` |
-| `STRIPE_PRINT_BYPASS` | `1` (bêta interne) |
-| TF build | `1.0.0 (24)` production |
-| `resetUserTierForTesting` | commenté dans `_layout` |
+
+| Check                      | Résultat                               |
+| -------------------------- | -------------------------------------- |
+| Railway `/health`          | `ok: true`                             |
+| `bug_outreach_drafts`      | table présente                         |
+| Edge `sentry-issue-notify` | deploy + smoke `{emailed:true}`        |
+| `smoke-qr-audio.sh`        | OK                                     |
+| `smoke-print.sh`           | OK (priceCents 3510 paid −10 %)        |
+| `smoke-gelato-draft.sh`    | `sent_to_printer` + `printer_order_id` |
+| `STRIPE_PRINT_BYPASS`      | `1` (bêta interne)                     |
+| TF build                   | `1.0.0 (24)` production                |
+| `resetUserTierForTesting`  | commenté dans `_layout`                |
+
+
