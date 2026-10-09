@@ -28,7 +28,7 @@ import {
 } from '@/constants/bookCoverThumbnail';
 import { scale } from '@/utils/responsive';
 import { formatAppCurrency } from '@/utils/appLocale';
-import { getUserTier } from '@/lib/userTier';
+import { getUserTier, peekUserTier } from '@/lib/userTier';
 import { getLastGuestExportEmail, setLastGuestExportEmail } from '@/lib/guestExportPrefs';
 import {
   getLastPrintOrderForm,
@@ -599,11 +599,22 @@ export default function BookOrderScreen() {
     }
   }, [exportMode, submitting, printPhase]);
 
-  /** Au retour de la revue livre : recalcule pages / QR / prix depuis le pending rafraîchi. */
+  /**
+   * Au focus : relit le tier (retour paywall → −10 % immédiat) +
+   * recalcule pages / QR / prix depuis le pending rafraîchi (revue livre).
+   */
   useFocusEffect(
     useCallback(() => {
       let alive = true;
+      // Sync immédiat (mémoire RC/paywall) puis confirm AsyncStorage — −10 % sans quitter l’écran.
+      setTier(peekUserTier());
       void (async () => {
+        try {
+          const t = await getUserTier();
+          if (alive) setTier(t);
+        } catch {
+          /* ignore */
+        }
         if (!bookId) return;
         try {
           const freshBook = await getBook(bookId);
