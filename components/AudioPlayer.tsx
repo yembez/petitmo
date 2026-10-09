@@ -61,6 +61,11 @@ interface AudioPlayerProps {
   /** Fil : désactive le flou temps réel (BlurView) du disque play pour un scroll fluide. */
   disableBlurDisc?: boolean;
   /**
+   * Fil : ne pas `createAsync` au mount — charge au 1er play seulement
+   * (évite le décodage audio hors viewport pendant le scroll).
+   */
+  deferLoadUntilPlay?: boolean;
+  /**
    * Palette onde : `ink` = noir/gris (fil, fond clair) ;
    * `onDark` = blanc/gris (immersif sombre).
    */
@@ -137,6 +142,7 @@ export default function AudioPlayer({
   compactPlayWave = false,
   feedPlayDiscOutline = false,
   disableBlurDisc = false,
+  deferLoadUntilPlay = false,
   wavePalette = 'ink',
   wavePeaks = null,
 }: AudioPlayerProps) {
@@ -373,8 +379,9 @@ export default function AudioPlayer({
     return loadPromise;
   }, []);
 
-  // Prefetch dès l’arrivée sur le fil / viewer — 1er play sans attendre createAsync.
+  // Prefetch au mount (viewer) — fil : `deferLoadUntilPlay` → 1er tap seulement.
   useEffect(() => {
+    if (deferLoadUntilPlay) return;
     if (!uri?.trim()) return;
     let cancelled = false;
     void (async () => {
@@ -384,7 +391,7 @@ export default function AudioPlayer({
     return () => {
       cancelled = true;
     };
-  }, [uri, ensureSoundLoaded]);
+  }, [uri, ensureSoundLoaded, deferLoadUntilPlay]);
 
   useEffect(() => {
     return () => {

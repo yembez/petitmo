@@ -19,7 +19,7 @@ function emitOnScreen(): void {
 }
 
 function emitScrollIdle(): void {
-  // Réservé si on branche un hook scroll-idle global ; noop pour l’instant.
+  /* scroll-idle consommé via `isFeedScrollIdle()` (pas de re-render global). */
 }
 
 function sameIdSet(a: Set<string>, b: Set<string>): boolean {
@@ -85,10 +85,12 @@ export function useIsFeedVideoAutoplay(memoryId: string | null | undefined): boo
   );
 }
 
-export function useIsFeedVideoOnScreen(memoryId: string): boolean {
+/** `null` / vide : pas d’abonnement (évite re-render de toutes les rows photo/texte). */
+export function useIsFeedVideoOnScreen(memoryId: string | null | undefined): boolean {
+  const id = memoryId?.trim() ?? '';
   return useSyncExternalStore(
-    subscribeFeedOnScreenVideos,
-    () => isFeedVideoOnScreen(memoryId),
+    id ? subscribeFeedOnScreenVideos : subscribeAutoplayNoop,
+    () => (id ? isFeedVideoOnScreen(id) : false),
     () => false,
   );
 }

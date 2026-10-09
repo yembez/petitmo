@@ -315,7 +315,9 @@ function FilMemoryRow({
   const isFeedVideoAutoplay = useIsFeedVideoAutoplay(
     memory.type === 'video' ? memory.id : null,
   );
-  const isFeedVideoOnScreen = useIsFeedVideoOnScreen(memory.id);
+  const isFeedVideoOnScreen = useIsFeedVideoOnScreen(
+    memory.type === 'video' ? memory.id : null,
+  );
   const memoryEditorialFontStyle = memoryEditorialTextStyle('regular');
   const memoryEditorialBoldFontStyle = memoryEditorialTextStyle('bold');
   const photoUrls = useFeedPhotoDisplayUrls(memory);
@@ -339,21 +341,25 @@ function FilMemoryRow({
   })();
   const videoPosterUri = useFeedVideoPosterDisplayUrl(memory);
   /**
-   * Cadre média portrait / paysage :
-   * 1) mesure de l’URI affichée (cache module) — fidèle au rendu
-   * 2) sinon `print_px_*` SQLite (sync, 1er paint)
-   * 3) sinon 4/5 historique
+   * Cadre média portrait / paysage — figer tôt pour éviter les sauts mid-scroll :
+   * 1) `print_px_*` SQLite (sync)
+   * 2) sinon mesure URI (une fois, cache module)
+   * 3) sinon 4/5
+   * On ne laisse plus la mesure écraser un print_px déjà connu.
    */
+  const syncMediaAspect = feedMediaAspectFromMemory(memory);
   const measureMediaUri =
-    memory.type === 'photo'
-      ? photoUrls[0]?.trim() || null
-      : memory.type === 'video'
-        ? videoPosterUri.trim() || null
-        : null;
+    syncMediaAspect != null
+      ? null
+      : memory.type === 'photo'
+        ? photoUrls[0]?.trim() || null
+        : memory.type === 'video'
+          ? videoPosterUri.trim() || null
+          : null;
   const measuredMediaPx = useImagePixelSize(measureMediaUri);
   const mediaAspectRatio =
+    syncMediaAspect ??
     feedMediaAspectFromPixels(measuredMediaPx?.w, measuredMediaPx?.h) ??
-    feedMediaAspectFromMemory(memory) ??
     FEED_MEDIA_ASPECT_DEFAULT;
   const voiceCoverRaw = getVoiceCoverUriForFeedAndViewer(memory);
   const voiceCoverSigned = useSignedMediaUrl(voiceCoverRaw || null) ?? '';
@@ -1086,6 +1092,7 @@ function FilMemoryRow({
                     coverFlushBottom={hasVoiceCover}
                     feedPlayDiscOutline
                     disableBlurDisc
+                    deferLoadUntilPlay
                   />
                 </View>
               </View>

@@ -9,14 +9,13 @@ import {
   InteractionManager,
   DeviceEventEmitter,
 } from 'react-native';
-import Animated, { LinearTransition } from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
 import { Plus } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { scale, verticalScale } from '@/utils/responsive';
-import { MOTION_EASE } from '@/constants/motion';
 import EditTextModal from '@/components/EditTextModal';
 import { feedMemoryTextEditPreviewVariant } from '@/utils/memoryTextEditStyles';
 import { bookLineBudgetForMemoryType, bookCharsPerLineForMemoryType } from '@/utils/textLimits';
@@ -594,7 +593,7 @@ function FilScreen() {
           keyExtractor={keyExtractor}
           renderItem={renderItem}
           CellRendererComponentStyle={renderFilListCellStyle}
-          itemLayoutAnimation={LinearTransition.duration(320).easing(MOTION_EASE.sheet)}
+          /** Pas de `itemLayoutAnimation` : anime les sauts de hauteur (aspect) pendant le scroll. */
           viewabilityConfigCallbackPairs={feedViewabilityPairs}
           onScroll={onFeedScroll}
           onScrollBeginDrag={onFeedScrollActive}
