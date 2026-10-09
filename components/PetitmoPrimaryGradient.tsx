@@ -8,7 +8,7 @@ type Props = {
   style?: StyleProp<ViewStyle>;
 };
 
-/** Fond dégradé rose→orangé pour CTA primaires. */
+/** Fond dégradé rose→corail Capturer (`#FC5757`) pour CTA primaires. */
 export default function PetitmoPrimaryGradient({ children, style }: Props) {
   return (
     <LinearGradient

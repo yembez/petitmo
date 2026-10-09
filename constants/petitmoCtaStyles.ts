@@ -31,7 +31,7 @@ export const PETITMO_CTA_SPINNER_COLOR = '#FFFFFF';
 
 /**
  * CTA primaire app : texte blanc, coins arrondis.
- * Envelopper le contenu avec `PetitmoPrimaryGradient` (fond L−3 `#FD628D` → `#FD6764`).
+ * Envelopper le contenu avec `PetitmoPrimaryGradient` (fond `#FD628D` → corail Capturer `#FC5757`).
  */
 export const petitmoCtaStyles = StyleSheet.create({
   primary: {

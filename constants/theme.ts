@@ -101,7 +101,7 @@ export const THEME = {
   captureAccentYellow: BRAND_CTA_ACCENT,
   /** Fond CTA primaire app (fallback solid) — préfère `BRAND_ACTION_GRADIENT`. */
   captureScreenCtaBackground: BRAND_CTA_ACCENT,
-  /** Libellé + icône sur fond CTA primaire (dégradé rose→orangé). */
+  /** Libellé + icône sur fond CTA primaire (dégradé rose→corail Capturer). */
   captureScreenCtaForeground: '#FFFFFF',
   /** @deprecated — `captureScreenCtaBackground` */
   captureWriteCtaRose: BRAND_CTA_ACCENT,

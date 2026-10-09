@@ -7,7 +7,7 @@ import {
 /**
  * Essai UI Capturer :
  * - `'d1'` = outline beige + liseré gris · Mic / PencilLine / ImagePlus (corail ou dégradé)
- * - `'d2'` = disques dégradé CTA L−3 (#FD628D→#FD6764) · icônes blanches (mock D2)
+ * - `'d2'` = disques corail Capturer `#FC5757` · icônes blanches (mock D2)
  * - `'d3'` = fond corail pâle · icônes corail (mock D3)
  * - `'d16'` = disques corail action (#FD7764) · icônes blanches (mock D16)
  * - `'d6'` = disques gris pâle + icônes encre Lucide (mock D6)

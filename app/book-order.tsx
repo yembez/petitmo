@@ -1651,7 +1651,7 @@ export default function BookOrderScreen() {
           : t('bookOrder.formLoadingBody3');
     return (
       <View style={[styles.center, { paddingTop: insets.top, paddingHorizontal: scale(28) }]}>
-        <ActivityIndicator size="large" color={THEME.brandCtaOrange} />
+        <ActivityIndicator size="large" color={THEME.brandPrimary} />
         <Text
           style={[
             styles.muted,
@@ -1675,7 +1675,7 @@ export default function BookOrderScreen() {
   if (blockedEmptyMemories) {
     return (
       <View style={[styles.center, { paddingTop: insets.top }]}>
-        <ActivityIndicator size="large" color={THEME.brandCtaOrange} />
+        <ActivityIndicator size="large" color={THEME.brandPrimary} />
       </View>
     );
   }
@@ -2336,7 +2336,7 @@ const styles = StyleSheet.create({
   priceDetailLinkText: {
     fontSize: scale(14),
     fontWeight: '600',
-    color: THEME.brandCtaOrange,
+    color: THEME.brandPrimary,
   },
   priceDetailBox: {
     marginTop: scale(10),
@@ -2352,7 +2352,7 @@ const styles = StyleSheet.create({
   },
 
   plusBanner: {
-    backgroundColor: 'rgba(253, 119, 100, 0.10)',
+    backgroundColor: 'rgba(252, 87, 87, 0.10)',
     borderRadius: scale(14),
     paddingVertical: scale(12),
     paddingHorizontal: scale(14),
@@ -2369,7 +2369,7 @@ const styles = StyleSheet.create({
     fontSize: scale(16),
     fontWeight: '600',
     lineHeight: scale(22),
-    color: THEME.brandCtaOrange,
+    color: THEME.brandPrimary,
   },
 
   section: {
@@ -2449,7 +2449,7 @@ const styles = StyleSheet.create({
   emailEdit: {
     fontSize: scale(14),
     fontWeight: '600',
-    color: THEME.brandCtaOrange,
+    color: THEME.brandPrimary,
   },
 
   reviewRow: {
@@ -2481,7 +2481,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   checkboxOn: {
-    backgroundColor: THEME.brandCtaOrange,
+    backgroundColor: THEME.brandPrimary,
     borderColor: THEME.captureCtaBorderColor,
   },
   checkboxMark: {
@@ -2504,7 +2504,7 @@ const styles = StyleSheet.create({
   },
   legalCgvLink: {
     fontSize: scale(12),
-    color: THEME.brandCtaOrange,
+    color: THEME.brandPrimary,
     fontWeight: '600',
   },
 
@@ -2531,7 +2531,7 @@ const styles = StyleSheet.create({
     fontSize: scale(13),
     lineHeight: scale(18),
     fontWeight: '600',
-    color: THEME.brandCtaOrange,
+    color: THEME.brandPrimary,
   },
   stickyCtaWrap: {
     paddingHorizontal: scale(20),

@@ -25,7 +25,7 @@ type Props = {
 };
 
 /**
- * CTA primaire — dégradé rose→orangé, texte blanc attendu via `petitmoCtaStyles.primaryText`.
+ * CTA primaire — dégradé rose→corail Capturer (`#FC5757`), texte blanc via `petitmoCtaStyles.primaryText`.
  * Appui = scale (pas d’activeOpacity translucide).
  */
 export default function PetitmoPrimaryPressable({

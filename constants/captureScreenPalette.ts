@@ -42,10 +42,14 @@ export const CAPTURE_CTA_WRITE_GRADIENT = ['#E779CD', '#FC7299'] as const;
 export const CAPTURE_CTA_IMPORT_GRADIENT = ['#FD6F9F', '#FD7D4D'] as const;
 
 /**
- * CTA primaire app (`PetitmoPrimaryPressable` / Morph / paywall « S’abonner »…).
- * Rose → corail L−3 — distinct du dégradé splash diagonal et des 3 disques Capturer.
+ * Corail Capturer / cœur titre (`THEME.brandPrimary`) — CTA d2, liens, accents UI.
  */
-export const BRAND_ACTION_GRADIENT = ['#FD628D', '#FD6764'] as const;
+export const CAPTURE_CTA_ICON_CORAL = '#FC5757';
+/**
+ * CTA primaire app (`PetitmoPrimaryPressable` / Morph / Commander livre…).
+ * Rose → corail Capturer `#FC5757` (même teinte que les disques d2).
+ */
+export const BRAND_ACTION_GRADIENT = ['#FD628D', CAPTURE_CTA_ICON_CORAL] as const;
 /** @deprecated alias — `BRAND_ACTION_GRADIENT`. */
 export const CAPTURE_CTA_BRAND_GRADIENT = BRAND_ACTION_GRADIENT;
 /**
@@ -58,11 +62,6 @@ export const CAPTURE_CTA_GRADIENT_LOCATIONS = [0, 0.12, 0.58, 1] as const;
 export const CAPTURE_CTA_WRITE = CAPTURE_CTA_WRITE_GRADIENT[1];
 /** Rose accent — départ disque Importer (dégradé). */
 export const CAPTURE_CTA_IMPORT = CAPTURE_CTA_IMPORT_GRADIENT[0];
-/**
- * Corail icônes CTA Capturer outline (`THEME.brandPrimary`) —
- * cœur titre + onglet tab bar actif.
- */
-export const CAPTURE_CTA_ICON_CORAL = '#FC5757';
 /** Cœur dans le titre Capturer. */
 export const CAPTURE_TITLE_HEART = CAPTURE_CTA_ICON_CORAL;
 /** Point pilule âge hero. */
