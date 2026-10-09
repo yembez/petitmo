@@ -30,6 +30,7 @@ import { scale } from '@/utils/responsive';
 import { formatAppCurrency } from '@/utils/appLocale';
 import { getUserTier } from '@/lib/userTier';
 import { getLastGuestExportEmail, setLastGuestExportEmail } from '@/lib/guestExportPrefs';
+import { getLastPrintOrderForm, setLastPrintOrderForm } from '@/lib/printOrderFormPrefs';
 import { PRINT_V1_INCLUDED_QR, quotePrintOrderV1 } from '@/lib/pricingV1';
 import { isSentryEnabled, Sentry } from '@/lib/sentry';
 import { PRINT_V1_PAID_DISCOUNT_PERCENT, type DiscountPercent } from '@/lib/printedBookQuote';
@@ -450,10 +451,11 @@ export default function BookOrderScreen() {
         const localChild = localKids.find(c => c.id === childId) ?? null;
         if (localChild) setChild(localChild);
 
-        const [book, t, tLast] = await Promise.all([
+        const [book, t, tLast, localForm] = await Promise.all([
           getBook(bookId),
           getUserTier(),
           getLastGuestExportEmail(),
+          getLastPrintOrderForm(),
         ]);
         setTier(t);
         if (book) setBook(book);
@@ -476,15 +478,39 @@ export default function BookOrderScreen() {
 
         setMemoryPageCount(mpc);
 
-        const startEmail = tLast?.trim() ?? '';
+        // Prefill local immédiat (avant paint) — CRM en fond ne fait que combler les vides.
+        const startEmail = (localForm?.email || tLast || '').trim().toLowerCase();
         if (startEmail) {
           applyField('email', startEmail);
           setEmailEditing(false);
         }
+        if (localForm) {
+          if (localForm.fullName && !liveFormRef.current.fullName.trim()) {
+            applyField('fullName', localForm.fullName);
+          }
+          if (localForm.shippingName && !liveFormRef.current.shippingName.trim()) {
+            applyField('shippingName', localForm.shippingName);
+          }
+          if (
+            !liveFormRef.current.line1.trim() &&
+            !liveFormRef.current.city.trim() &&
+            !liveFormRef.current.zip.trim()
+          ) {
+            if (localForm.line1) applyField('line1', localForm.line1);
+            if (localForm.line2) applyField('line2', localForm.line2);
+            if (localForm.city) applyField('city', localForm.city);
+            if (localForm.zip) applyField('zip', localForm.zip);
+            if (localForm.country) setCountry(localForm.country);
+          }
+        }
 
         // Formulaire visible tout de suite — pas d’attente réseau.
         setLoading(false);
-        printBreadcrumb('print.form.painted_local', { bookId, childId });
+        printBreadcrumb('print.form.painted_local', {
+          bookId,
+          childId,
+          hasLocalForm: !!localForm,
+        });
 
         // Fond : entitlements + enfants cloud + CRM (n’écrase jamais une saisie en cours).
         void resolveServerPdfEntitlements()
@@ -938,13 +964,26 @@ export default function BookOrderScreen() {
 
         await setLastGuestExportEmail(opts.emailNorm);
 
+        // Cache local confort pour la prochaine commande (paint instantané).
+        const live = liveFormRef.current;
+        void setLastPrintOrderForm({
+          email: opts.emailNorm,
+          fullName: live.fullName,
+          shippingName: live.shippingName,
+          line1: live.line1,
+          line2: live.line2,
+          city: live.city,
+          zip: live.zip,
+          country,
+        });
+
         if (exportRequestId) {
           await rememberLocalPrintOrder({
             id: exportRequestId,
             createdAt: new Date().toISOString(),
             priceCents: opts.priceCents,
             status: 'printing',
-            shippingName: '',
+            shippingName: live.shippingName.trim(),
             bookId: pendingPayload?.bookId || bookId,
             childId: pendingPayload?.childId || childId,
             bookTitle: (pendingPayload?.coverTitle || book?.title || '').trim(),
@@ -1009,7 +1048,7 @@ export default function BookOrderScreen() {
         setPrintPhase('idle');
       }
     },
-    [book?.title, bookId, childId, navigateToConfirmation],
+    [book?.title, bookId, childId, country, navigateToConfirmation],
   );
 
   const applyPrintSubmitError = useCallback(
@@ -1522,7 +1561,7 @@ export default function BookOrderScreen() {
         if (waitForPaid) {
           setSubmitting(true);
           submittingRef.current = true;
-          setPrintPhase('finishing');
+          setPrintPhase('checking');
           const st = await waitUntilPrintPaid(pending.exportTicket, {
             attempts: 15,
             intervalMs: 1000,
@@ -1537,10 +1576,8 @@ export default function BookOrderScreen() {
           if (submittingRef.current) return;
           const st = await fetchPrintPaymentStatus(pending.exportTicket);
           if (st !== 'paid') return;
-          setSubmitting(true);
-          submittingRef.current = true;
-          setPrintPhase('finishing');
         }
+        // Confirm-on-paid : pas d’overlay « Presque fini… » (stash en fond).
         await completePrintAfterPaid({
           exportTicket: pending.exportTicket,
           emailNorm: pending.email,
