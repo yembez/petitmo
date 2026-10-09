@@ -189,8 +189,6 @@ import { peekLastPrintOrderForm } from '@/lib/printOrderFormPrefs';
 import { setPendingBookOrderPdfPayload } from '@/lib/pendingBookOrderPdf';
 import { isDeviceStorageFullError } from '@/utils/deviceStorageFull';
 import { THEME } from '@/constants/theme';
-import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
-
 const HEADER_H = 44;
 const BOTTOM_H = 82;
 /** Vue verticale (Phase 1) : marge latérale ; pages collées à la reliure (trait + ombres latérales). */
@@ -409,7 +407,6 @@ export default function BookPreviewScreen() {
   const dm400 = fontsLoaded ? 'DMSans_400Regular' : undefined;
   const dm500 = fontsLoaded ? 'DMSans_500Medium' : undefined;
   const dm600 = fontsLoaded ? 'DMSans_600SemiBold' : undefined;
-  const dm700 = fontsLoaded ? 'DMSans_700Bold' : undefined;
 
   const localSnapshotRef = useRef(
     bookId ? readBookPreviewLocalSnapshotSync(bookId) : null,
@@ -3731,7 +3728,7 @@ export default function BookPreviewScreen() {
             accessibilityRole="button"
             accessibilityLabel={t('bookOrder.backToOrder')}
           >
-            <Text style={[styles.headerCtaTextDark, dm700 && { fontFamily: dm700 }]} numberOfLines={1}>
+            <Text style={styles.headerCtaTextDark} numberOfLines={1}>
               {isLandscape ? t('bookOrder.backToOrderShort') : t('bookOrder.backToOrder')}
             </Text>
           </Pressable>
@@ -3744,38 +3741,32 @@ export default function BookPreviewScreen() {
               accessibilityRole="button"
               accessibilityLabel="Ajouter des souvenirs depuis les favoris"
             >
-              <Text
-                style={[
-                  styles.headerCtaTextDark,
-                  dm700 ? { fontFamily: dm700, fontWeight: '400' } : { fontWeight: '600' },
-                ]}
-              >
-                Ajouter
-              </Text>
+              <Text style={styles.headerCtaTextDark}>Ajouter</Text>
             </Pressable>
           ) : (
             <View style={styles.headerRightSpacer} accessibilityElementsHidden />
           )
         ) : (
-          <PetitmoPrimaryPressable
+          <Pressable
             onPress={() => void handleExportBook()}
             hitSlop={12}
-            style={[
-              styles.headerCtaOrange,
+            style={({ pressed }) => [
+              styles.headerCtaCoral,
               (exporting || guestExportSubmitting || preparingPrintOrder) && { opacity: 0.5 },
+              pressed && { opacity: 0.85 },
             ]}
             disabled={exporting || guestExportSubmitting || preparingPrintOrder}
             accessibilityRole="button"
             accessibilityLabel="Commander le livre imprimé"
           >
-            <Text style={[styles.headerCtaText, dm700 && { fontFamily: dm700 }]}>
+            <Text style={styles.headerCtaText}>
               {exporting || guestExportSubmitting
                 ? 'Export…'
                 : preparingPrintOrder
                   ? '…'
                   : 'Commander'}
             </Text>
-          </PetitmoPrimaryPressable>
+          </Pressable>
         )}
       </View>
 
@@ -3863,14 +3854,7 @@ export default function BookPreviewScreen() {
                   accessibilityRole="button"
                   accessibilityLabel="Revenir à l’ordre chronologique"
                 >
-                  <Text
-                    style={[
-                      styles.headerCtaTextDark,
-                      dm700 ? { fontFamily: dm700, fontWeight: '400' } : { fontWeight: '600' },
-                    ]}
-                  >
-                    Ordre par date
-                  </Text>
+                  <Text style={styles.headerCtaTextDark}>Ordre par date</Text>
                 </Pressable>
               ) : null}
               <Pressable
@@ -3879,14 +3863,7 @@ export default function BookPreviewScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="Terminer la réorganisation"
               >
-                <Text
-                  style={[
-                    styles.headerCtaTextDark,
-                    dm700 ? { fontFamily: dm700, fontWeight: '400' } : { fontWeight: '600' },
-                  ]}
-                >
-                  Terminer
-                </Text>
+                <Text style={styles.headerCtaTextDark}>Terminer</Text>
               </Pressable>
             </>
           ) : (
@@ -3897,14 +3874,7 @@ export default function BookPreviewScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="Ajouter des souvenirs depuis les favoris"
               >
-                <Text
-                  style={[
-                    styles.headerCtaTextDark,
-                    dm700 ? { fontFamily: dm700, fontWeight: '400' } : { fontWeight: '600' },
-                  ]}
-                >
-                  Ajouter
-                </Text>
+                <Text style={styles.headerCtaTextDark}>Ajouter</Text>
               </Pressable>
               {reorderMovableCount > 1 ? (
                 <Pressable
@@ -3913,14 +3883,7 @@ export default function BookPreviewScreen() {
                   accessibilityRole="button"
                   accessibilityLabel="Réorganiser les pages du livre"
                 >
-                  <Text
-                    style={[
-                      styles.headerCtaTextDark,
-                      dm700 ? { fontFamily: dm700, fontWeight: '400' } : { fontWeight: '600' },
-                    ]}
-                  >
-                    Réorganiser
-                  </Text>
+                  <Text style={styles.headerCtaTextDark}>Réorganiser</Text>
                 </Pressable>
               ) : null}
             </>
@@ -4299,6 +4262,13 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     paddingHorizontal: 16,
   },
+  /** Corail Capturer uni `#FC5757` — CTA Commander (pas de dégradé). */
+  headerCtaCoral: {
+    backgroundColor: THEME.brandPrimary,
+    borderRadius: 20,
+    paddingVertical: 7,
+    paddingHorizontal: 16,
+  },
   headerCtaOutline: {
     backgroundColor: '#FFFFFF',
     borderRadius: 20,
@@ -4312,11 +4282,12 @@ const styles = StyleSheet.create({
   headerCtaText: {
     color: '#FFFFFF',
     fontSize: 14,
-    /** Pas de fontWeight : le bold vient uniquement de DMSans_700Bold (évite flash système). */
+    fontWeight: '500',
   },
   headerCtaTextDark: {
     color: THEME.textPrimary,
     fontSize: 14,
+    fontWeight: '500',
   },
   /** Équilibre le header quand le CTA Commander est masqué (paysage). */
   headerRightSpacer: {

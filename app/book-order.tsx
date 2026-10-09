@@ -1779,15 +1779,7 @@ export default function BookOrderScreen() {
         {submitting && exportMode === 'pdf' ? (
           <ActivityIndicator color="#FFFFFF" />
         ) : (
-          <Text
-            style={[
-              petitmoCtaStyles.primaryText,
-              styles.ctaText,
-              styles.ctaOrderBlackText
-            ]}
-          >
-            {ctaLabel}
-          </Text>
+          <Text style={[styles.ctaText, styles.ctaOrderBlackText]}>{ctaLabel}</Text>
         )}
       </Pressable>
     </View>
@@ -2553,6 +2545,7 @@ const styles = StyleSheet.create({
   },
   ctaText: {
     fontSize: scale(16),
+    fontWeight: '500',
   },
   devFillBtn: {
     alignSelf: 'flex-start',
