@@ -14,7 +14,27 @@ import {
 } from 'react-native';
 import { usePathname, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronLeft, ChevronDown, Plus } from 'lucide-react-native';
+import type { LucideIcon } from 'lucide-react-native';
+import {
+  Bell,
+  ChevronLeft,
+  ChevronRight,
+  Cloud,
+  CreditCard,
+  FileText,
+  HelpCircle,
+  Image as ImageIcon,
+  LogOut,
+  MessageCircle,
+  Package,
+  Plus,
+  RefreshCw,
+  Settings,
+  Share2,
+  Shield,
+  Trash2,
+  UserRound,
+} from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BRAND_ACTION_GRADIENT } from '@/constants/captureScreenPalette';
 import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
@@ -448,13 +468,9 @@ export default function ParentSpaceScreen() {
   }, [deleteBusy, performDeleteAccount, signOutBusy, t]);
 
   const paid = tier === 'paid';
-  /** Accordion : une rubrique à la fois. Gratuit → « Mon abonnement » ouvert par défaut. */
-  const [openSectionId, setOpenSectionId] = useState<string | null>(() =>
-    peekUserTier() === 'paid' ? null : 'subscription',
+  const menuIcon = (Icon: LucideIcon) => (
+    <Icon size={ICON_SIZES.md} color={THEME.textPrimary} strokeWidth={1.85} />
   );
-  const toggleSection = useCallback((id: string) => {
-    setOpenSectionId(prev => (prev === id ? null : id));
-  }, []);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -472,28 +488,23 @@ export default function ParentSpaceScreen() {
 
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + verticalScale(24) }]}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + verticalScale(32) }]}
         showsVerticalScrollIndicator={false}
       >
-        <Section
-          sectionId="children"
-          title="Mes enfants"
-          titleFontFamily={dm700}
-          open={openSectionId === 'children'}
-          onToggle={toggleSection}
-        >
+        <MenuGroup title="Mes enfants" titleFontFamily={dm600}>
           {children.length === 0 ? (
             <Text style={[styles.emptyText, dm500 ? { fontFamily: dm500 } : null]}>
               Aucun enfant pour le moment.
             </Text>
           ) : (
-            children.map((c) => (
-              <Row
+            children.map((c, i) => (
+              <MenuRow
                 key={c.id}
+                bordered={i > 0}
                 icon={<ChildAvatar child={c} size={scale(34)} />}
                 label={c.name ?? 'Sans nom'}
+                detail={c.birthdate ? calculateAge(c.birthdate) : undefined}
                 labelFontFamily={dm500}
-                value={c.birthdate ? calculateAge(c.birthdate) : ''}
                 onPress={async () => {
                   await setSelectedChild(c.id);
                   router.push(`/edit-child?childId=${c.id}`);
@@ -501,31 +512,25 @@ export default function ParentSpaceScreen() {
               />
             ))
           )}
-
-          <TouchableOpacity
-            style={styles.addChildRow}
+          <MenuRow
+            bordered={children.length > 0}
+            icon={
+              <LinearGradient
+                colors={[...BRAND_ACTION_GRADIENT]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.addChildIcon}
+              >
+                <Plus size={ICON_SIZES.sm} color="#FFFFFF" strokeWidth={2.5} />
+              </LinearGradient>
+            }
+            label="Ajouter un enfant"
+            labelFontFamily={dm600}
             onPress={() => router.push('/create-child')}
-            activeOpacity={0.9}
-          >
-            <LinearGradient
-              colors={[...BRAND_ACTION_GRADIENT]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.addChildIcon}
-            >
-              <Plus size={ICON_SIZES.md} color="#FFFFFF" strokeWidth={2.5} />
-            </LinearGradient>
-            <Text style={[styles.addChildText, dm600 ? { fontFamily: dm600 } : null]}>Ajouter un enfant</Text>
-          </TouchableOpacity>
-        </Section>
+          />
+        </MenuGroup>
 
-        <Section
-          sectionId="subscription"
-          title={t('parent.subscription.sectionTitle')}
-          titleFontFamily={dm700}
-          open={openSectionId === 'subscription'}
-          onToggle={toggleSection}
-        >
+        <MenuGroup title={t('parent.subscription.sectionTitle')} titleFontFamily={dm600}>
           {billingIssue ? (
             <View style={styles.billingIssueBanner}>
               <Text style={[styles.billingIssueTitle, dm600 ? { fontFamily: dm600 } : null]}>
@@ -549,70 +554,50 @@ export default function ParentSpaceScreen() {
           ) : null}
           {paid ? (
             <>
-              <StaticRow
+              <MenuRow
+                icon={menuIcon(CreditCard)}
                 label={t('parent.subscription.currentPlan')}
-                value={t('parent.subscription.planPremium')}
+                detail={t('parent.subscription.planPremium')}
                 labelFontFamily={dm500}
+                showChevron={false}
               />
-              <TouchableOpacity
-                style={[styles.row, styles.rowBorderTop]}
+              <MenuRow
+                bordered
+                icon={menuIcon(Settings)}
+                label={t('parent.subscription.manage')}
+                labelFontFamily={dm500}
                 onPress={() => void openUrl(manageSubscriptionUrl())}
-                activeOpacity={0.85}
-                accessibilityRole="button"
                 accessibilityLabel={t('parent.subscription.manage')}
-              >
-                <View style={styles.rowIconPlaceholder} />
-                <View style={styles.rowText}>
-                  <Text style={[styles.rowLabel, dm500 ? { fontFamily: dm500 } : null]}>
-                    {t('parent.subscription.manage')}
-                  </Text>
-                </View>
-                <Text style={styles.rowValue}>{t('parent.subscription.manageOpen')}</Text>
-              </TouchableOpacity>
+              />
             </>
           ) : (
-            <TouchableOpacity
-              style={styles.row}
+            <MenuRow
+              icon={menuIcon(CreditCard)}
+              label={t('parent.subscription.upgradeCta')}
+              labelFontFamily={dm700}
+              labelAccent
               onPress={() =>
                 router.push({
                   pathname: '/paywall',
                   params: { context: captureLocked ? 'EX_SUBSCRIBER' : 'GENERAL' },
                 })
               }
-              activeOpacity={0.85}
-              accessibilityRole="button"
               accessibilityLabel={t('parent.subscription.upgradeCta')}
-            >
-              <View style={styles.rowIconPlaceholder} />
-              <View style={styles.rowText}>
-                <Text
-                  style={[styles.rowLabel, styles.rowLabelAccent, dm700 ? { fontFamily: dm700 } : { fontWeight: '700' }]}
-                >
-                  {t('parent.subscription.upgradeCta')}
-                </Text>
-              </View>
-              <Text style={styles.rowValue}>›</Text>
-            </TouchableOpacity>
+            />
           )}
-        </Section>
+        </MenuGroup>
 
         {hasRealAccount ? (
-          <Section
-            sectionId="orders"
-            title={t('parent.orders.sectionTitle')}
-            titleFontFamily={dm700}
-            open={openSectionId === 'orders'}
-            onToggle={toggleSection}
-          >
+          <MenuGroup title={t('parent.orders.sectionTitle')} titleFontFamily={dm600}>
             {orders.length === 0 ? (
-              <>
-                <Text style={[styles.emptyText, styles.bannerMatchedBody, dm500 ? { fontFamily: dm500 } : null]}>
+              <View style={styles.emptyBlock}>
+                <Text style={[styles.emptyText, dm500 ? { fontFamily: dm500 } : null]}>
                   {t('parent.orders.empty')}
                 </Text>
-                <Text style={[styles.emptyText, styles.bannerMatchedBody, dm500 ? { fontFamily: dm500 } : null]}>
+                <Text style={[styles.emptyTextHint, dm500 ? { fontFamily: dm500 } : null]}>
                   {t('parent.orders.hint')}
                 </Text>
-              </>
+              </View>
             ) : (
               orders.map((o, i) => {
                 const when = o.createdAt
@@ -621,248 +606,152 @@ export default function ParentSpaceScreen() {
                 const price = formatAppCurrency(o.priceCents / 100, lang);
                 const meta = [when, price].filter(Boolean).join(' · ');
                 return (
-                  <StaticRow
+                  <MenuRow
                     key={o.id}
+                    bordered={i > 0}
+                    icon={menuIcon(Package)}
                     label={orderBookTitle(o, t)}
                     detail={meta || undefined}
                     value={printOrderStatusLabel(o.status, t)}
                     valueRefreshing={ordersStatusRefreshing}
                     refreshingAccessibilityLabel={t('parent.orders.statusUpdating')}
                     labelFontFamily={dm500}
-                    bordered={i > 0}
-                    textScale="banner"
+                    showChevron={false}
                   />
                 );
               })
             )}
-          </Section>
+          </MenuGroup>
         ) : null}
 
-        <Section
-          sectionId="help"
-          title="Aide"
-          titleFontFamily={dm700}
-          open={openSectionId === 'help'}
-          onToggle={toggleSection}
-        >
-          <TouchableOpacity
-            style={styles.row}
+        <MenuGroup title="Aide" titleFontFamily={dm600}>
+          <MenuRow
+            icon={menuIcon(HelpCircle)}
+            label={t('parent.report.cta')}
+            labelFontFamily={dm500}
             onPress={() => setSupportKind('report')}
-            activeOpacity={0.85}
-            accessibilityRole="button"
             accessibilityLabel={t('parent.report.cta')}
-          >
-            <View style={styles.rowIconPlaceholder} />
-            <View style={styles.rowText}>
-              <Text style={[styles.rowLabel, dm500 ? { fontFamily: dm500 } : null]}>
-                {t('parent.report.cta')}
-              </Text>
-            </View>
-            <Text style={styles.rowValue}>›</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.row, styles.rowBorderTop]}
+          />
+          <MenuRow
+            bordered
+            icon={menuIcon(MessageCircle)}
+            label={t('parent.support.contactCta')}
+            labelFontFamily={dm500}
             onPress={() => setSupportKind('contact')}
-            activeOpacity={0.85}
-            accessibilityRole="button"
             accessibilityLabel={t('parent.support.contactCta')}
-          >
-            <View style={styles.rowIconPlaceholder} />
-            <View style={styles.rowText}>
-              <Text style={[styles.rowLabel, dm500 ? { fontFamily: dm500 } : null]}>
-                {t('parent.support.contactCta')}
-              </Text>
-            </View>
-            <Text style={styles.rowValue}>›</Text>
-          </TouchableOpacity>
-        </Section>
+          />
+        </MenuGroup>
 
-        <Section
-          sectionId="application"
-          title="Application"
-          titleFontFamily={dm700}
-          open={openSectionId === 'application'}
-          onToggle={toggleSection}
-        >
-          <TouchableOpacity
-            style={styles.row}
-            activeOpacity={0.85}
-            disabled={updateCheckBusy}
+        <MenuGroup title="Application" titleFontFamily={dm600}>
+          <MenuRow
+            icon={menuIcon(RefreshCw)}
+            label={t('parent.application.checkUpdate')}
+            detail={t('parent.application.versionPrefix', { label: versionLabel })}
+            labelFontFamily={dm500}
             onPress={handleCheckForUpdate}
             onLongPress={handleSentrySmokeLongPress}
-            delayLongPress={700}
-            accessibilityRole="button"
+            disabled={updateCheckBusy}
+            trailing={
+              updateCheckBusy ? <ActivityIndicator size="small" color={THEME.textMuted} /> : undefined
+            }
             accessibilityLabel={t('parent.application.checkUpdate')}
-          >
-            <View style={styles.rowIconPlaceholder} />
-            <View style={styles.rowText}>
-              <Text style={[styles.rowLabel, dm500 ? { fontFamily: dm500 } : null]}>
-                {t('parent.application.checkUpdate')}
-              </Text>
-              <Text style={styles.rowDetail}>
-                {t('parent.application.versionPrefix', { label: versionLabel })}
-              </Text>
-            </View>
-            {updateCheckBusy ? (
-              <ActivityIndicator size="small" color={THEME.textMuted} />
-            ) : (
-              <Text style={styles.rowValue}>›</Text>
-            )}
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.row, styles.rowBorderTop]}
-            activeOpacity={0.85}
+          />
+          <MenuRow
+            bordered
+            icon={menuIcon(ImageIcon)}
+            label={t('parent.application.enablePhotos')}
+            detail={t('parent.application.enablePhotosHint')}
+            labelFontFamily={dm500}
             onPress={handleEnablePhotos}
-            accessibilityRole="button"
             accessibilityLabel={t('parent.application.enablePhotos')}
-          >
-            <View style={styles.rowIconPlaceholder} />
-            <View style={styles.rowText}>
-              <Text style={[styles.rowLabel, dm500 ? { fontFamily: dm500 } : null]}>
-                {t('parent.application.enablePhotos')}
-              </Text>
-              <Text style={styles.rowDetail}>{t('parent.application.enablePhotosHint')}</Text>
-            </View>
-            <Text style={styles.rowValue}>›</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.row, styles.rowBorderTop]}
-            activeOpacity={0.85}
+          />
+          <MenuRow
+            bordered
+            icon={menuIcon(Bell)}
+            label={t('parent.application.enableNotifications')}
+            detail={t('parent.application.enableNotificationsHint')}
+            labelFontFamily={dm500}
             onPress={handleEnableNotifications}
-            accessibilityRole="button"
             accessibilityLabel={t('parent.application.enableNotifications')}
-          >
-            <View style={styles.rowIconPlaceholder} />
-            <View style={styles.rowText}>
-              <Text style={[styles.rowLabel, dm500 ? { fontFamily: dm500 } : null]}>
-                {t('parent.application.enableNotifications')}
-              </Text>
-              <Text style={styles.rowDetail}>{t('parent.application.enableNotificationsHint')}</Text>
-            </View>
-            <Text style={styles.rowValue}>›</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.row, styles.rowBorderTop]}
-            activeOpacity={0.85}
+          />
+          <MenuRow
+            bordered
+            icon={menuIcon(Share2)}
+            label={t('parent.application.copyPushToken')}
+            detail={t('parent.application.pushTokenHint')}
+            labelFontFamily={dm500}
             onPress={handleSharePushToken}
-            accessibilityRole="button"
             accessibilityLabel={t('parent.application.copyPushToken')}
-          >
-            <View style={styles.rowIconPlaceholder} />
-            <View style={styles.rowText}>
-              <Text style={[styles.rowLabel, dm500 ? { fontFamily: dm500 } : null]}>
-                {t('parent.application.copyPushToken')}
-              </Text>
-              <Text style={styles.rowDetail}>{t('parent.application.pushTokenHint')}</Text>
-            </View>
-            <Text style={styles.rowValue}>›</Text>
-          </TouchableOpacity>
-        </Section>
+          />
+        </MenuGroup>
 
         {hasRealAccount ? (
-          <Section
-            sectionId="account"
-            title={t('parent.account.sectionTitle')}
-            titleFontFamily={dm700}
-            open={openSectionId === 'account'}
-            onToggle={toggleSection}
-          >
-            <StaticRow label={accountEmail || '—'} labelFontFamily={dm500} />
-            <TouchableOpacity
-              style={[styles.row, styles.rowBorderTop]}
+          <MenuGroup title={t('parent.account.sectionTitle')} titleFontFamily={dm600}>
+            <MenuRow
+              icon={menuIcon(UserRound)}
+              label={accountEmail || '—'}
+              labelFontFamily={dm500}
+              showChevron={false}
+            />
+            <MenuRow
+              bordered
+              icon={menuIcon(LogOut)}
+              label={t('parent.account.signOut')}
+              labelFontFamily={dm500}
+              destructive
+              showChevron={false}
               onPress={handleSignOut}
-              activeOpacity={0.85}
               disabled={signOutBusy || deleteBusy}
-              accessibilityRole="button"
               accessibilityLabel={t('parent.account.signOut')}
-            >
-              <View style={styles.rowIconPlaceholder} />
-              <View style={styles.rowText}>
-                <Text style={[styles.rowLabelDestructive, dm500 ? { fontFamily: dm500 } : null]}>
-                  {t('parent.account.signOut')}
-                </Text>
-              </View>
-              <View style={styles.rowValuePlaceholder} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.row, styles.rowBorderTop]}
+            />
+            <MenuRow
+              bordered
+              icon={menuIcon(Trash2)}
+              label={t('parent.account.deleteAccount')}
+              labelFontFamily={dm500}
+              destructive
+              showChevron={false}
               onPress={handleDeleteAccount}
-              activeOpacity={0.85}
               disabled={signOutBusy || deleteBusy}
-              accessibilityRole="button"
               accessibilityLabel={t('parent.account.deleteAccount')}
-            >
-              <View style={styles.rowIconPlaceholder} />
-              <View style={styles.rowText}>
-                <Text style={[styles.rowLabelDestructive, dm500 ? { fontFamily: dm500 } : null]}>
-                  {t('parent.account.deleteAccount')}
-                </Text>
-              </View>
-              <View style={styles.rowValuePlaceholder} />
-            </TouchableOpacity>
-          </Section>
+            />
+          </MenuGroup>
         ) : null}
 
         {hasRealAccount ? (
-          <Section
-            sectionId="backup"
-            title="Sauvegarde cloud"
-            titleFontFamily={dm700}
-            open={openSectionId === 'backup'}
-            onToggle={toggleSection}
-          >
-            <StaticRow label="Sauvegarde" value={backupStatus || 'À jour'} labelFontFamily={dm500} />
-          </Section>
+          <MenuGroup title="Sauvegarde cloud" titleFontFamily={dm600}>
+            <MenuRow
+              icon={menuIcon(Cloud)}
+              label="Sauvegarde"
+              detail={backupStatus || 'À jour'}
+              labelFontFamily={dm500}
+              showChevron={false}
+            />
+          </MenuGroup>
         ) : null}
 
-        <Section
-          sectionId="legal"
-          title="Informations légales"
-          titleFontFamily={dm700}
-          open={openSectionId === 'legal'}
-          onToggle={toggleSection}
-        >
-          <TouchableOpacity
-            style={styles.row}
+        <MenuGroup title="Informations légales" titleFontFamily={dm600}>
+          <MenuRow
+            icon={menuIcon(Shield)}
+            label="Politique de confidentialité"
+            labelFontFamily={dm500}
             onPress={() => void openUrl(LEGAL_PRIVACY_URL)}
-            activeOpacity={0.85}
-            accessibilityRole="link"
-          >
-            <View style={styles.rowIconPlaceholder} />
-            <View style={styles.rowText}>
-              <Text style={[styles.rowLabel, dm500 ? { fontFamily: dm500 } : null]}>
-                Politique de confidentialité
-              </Text>
-            </View>
-            <Text style={styles.rowValue}>›</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.row, styles.rowBorderTop]}
+          />
+          <MenuRow
+            bordered
+            icon={menuIcon(FileText)}
+            label="Conditions d'utilisation"
+            labelFontFamily={dm500}
             onPress={() => void openUrl(LEGAL_TERMS_URL)}
-            activeOpacity={0.85}
-            accessibilityRole="link"
-          >
-            <View style={styles.rowIconPlaceholder} />
-            <View style={styles.rowText}>
-              <Text style={[styles.rowLabel, dm500 ? { fontFamily: dm500 } : null]}>
-                Conditions d&apos;utilisation
-              </Text>
-            </View>
-            <Text style={styles.rowValue}>›</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.row, styles.rowBorderTop]}
+          />
+          <MenuRow
+            bordered
+            icon={menuIcon(FileText)}
+            label="Mentions légales"
+            labelFontFamily={dm500}
             onPress={() => void openUrl(LEGAL_MENTIONS_URL)}
-            activeOpacity={0.85}
-            accessibilityRole="link"
-          >
-            <View style={styles.rowIconPlaceholder} />
-            <View style={styles.rowText}>
-              <Text style={[styles.rowLabel, dm500 ? { fontFamily: dm500 } : null]}>Mentions légales</Text>
-            </View>
-            <Text style={styles.rowValue}>›</Text>
-          </TouchableOpacity>
-        </Section>
+          />
+        </MenuGroup>
       </ScrollView>
 
       <SupportContactModal
@@ -912,172 +801,165 @@ function printOrderStatusLabel(
   }
 }
 
-function Section({
-  sectionId,
+const MENU_BG = '#F2F2F7';
+const MENU_CARD = '#FFFFFF';
+const MENU_HEADER = '#6D6D72';
+const MENU_SEPARATOR = '#C6C6C8';
+const MENU_CHEVRON = '#C7C7CC';
+
+function MenuGroup({
   title,
   children,
   titleFontFamily,
-  open,
-  onToggle,
 }: {
-  sectionId: string;
   title: string;
   children: ReactNode;
   titleFontFamily?: string;
-  open: boolean;
-  onToggle: (id: string) => void;
 }) {
   return (
-    <View style={styles.section}>
-      <TouchableOpacity
-        style={styles.sectionHeader}
-        onPress={() => onToggle(sectionId)}
-        activeOpacity={0.75}
-        accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
-        accessibilityLabel={title}
+    <View style={styles.menuGroup}>
+      <Text
+        style={[styles.menuGroupTitle, titleFontFamily ? { fontFamily: titleFontFamily } : null]}
+        numberOfLines={1}
       >
-        <Text
-          style={[styles.sectionTitle, titleFontFamily ? { fontFamily: titleFontFamily } : null]}
-          numberOfLines={1}
-        >
-          {title}
-        </Text>
-        <ChevronDown
-          size={ICON_SIZES.md}
-          color={THEME.textSecondary}
-          strokeWidth={2.2}
-          style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }}
-        />
-      </TouchableOpacity>
-      {open ? <View style={styles.card}>{children}</View> : null}
+        {title}
+      </Text>
+      <View style={styles.menuCard}>{children}</View>
     </View>
   );
 }
 
-function StaticRow({
+function MenuRow({
   label,
   detail,
   value,
+  icon,
+  onPress,
+  onLongPress,
+  bordered,
+  labelFontFamily,
+  labelAccent,
+  destructive,
+  showChevron = true,
+  disabled,
+  trailing,
   valueRefreshing,
   refreshingAccessibilityLabel,
-  labelFontFamily,
-  bordered,
-  textScale,
+  accessibilityLabel,
 }: {
   label: string;
   detail?: string;
   value?: string;
+  icon?: ReactNode;
+  onPress?: () => void;
+  onLongPress?: () => void;
+  bordered?: boolean;
+  labelFontFamily?: string;
+  labelAccent?: boolean;
+  destructive?: boolean;
+  showChevron?: boolean;
+  disabled?: boolean;
+  trailing?: ReactNode;
   valueRefreshing?: boolean;
   refreshingAccessibilityLabel?: string;
-  labelFontFamily?: string;
-  bordered?: boolean;
-  /** Aligne label/détail/valeur sur le bandeau (titre base + corps md). */
-  textScale?: 'banner';
+  accessibilityLabel?: string;
 }) {
-  const banner = textScale === 'banner';
-  return (
-    <View
-      style={[styles.row, bordered && styles.rowBorderTop]}
-      accessibilityRole="text"
-      accessibilityLabel={
-        valueRefreshing && refreshingAccessibilityLabel
-          ? [label, detail, refreshingAccessibilityLabel].filter(Boolean).join(', ')
-          : undefined
-      }
-    >
-      <View style={styles.rowIconPlaceholder} />
+  const content = (
+    <>
+      <View style={styles.rowIconSlot}>
+        {icon ?? <View style={styles.rowIconPlaceholder} />}
+      </View>
       <View style={styles.rowText}>
         <Text
           style={[
             styles.rowLabel,
-            banner && styles.bannerMatchedLabel,
+            labelAccent && styles.rowLabelAccent,
+            destructive && styles.rowLabelDestructive,
             labelFontFamily ? { fontFamily: labelFontFamily } : null,
           ]}
           numberOfLines={2}
-          ellipsizeMode="tail"
         >
           {label}
         </Text>
         {detail ? (
-          <Text
-            style={[styles.rowDetail, banner && styles.bannerMatchedDetail]}
-            numberOfLines={1}
-            ellipsizeMode="tail"
-          >
+          <Text style={styles.rowDetail} numberOfLines={2}>
             {detail}
           </Text>
         ) : null}
       </View>
-      {valueRefreshing ? (
+      {trailing ? (
+        <View style={styles.rowTrailing}>{trailing}</View>
+      ) : valueRefreshing ? (
         <View style={styles.statusRefreshWrap}>
           {value ? (
-            <Text
-              style={[styles.statusLabel, banner && styles.bannerMatchedDetail]}
-              numberOfLines={2}
-            >
+            <Text style={styles.rowValue} numberOfLines={2}>
               {value}
             </Text>
           ) : null}
           <ActivityIndicator
-            color={THEME.brandCtaOrange}
+            color={THEME.brandPrimary}
             size="small"
             style={styles.statusSpinner}
             accessibilityLabel={refreshingAccessibilityLabel}
           />
         </View>
       ) : value ? (
-        <Text style={[styles.rowValue, banner && styles.bannerMatchedDetail]} numberOfLines={2}>
+        <Text style={styles.rowValue} numberOfLines={2}>
           {value}
         </Text>
+      ) : showChevron && onPress ? (
+        <ChevronRight size={ICON_SIZES.md} color={MENU_CHEVRON} strokeWidth={2} />
       ) : (
         <View style={styles.rowValuePlaceholder} />
       )}
+    </>
+  );
+
+  const wrap = (node: ReactNode) => (
+    <View style={styles.rowWrap}>
+      {bordered ? <View style={styles.rowDivider} /> : null}
+      {node}
     </View>
   );
-}
 
-function Row({
-  label,
-  value,
-  onPress,
-  icon,
-  labelFontFamily,
-}: {
-  label: string;
-  value?: string;
-  onPress: () => void;
-  icon?: React.ReactNode;
-  labelFontFamily?: string;
-}) {
-  return (
-    <TouchableOpacity style={styles.row} onPress={onPress} activeOpacity={0.85}>
-      {icon ? <View style={styles.rowIcon}>{icon}</View> : <View style={styles.rowIconPlaceholder} />}
-      <View style={styles.rowText}>
-        <Text style={[styles.rowLabel, labelFontFamily ? { fontFamily: labelFontFamily } : null]}>
-          {label}
-        </Text>
-      </View>
-      {value ? <Text style={styles.rowValue}>{value}</Text> : <View style={styles.rowValuePlaceholder} />}
-    </TouchableOpacity>
+  if (onPress) {
+    return wrap(
+      <TouchableOpacity
+        style={styles.row}
+        onPress={onPress}
+        onLongPress={onLongPress}
+        delayLongPress={onLongPress ? 700 : undefined}
+        activeOpacity={0.65}
+        disabled={disabled}
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel ?? label}
+      >
+        {content}
+      </TouchableOpacity>,
+    );
+  }
+
+  return wrap(
+    <View
+      style={styles.row}
+      accessibilityRole="text"
+      accessibilityLabel={accessibilityLabel ?? [label, detail, value].filter(Boolean).join(', ')}
+    >
+      {content}
+    </View>,
   );
 }
 
-function AvatarFallback({ letter, letterFontFamily }: { letter: string; letterFontFamily?: string }) {
-  return (
-    <View style={styles.avatarFallback}>
-      <Text style={[styles.avatarFallbackText, letterFontFamily ? { fontFamily: letterFontFamily } : null]}>
-        {letter}
-      </Text>
-    </View>
-  );
-}
-
+const MENU_BG = '#F2F2F7';
+const MENU_CARD = '#FFFFFF';
+const MENU_HEADER = '#6D6D72';
+const MENU_SEPARATOR = '#C6C6C8';
+const MENU_CHEVRON = '#C7C7CC';
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: THEME.bg,
+    backgroundColor: MENU_BG,
   },
   header: {
     flexDirection: 'row',
@@ -1085,9 +967,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
-    backgroundColor: THEME.bg,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: THEME.familyFlowLine,
+    backgroundColor: MENU_BG,
   },
   headerButton: {
     width: scale(44),
@@ -1104,14 +984,35 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: SPACING.md,
-    paddingTop: SPACING.md,
+    paddingTop: SPACING.sm,
+    paddingBottom: SPACING.lg,
+  },
+  menuGroup: {
+    marginBottom: verticalScale(22),
+  },
+  menuGroupTitle: {
+    fontSize: FONT_SIZES.xs,
+    fontWeight: '600',
+    color: MENU_HEADER,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    paddingHorizontal: SPACING.lg,
+    marginBottom: verticalScale(8),
+  },
+  menuCard: {
+    backgroundColor: MENU_CARD,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: MENU_SEPARATOR,
+    overflow: 'hidden',
   },
   billingIssueBanner: {
+    marginHorizontal: SPACING.md,
+    marginTop: SPACING.md,
+    marginBottom: SPACING.sm,
     paddingHorizontal: SPACING.md,
     paddingVertical: verticalScale(14),
-    marginBottom: verticalScale(8),
-    backgroundColor: '#F2F2F7',
+    backgroundColor: MENU_BG,
     borderRadius: scale(12),
     gap: verticalScale(8),
   },
@@ -1132,77 +1033,39 @@ const styles = StyleSheet.create({
     paddingVertical: verticalScale(8),
     paddingHorizontal: SPACING.md,
     borderRadius: scale(100),
-    backgroundColor: THEME.accent,
+    backgroundColor: THEME.brandPrimary,
   },
   billingIssueCtaText: {
     fontSize: FONT_SIZES.sm,
     fontWeight: '600',
     color: '#FFFFFF',
   },
-  /** Même échelle que le bandeau (titre base / corps md). */
-  bannerMatchedLabel: {
-    fontSize: FONT_SIZES.base,
+  rowWrap: {
+    backgroundColor: MENU_CARD,
   },
-  bannerMatchedDetail: {
-    fontSize: FONT_SIZES.md,
-  },
-  bannerMatchedBody: {
-    fontSize: FONT_SIZES.md,
-    lineHeight: scale(20),
-  },
-  section: {
-    marginBottom: SPACING.lg,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: SPACING.sm,
-    paddingVertical: SPACING.sm,
-    paddingHorizontal: SPACING.xs,
-    marginBottom: SPACING.xs,
-  },
-  sectionTitle: {
-    flex: 1,
-    fontSize: FONT_SIZES.xl,
-    fontWeight: '700',
-    color: THEME.textPrimary,
-    letterSpacing: -0.3,
-  },
-  card: {
-    backgroundColor: THEME.bg,
-    borderRadius: scale(18),
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: THEME.familyFlowLine,
-    overflow: 'hidden',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.05,
-        shadowRadius: 4,
-      },
-      android: { elevation: 1 },
-      default: {},
-    }),
+  rowDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: MENU_SEPARATOR,
+    marginLeft: scale(52),
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
+    paddingLeft: SPACING.md,
+    paddingRight: SPACING.md,
+    paddingVertical: verticalScale(14),
+    minHeight: scale(52),
+    backgroundColor: MENU_CARD,
   },
-  rowBorderTop: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: THEME.familyFlowLine,
-  },
-  rowIcon: {
-    width: scale(40),
+  rowIconSlot: {
+    width: scale(36),
+    marginRight: SPACING.sm,
     alignItems: 'center',
     justifyContent: 'center',
   },
   rowIconPlaceholder: {
-    width: scale(40),
+    width: scale(22),
+    height: scale(22),
   },
   rowText: {
     flex: 1,
@@ -1219,11 +1082,10 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   rowLabelAccent: {
-    color: THEME.brandCtaOrange,
+    color: THEME.brandPrimary,
     fontWeight: '700',
   },
   rowLabelDestructive: {
-    fontSize: FONT_SIZES.base,
     color: '#C62828',
     fontWeight: '600',
   },
@@ -1232,7 +1094,11 @@ const styles = StyleSheet.create({
     color: THEME.textMuted,
     marginLeft: SPACING.sm,
     flexShrink: 0,
-    maxWidth: '46%',
+    maxWidth: '42%',
+    textAlign: 'right',
+  },
+  rowTrailing: {
+    marginLeft: SPACING.sm,
   },
   statusRefreshWrap: {
     flexDirection: 'row',
@@ -1241,61 +1107,35 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     maxWidth: '50%',
   },
-  statusLabel: {
-    fontSize: FONT_SIZES.sm,
-    color: THEME.textMuted,
-    flexShrink: 1,
-  },
   statusSpinner: {
     marginLeft: 8,
   },
   rowValuePlaceholder: {
-    width: scale(18),
+    width: scale(10),
+  },
+  emptyBlock: {
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.md,
+    gap: verticalScale(4),
   },
   emptyText: {
-    fontSize: FONT_SIZES.sm,
+    fontSize: FONT_SIZES.md,
     color: THEME.textMuted,
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.md,
   },
-  addChildRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  emptyTextHint: {
+    fontSize: FONT_SIZES.sm,
+    color: THEME.textMuted,
     paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
-    borderTopWidth: 1,
-    borderTopColor: THEME.familyFlowLine,
+    paddingBottom: SPACING.md,
+    lineHeight: scale(18),
   },
   addChildIcon: {
-    width: scale(34),
-    height: scale(34),
-    borderRadius: scale(17),
+    width: scale(28),
+    height: scale(28),
+    borderRadius: scale(14),
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: SPACING.sm,
-  },
-  addChildText: {
-    fontSize: FONT_SIZES.base,
-    color: THEME.textPrimary,
-    fontWeight: '600',
-  },
-  childRowAvatarImg: {
-    width: scale(34),
-    height: scale(34),
-    borderRadius: scale(17),
-    backgroundColor: '#E8E8ED',
-  },
-  avatarFallback: {
-    width: scale(34),
-    height: scale(34),
-    borderRadius: scale(17),
-    backgroundColor: '#C8DCDE',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarFallbackText: {
-    color: '#2F5560',
-    fontWeight: '700',
-    fontSize: FONT_SIZES.sm,
   },
 });
