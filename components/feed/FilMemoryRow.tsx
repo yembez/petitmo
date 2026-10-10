@@ -1008,7 +1008,11 @@ function FilMemoryRow({
                   ) : (
                     <View style={[styles.photoImage, { backgroundColor: '#000000' }]} />
                   )}
-                  {!skipImmersive && !canAutoplayVideoInline ? (
+                  {/**
+                   * Pas d’icône play si URI locale : autoplay fil. L’icône se cumule
+                   * sinon dans la transition immersif (poster + play stackés).
+                   */}
+                  {!skipImmersive && !canAutoplayVideoInline && !videoPlaybackUri.trim() ? (
                     <View style={[styles.playOverlay, styles.videoPlayIconAboveTap]} pointerEvents="none">
                       <View style={styles.playButton}>
                         <Play size={ICON_SIZES.sm} color="#FFFFFF" fill="#FFFFFF" strokeWidth={0} />

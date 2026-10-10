@@ -5,7 +5,6 @@ import type { Memory } from '@/types/local';
 import type { FeedListItem } from '@/components/feed/FilMemoryRow';
 import {
   getFeedAutoplayActiveMemoryId,
-  isFeedScrollIdle,
   setFeedAutoplayActiveMemoryId,
   setFeedOnScreenVideoIds,
   setFeedScrollIdle,
@@ -19,11 +18,8 @@ import {
   canRenderOptimisticPendingRow,
 } from '@/utils/feedHelpers';
 
-/**
- * Délai après fin de scroll avant de (re)picker une vidéo autoplay.
- * Évite attach/detach VideoView + fades pendant le fling.
- */
-const FEED_SCROLL_IDLE_MS = 180;
+/** Backup après fin de scroll si la viewability n’a pas re-tiré (immédiat). */
+const FEED_SCROLL_IDLE_MS = 0;
 
 /** Arrêt lecture : sous ce % de la ligne visible, la vidéo n’est plus « à l’écran ». */
 export const FEED_VIDEO_ON_SCREEN_VISIBLE_PCT = 50;
@@ -133,8 +129,6 @@ export function useFeedVideoAutoplay(
     }
 
     if (!allowNewPick) return;
-    /** Pas de nouveau pick pendant le fling — sinon jank (mount player / fade poster). */
-    if (!isFeedScrollIdle()) return;
 
     /** Toujours la plus haute éligible — évite qu’un bandeau du post précédent garde la lecture. */
     setFeedAutoplayActiveMemoryId(pickBestVideoId(eligible));
