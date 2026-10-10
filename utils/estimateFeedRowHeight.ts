@@ -3,15 +3,14 @@ import {
   MEDIA_CARD_INSET,
 } from '@/constants/feedLayout';
 import type { FeedListItem } from '@/components/feed/FilMemoryRow';
-import {
-  FEED_MEDIA_ASPECT_DEFAULT,
-  feedMediaAspectFromMemory,
-} from '@/utils/feedMediaAspect';
+import { FEED_MEDIA_ASPECT_DEFAULT } from '@/utils/feedMediaAspect';
 import { scale, verticalScale } from '@/utils/responsive';
 import { memoryHasExplicitVoiceCover } from '@/utils/memoryPhotos';
 
 /** Espacement inter-posts (`feedRowSpacingTop`). */
-const ROW_SPACING_TOP = verticalScale(8);
+const ROW_SPACING_TOP = verticalScale(24);
+/** Marges latérales carte (`postShell.marginHorizontal` × 2). */
+const POST_SHELL_GUTTER = scale(16);
 /** `postActions` paddingVertical ×2 + disque CTA. */
 const POST_ACTIONS_H = verticalScale(24) + scale(40);
 /** `postCaption` paddings si annotation. */
@@ -33,15 +32,14 @@ function captionBlockHeight(content: string | null | undefined): number {
   return CAPTION_PAD_V + body;
 }
 
-function mediaHeight(screenW: number, aspect: number): number {
-  const w = Math.max(1, screenW - 2 * MEDIA_CARD_INSET);
-  const a = aspect > 0 ? aspect : FEED_MEDIA_ASPECT_DEFAULT;
-  return w / a;
+function mediaHeight(screenW: number): number {
+  const w = Math.max(1, screenW - POST_SHELL_GUTTER - 2 * MEDIA_CARD_INSET);
+  return w / FEED_MEDIA_ASPECT_DEFAULT;
 }
 
 /**
  * Estimation synchrone de la hauteur d’une ligne fil (anti-saut FlatList).
- * Affinée ensuite via `setFeedRowMeasuredHeight` (onLayout).
+ * Format carte unique 4/5 + coins arrondis (layout historique).
  */
 export function estimateFeedRowHeight(
   item: FeedListItem,
@@ -62,15 +60,13 @@ export function estimateFeedRowHeight(
     memory.type !== 'text' ? captionBlockHeight(memory.content) : 0;
 
   if (memory.type === 'photo' || memory.type === 'video') {
-    const aspect = feedMediaAspectFromMemory(memory) ?? FEED_MEDIA_ASPECT_DEFAULT;
-    return spacing + mediaHeight(screenW, aspect) + captionH + POST_ACTIONS_H;
+    return spacing + mediaHeight(screenW) + captionH + POST_ACTIONS_H;
   }
 
   if (memory.type === 'voice') {
     const hasCover = memoryHasExplicitVoiceCover(memory);
     if (hasCover) {
-      const aspect = feedMediaAspectFromMemory(memory) ?? 1;
-      const coverH = Math.max(VOICE_COVER_MIN_H, mediaHeight(screenW, aspect));
+      const coverH = Math.max(VOICE_COVER_MIN_H, mediaHeight(screenW));
       return spacing + coverH + captionH + POST_ACTIONS_H;
     }
     return spacing + verticalScale(120) + captionH + POST_ACTIONS_H;
@@ -85,5 +81,5 @@ export function estimateFeedRowHeight(
     return spacing + DAY_SEP_H + titleH + bodyH + POST_ACTIONS_H;
   }
 
-  return spacing + mediaHeight(screenW, FEED_MEDIA_ASPECT_DEFAULT) + POST_ACTIONS_H;
+  return spacing + mediaHeight(screenW) + POST_ACTIONS_H;
 }

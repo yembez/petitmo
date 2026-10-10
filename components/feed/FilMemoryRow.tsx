@@ -63,10 +63,6 @@ import {
 import { useFeedPhotoDisplayUrls } from '@/hooks/useFeedPhotoDisplayUrls';
 import { useFeedVideoPlaybackUri } from '@/hooks/useFeedVideoPlaybackUri';
 import { useFeedVideoPosterDisplayUrl } from '@/hooks/useFeedVideoPosterDisplayUrl';
-import {
-  FEED_MEDIA_ASPECT_DEFAULT,
-  feedMediaAspectFromMemory,
-} from '@/utils/feedMediaAspect';
 import { useVideoShouldPlay } from '@/hooks/useVideoShouldPlay';
 import { normalizeVideoPlaybackUri } from '@/utils/videoMediaUri';
 import { PetitmoVideoView } from '@/components/PetitmoVideoView';
@@ -338,11 +334,6 @@ function FilMemoryRow({
     return parts.length > 0 ? parts : [raw];
   })();
   const videoPosterUri = useFeedVideoPosterDisplayUrl(memory);
-  /**
-   * Cadre média — sync only (`print_px_*` ou défaut).
-   * Plus de `Image.getSize` async : ça recalait le ratio mid-scroll (micro-sauts TF).
-   */
-  const mediaAspectRatio = feedMediaAspectFromMemory(memory) ?? FEED_MEDIA_ASPECT_DEFAULT;
   const voiceCoverRaw = getVoiceCoverUriForFeedAndViewer(memory);
   const voiceCoverSigned = useSignedMediaUrl(voiceCoverRaw || null) ?? '';
   /**
@@ -381,7 +372,6 @@ function FilMemoryRow({
     feedFlashLog('row.mount', {
       id: memory.id.slice(0, 8),
       type: memory.type,
-      aspect: Number(mediaAspectRatio.toFixed(3)),
       photos: photoUrls.length,
       poster: !!videoPosterUri.trim(),
       playUri: !!videoPlaybackUri.trim(),
@@ -875,7 +865,6 @@ function FilMemoryRow({
               {mediaMetaOverlay}
               <PhotoMosaic
                 urls={photoUrls}
-                mediaAspectRatio={mediaAspectRatio}
                 memoryId={isOptimisticFeedPending ? undefined : memory.id}
                 favoritePhotoUrls={parseFavoritePhotoUrls(memory)}
                 onFavoritePhotoUrlsUpdated={urls =>
@@ -904,9 +893,7 @@ function FilMemoryRow({
           {memory.type === 'photo' && photoUrls.length === 0 && (
             <View style={{ position: 'relative' }}>
               {mediaMetaOverlay}
-              <View
-                style={[styles.mediaCard, styles.photoPlaceholder, { aspectRatio: mediaAspectRatio }]}
-              />
+              <View style={[styles.mediaCard, styles.photoPlaceholder]} />
               {isOptimisticFeedPending ? (
                 <FeedMediaPrepOverlay
                   compact
@@ -937,14 +924,7 @@ function FilMemoryRow({
                 accessibilityRole="button"
                 accessibilityLabel="Ouvrir en plein écran"
               >
-                <View
-                  style={[
-                    styles.mediaCard,
-                    styles.videoBody,
-                    styles.videoMediaCard,
-                    { aspectRatio: mediaAspectRatio },
-                  ]}
-                >
+                <View style={[styles.mediaCard, styles.videoBody, styles.videoMediaCard]}>
                   {videoPlaybackUri.trim() ? (
                     <View style={[styles.photoImage, styles.feedInlineAutoplayStack]} pointerEvents="none">
                       <View
@@ -1038,13 +1018,7 @@ function FilMemoryRow({
                 </View>
               </FeedMediaPressable>
               ) : (
-                <View
-                  style={[
-                    styles.mediaCard,
-                    styles.photoPlaceholder,
-                    { aspectRatio: mediaAspectRatio },
-                  ]}
-                />
+                <View style={[styles.mediaCard, styles.photoPlaceholder]} />
               )}
               {/** Pending import : points tant que le souvenir n’est pas posé en SQLite. */}
               {isOptimisticFeedPending ? (
