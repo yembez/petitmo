@@ -376,6 +376,11 @@ function RootLayoutNav() {
         <Stack.Screen name="onboarding-permissions" />
         <Stack.Screen name="edit-child" />
         <Stack.Screen name="parent-space" />
+        <Stack.Screen name="parent-orders" />
+        <Stack.Screen name="parent-help" />
+        <Stack.Screen name="parent-application" />
+        <Stack.Screen name="parent-account" />
+        <Stack.Screen name="parent-legal" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen
           name="write"
