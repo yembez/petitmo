@@ -68,8 +68,7 @@ function htmlPage(
     .wrap{max-width:560px;margin:0 auto;padding:28px 18px}
     .page-top{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:14px}
     .page-top-logo{flex:0 0 auto}
-    /* Lockup très large (1024x188) : piloter par la largeur pour garder le ratio. */
-    .logo-img{width:min(196px,48vw);height:auto;display:block}
+    .logo-img{width:min(112px,30vw);height:auto;display:block}
     .page-header-text{flex:1;min-width:0;padding-top:2px;text-align:right}
     .page-header-kind{font-size:14px;font-weight:500;line-height:1.3;color:#1C1C1E}
     .page-header-date{margin-top:3px;font-size:12px;font-weight:400;line-height:1.35;color:#6B7280}
@@ -78,13 +77,11 @@ function htmlPage(
     .page-main{margin-top:0}
     .card{background:#fff;border:1px solid rgba(0,0,0,.06);border-radius:16px;padding:18px 18px;box-shadow:0 6px 20px rgba(0,0,0,.06)}
     .muted{color:#6B7280;font-size:14px;line-height:1.45}
-    .btn{display:inline-block;margin-top:14px;margin-right:8px;padding:10px 14px;border-radius:12px;background:#C4784A;color:#fff;text-decoration:none;font-weight:600;border:none;font-size:15px;cursor:pointer;font-family:inherit}
-    .btn-secondary{background:#fff;color:#C4784A;border:1.5px solid #C4784A}
+    .btn{display:inline-block;margin-top:14px;margin-right:8px;padding:10px 14px;border-radius:12px;background:#FC5757;color:#fff;text-decoration:none;font-weight:600;border:none;font-size:15px;cursor:pointer;font-family:inherit}
+    .btn-secondary{background:#fff;color:#FC5757;border:1.5px solid #FC5757}
     .player{width:100%;margin-top:0;border-radius:10px}
     .player-video{display:block;width:100%;border-radius:16px;box-shadow:0 6px 20px rgba(0,0,0,.08);background:#111827;vertical-align:top}
     .save-block{margin-top:16px}
-    .save-hint{margin-top:10px;font-size:12px;line-height:1.45;color:#6B7280}
-    .save-status{margin-top:8px;font-size:12px;line-height:1.45;color:#6B7280;display:none}
   </style>
 </head>
 <body>
@@ -104,18 +101,12 @@ function htmlPage(
 function saveControlsHtml(token: string, kind: TokenRow['kind']): string {
   const primaryLabel = kind === 'video' ? 'Télécharger' : 'Télécharger l’audio';
   const againLabel = 'Télécharger à nouveau';
-  const iosHint =
-    kind === 'video'
-      ? `<div id="save-hint" class="save-hint">Sur iPhone : touchez le bouton, faites défiler le menu vers le bas, puis « Enregistrer la vidéo ».</div>`
-      : `<div id="save-hint" class="save-hint">Le fichier s’enregistre via le menu qui s’ouvre en bas de l’écran.</div>`;
   const safeToken = token.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
   const safeKind = kind === 'video' ? 'video' : 'audio';
   const filename = downloadFilename(kind);
 
   return `<div class="save-block">
       <button type="button" id="save-btn" class="btn btn-secondary">${primaryLabel}</button>
-      <div id="save-status" class="save-status"></div>
-      ${iosHint}
     </div>
     <script>
     (function () {
@@ -124,21 +115,11 @@ function saveControlsHtml(token: string, kind: TokenRow['kind']): string {
       var filename = '${filename}';
       var storageKey = 'petitmo_saved_' + token;
       var btn = document.getElementById('save-btn');
-      var status = document.getElementById('save-status');
       var downloadUrl = '/m/' + encodeURIComponent(token) + '/download';
-      var primaryLabel = ${JSON.stringify(primaryLabel)};
       var againLabel = ${JSON.stringify(againLabel)};
-      var statusAgain =
-        kind === 'video'
-          ? 'Déjà téléchargé ici. Pas dans Photos ? Touchez à nouveau.'
-          : 'Déjà téléchargé ici. Touchez à nouveau si besoin.';
 
       function applySavedUi() {
         if (btn) btn.textContent = againLabel;
-        if (status) {
-          status.textContent = statusAgain;
-          status.style.display = 'block';
-        }
       }
 
       function markSaved() {

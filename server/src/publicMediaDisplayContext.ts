@@ -117,14 +117,14 @@ export function escapePublicMediaHtml(text: string): string {
 let cachedLogoHtml: string | null = null;
 
 /**
- * Logo Petit Cœur (même lockup que l’app : `logo_petit_coeur_trois_points_ink`).
- * Inline en data URI : la page QR est une visite unique, on évite une seconde requête.
+ * Wordmark manuscrit « Petit / Cœur » noir (même asset que l’app / paywall).
+ * Inline data URI : visite QR unique, pas de seconde requête.
  */
 export function petitCoeurLogoHtml(): string {
   if (!cachedLogoHtml) {
-    const png = readFileSync(join(__dirname, 'brand', 'petit-coeur-logo.png'));
+    const png = readFileSync(join(__dirname, 'brand', 'petit-coeur-wordmark-noir.png'));
     const src = `data:image/png;base64,${png.toString('base64')}`;
-    cachedLogoHtml = `<img class="logo-img" src="${src}" width="1024" height="188" alt="Petit Cœur"/>`;
+    cachedLogoHtml = `<img class="logo-img" src="${src}" width="1200" height="1030" alt="Petit Cœur"/>`;
   }
   return cachedLogoHtml;
 }
