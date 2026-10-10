@@ -12,6 +12,7 @@ import {
   ChevronLeft,
   CreditCard,
   FileText,
+  Heart,
   HelpCircle,
   Package,
   Plus,
@@ -203,7 +204,13 @@ export default function ParentSpaceScreen() {
             </>
           ) : (
             <MenuRow
-              icon={menuIcon(CreditCard)}
+              icon={
+                <Heart
+                  size={ICON_SIZES.md}
+                  color={THEME.brandPrimary}
+                  strokeWidth={1.85}
+                />
+              }
               label={t('parent.subscription.upgradeCta')}
               labelFontFamily={dm700}
               labelAccent
