@@ -68,7 +68,7 @@ function htmlPage(
     .wrap{max-width:560px;margin:0 auto;padding:28px 18px}
     .page-top{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:14px}
     .page-top-logo{flex:0 0 auto}
-    .logo-img{width:min(112px,30vw);height:auto;display:block}
+    .logo-img{width:min(56px,15vw);height:auto;display:block}
     .page-header-text{flex:1;min-width:0;padding-top:2px;text-align:right}
     .page-header-kind{font-size:14px;font-weight:500;line-height:1.3;color:#1C1C1E}
     .page-header-date{margin-top:3px;font-size:12px;font-weight:400;line-height:1.35;color:#6B7280}
