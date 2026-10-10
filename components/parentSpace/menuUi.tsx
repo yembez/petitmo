@@ -183,7 +183,7 @@ const styles = StyleSheet.create({
     marginBottom: verticalScale(22),
   },
   menuGroupTitle: {
-    fontSize: FONT_SIZES.xs,
+    fontSize: FONT_SIZES.sm,
     fontWeight: '600',
     color: MENU_HEADER,
     letterSpacing: 0.6,
@@ -230,12 +230,12 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   rowLabel: {
-    fontSize: FONT_SIZES.base,
+    fontSize: FONT_SIZES.lg,
     color: THEME.textPrimary,
     fontWeight: '500',
   },
   rowDetail: {
-    fontSize: FONT_SIZES.sm,
+    fontSize: FONT_SIZES.md,
     color: THEME.textMuted,
     marginTop: 2,
   },
@@ -248,7 +248,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   rowValue: {
-    fontSize: FONT_SIZES.sm,
+    fontSize: FONT_SIZES.md,
     color: THEME.textMuted,
     marginLeft: SPACING.sm,
     flexShrink: 0,

@@ -98,12 +98,12 @@ const styles = StyleSheet.create({
     gap: verticalScale(4),
   },
   emptyText: {
-    fontSize: FONT_SIZES.md,
+    fontSize: FONT_SIZES.base,
     color: THEME.textMuted,
   },
   emptyHint: {
-    fontSize: FONT_SIZES.sm,
+    fontSize: FONT_SIZES.md,
     color: THEME.textMuted,
-    lineHeight: scale(18),
+    lineHeight: scale(20),
   },
 });

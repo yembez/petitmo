@@ -284,7 +284,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerTitle: {
-    fontSize: FONT_SIZES.lg,
+    fontSize: FONT_SIZES.xl,
     fontWeight: '600',
     color: THEME.textPrimary,
   },
@@ -305,15 +305,15 @@ const styles = StyleSheet.create({
     gap: verticalScale(8),
   },
   billingIssueTitle: {
-    fontSize: FONT_SIZES.base,
+    fontSize: FONT_SIZES.lg,
     fontWeight: '600',
     color: THEME.textPrimary,
   },
   billingIssueBody: {
-    fontSize: FONT_SIZES.md,
+    fontSize: FONT_SIZES.base,
     fontWeight: '500',
     color: THEME.textSecondary,
-    lineHeight: scale(20),
+    lineHeight: scale(22),
   },
   billingIssueCta: {
     alignSelf: 'flex-start',
@@ -324,12 +324,12 @@ const styles = StyleSheet.create({
     backgroundColor: THEME.brandPrimary,
   },
   billingIssueCtaText: {
-    fontSize: FONT_SIZES.sm,
+    fontSize: FONT_SIZES.md,
     fontWeight: '600',
     color: '#FFFFFF',
   },
   emptyText: {
-    fontSize: FONT_SIZES.md,
+    fontSize: FONT_SIZES.base,
     color: THEME.textMuted,
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.md,
