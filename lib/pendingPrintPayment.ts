@@ -12,6 +12,12 @@ export type PendingPrintPayment = {
   childId: string;
   createdAt: string;
   /**
+   * Empreinte contenu livre au moment du ticket (pages Gelato + QR + remise).
+   * Si la revue livre change le contenu, on refuse de réutiliser ce pending unpaid
+   * pour ne pas ouvrir Stripe avec un ancien montant.
+   */
+  contentKey?: string;
+  /**
    * Payload (médias + pages) déjà stashé côté serveur pour ce ticket.
    * Le Checkout s’ouvre pendant l’upload : si l’app est tuée entre paiement et fin du stash,
    * la reprise doit terminer l’upload avant de kicker PDF + Gelato.
@@ -32,6 +38,7 @@ function parse(raw: string): PendingPrintPayment | null {
     if (!exportRequestId || !exportTicket || !email || !bookId || !Number.isFinite(priceCents)) {
       return null;
     }
+    const contentKey = typeof o.contentKey === 'string' ? o.contentKey.trim() : '';
     return {
       exportRequestId,
       exportTicket,
@@ -40,6 +47,7 @@ function parse(raw: string): PendingPrintPayment | null {
       bookId,
       childId,
       createdAt,
+      ...(contentKey ? { contentKey } : {}),
       stashed: o.stashed === true,
     };
   } catch {

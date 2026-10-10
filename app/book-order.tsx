@@ -35,7 +35,7 @@ import {
   peekLastPrintOrderForm,
   setLastPrintOrderForm,
 } from '@/lib/printOrderFormPrefs';
-import { PRINT_V1_INCLUDED_QR, quotePrintOrderV1 } from '@/lib/pricingV1';
+import { PRINT_V1_INCLUDED_QR, quotePrintOrderV1, quotePrintOrderV1Cents } from '@/lib/pricingV1';
 import { isSentryEnabled, Sentry } from '@/lib/sentry';
 import { PRINT_V1_PAID_DISCOUNT_PERCENT, type DiscountPercent } from '@/lib/printedBookQuote';
 import { PRINT_ORDER_CGV_URL, PRINT_ORDER_CGV_VERSION } from '@/lib/printOrderLegal';
@@ -126,6 +126,35 @@ type PrintTicketInfo = {
   exportRequestId: string;
   priceCents: number;
 };
+
+/** Session Stripe préchargée (fond) — ouverte au tap si empreinte + adresse inchangées. */
+type PrintCheckoutPrefetch = {
+  fingerprint: string;
+  shippingKey: string;
+  exportTicket: string;
+  checkoutUrl: string;
+  priceCents: number;
+};
+
+function printShippingKey(input: {
+  shippingName: string;
+  fullName: string;
+  line1: string;
+  line2: string;
+  city: string;
+  zip: string;
+  country: string;
+}): string {
+  return [
+    input.shippingName.trim(),
+    input.fullName.trim(),
+    input.line1.trim(),
+    input.line2.trim(),
+    input.city.trim(),
+    input.zip.trim(),
+    input.country.trim().toUpperCase(),
+  ].join('\0');
+}
 
 /** Miniature couverture carte commande — même composant que l’onglet Livres, un cran plus petit. */
 const ORDER_COVER_SCALE = 0.78;
@@ -316,6 +345,9 @@ export default function BookOrderScreen() {
   );
   /** Dernier échec de stash en fond (prefetch) → on bloque avant paiement plutôt qu’après. */
   const printStashErrorRef = useRef<{ exportTicket: string; error: unknown } | null>(null);
+  /** Session Stripe Checkout préchargée (fond) — évite l’attente au tap Commander. */
+  const printCheckoutPrefetchRef = useRef<PrintCheckoutPrefetch | null>(null);
+  const printCheckoutPrefetchInFlightRef = useRef<Promise<PrintCheckoutPrefetch | null> | null>(null);
   const [pdfEntitled, setPdfEntitled] = useState({ premium: false, digitalPaid: false });
   const [blockedEmptyMemories, setBlockedEmptyMemories] = useState(false);
   const emptyBookAlertShownRef = useRef(false);
@@ -715,15 +747,29 @@ export default function BookOrderScreen() {
   );
 
   /**
-   * Empreinte ticket / stash : livre + e-mail + remise seulement.
-   * L’adresse **n’y figure plus** : elle est figée au Checkout (`createPrintPayment`), pas à
-   * l’init-export. Sinon chaque frappe (« Mont » → « Montpellier ») invalidait le prefetch,
-   * relançait l’upload, et après paiement l’overlay attendait tout l’upload d’un coup.
-   * Ne pas inclure `contentVerified` non plus (même piège sur la case légale).
+   * Empreinte ticket / stash / session Stripe : livre + e-mail + remise + **contenu**
+   * (pages Gelato + QR). L’adresse n’y figure pas (figée au Checkout) pour ne pas
+   * invalider le prefetch à chaque frappe ville. `contentVerified` non plus (case légale).
+   * Revue livre qui ajoute/retire des souvenirs → nouvel empreinte → nouveau ticket + prix.
    */
   const printFormFingerprint = useCallback(() => {
-    return [bookId, childId, email.trim().toLowerCase(), String(discountPercent)].join('\0');
-  }, [bookId, childId, discountPercent, email]);
+    const gelato =
+      gelatoPagesForQuote > 0 ? gelatoPagesForQuote : GELATO_MIN_INNER_PAGES;
+    return [
+      bookId,
+      childId,
+      email.trim().toLowerCase(),
+      String(discountPercent),
+      String(gelato),
+      String(Math.max(0, qrCountForQuote)),
+    ].join('\0');
+  }, [bookId, childId, discountPercent, email, gelatoPagesForQuote, qrCountForQuote]);
+
+  const printContentKey = useCallback(() => {
+    const gelato =
+      gelatoPagesForQuote > 0 ? gelatoPagesForQuote : GELATO_MIN_INNER_PAGES;
+    return `${gelato}:${Math.max(0, qrCountForQuote)}:${discountPercent}`;
+  }, [discountPercent, gelatoPagesForQuote, qrCountForQuote]);
 
   /** Assez d’infos pour init-export + stash en fond (sans attendre la case légale). */
   const printAddressReady = useMemo(() => {
@@ -774,6 +820,13 @@ export default function BookOrderScreen() {
 
       // Le ticket est rattaché au contact CRM (e-mail) : un pending avec un autre e-mail n’est
       // pas réutilisable. L’adresse, elle, est re-figée au Checkout (`createPrintPayment`).
+      // Contenu livre (pages/QR) : refuse un pending unpaid au mauvais montant (revue livre).
+      const contentKey = printContentKey();
+      const expectedPriceCents = quotePrintOrderV1Cents({
+        gelatoPages: gelatoPagesForQuote > 0 ? gelatoPagesForQuote : GELATO_MIN_INNER_PAGES,
+        qrCount: Math.max(0, qrCountForQuote),
+        tier: subscriptionDb === 'paid' ? 'paid' : 'free',
+      }).priceCents;
       const existingPay = await getPendingPrintPayment();
       if (
         existingPay &&
@@ -781,27 +834,40 @@ export default function BookOrderScreen() {
         existingPay.email === mail &&
         !isExportTicketExpired(existingPay.exportTicket)
       ) {
-        try {
-          const st = await fetchPrintPaymentStatus(existingPay.exportTicket);
-          // Un ticket **paid** n’est pas un ticket Checkout : reprise via `completePrintAfterPaid`.
-          // Le réutiliser ici empêchait toute nouvelle commande et fake-confirmait sans Gelato.
-          if (st === 'paid') {
-            printBreadcrumb('print.ticket.skip_paid_reuse', {
-              exportRequestId: existingPay.exportRequestId,
-            });
-            throw new Error('PRINT_ALREADY_PAID');
-          }
-          if (st === 'unpaid') {
-            info = {
-              exportTicket: existingPay.exportTicket,
-              exportRequestId: existingPay.exportRequestId,
-              priceCents: existingPay.priceCents,
-            };
-            reusedStashed = existingPay.stashed === true;
-          }
-        } catch (e) {
-          if (e instanceof Error && e.message === 'PRINT_ALREADY_PAID') throw e;
+        const contentOk =
+          (existingPay.contentKey && existingPay.contentKey === contentKey) ||
+          (!existingPay.contentKey && existingPay.priceCents === expectedPriceCents);
+        if (!contentOk) {
+          printBreadcrumb('print.ticket.content_mismatch', {
+            exportRequestId: existingPay.exportRequestId,
+            pendingPrice: existingPay.priceCents,
+            expectedPrice: expectedPriceCents,
+          });
           await clearPendingPrintPayment();
+          printCheckoutPrefetchRef.current = null;
+        } else {
+          try {
+            const st = await fetchPrintPaymentStatus(existingPay.exportTicket);
+            // Un ticket **paid** n’est pas un ticket Checkout : reprise via `completePrintAfterPaid`.
+            // Le réutiliser ici empêchait toute nouvelle commande et fake-confirmait sans Gelato.
+            if (st === 'paid') {
+              printBreadcrumb('print.ticket.skip_paid_reuse', {
+                exportRequestId: existingPay.exportRequestId,
+              });
+              throw new Error('PRINT_ALREADY_PAID');
+            }
+            if (st === 'unpaid') {
+              info = {
+                exportTicket: existingPay.exportTicket,
+                exportRequestId: existingPay.exportRequestId,
+                priceCents: existingPay.priceCents,
+              };
+              reusedStashed = existingPay.stashed === true;
+            }
+          } catch (e) {
+            if (e instanceof Error && e.message === 'PRINT_ALREADY_PAID') throw e;
+            await clearPendingPrintPayment();
+          }
         }
       }
 
@@ -858,6 +924,7 @@ export default function BookOrderScreen() {
         bookId,
         childId,
         createdAt: new Date().toISOString(),
+        contentKey,
         stashed: reusedStashed,
       });
 
@@ -879,9 +946,12 @@ export default function BookOrderScreen() {
     discountPercent,
     email,
     fullName,
+    gelatoPagesForQuote,
     line1,
     line2,
+    printContentKey,
     printFormFingerprint,
+    qrCountForQuote,
     readLiveForm,
     shippingName,
     subscriptionDb,
@@ -1056,6 +1126,7 @@ export default function BookOrderScreen() {
 
         printTicketRef.current = null;
         printStashReadyRef.current = null;
+        printCheckoutPrefetchRef.current = null;
       } catch (e) {
         printCaptureError('print.complete_after_paid', e, { bookId });
         throw e;
@@ -1069,6 +1140,91 @@ export default function BookOrderScreen() {
     },
     [book?.title, bookId, childId, country, navigateToConfirmation],
   );
+
+  /**
+   * Prefetch session Stripe en fond (ticket déjà prêt). Au tap Commander on ouvre l’URL cache
+   * si empreinte contenu + adresse inchangées — seule friction restante = ouverture navigateur.
+   */
+  const prefetchPrintCheckout = useCallback(async (): Promise<PrintCheckoutPrefetch | null> => {
+    const fingerprint = printFormFingerprint();
+    const live = readLiveForm();
+    const shippingKey = printShippingKey({ ...live, country });
+    const cached = printCheckoutPrefetchRef.current;
+    if (
+      cached &&
+      cached.fingerprint === fingerprint &&
+      cached.shippingKey === shippingKey &&
+      !isExportTicketExpired(cached.exportTicket)
+    ) {
+      return cached;
+    }
+    if (printCheckoutPrefetchInFlightRef.current) {
+      return await printCheckoutPrefetchInFlightRef.current;
+    }
+
+    const run = (async (): Promise<PrintCheckoutPrefetch | null> => {
+      try {
+        const ticket = await ensurePrintTicket();
+        const returnUrl = ExpoLinking.createURL('book-order-return');
+        const mail = live.email || email.trim().toLowerCase();
+        const pay = await createPrintPayment({
+          exportTicket: ticket.exportTicket,
+          returnUrl,
+          customerEmail: mail,
+          shipping: {
+            shippingName: live.shippingName,
+            fullName: live.fullName || live.shippingName || null,
+            address: {
+              line1: live.line1,
+              ...(live.line2 ? { line2: live.line2 } : {}),
+              city: live.city,
+              zip: live.zip,
+              country,
+            },
+          },
+        });
+        if (pay.paymentStatus === 'paid') {
+          printBreadcrumb('print.checkout_prefetch.already_paid', {
+            exportRequestId: ticket.exportRequestId,
+          });
+          printCheckoutPrefetchRef.current = null;
+          return null;
+        }
+        if (!pay.checkoutUrl) {
+          printCheckoutPrefetchRef.current = null;
+          return null;
+        }
+        const next: PrintCheckoutPrefetch = {
+          fingerprint,
+          shippingKey,
+          exportTicket: ticket.exportTicket,
+          checkoutUrl: pay.checkoutUrl,
+          priceCents: ticket.priceCents,
+        };
+        printCheckoutPrefetchRef.current = next;
+        printBreadcrumb('print.checkout_prefetch.ok', {
+          exportRequestId: ticket.exportRequestId,
+          priceCents: ticket.priceCents,
+        });
+        return next;
+      } catch (e) {
+        if (e instanceof Error && e.message === 'PRINT_ALREADY_PAID') return null;
+        printBreadcrumb('print.checkout_prefetch.fail', {
+          err: e instanceof Error ? e.message.slice(0, 80) : 'unknown',
+        });
+        return null;
+      }
+    })();
+
+    printCheckoutPrefetchInFlightRef.current = run;
+    try {
+      return await run;
+    } finally {
+      if (printCheckoutPrefetchInFlightRef.current === run) {
+        printCheckoutPrefetchInFlightRef.current = null;
+      }
+    }
+  }, [country, email, ensurePrintTicket, printFormFingerprint, readLiveForm]);
 
   const applyPrintSubmitError = useCallback(
     (e: unknown) => {
@@ -1207,8 +1363,8 @@ export default function BookOrderScreen() {
           return;
         }
       }
-      // Overlay cœur dès le tap (≈2 s : ticket + session Stripe), puis Checkout **tout de suite**.
-      // L’upload des photos tourne en fond pendant le paiement.
+      // Overlay cœur : si session Stripe déjà prefetchée → ouverture quasi immédiate.
+      // Sinon ticket + createPrintPayment (comme avant). Upload photos en fond pendant Checkout.
       Keyboard.dismiss();
       setSubmitting(true);
       submittingRef.current = true;
@@ -1239,43 +1395,78 @@ export default function BookOrderScreen() {
             await clearPendingPrintPayment();
             printStashReadyRef.current = null;
             printTicketRef.current = null;
+            printCheckoutPrefetchRef.current = null;
           }
         }
+
+        const contentFp = printFormFingerprint();
+        const shippingKey = printShippingKey({
+          shippingName: live.shippingName,
+          fullName: live.fullName,
+          line1: live.line1,
+          line2: live.line2,
+          city: live.city,
+          zip: live.zip,
+          country,
+        });
+        // Joindre un prefetch encore en vol (adresse vient d’être finalisée).
+        if (printCheckoutPrefetchInFlightRef.current) {
+          await printCheckoutPrefetchInFlightRef.current.catch(() => null);
+        }
+        const prefetched = printCheckoutPrefetchRef.current;
+        const prefetchHit =
+          prefetched &&
+          prefetched.fingerprint === contentFp &&
+          prefetched.shippingKey === shippingKey &&
+          !isExportTicketExpired(prefetched.exportTicket);
 
         const ticket = await ensurePrintTicket();
         const { exportTicket, priceCents } = ticket;
 
         // Checkout **tout de suite** : l’upload continue en fond (prefetch + cette promesse).
-        // On n’attend le stash qu’après `paid` (completePrintAfterPaid joint la même promesse).
-        // Bloquer ici = overlay « Ton livre prend vie » interminable avant Stripe.
         setPrintPhase('opening');
         void runPrintStash(ticket).catch(() => {
           /* surface après paid */
         });
 
-        const returnUrl = ExpoLinking.createURL('book-order-return');
-        // Adresse **finale** figée ici (le ticket a pu être créé en fond pendant la saisie).
-        const pay = await createPrintPayment({
-          exportTicket,
-          returnUrl,
-          customerEmail: mail,
-          shipping: finalShipping,
-        });
-        if (pay.paymentStatus === 'paid') {
-          try {
-            await completePrintAfterPaid({ exportTicket, emailNorm: mail, priceCents });
-          } catch (e) {
-            handlePrintAfterPaidError(e);
+        let checkoutUrl: string | undefined;
+        if (prefetchHit && prefetched.exportTicket === exportTicket) {
+          printBreadcrumb('print.checkout.open_prefetched', {
+            exportRequestId: ticket.exportRequestId,
+          });
+          checkoutUrl = prefetched.checkoutUrl;
+        } else {
+          const returnUrl = ExpoLinking.createURL('book-order-return');
+          // Adresse **finale** figée ici (le ticket a pu être créé en fond pendant la saisie).
+          const pay = await createPrintPayment({
+            exportTicket,
+            returnUrl,
+            customerEmail: mail,
+            shipping: finalShipping,
+          });
+          if (pay.paymentStatus === 'paid') {
+            try {
+              await completePrintAfterPaid({ exportTicket, emailNorm: mail, priceCents });
+            } catch (e) {
+              handlePrintAfterPaidError(e);
+            }
+            return;
           }
-          return;
-        }
-        if (!pay.checkoutUrl) {
-          throw new Error(t('bookOrder.payOpenFailed'));
+          if (!pay.checkoutUrl) {
+            throw new Error(t('bookOrder.payOpenFailed'));
+          }
+          checkoutUrl = pay.checkoutUrl;
+          printCheckoutPrefetchRef.current = {
+            fingerprint: contentFp,
+            shippingKey,
+            exportTicket,
+            checkoutUrl,
+            priceCents,
+          };
         }
 
         // Checkout : l’overlay (View, pas Modal) reste affiché sous SFSafariViewController —
         // pas de flash du formulaire, et aucune présentation iOS en conflit.
-        const checkoutUrl = pay.checkoutUrl;
         const hideWait = () => {
           submittingRef.current = false;
           setSubmitting(false);
@@ -1427,6 +1618,7 @@ export default function BookOrderScreen() {
     navigateToFinalizeMedia,
     completePrintAfterPaid,
     ensurePrintTicket,
+    printFormFingerprint,
     runPrintStash,
     readLiveForm,
     router,
@@ -1473,15 +1665,20 @@ export default function BookOrderScreen() {
     return getCityHint(city, zipCommunes.names);
   }, [city, zip, zipCommunes]);
 
-  // Invalide ticket / stash seulement si livre / e-mail / remise change (plus l’adresse).
+  // Invalide ticket / stash / session Stripe si livre / e-mail / remise / contenu change.
   // Ne jamais clear un pending **paid** (sinon on perd la reprise Gelato).
   useEffect(() => {
     const fp = printFormFingerprint();
     const ticket = printTicketRef.current;
-    if (ticket && ticket.fingerprint !== fp) {
+    const checkout = printCheckoutPrefetchRef.current;
+    if (
+      (ticket && ticket.fingerprint !== fp) ||
+      (checkout && checkout.fingerprint !== fp)
+    ) {
       printTicketRef.current = null;
       printStashReadyRef.current = null;
       printStashErrorRef.current = null;
+      printCheckoutPrefetchRef.current = null;
       if (!printStashInFlightRef.current && !printTicketInFlightRef.current) {
         void (async () => {
           const pending = await getPendingPrintPayment();
@@ -1547,23 +1744,35 @@ export default function BookOrderScreen() {
           }
         }
         try {
-          await ensurePrintStashed();
+          // Ticket + stash photos en fond ; session Stripe en parallèle (pas d’attente mutuelle).
+          void ensurePrintStashed().catch(e => {
+            if (e instanceof Error && e.message === 'PRINT_ALREADY_PAID') return;
+            if (__DEV__) console.warn('[book-order] prefetch stash', e);
+          });
+          void prefetchPrintCheckout().catch(() => undefined);
         } catch (e) {
           if (e instanceof Error && e.message === 'PRINT_ALREADY_PAID') return;
-          if (__DEV__) console.warn('[book-order] prefetch stash', e);
+          if (__DEV__) console.warn('[book-order] prefetch', e);
         }
       })();
     }, 400);
     return () => clearTimeout(timer);
   }, [
     bookId,
+    city,
     completePrintAfterPaid,
+    country,
     ensurePrintStashed,
     exportMode,
-    printAddressReady,
+    line1,
+    line2,
     loading,
+    prefetchPrintCheckout,
+    printAddressReady,
     printFormFingerprint,
-    submitting
+    shippingName,
+    submitting,
+    zip,
   ]);
 
   useEffect(() => {
