@@ -100,31 +100,51 @@ Deno.serve(async (req: Request) => {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
-  let prefsQuery = admin
-    .from('notification_prefs')
-    .select('user_id, capture_reminder_local_time, timezone')
-    .eq('capture_reminder_enabled', true)
-    .limit(2000);
+  type PrefRow = {
+    user_id: string;
+    capture_reminder_local_time: string;
+    timezone: string;
+  };
+
+  let prefs: PrefRow[] = [];
 
   if (forceUserId) {
-    prefsQuery = admin
+    // Smoke : envoie même sans ligne prefs / sans opt-in (ignore l’heure).
+    const { data, error: prefsErr } = await admin
       .from('notification_prefs')
       .select('user_id, capture_reminder_local_time, timezone')
       .eq('user_id', forceUserId)
-      .limit(1);
-  }
-
-  const { data: prefs, error: prefsErr } = await prefsQuery;
-  if (prefsErr) {
-    console.error('[daily-capture-reminder] prefs', prefsErr.message);
-    return jsonRes({ error: prefsErr.message }, 500);
+      .maybeSingle();
+    if (prefsErr) {
+      console.error('[daily-capture-reminder] prefs', prefsErr.message);
+      return jsonRes({ error: prefsErr.message }, 500);
+    }
+    prefs = [
+      {
+        user_id: forceUserId,
+        capture_reminder_local_time: data?.capture_reminder_local_time || '20:00',
+        timezone: data?.timezone || 'Europe/Paris',
+      },
+    ];
+  } else {
+    const { data, error: prefsErr } = await admin
+      .from('notification_prefs')
+      .select('user_id, capture_reminder_local_time, timezone')
+      .eq('capture_reminder_enabled', true)
+      .limit(2000);
+    if (prefsErr) {
+      console.error('[daily-capture-reminder] prefs', prefsErr.message);
+      return jsonRes({ error: prefsErr.message }, 500);
+    }
+    prefs = (data ?? []) as PrefRow[];
   }
 
   const now = new Date();
   const dueUserIds: string[] = [];
   const dayKeyByUser = new Map<string, string>();
+  let skippedAlreadySent = 0;
 
-  for (const row of prefs ?? []) {
+  for (const row of prefs) {
     const userId = String(row.user_id ?? '');
     const tz = String(row.timezone || 'Europe/Paris').trim() || 'Europe/Paris';
     const preferred = String(row.capture_reminder_local_time || '20:00').trim();
@@ -135,30 +155,44 @@ Deno.serve(async (req: Request) => {
     if (!local) continue;
 
     // Fenêtre 15 min : cron */15 → un seul match par créneau.
-    const due =
-      forceUserId === userId ||
+    // forceUserId : toujours due (smoke).
+    const due = forceUserId === userId ||
       floorToSlot(local.minutes, 15) === floorToSlot(prefMins, 15);
 
     if (!due) continue;
 
     // Anti-doublon : tenter insert avant envoi.
+    // Smoke forceUserId : day_key unique (≤32) pour pouvoir retester le même jour.
+    const dayKey = forceUserId === userId
+      ? `f-${Date.now().toString(36)}`
+      : local.dayKey;
+
     const { error: logErr } = await admin.from('push_send_log').insert({
       user_id: userId,
       kind: KIND,
-      day_key: local.dayKey,
+      day_key: dayKey,
     });
     if (logErr) {
-      if (logErr.code === '23505') continue;
+      if (logErr.code === '23505') {
+        skippedAlreadySent += 1;
+        continue;
+      }
       console.warn('[daily-capture-reminder] log', userId.slice(0, 8), logErr.message);
       continue;
     }
 
     dueUserIds.push(userId);
-    dayKeyByUser.set(userId, local.dayKey);
+    dayKeyByUser.set(userId, dayKey);
   }
 
   if (dueUserIds.length === 0) {
-    return jsonRes({ ok: true, matched: 0, sent: 0 }, 200);
+    return jsonRes({
+      ok: true,
+      matched: 0,
+      sent: 0,
+      skippedAlreadySent,
+      reason: skippedAlreadySent > 0 ? 'already_sent_today' : 'no_match',
+    }, 200);
   }
 
   const { data: tokenRows, error: tokErr } = await admin
