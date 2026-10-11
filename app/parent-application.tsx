@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
+  Platform,
   Share,
   Switch,
 } from 'react-native';
@@ -40,9 +41,9 @@ import {
   peekOfflineLocalResumeActive,
 } from '@/lib/authAccount';
 import {
-  CAPTURE_REMINDER_TIME_PRESETS,
   DEFAULT_NOTIFICATION_PREFS,
   loadNotificationPrefs,
+  parseCaptureReminderTime,
   peekCachedNotificationPrefs,
   saveNotificationPrefs,
   type NotificationPrefs,
@@ -259,20 +260,40 @@ export default function ParentApplicationScreen() {
   );
 
   const handlePickReminderTime = useCallback(() => {
+    const apply = (raw: string | undefined) => {
+      const parsed = parseCaptureReminderTime(raw ?? '');
+      if (!parsed) {
+        Alert.alert(
+          t('parent.application.captureReminderTimeTitle'),
+          t('parent.application.captureReminderTimeInvalid'),
+        );
+        return;
+      }
+      void saveNotificationPrefs({ captureReminderLocalTime: parsed }).then(setNotifPrefs);
+    };
+
+    // Test : saisie libre HH:mm (00:00–23:59), à la minute près.
+    if (Platform.OS === 'ios' && typeof Alert.prompt === 'function') {
+      Alert.prompt(
+        t('parent.application.captureReminderTimeTitle'),
+        t('parent.application.captureReminderTimePrompt'),
+        [
+          { text: t('cancel'), style: 'cancel' },
+          { text: t('ok'), onPress: (value) => apply(value) },
+        ],
+        'plain-text',
+        notifPrefs.captureReminderLocalTime,
+        'numbers-and-punctuation',
+      );
+      return;
+    }
+
     Alert.alert(
       t('parent.application.captureReminderTimeTitle'),
-      undefined,
-      [
-        ...CAPTURE_REMINDER_TIME_PRESETS.map((time) => ({
-          text: time,
-          onPress: () => {
-            void saveNotificationPrefs({ captureReminderLocalTime: time }).then(setNotifPrefs);
-          },
-        })),
-        { text: t('cancel'), style: 'cancel' as const },
-      ],
+      t('parent.application.captureReminderTimePrompt'),
+      [{ text: t('ok'), style: 'cancel' }],
     );
-  }, [t]);
+  }, [notifPrefs.captureReminderLocalTime, t]);
 
   return (
     <ParentSubpageShell title="Application">

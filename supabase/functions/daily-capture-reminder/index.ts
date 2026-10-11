@@ -38,10 +38,6 @@ function hmToMinutes(hm: string): number | null {
   return h * 60 + min;
 }
 
-function floorToSlot(minutes: number, slotMin: number): number {
-  return Math.floor(minutes / slotMin) * slotMin;
-}
-
 /** Heure / date locale IANA via Intl (Deno). */
 function localParts(timeZone: string, now: Date): { hm: string; dayKey: string; minutes: number } | null {
   try {
@@ -154,10 +150,9 @@ Deno.serve(async (req: Request) => {
     const local = localParts(tz, now);
     if (!local) continue;
 
-    // Fenêtre 15 min : cron */15 → un seul match par créneau.
-    // forceUserId : toujours due (smoke).
-    const due = forceUserId === userId ||
-      floorToSlot(local.minutes, 15) === floorToSlot(prefMins, 15);
+    // Match à la minute (cron * * * * *) — idéal pour smoke TF.
+    // forceUserId : toujours due.
+    const due = forceUserId === userId || local.minutes === prefMins;
 
     if (!due) continue;
 

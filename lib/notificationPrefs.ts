@@ -21,17 +21,16 @@ export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
   timezone: 'Europe/Paris',
 };
 
-/** Créneaux proposés (fenêtre cron 15 min). */
-export const CAPTURE_REMINDER_TIME_PRESETS = [
-  '18:00',
-  '19:00',
-  '19:30',
-  '20:00',
-  '20:30',
-  '21:00',
-  '21:30',
-  '22:00',
-] as const;
+/** Valide HH:mm (00:00–23:59), y compris minuit. */
+export function parseCaptureReminderTime(raw: string | null | undefined): string | null {
+  const t = (raw ?? '').trim();
+  const m = /^(\d{1,2}):(\d{2})$/.exec(t);
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (!Number.isFinite(h) || !Number.isFinite(min) || h > 23 || min > 59) return null;
+  return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+}
 
 export function detectDeviceTimezone(): string {
   try {
@@ -44,9 +43,7 @@ export function detectDeviceTimezone(): string {
 }
 
 function normalizeTime(raw: string | null | undefined): string {
-  const t = (raw ?? '').trim();
-  if (/^\d{2}:\d{2}$/.test(t)) return t;
-  return DEFAULT_NOTIFICATION_PREFS.captureReminderLocalTime;
+  return parseCaptureReminderTime(raw) ?? DEFAULT_NOTIFICATION_PREFS.captureReminderLocalTime;
 }
 
 export async function peekCachedNotificationPrefs(): Promise<NotificationPrefs> {

@@ -22,18 +22,17 @@ supabase functions deploy send-expo-push
 supabase functions deploy daily-capture-reminder
 ```
 
-## Cron (toutes les 15 min) — **branché en prod**
+## Cron — **branché en prod** (mode test = chaque minute)
 
-- Job `cron.job` : `daily-capture-reminder-15m` → `*/15 * * * *`
-- Migration : `20261011220000_schedule_daily_capture_reminder_cron.sql`
-- Auth : Vault `push_cron_secret` = Edge secret `PUSH_CRON_SECRET`  
-  (prioritaire sur `REVENUECAT_WEBHOOK_SECRET` pour les curls)
+- Job actuel : `daily-capture-reminder-1m` → `* * * * *` (match HH:mm exact, y compris `00:00`)
+- UI test : saisie libre `HH:mm` (Espace parent → Application → Heure du rappel)
+- Auth : Vault `push_cron_secret` = Edge secret `PUSH_CRON_SECRET`
 
 Vérifier :
 
 ```sql
 select jobid, jobname, schedule, active from cron.job
-where jobname = 'daily-capture-reminder-15m';
+where jobname like 'daily-capture-reminder%';
 ```
 
 Curl smoke (secret Edge `PUSH_CRON_SECRET`) :
