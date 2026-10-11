@@ -41,30 +41,30 @@ Scripts QA déjà OK (print PDF, QR audio, Gelato draft `printer_order_id`). Sur
 - [x] Commander impression jusqu’à confirmation (**pas de débit** — bypass bêta)
 - [x] Scanner QR PDF en 4G → lecture OK
 - [ ] **Print fond post-pay** : après bypass, confirmation en quelques secondes (pas d’attente « garde l’app ouverte »)
-- [ ] Kill app juste après confirmation → `export_requests` passe `rendering` → `sent_to_printer` (Railway + Gelato draft) sans rouvrir l’app
-- [ ] Mail confirmation cliente reçu (ou erreur Resend → abandon + mail ops, **pas** de boucle Railway)
-- [ ] Mes commandes : pendant retries → « En préparation » ; si permanent → « À vérifier »
+- [x] Kill app juste après confirmation → `export_requests` passe `rendering` → `sent_to_printer` (Railway + Gelato draft) sans rouvrir l’app
+- [x] Mail confirmation cliente reçu (ou erreur Resend → abandon + mail ops, **pas** de boucle Railway)
+- [x] Mes commandes : pendant retries → « En préparation » ; si permanent → « À vérifier »
 - [x] Prérequis deploy : migrations print + Railway fulfill/retry + Edges print (2026-10-09)
 
 
 
 ## Phase 5 — Quota
 
-- [ ] Approcher 50 souvenirs (ou compte QA dédié) : 50ᵉ OK, 51ᵉ → paywall `LIMIT_REACHED`
+- [x] Approcher 50 souvenirs (ou compte QA dédié) : 50ᵉ OK, 51ᵉ → paywall `LIMIT_REACHED`
 
 
 
 ## Phase 6 — Delete compte
 
-- [ ] Espace parent → supprimer le compte → confirm
-- [ ] Relog impossible / workspace vide
-- [ ] (Option) vérifier purge Storage côté dashboard
+- [x] Espace parent → supprimer le compte → confirm
+- [x] Relog impossible / workspace vide
+- [x] (Option) vérifier purge Storage côté dashboard
 
 
 
 ## Phase 8 — GO interne
 
-- [ ] Privacy `https://petitcoeur.app/#/privacy` ouverte depuis l’app
+- [x] Privacy `https://petitcoeur.app/#/privacy` ouverte depuis l’app
 - [ ] Envoyer `[BETA_INTERNAL_BRIEF.md](./BETA_INTERNAL_BRIEF.md)` à 2–3 proches
 - [ ] Noter retours / bugs P0
 
@@ -72,8 +72,10 @@ Scripts QA déjà OK (print PDF, QR audio, Gelato draft `printer_order_id`). Sur
 
 ## Phase 9 — IAP (après GO interne)
 
+Guide détaillé : [`IAP_SANDBOX_SMOKE.md`](./IAP_SANDBOX_SMOKE.md)
+
 - [ ] Apple Agreements / Paid Apps
-- [ ] Offerings RevenueCat + produits StoreKit
+- [ ] Offerings RevenueCat + produits StoreKit (`petitmo_plus_monthly` / `_yearly`)
 - [ ] Achat sandbox → `app_metadata.subscriptionTier=paid`
 - [ ] Remise −10 % print visible
 

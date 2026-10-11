@@ -19,6 +19,17 @@
 4. **Secrets EAS** : `EXPO_PUBLIC_REVENUECAT_IOS_API_KEY` (déjà listé sur EAS prod — vérifier valeur live).
 5. **Smoke sandbox** : achat → webhook → `subscriptionTier=paid` → quotas / paywall.
 
+**Pas-à-pas ops + smoke Sandbox** : [`IAP_SANDBOX_SMOKE.md`](./IAP_SANDBOX_SMOKE.md).
+
+### Déjà vérifié côté infra (2026-10-11)
+
+| Check | État |
+|-------|------|
+| EAS prod `EXPO_PUBLIC_REVENUECAT_IOS_API_KEY` | présent |
+| EAS prod `EXPO_PUBLIC_RC_ENTITLEMENT_ID` | `petitmo_plus` |
+| Edge `revenuecat-webhook` | répond (401 sans Bearer — OK) |
+| Secret `REVENUECAT_WEBHOOK_SECRET` | présent Supabase |
+
 ## Hors Phase 9
 
 - Stripe print (séparé — bypass bêta interne aujourd’hui).
