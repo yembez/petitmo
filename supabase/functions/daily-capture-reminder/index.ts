@@ -118,7 +118,7 @@ Deno.serve(async (req: Request) => {
     prefs = [
       {
         user_id: forceUserId,
-        capture_reminder_local_time: data?.capture_reminder_local_time || '20:00',
+        capture_reminder_local_time: data?.capture_reminder_local_time || '20:45',
         timezone: data?.timezone || 'Europe/Paris',
       },
     ];
@@ -143,7 +143,7 @@ Deno.serve(async (req: Request) => {
   for (const row of prefs) {
     const userId = String(row.user_id ?? '');
     const tz = String(row.timezone || 'Europe/Paris').trim() || 'Europe/Paris';
-    const preferred = String(row.capture_reminder_local_time || '20:00').trim();
+    const preferred = String(row.capture_reminder_local_time || '20:45').trim();
     const prefMins = hmToMinutes(preferred);
     if (!userId || prefMins == null) continue;
 

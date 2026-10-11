@@ -47,7 +47,7 @@ curl -X POST "$SUPABASE_URL/functions/v1/daily-capture-reminder" \
 ## Smoke TF
 
 1. Activer notifications iOS (Application).
-2. Activer **Rappel du soir**, choisir une heure dans les **15 prochaines minutes** (ex. 20:00 si il est 19:50).
+2. Activer **Rappel du soir** (défaut **20:45**), ou choisir une heure proche pour le smoke.
 3. Vérifier ligne `notification_prefs` + `push_tokens` pour ton `user_id`.
 4. Forcer le job (ignore l’heure) :
 
