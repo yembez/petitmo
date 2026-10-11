@@ -130,6 +130,32 @@ export function captureUserBugReport(message: string, extra: Record<string, unkn
 }
 
 /**
+ * Échec achat / restore Petitmo+ (hors annulation utilisatrice).
+ * → issue Sentry (et mail fondateur si webhook issue configuré).
+ */
+export function capturePaywallPurchaseFailure(params: {
+  kind: 'purchase' | 'restore';
+  plan?: string;
+  message: string;
+}): string | null {
+  if (!isSentryEnabled()) return null;
+  const msg = (params.message || 'unknown').trim().slice(0, 280);
+  const kind = params.kind;
+  const plan = (params.plan ?? '').trim().slice(0, 24);
+  const err = new Error(`paywall.${kind}.fail: ${msg}`);
+  return Sentry.captureException(err, {
+    level: 'error',
+    tags: {
+      'app.errorScope': `paywall.${kind}`,
+      'app.paywallKind': kind,
+      ...(plan ? { 'app.paywallPlan': plan } : {}),
+    },
+    fingerprint: ['paywall', kind, msg.slice(0, 80)],
+    extra: { message: msg, plan: plan || undefined },
+  });
+}
+
+/**
  * Smoke HITL (appui long version Espace parent).
  * Fingerprint unique à chaque envoi → nouvelle issue Sentry → webhook fondateur.
  */

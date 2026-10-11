@@ -29,6 +29,7 @@ import PetitmoPrimaryMorphButton, {
 import { MOTION_CTA_MORPH_DISK_PT } from '@/constants/motion'
 import { useAppTranslation } from '@/hooks/useAppTranslation'
 import { purchasePetitmoPlusPlan, restorePetitmoPlusPurchases, fetchPetitmoPlusPlanPrices } from '@/lib/revenueCat'
+import { capturePaywallPurchaseFailure } from '@/lib/sentry'
 import { upgradeToFullCloud } from '@/services/migration'
 import { flushPendingCloudUploadsOnce } from '@/services/pendingCloudFlush'
 import { hydrateTabScreensFromLocal } from '@/services/tabScreensHydrate'
@@ -306,6 +307,11 @@ export default function PaywallScreen() {
           return
         }
         recordWarn('paywall.purchase.fail', purchase.message)
+        capturePaywallPurchaseFailure({
+          kind: 'purchase',
+          plan,
+          message: purchase.message,
+        })
         setCtaPhase('error')
         Alert.alert(t('error'), purchase.message)
         return
@@ -369,6 +375,10 @@ export default function PaywallScreen() {
       const restored = await restorePetitmoPlusPurchases()
       if (!restored.ok) {
         if (!restored.cancelled) {
+          capturePaywallPurchaseFailure({
+            kind: 'restore',
+            message: restored.message,
+          })
           Alert.alert(t('error'), restored.message)
         }
         return
@@ -381,6 +391,7 @@ export default function PaywallScreen() {
         { text: 'OK', onPress: () => void continueAfterPaywall() },
       ])
     } catch (e) {
+      recordCaughtError('paywall.restore', e)
       Alert.alert(
         t('error'),
         __DEV__ && e instanceof Error ? e.message : t('paywall.restoreFailed'),
