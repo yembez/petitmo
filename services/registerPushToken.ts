@@ -124,6 +124,10 @@ export async function registerPushTokenInBackground(): Promise<string | null> {
         console.warn('[push] upsert push_tokens', error.message);
       }
 
+      void import('@/lib/notificationPrefs').then((m) =>
+        m.syncNotificationTimezoneInBackground(),
+      );
+
       return expoPushToken;
     } catch (e) {
       console.warn('[push] registerPushTokenInBackground', e);

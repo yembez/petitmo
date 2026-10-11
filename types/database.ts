@@ -172,6 +172,48 @@ export interface Database {
         }
         Relationships: []
       }
+      notification_prefs: {
+        Row: {
+          user_id: string
+          capture_reminder_enabled: boolean
+          capture_reminder_local_time: string
+          timezone: string
+          updated_at: string
+          created_at: string
+        }
+        Insert: {
+          user_id: string
+          capture_reminder_enabled?: boolean
+          capture_reminder_local_time?: string
+          timezone?: string
+          updated_at?: string
+          created_at?: string
+        }
+        Update: {
+          [key: string]: unknown
+        }
+        Relationships: []
+      }
+      push_send_log: {
+        Row: {
+          id: string
+          user_id: string
+          kind: string
+          day_key: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          kind: string
+          day_key: string
+          created_at?: string
+        }
+        Update: {
+          [key: string]: unknown
+        }
+        Relationships: []
+      }
     }
     Views: {}
     Functions: {}

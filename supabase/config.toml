@@ -48,3 +48,9 @@ verify_jwt = false
 
 [functions.sentry-issue-notify]
 verify_jwt = false
+
+[functions.send-expo-push]
+verify_jwt = false
+
+[functions.daily-capture-reminder]
+verify_jwt = false

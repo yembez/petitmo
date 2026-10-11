@@ -4,10 +4,11 @@ import {
   Alert,
   Linking,
   Share,
+  Switch,
 } from 'react-native';
 import { usePathname } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
-import { Bell, Cloud, Image as ImageIcon, RefreshCw, Share2 } from 'lucide-react-native';
+import { Bell, Clock, Cloud, Image as ImageIcon, Moon, RefreshCw, Share2 } from 'lucide-react-native';
 import ParentSubpageShell from '@/components/parentSpace/ParentSubpageShell';
 import { MenuGroup, MenuRow, menuIcon } from '@/components/parentSpace/menuUi';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
@@ -38,6 +39,14 @@ import {
   peekHasRealAuthAccount,
   peekOfflineLocalResumeActive,
 } from '@/lib/authAccount';
+import {
+  CAPTURE_REMINDER_TIME_PRESETS,
+  DEFAULT_NOTIFICATION_PREFS,
+  loadNotificationPrefs,
+  peekCachedNotificationPrefs,
+  saveNotificationPrefs,
+  type NotificationPrefs,
+} from '@/lib/notificationPrefs';
 
 export default function ParentApplicationScreen() {
   const pathname = usePathname();
@@ -47,10 +56,13 @@ export default function ParentApplicationScreen() {
   const [updateCheckBusy, setUpdateCheckBusy] = useState(false);
   const [backupStatus, setBackupStatus] = useState('');
   const [hasRealAccount, setHasRealAccount] = useState(() => peekHasRealAuthAccount());
+  const [notifPrefs, setNotifPrefs] = useState<NotificationPrefs>(DEFAULT_NOTIFICATION_PREFS);
 
   useFocusEffect(
     useCallback(() => {
       setHasRealAccount(peekHasRealAuthAccount());
+      void peekCachedNotificationPrefs().then(setNotifPrefs);
+      void loadNotificationPrefs().then(setNotifPrefs);
       void collectBugReportContext({
         pathname,
         sentryEnabled: isSentryEnabled(),
@@ -216,6 +228,52 @@ export default function ParentApplicationScreen() {
     })();
   }, [t]);
 
+  const handleCaptureReminderToggle = useCallback(
+    (enabled: boolean) => {
+      void (async () => {
+        if (enabled) {
+          if (!(await isNotificationsModuleAvailable()) || !(await getNotificationsGranted())) {
+            const granted = await requestNotificationsAccess();
+            if (!granted) {
+              Alert.alert(
+                t('parent.application.captureReminderNeedNotifTitle'),
+                t('parent.application.captureReminderNeedNotifBody'),
+                [
+                  { text: t('cancel'), style: 'cancel' },
+                  {
+                    text: t('parent.application.openSettings'),
+                    onPress: () => void Linking.openSettings(),
+                  },
+                ],
+              );
+              return;
+            }
+          }
+          void registerPushTokenInBackground();
+        }
+        const next = await saveNotificationPrefs({ captureReminderEnabled: enabled });
+        setNotifPrefs(next);
+      })();
+    },
+    [t],
+  );
+
+  const handlePickReminderTime = useCallback(() => {
+    Alert.alert(
+      t('parent.application.captureReminderTimeTitle'),
+      undefined,
+      [
+        ...CAPTURE_REMINDER_TIME_PRESETS.map((time) => ({
+          text: time,
+          onPress: () => {
+            void saveNotificationPrefs({ captureReminderLocalTime: time }).then(setNotifPrefs);
+          },
+        })),
+        { text: t('cancel'), style: 'cancel' as const },
+      ],
+    );
+  }, [t]);
+
   return (
     <ParentSubpageShell title="Application">
       <MenuGroup titleFontFamily={dm600}>
@@ -250,6 +308,46 @@ export default function ParentApplicationScreen() {
           onPress={handleEnableNotifications}
           accessibilityLabel={t('parent.application.enableNotifications')}
         />
+        {hasRealAccount ? (
+          <>
+            <MenuRow
+              bordered
+              icon={menuIcon(Moon)}
+              label={t('parent.application.captureReminder')}
+              detail={
+                notifPrefs.captureReminderEnabled
+                  ? t('parent.application.captureReminderHintOn', {
+                      time: notifPrefs.captureReminderLocalTime,
+                    })
+                  : t('parent.application.captureReminderHintOff')
+              }
+              labelFontFamily={dm500}
+              showChevron={false}
+              trailing={
+                <Switch
+                  value={notifPrefs.captureReminderEnabled}
+                  onValueChange={handleCaptureReminderToggle}
+                  trackColor={{ false: '#E5E5EA', true: 'rgba(252, 87, 87, 0.4)' }}
+                  thumbColor={notifPrefs.captureReminderEnabled ? THEME.brandPrimary : '#FFFFFF'}
+                  ios_backgroundColor="#E5E5EA"
+                  accessibilityLabel={t('parent.application.captureReminder')}
+                />
+              }
+              accessibilityLabel={t('parent.application.captureReminder')}
+            />
+            {notifPrefs.captureReminderEnabled ? (
+              <MenuRow
+                bordered
+                icon={menuIcon(Clock)}
+                label={t('parent.application.captureReminderTimeTitle')}
+                detail={notifPrefs.captureReminderLocalTime}
+                labelFontFamily={dm500}
+                onPress={handlePickReminderTime}
+                accessibilityLabel={t('parent.application.captureReminderTimeTitle')}
+              />
+            ) : null}
+          </>
+        ) : null}
         <MenuRow
           bordered
           icon={menuIcon(Share2)}
