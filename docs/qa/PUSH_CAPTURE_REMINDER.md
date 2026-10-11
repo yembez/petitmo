@@ -22,29 +22,21 @@ supabase functions deploy send-expo-push
 supabase functions deploy daily-capture-reminder
 ```
 
-## Cron (toutes les 15 min)
+## Cron (toutes les 15 min) — **branché en prod**
 
-Exemple `pg_cron` + `pg_net` (adapter URL / secret Vault) :
+- Job `cron.job` : `daily-capture-reminder-15m` → `*/15 * * * *`
+- Migration : `20261011220000_schedule_daily_capture_reminder_cron.sql`
+- Auth : Vault `push_cron_secret` = Edge secret `PUSH_CRON_SECRET`  
+  (prioritaire sur `REVENUECAT_WEBHOOK_SECRET` pour les curls)
+
+Vérifier :
 
 ```sql
-select cron.schedule(
-  'daily-capture-reminder-15m',
-  '*/15 * * * *',
-  $$
-  select net.http_post(
-    url := (select decrypted_secret from vault.decrypted_secrets where name = 'project_url')
-           || '/functions/v1/daily-capture-reminder',
-    headers := jsonb_build_object(
-      'Content-Type', 'application/json',
-      'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'push_cron_secret')
-    ),
-    body := '{}'::jsonb
-  );
-  $$
-);
+select jobid, jobname, schedule, active from cron.job
+where jobname = 'daily-capture-reminder-15m';
 ```
 
-Sans Vault : cron externe (GitHub Action / curl) :
+Curl smoke (secret Edge `PUSH_CRON_SECRET`) :
 
 ```bash
 curl -X POST "$SUPABASE_URL/functions/v1/daily-capture-reminder" \

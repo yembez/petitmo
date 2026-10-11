@@ -41,3 +41,4 @@ supabase/.temp/
 
 # typescript
 *.tsbuildinfo
+.local/
