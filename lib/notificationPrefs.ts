@@ -32,6 +32,48 @@ export function parseCaptureReminderTime(raw: string | null | undefined): string
   return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
 }
 
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
+/** Créneaux UI produit : 17:00 → 00:00 par pas de 15 min. */
+export const CAPTURE_REMINDER_TIME_SLOTS: readonly string[] = (() => {
+  const out: string[] = [];
+  for (let minutes = 17 * 60; minutes < 24 * 60; minutes += 15) {
+    out.push(`${pad2(Math.floor(minutes / 60))}:${pad2(minutes % 60)}`);
+  }
+  out.push('00:00');
+  return out;
+})();
+
+/** Ramène une heure libre vers le créneau UI le plus proche (dans la plage). */
+export function snapCaptureReminderTimeToSlot(raw: string | null | undefined): string {
+  const parsed = parseCaptureReminderTime(raw);
+  if (!parsed) return DEFAULT_NOTIFICATION_PREFS.captureReminderLocalTime;
+  if ((CAPTURE_REMINDER_TIME_SLOTS as readonly string[]).includes(parsed)) return parsed;
+
+  const mins = (() => {
+    const [h, m] = parsed.split(':').map(Number);
+    return (h ?? 0) * 60 + (m ?? 0);
+  })();
+
+  let best = CAPTURE_REMINDER_TIME_SLOTS[0]!;
+  let bestDist = Infinity;
+  for (const slot of CAPTURE_REMINDER_TIME_SLOTS) {
+    const [h, m] = slot.split(':').map(Number);
+    let slotMins = (h ?? 0) * 60 + (m ?? 0);
+    // 00:00 = fin de soirée (1440) pour la distance vs 23:xx
+    if (slot === '00:00') slotMins = 24 * 60;
+    let dist = Math.abs(slotMins - mins);
+    if (mins < 12 * 60 && slot === '00:00') dist = Math.min(dist, mins); // tôt matin → 00:00 proche
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = slot;
+    }
+  }
+  return best;
+}
+
 export function detectDeviceTimezone(): string {
   try {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone?.trim();
@@ -43,7 +85,7 @@ export function detectDeviceTimezone(): string {
 }
 
 function normalizeTime(raw: string | null | undefined): string {
-  return parseCaptureReminderTime(raw) ?? DEFAULT_NOTIFICATION_PREFS.captureReminderLocalTime;
+  return snapCaptureReminderTimeToSlot(raw);
 }
 
 export async function peekCachedNotificationPrefs(): Promise<NotificationPrefs> {

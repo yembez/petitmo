@@ -221,6 +221,7 @@
       "captureReminderHintOff": "Off — un petit rappel pour capturer (opt-in)",
       "captureReminderHintOn": "Tous les jours à {{time}}",
       "captureReminderTimeTitle": "Heure du rappel",
+      "captureReminderTimeSheetHint": "De 17:00 à minuit, par quarts d’heure.",
       "captureReminderTimePrompt": "Format HH:mm (ex. 23:07 ou 00:00).",
       "captureReminderTimeInvalid": "Heure invalide. Utilise HH:mm entre 00:00 et 23:59.",
       "captureReminderNeedNotifTitle": "Notifications requises",

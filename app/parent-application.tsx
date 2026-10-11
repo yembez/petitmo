@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
-  Platform,
   Share,
   Switch,
 } from 'react-native';
@@ -11,6 +10,7 @@ import { usePathname } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { Bell, Clock, Cloud, Image as ImageIcon, Moon, RefreshCw, Share2 } from 'lucide-react-native';
 import ParentSubpageShell from '@/components/parentSpace/ParentSubpageShell';
+import CaptureReminderTimeSheet from '@/components/parentSpace/CaptureReminderTimeSheet';
 import { MenuGroup, MenuRow, menuIcon } from '@/components/parentSpace/menuUi';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
@@ -43,9 +43,9 @@ import {
 import {
   DEFAULT_NOTIFICATION_PREFS,
   loadNotificationPrefs,
-  parseCaptureReminderTime,
   peekCachedNotificationPrefs,
   saveNotificationPrefs,
+  snapCaptureReminderTimeToSlot,
   type NotificationPrefs,
 } from '@/lib/notificationPrefs';
 
@@ -58,6 +58,7 @@ export default function ParentApplicationScreen() {
   const [backupStatus, setBackupStatus] = useState('');
   const [hasRealAccount, setHasRealAccount] = useState(() => peekHasRealAuthAccount());
   const [notifPrefs, setNotifPrefs] = useState<NotificationPrefs>(DEFAULT_NOTIFICATION_PREFS);
+  const [timeSheetOpen, setTimeSheetOpen] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -260,43 +261,22 @@ export default function ParentApplicationScreen() {
   );
 
   const handlePickReminderTime = useCallback(() => {
-    const apply = (raw: string | undefined) => {
-      const parsed = parseCaptureReminderTime(raw ?? '');
-      if (!parsed) {
-        Alert.alert(
-          t('parent.application.captureReminderTimeTitle'),
-          t('parent.application.captureReminderTimeInvalid'),
-        );
-        return;
-      }
-      void saveNotificationPrefs({ captureReminderLocalTime: parsed }).then(setNotifPrefs);
-    };
+    setTimeSheetOpen(true);
+  }, []);
 
-    // Test : saisie libre HH:mm (00:00–23:59), à la minute près.
-    if (Platform.OS === 'ios' && typeof Alert.prompt === 'function') {
-      Alert.prompt(
-        t('parent.application.captureReminderTimeTitle'),
-        t('parent.application.captureReminderTimePrompt'),
-        [
-          { text: t('cancel'), style: 'cancel' },
-          { text: t('ok'), onPress: (value) => apply(value) },
-        ],
-        'plain-text',
-        notifPrefs.captureReminderLocalTime,
-        'numbers-and-punctuation',
-      );
-      return;
-    }
-
-    Alert.alert(
-      t('parent.application.captureReminderTimeTitle'),
-      t('parent.application.captureReminderTimePrompt'),
-      [{ text: t('ok'), style: 'cancel' }],
-    );
-  }, [notifPrefs.captureReminderLocalTime, t]);
+  const handleSelectReminderTime = useCallback((time: string) => {
+    const snapped = snapCaptureReminderTimeToSlot(time);
+    void saveNotificationPrefs({ captureReminderLocalTime: snapped }).then(setNotifPrefs);
+  }, []);
 
   return (
     <ParentSubpageShell title="Application">
+      <CaptureReminderTimeSheet
+        visible={timeSheetOpen}
+        selectedTime={notifPrefs.captureReminderLocalTime}
+        onSelect={handleSelectReminderTime}
+        onClose={() => setTimeSheetOpen(false)}
+      />
       <MenuGroup titleFontFamily={dm600}>
         <MenuRow
           icon={menuIcon(RefreshCw)}
