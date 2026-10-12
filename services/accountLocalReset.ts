@@ -12,12 +12,88 @@ import {
   getAllLocalMemoriesIncludingArchived,
   listLocalBooks,
   listLocalChildren,
-  listLocalChildrenForUser,
+  upsertLocalChild,
+  upsertLocalMemory,
 } from '@/lib/localDb';
 import { deleteLocalMediaFiles } from '@/lib/localCleanup';
 import { supabase } from '@/lib/supabase';
 import { setFeedHydrationSnapshots } from '@/services/tabScreensCache';
 import { clearSelectedChildAndCaptureSnapshot } from '@/services/children';
+
+function normalizeAccountEmail(email: string | null | undefined): string {
+  return (email ?? '').trim().toLowerCase();
+}
+
+/** Hide My Email / relay ≠ même identité que gmail — pas de rekey silencieux. */
+function isApplePrivateRelayEmail(email: string): boolean {
+  return email.endsWith('@privaterelay.appleid.com');
+}
+
+/**
+ * Même personne (e-mail normalisé identique, hors relay Apple) → rekey local
+ * plutôt que purge account_switch.
+ */
+export function emailsMatchForSameAccount(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean {
+  const ea = normalizeAccountEmail(a);
+  const eb = normalizeAccountEmail(b);
+  if (!ea || !eb) return false;
+  if (isApplePrivateRelayEmail(ea) || isApplePrivateRelayEmail(eb)) {
+    return ea === eb;
+  }
+  return ea === eb;
+}
+
+/**
+ * Enfant / souvenir affichable pour ce compte.
+ * `user_id` vide = orphelin (claim). Un autre uid ne doit jamais être peint.
+ */
+export function entityVisibleForAccount(
+  entityUserId: string | null | undefined,
+  accountUserId: string | null | undefined,
+): boolean {
+  const owner = (entityUserId ?? '').trim();
+  const uid = (accountUserId ?? '').trim();
+  if (!uid) return !owner;
+  return !owner || owner === uid;
+}
+
+/** uid courant connu et ligne rattachée à un autre compte. uid pas encore warm → false. */
+export function isForeignToCurrentAccount(entityUserId: string | null | undefined): boolean {
+  const uid = peekLastRealAuthUserId();
+  if (!uid) return false;
+  return !entityVisibleForAccount(entityUserId, uid);
+}
+
+/** Souvenirs SQLite du compte courant — jamais ceux d’un autre `user_id`. */
+export function listMemoriesVisibleForAccount(
+  accountUserId: string | null | undefined,
+): ReturnType<typeof getAllLocalMemories> {
+  return getAllLocalMemories().filter(m => entityVisibleForAccount(m.user_id, accountUserId));
+}
+
+/** Réattribue enfants + souvenirs `fromUserId` → `toUserId` (même compte, nouvel uid Auth). */
+export function rekeyLocalWorkspaceUserId(fromUserId: string, toUserId: string): number {
+  const from = fromUserId.trim();
+  const to = toUserId.trim();
+  if (!from || !to || from === to) return 0;
+  let n = 0;
+  for (const child of listLocalChildren()) {
+    if ((child.user_id ?? '').trim() === from) {
+      upsertLocalChild({ ...child, user_id: to });
+      n += 1;
+    }
+  }
+  for (const memory of getAllLocalMemoriesIncludingArchived()) {
+    if ((memory.user_id ?? '').trim() === from) {
+      upsertLocalMemory({ ...memory, user_id: to });
+      n += 1;
+    }
+  }
+  return n;
+}
 
 const LAST_REAL_AUTH_USER_ID_KEY = 'petitmo:lastRealAuthUserId';
 const LAST_REAL_AUTH_EMAIL_KEY = 'petitmo:lastRealAuthEmail';
@@ -118,13 +194,13 @@ export function localWorkspaceConflictsWithUser(userId: string): boolean {
 export async function clearLocalAccountWorkspace(reason: string): Promise<void> {
   console.warn('[accountLocalReset] clearLocalAccountWorkspace', reason);
 
+  /**
+   * SQLite d’abord (rapide) — les deletes fichiers en fond.
+   * Sinon finishAfterAuth (race 5s) route avec peek uid encore ancien pendant une purge médias longue.
+   */
   const memories = getAllLocalMemoriesIncludingArchived();
+  const mediaToDelete = [...memories];
   for (const memory of memories) {
-    try {
-      await deleteLocalMediaFiles(memory);
-    } catch {
-      /* */
-    }
     deleteLocalMemory(memory.id);
   }
 
@@ -132,34 +208,16 @@ export async function clearLocalAccountWorkspace(reason: string): Promise<void> 
     deleteLocalBook(book.id);
   }
 
+  const childPhotoPaths: string[] = [];
   for (const child of listLocalChildren()) {
     const lp = (child.local_photo_path ?? '').trim();
-    if (lp) {
-      try {
-        await deleteAsync(lp, { idempotent: true });
-      } catch {
-        /* */
-      }
-    }
+    if (lp) childPhotoPaths.push(lp);
     try {
-      await AsyncStorage.removeItem(`@petitmo_child_original_photo_v1:${child.id}`);
+      void AsyncStorage.removeItem(`@petitmo_child_original_photo_v1:${child.id}`);
     } catch {
       /* */
     }
     deleteLocalChild(child.id);
-  }
-
-  if (Platform.OS !== 'web' && documentDirectory) {
-    try {
-      await deleteAsync(`${documentDirectory}petitmo_memories/`, { idempotent: true });
-    } catch {
-      /* */
-    }
-    try {
-      await deleteAsync(`${documentDirectory}petitmo_children/`, { idempotent: true });
-    } catch {
-      /* */
-    }
   }
 
   await clearSelectedChildAndCaptureSnapshot();
@@ -172,27 +230,76 @@ export async function clearLocalAccountWorkspace(reason: string): Promise<void> 
   }
   DeviceEventEmitter.emit('petitmo:memories-invalidate');
   DeviceEventEmitter.emit('petitmo:books-updated');
+
+  void (async () => {
+    for (const memory of mediaToDelete) {
+      try {
+        await deleteLocalMediaFiles(memory);
+      } catch {
+        /* */
+      }
+    }
+    for (const lp of childPhotoPaths) {
+      try {
+        await deleteAsync(lp, { idempotent: true });
+      } catch {
+        /* */
+      }
+    }
+    if (Platform.OS !== 'web' && documentDirectory) {
+      try {
+        await deleteAsync(`${documentDirectory}petitmo_memories/`, { idempotent: true });
+      } catch {
+        /* */
+      }
+      try {
+        await deleteAsync(`${documentDirectory}petitmo_children/`, { idempotent: true });
+      } catch {
+        /* */
+      }
+    }
+  })();
 }
 
 /**
  * Avant sync d’un compte produit : si un autre compte a laissé des données sur cet appareil,
  * on les efface. Les orphelins (`user_id` vide) sont conservés pour claim.
  */
-export async function prepareLocalWorkspaceForRealUser(userId: string): Promise<void> {
+export async function prepareLocalWorkspaceForRealUser(
+  userId: string,
+  opts?: { sessionEmail?: string | null },
+): Promise<void> {
   const uid = userId.trim();
   if (!uid) return;
 
   const prev = await getLastRealAuthUserId();
+  const prevEmail = await getLastRealAuthEmail();
+  /** E-mail de la session qui arrive. Vide ≠ « même que le précédent ». */
+  const sessionEmail = normalizeAccountEmail(opts?.sessionEmail);
   const switched = !!(prev && prev !== uid);
   const foreign = localWorkspaceConflictsWithUser(uid);
+  const localChildrenBefore = listLocalChildren().length;
 
   /**
-   * Récupération post-bug « claim volant » : premier tracking, cloud du compte vide,
-   * mais SQLite déjà rempli avec ce `user_id` (données d’un autre e-mail réattribuées).
-   * Jamais await réseau ici sans timeout — sinon login spinner infini.
+   * Même e-mail, nouvel uid Auth (ex. provider relié mal) → rekey, pas purge.
+   * Apple Hide My Email ≠ gmail → pas de rekey (isolation).
+   * Les deux e-mails doivent être connus et identiques. Sinon on purge.
+   */
+  if (switched && prev && emailsMatchForSameAccount(prevEmail, sessionEmail)) {
+    const rekeyed = rekeyLocalWorkspaceUserId(prev, uid);
+    console.warn('[accountLocalReset] rekey same-email', { prev, uid, rekeyed });
+    await setLastRealAuthUserId(uid);
+    if (sessionEmail) await setLastRealAuthEmail(sessionEmail);
+    return;
+  }
+
+  /**
+   * Bug « claim volant » uniquement : lignes **déjà taguées** cet uid + cloud vide.
+   * Orphelins seuls → claim, jamais purge (sinon 1er login détruit le local).
    */
   let cloudEmptyStale = false;
-  if (!switched && !foreign && !prev && listLocalChildrenForUser(uid).length > 0) {
+  const taggedForUid = listLocalChildren().filter(c => (c.user_id ?? '').trim() === uid);
+  if (!switched && !foreign && !prev && taggedForUid.length > 0) {
     try {
       const probe = supabase.from('children').select('id', { count: 'exact', head: true });
       const timed = await Promise.race([
@@ -208,14 +315,46 @@ export async function prepareLocalWorkspaceForRealUser(userId: string): Promise<
   }
 
   if (switched || foreign || cloudEmptyStale) {
-    await clearLocalAccountWorkspace(
-      switched
-        ? `account_switch:${prev}->${uid}`
-        : foreign
-          ? `foreign_local_data->${uid}`
-          : `cloud_empty_stale_local->${uid}`,
-    );
+    const reason = switched
+      ? `account_switch:${prev}->${uid}`
+      : foreign
+        ? `foreign_local_data->${uid}`
+        : `cloud_empty_stale_local->${uid}`;
+
+    /**
+     * Origine « profil disparu » après Apple / autre provider :
+     * nouvel `auth.users.id` ≠ dernier compte → purge isolation (volontaire produit).
+     * Sans Sentry / notice, ça ressemble à un bug SQLite.
+     */
+    if (localChildrenBefore > 0) {
+      try {
+        const { captureAccountWorkspaceCleared } = await import('@/lib/sentry');
+        captureAccountWorkspaceCleared({
+          reason,
+          prevUserId: prev,
+          nextUserId: uid,
+          localChildrenBefore,
+        });
+      } catch {
+        /* */
+      }
+      try {
+        const { setPendingAccountSwitchNotice } = await import('@/lib/accountSwitchNotice');
+        setPendingAccountSwitchNotice({
+          reason,
+          prevUserId: prev,
+          prevEmail,
+          nextUserId: uid,
+          localChildrenBefore,
+        });
+      } catch {
+        /* */
+      }
+    }
+
+    await clearLocalAccountWorkspace(reason);
   }
 
   await setLastRealAuthUserId(uid);
+  if (sessionEmail) await setLastRealAuthEmail(sessionEmail);
 }

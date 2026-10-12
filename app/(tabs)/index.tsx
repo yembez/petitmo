@@ -84,7 +84,10 @@ import type { Child } from '@/types/local';
 import { checkMemoryLimit } from '@/lib/limits';
 import { promptFreeTierLimitThenPaywall, freeTierLimitKindFromCheck } from '@/utils/freeTierLimitGate';
 import { getLocalChild, listLocalChildren, listLocalChildrenForUser } from '@/lib/localDb';
-import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
+import {
+  isForeignToCurrentAccount,
+  peekLastRealAuthUserId,
+} from '@/services/accountLocalReset';
 import {
   PETITMO_AUTH_SIGNED_OUT_EVENT,
   peekHasRealAuthAccount,
@@ -278,21 +281,33 @@ function CapturerScreen() {
   const [isLoading, setIsLoading] = useState(() => child === null);
   const childRef = useRef<Child | null>(null);
   childRef.current = child;
+  /**
+   * Profil d’un autre compte encore en mémoire (onglets restés montés).
+   * On garde l’écran neutre jusqu’au prochain profil du compte courant —
+   * sinon un setChild(null) ouvre une fraction de seconde « créer un enfant ».
+   */
+  const hidingForeignProfileRef = useRef(false);
+  const shownChild =
+    peekHasRealAuthAccount() && child && !isForeignToCurrentAccount(child.user_id)
+      ? child
+      : null;
+  if (shownChild) hidingForeignProfileRef.current = false;
+  else if (child) hidingForeignProfileRef.current = true;
   const captureScrollRef = useRef<ScrollView>(null);
   const captureScrollYRef = useRef(0);
   const captureScrollMaxYRef = useRef(0);
 
-  const heroDisplayUri = useChildProfileDisplayUri(child);
+  const heroDisplayUri = useChildProfileDisplayUri(shownChild);
   const stickyHeroUriRef = useRef('');
   const stickyHeroChildIdRef = useRef('');
-  if ((child?.id ?? '') !== stickyHeroChildIdRef.current) {
-    stickyHeroChildIdRef.current = child?.id ?? '';
+  if ((shownChild?.id ?? '') !== stickyHeroChildIdRef.current) {
+    stickyHeroChildIdRef.current = shownChild?.id ?? '';
     stickyHeroUriRef.current = '';
   }
   if (heroDisplayUri.trim()) stickyHeroUriRef.current = heroDisplayUri.trim();
   /** Évite unmount hero → placeholder crème quand l’URI est brièvement vide post-restore. */
   const photoUri = heroDisplayUri.trim() || stickyHeroUriRef.current;
-  const heroPhotoCacheKey = child ? captureHeroPhotoRevision(child) : '';
+  const heroPhotoCacheKey = shownChild ? captureHeroPhotoRevision(shownChild) : '';
   const heroPillBackdrop = useCaptureHeroPillBackdrop(
     familyChildren.length > 1 ? null : photoUri,
   );
@@ -303,12 +318,16 @@ function CapturerScreen() {
   }, [photoUri]);
 
   useEffect(() => {
-    if (!peekHasRealAuthAccount()) {
+    if (!peekHasRealAuthAccount() || !shownChild) {
+      if (child) {
+        setChild(null);
+        setFamilyChildren([]);
+      }
       setCaptureTabChildSnapshot(null);
       return;
     }
-    setCaptureTabChildSnapshot(child);
-  }, [child]);
+    setCaptureTabChildSnapshot(shownChild);
+  }, [child, shownChild]);
 
   /** Déconnexion : vider le hero immédiatement (onglets restent montés / SQLite intact). */
   useEffect(() => {
@@ -355,6 +374,7 @@ function CapturerScreen() {
         const id = payload?.childId?.trim();
         const fromPayload =
           payload?.child && (!id || payload.child.id === id) ? payload.child : null;
+        if (fromPayload && isForeignToCurrentAccount(fromPayload.user_id)) return;
         const active =
           fromPayload ??
           (id ? sorted.find(c => c.id === id) : null) ??
@@ -493,6 +513,13 @@ function CapturerScreen() {
           return;
         }
 
+        if (childRef.current && isForeignToCurrentAccount(childRef.current.user_id)) {
+          stickyHeroUriRef.current = '';
+          stickyHeroChildIdRef.current = '';
+          childRef.current = null;
+          setChild(null);
+          setFamilyChildren([]);
+        }
         const silent = childRef.current != null;
         try {
           if (!silent) setIsLoading(true);
@@ -590,7 +617,11 @@ function CapturerScreen() {
     }, [navigation, router])
   );
 
-  if (!peekHasRealAuthAccount()) {
+  if (
+    !peekHasRealAuthAccount() ||
+    hidingForeignProfileRef.current ||
+    (child != null && shownChild == null)
+  ) {
     return (
       <View style={[styles.root, styles.loadingContainer]}>
         <StatusBar style="dark" />
@@ -598,7 +629,7 @@ function CapturerScreen() {
     );
   }
 
-  if (isLoading && !child) {
+  if (isLoading && !shownChild) {
     return (
       <View style={[styles.root, styles.loadingContainer]}>
         <StatusBar style="dark" />

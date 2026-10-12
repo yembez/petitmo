@@ -56,6 +56,7 @@ import { getChildren } from '@/services/children';
 import { listLocalChildrenForUser } from '@/lib/localDb';
 import {
   getLastRealAuthEmail,
+  listMemoriesVisibleForAccount,
   peekLastRealAuthUserId,
 } from '@/services/accountLocalReset';
 import type { User } from '@supabase/supabase-js';
@@ -63,9 +64,23 @@ import { hydrateTabScreensFromSqliteSync } from '@/services/tabScreensHydrate';
 import { safeRouterBack } from '@/utils/safeRouterBack';
 import { LEGAL_PRIVACY_URL, LEGAL_TERMS_URL } from '@/lib/legalUrls';
 import { looksLikeNetworkAuthError, probeNetworkReachable } from '@/utils/networkProbe';
+import { captureAuthGateTimeout } from '@/lib/sentry';
+import { consumePendingAccountSwitchNotice } from '@/lib/accountSwitchNotice';
 
 function normalizeAuthEmail(value: string): string {
   return value.trim().toLowerCase();
+}
+
+/** Filet anti-spinner mort (Apple / login → getChildren cloud sans timeout). */
+const AUTH_CHILDREN_PULL_MS = 8_000;
+/** Isolation SQLite est maintenant rapide (médias purge en fond) — await complet OK. */
+const AUTH_FINISH_WATCHDOG_MS = 15_000;
+
+async function getChildrenWithTimeout(): Promise<Awaited<ReturnType<typeof getChildren>> | null> {
+  return Promise.race([
+    getChildren(),
+    new Promise<null>(resolve => setTimeout(() => resolve(null), AUTH_CHILDREN_PULL_MS)),
+  ]);
 }
 
 type AuthMode = 'signup' | 'login';
@@ -111,8 +126,9 @@ async function openUrl(url: string) {
 async function restoreThenEnterTabs(router: {
   replace: (href: '/(tabs)') => void;
 }): Promise<void> {
-  const { getAllLocalMemories } = await import('@/lib/localDb');
-  if (getAllLocalMemories().length > 0) {
+  const { peekLastRealAuthUserId: peekUid, listMemoriesVisibleForAccount: listVisible } =
+    await import('@/services/accountLocalReset');
+  if (listVisible(peekUid()).length > 0) {
     hydrateTabScreensFromSqliteSync();
     router.replace('/(tabs)');
     return;
@@ -121,7 +137,11 @@ async function restoreThenEnterTabs(router: {
     '@/services/runCloudMemoriesRestore'
   );
   const { endCloudRestoreUi, peekCloudRestoreUi } = await import('@/lib/cloudRestoreUi');
-  await restoreFamilyMemoriesFromCloudWithSoftWait({ softUi: true, holdUi: true });
+  // Soft restore max 20s ici — le pull cloud peut continuer ; ne jamais figer auth 2 min.
+  await Promise.race([
+    restoreFamilyMemoriesFromCloudWithSoftWait({ softUi: true, holdUi: true }),
+    new Promise<void>(resolve => setTimeout(resolve, 20_000)),
+  ]);
   hydrateTabScreensFromSqliteSync();
   router.replace('/(tabs)');
   if (peekCloudRestoreUi().active) {
@@ -245,65 +265,144 @@ export default function AuthScreen() {
   /**
    * Après auth : isolation + mode cloud **déjà** awaités via
    * `ensureCloudSyncAfterRealAuth` (sinon race purge / mode local).
+   * Local-first : aucun await cloud sans timeout — sinon spinner auth figé (Apple / reboot).
    */
   const finishAfterAuth = useCallback(
     async (opts?: { assumeNewAccount?: boolean; user?: User | null }) => {
-      if (opts?.user) {
-        await ensureCloudSyncAfterRealAuth(opts.user);
-      }
+      let navigated = false;
+      const markNav = () => {
+        navigated = true;
+      };
 
-      const uid = peekLastRealAuthUserId() || opts?.user?.id?.trim() || null;
-      const localCount = uid ? listLocalChildrenForUser(uid).length : 0;
+      const emergencyExit = async (gate: string) => {
+        if (navigated) return;
+        captureAuthGateTimeout({
+          gate,
+          detail: opts?.user?.id ? `uid:${opts.user.id.slice(0, 8)}` : undefined,
+        });
+        try {
+          const uid = peekLastRealAuthUserId() || opts?.user?.id?.trim() || null;
+          const localCount = uid ? listLocalChildrenForUser(uid).length : 0;
+          hydrateTabScreensFromSqliteSync();
+          if (isSubscribe) {
+            markNav();
+            goPaywall();
+            return;
+          }
+          if (localCount > 0) {
+            markNav();
+            router.replace('/(tabs)');
+            return;
+          }
+          const { replaceToOnboardingPermissionsOrCreateChild } = await import(
+            '@/utils/onboardingPermissionsRoute'
+          );
+          markNav();
+          await replaceToOnboardingPermissionsOrCreateChild(router, {
+            returning: opts?.assumeNewAccount !== true,
+          });
+        } catch (e) {
+          console.warn('[auth] emergencyExit', e);
+          setLeavingShell(false);
+          setBusy(false);
+          setUiPhase('auth');
+        }
+      };
 
-      // Intent abonnement : compte → paywall tout de suite (profil enfant après).
-      if (isSubscribe) {
-        hydrateTabScreensFromSqliteSync();
-        goPaywall();
-        return;
-      }
+      const watchdog = setTimeout(() => {
+        void emergencyExit('finishAfterAuth.watchdog');
+      }, AUTH_FINISH_WATCHDOG_MS);
 
-      // Login / reconnexion : SQLite vide → pull enfants avant de router
-      // (sinon écran permissions rejoué alors que le compte a déjà un fil).
-      if (localCount === 0) {
-        if (!opts?.assumeNewAccount) {
-          const children = await getChildren();
-          if (children.length > 0) {
-            hydrateTabScreensFromSqliteSync();
-            const { markOnboardingPermissionsSeen } = await import(
-              '@/lib/onboardingPermissionsSeen'
+      try {
+        // Await isolation complète (purge SQLite sync + setLastRealAuthUserId).
+        // Ne plus race 5s : sinon peek reste sur l’ancien uid pendant/après wipe (H2 audit).
+        if (opts?.user) {
+          await ensureCloudSyncAfterRealAuth(opts.user);
+        }
+
+        const uid = (opts?.user?.id?.trim() || peekLastRealAuthUserId() || null) as string | null;
+        const localCount = uid ? listLocalChildrenForUser(uid).length : 0;
+
+        // Intent abonnement : compte → paywall tout de suite (profil enfant après).
+        if (isSubscribe) {
+          hydrateTabScreensFromSqliteSync();
+          markNav();
+          goPaywall();
+          return;
+        }
+
+        // Login / reconnexion : SQLite vide → pull enfants avant de router
+        // (sinon écran permissions rejoué alors que le compte a déjà un fil).
+        if (localCount === 0) {
+          if (!opts?.assumeNewAccount) {
+            const children = await getChildrenWithTimeout();
+            if (children === null) {
+              captureAuthGateTimeout({ gate: 'finishAfterAuth.getChildren' });
+            } else if (children.length > 0) {
+              hydrateTabScreensFromSqliteSync();
+              const { markOnboardingPermissionsSeen } = await import(
+                '@/lib/onboardingPermissionsSeen'
+              );
+              await markOnboardingPermissionsSeen(uid);
+              markNav();
+              await restoreThenEnterTabs(router);
+              return;
+            }
+          }
+
+          /**
+           * Origine : Apple/Google a créé un **autre** `user_id` → purge isolation.
+           * Le profil SQLite n’a pas « disparu » : il était rattaché au compte précédent.
+           * Indispensable d’expliquer (sinon create-child = faux nouveau départ).
+           */
+          const switchNotice = consumePendingAccountSwitchNotice();
+          if (switchNotice?.prevEmail && switchNotice.localChildrenBefore > 0) {
+            Alert.alert(
+              t('auth.accountSwitchTitle'),
+              t('auth.accountSwitchBody', { email: switchNotice.prevEmail }),
             );
-            await markOnboardingPermissionsSeen(uid);
+          }
+
+          const { replaceToOnboardingPermissionsOrCreateChild } = await import(
+            '@/utils/onboardingPermissionsRoute'
+          );
+          markNav();
+          await replaceToOnboardingPermissionsOrCreateChild(router, {
+            // Login / restore : copy « réautoriser après install » (pas 1ʳᵉ création).
+            returning: opts?.assumeNewAccount !== true,
+          });
+          return;
+        }
+
+        // Enfants déjà en local → Capturer / fil immédiat (sauf restore soft si SQLite souvenirs vide).
+        if (!opts?.assumeNewAccount) {
+          if (listMemoriesVisibleForAccount(peekLastRealAuthUserId()).length === 0) {
+            markNav();
             await restoreThenEnterTabs(router);
             return;
           }
-        }
-        const { replaceToOnboardingPermissionsOrCreateChild } = await import(
-          '@/utils/onboardingPermissionsRoute'
-        );
-        await replaceToOnboardingPermissionsOrCreateChild(router, {
-          // Login / restore : copy « réautoriser après install » (pas 1ʳᵉ création).
-          returning: opts?.assumeNewAccount !== true,
-        });
-        return;
-      }
-
-      // Enfants déjà en local → Capturer / fil immédiat (sauf restore soft si SQLite souvenirs vide).
-      if (!opts?.assumeNewAccount) {
-        const { getAllLocalMemories } = await import('@/lib/localDb');
-        if (getAllLocalMemories().length === 0) {
-          await restoreThenEnterTabs(router);
+          hydrateTabScreensFromSqliteSync();
+          markNav();
+          router.replace('/(tabs)');
+          void getChildren().then(() => {
+            hydrateTabScreensFromSqliteSync();
+          });
           return;
         }
-        hydrateTabScreensFromSqliteSync();
-        router.replace('/(tabs)');
-        void getChildren().then(() => {
-          hydrateTabScreensFromSqliteSync();
-        });
-        return;
-      }
 
-      hydrateTabScreensFromSqliteSync();
-      router.replace('/(tabs)');
+        hydrateTabScreensFromSqliteSync();
+        markNav();
+        router.replace('/(tabs)');
+      } catch (e) {
+        console.warn('[auth] finishAfterAuth', e);
+        captureAuthGateTimeout({
+          gate: 'finishAfterAuth.throw',
+          detail: e instanceof Error ? e.message : String(e),
+        });
+        await emergencyExit('finishAfterAuth.throw');
+      } finally {
+        clearTimeout(watchdog);
+      }
     },
     [goPaywall, isSubscribe, router]
   );
@@ -515,6 +614,10 @@ export default function AuthScreen() {
         });
       } catch (e) {
         console.warn('[auth] run', e);
+        captureAuthGateTimeout({
+          gate: 'auth.run',
+          detail: e instanceof Error ? e.message : String(e),
+        });
         Alert.alert(t('error'), t('error'));
         setBusy(false);
         setLeavingShell(false);

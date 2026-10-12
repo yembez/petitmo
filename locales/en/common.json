@@ -55,6 +55,8 @@
     "freeBadge": "Free",
     "continueGoogle": "Continue with Google",
     "continueApple": "Continue with Apple",
+    "accountSwitchTitle": "Different account detected",
+    "accountSwitchBody": "Apple / Google opened a different account from {{email}}. Memories on this device belong to your usual email — sign in with that email (not Apple) to get them back. Don’t create a new child profile here.",
     "continueEmail": "Continue with email",
     "orEmail": "or with email",
     "email": "Email",
@@ -330,7 +332,9 @@
   },
   "write": {
     "emptyTitle": "One little note?",
-    "emptyBody": "Even a single sentence is enough to keep this moment."
+    "emptyBody": "Even a single sentence is enough to keep this moment.",
+    "placeholderOne": "Write what you'd like to tell them today…",
+    "placeholderMany": "Write what you'd like to tell them today…"
   },
   "book": {
     "createTile": {
@@ -435,7 +439,9 @@
 
   "recordVoice": {
     "title": "Capture their voice, a song, a message for later...",
+    "titleMany": "Capture their voices, a song, a message for later...",
     "subtitleIdle": "Their voice, a song, a message for later...",
+    "subtitleIdleMany": "Their voices, a song, a message for later...",
     "subtitleRecording": "Recording…",
     "subtitleDone": "Recording finished",
     "mic": "Mic",

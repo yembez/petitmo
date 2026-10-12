@@ -311,6 +311,7 @@ export default function PaywallScreen() {
           kind: 'purchase',
           plan,
           message: purchase.message,
+          diagnostic: 'diagnostic' in purchase ? purchase.diagnostic : undefined,
         })
         setCtaPhase('error')
         Alert.alert(t('error'), purchase.message)

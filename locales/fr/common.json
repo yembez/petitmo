@@ -55,6 +55,8 @@
     "freeBadge": "Gratuit",
     "continueGoogle": "Continuer avec Google",
     "continueApple": "Continuer avec Apple",
+    "accountSwitchTitle": "Autre compte détecté",
+    "accountSwitchBody": "Apple / Google a ouvert un compte différent de {{email}}. Les souvenirs de cet appareil sont liés à l’e-mail habituel — reconnecte-toi avec cet e-mail (pas Apple) pour les retrouver. Ne crée pas un nouveau profil enfant ici.",
     "continueEmail": "Continuer avec e-mail",
     "orEmail": "ou par e-mail",
     "email": "E-mail",
@@ -330,7 +332,9 @@
   },
   "write": {
     "emptyTitle": "Encore un petit mot ?",
-    "emptyBody": "Même une phrase suffit pour garder ce moment."
+    "emptyBody": "Même une phrase suffit pour garder ce moment.",
+    "placeholderOne": "Écris-lui ce que tu aimerais lui dire aujourd'hui…",
+    "placeholderMany": "Écris-leur ce que tu aimerais leur dire aujourd'hui…"
   },
   "book": {
     "createTile": {
@@ -435,7 +439,9 @@
 
   "recordVoice": {
     "title": "Capture sa voix, un chant, un message pour plus tard...",
+    "titleMany": "Capture leur voix, un chant, un message pour plus tard...",
     "subtitleIdle": "Sa voix, un chant, un message pour plus tard...",
+    "subtitleIdleMany": "Leur voix, un chant, un message pour plus tard...",
     "subtitleRecording": "Enregistrement en cours...",
     "subtitleDone": "Enregistrement terminé",
     "mic": "Micro",

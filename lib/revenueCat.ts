@@ -256,7 +256,66 @@ export async function fetchPetitmoPlusPlanPrices(): Promise<PetitmoPlusPlanPrice
 export type PurchasePetitmoPlusResult =
   | { ok: true; customerInfo: CustomerInfo }
   | { ok: false; cancelled: true }
-  | { ok: false; cancelled: false; message: string };
+  | { ok: false; cancelled: false; message: string; diagnostic?: Record<string, unknown> };
+
+function rcErrorFields(e: unknown): Record<string, unknown> {
+  const err = e as {
+    code?: string | number;
+    readableErrorCode?: string;
+    message?: string;
+    underlyingErrorMessage?: string;
+    userInfo?: unknown;
+  };
+  return {
+    code: err?.code ?? null,
+    readableErrorCode: err?.readableErrorCode ?? null,
+    message: typeof err?.message === 'string' ? err.message.slice(0, 500) : null,
+    underlyingErrorMessage:
+      typeof err?.underlyingErrorMessage === 'string'
+        ? err.underlyingErrorMessage.slice(0, 500)
+        : null,
+  };
+}
+
+/** Ce que StoreKit et l’offering RC renvoient vraiment — pour Sentry au tap S’abonner. */
+async function diagnosePetitmoPlusStore(purchaseError?: unknown): Promise<Record<string, unknown>> {
+  const diagnostic: Record<string, unknown> = {
+    expectedProductIds: [PRODUCT_ID_MONTHLY, PRODUCT_ID_YEARLY],
+    entitlementId: petitmoPlusEntitlementId(),
+  };
+  if (purchaseError) diagnostic.purchaseError = rcErrorFields(purchaseError);
+  try {
+    diagnostic.appUserId = await Purchases.getAppUserID();
+  } catch (e) {
+    diagnostic.appUserIdError = rcErrorFields(e);
+  }
+  try {
+    const products = await Purchases.getProducts([PRODUCT_ID_MONTHLY, PRODUCT_ID_YEARLY]);
+    diagnostic.storeProductCount = products.length;
+    diagnostic.storeProducts = products.map(p => ({
+      id: p.identifier,
+      price: p.priceString,
+      title: p.title,
+    }));
+  } catch (e) {
+    diagnostic.storeProductsError = rcErrorFields(e);
+  }
+  try {
+    const offerings = await Purchases.getOfferings();
+    const current = offerings.current;
+    diagnostic.currentOfferingId = current?.identifier ?? null;
+    diagnostic.offeringIds = Object.keys(offerings.all ?? {});
+    diagnostic.packages = (current?.availablePackages ?? []).map(p => ({
+      packageId: p.identifier,
+      packageType: p.packageType,
+      productId: p.product?.identifier ?? null,
+      price: p.product?.priceString ?? null,
+    }));
+  } catch (e) {
+    diagnostic.offeringsError = rcErrorFields(e);
+  }
+  return diagnostic;
+}
 
 export async function purchasePetitmoPlusPlan(
   plan: PetitmoPlusPlan,
@@ -279,6 +338,7 @@ export async function purchasePetitmoPlusPlan(
         ok: false,
         cancelled: false,
         message: 'Aucune offre Petitmo+ disponible. Vérifie RevenueCat / App Store Connect.',
+        diagnostic: await diagnosePetitmoPlusStore(),
       };
     }
 
@@ -316,7 +376,12 @@ export async function purchasePetitmoPlusPlan(
       typeof err?.message === 'string' && err.message.trim()
         ? err.message.trim()
         : "Impossible de finaliser l'achat.";
-    return { ok: false, cancelled: false, message };
+    return {
+      ok: false,
+      cancelled: false,
+      message,
+      diagnostic: await diagnosePetitmoPlusStore(e),
+    };
   }
 }
 

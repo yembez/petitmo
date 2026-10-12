@@ -2381,7 +2381,12 @@ export async function getFamilyMemories(opts?: {
   /** Défaut true — attendre le pull. Passer false pour local-first non bloquant. */
   waitForRemote?: boolean;
 }): Promise<MemoryRow[]> {
-  const local = getAllLocalMemories() as unknown as MemoryRow[];
+  const { listMemoriesVisibleForAccount, peekLastRealAuthUserId } = await import(
+    '@/services/accountLocalReset'
+  );
+  const readScoped = () =>
+    listMemoriesVisibleForAccount(peekLastRealAuthUserId()) as unknown as MemoryRow[];
+  const local = readScoped();
   if ((await getCachedUserMode()) === 'local') {
     return local;
   }
@@ -2395,7 +2400,7 @@ export async function getFamilyMemories(opts?: {
   } catch {
     /* hors ligne */
   }
-  return getAllLocalMemories() as unknown as MemoryRow[];
+  return readScoped();
 }
 
 export async function getMemoryById(memoryId: string) {

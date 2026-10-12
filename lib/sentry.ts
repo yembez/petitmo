@@ -130,6 +130,58 @@ export function captureUserBugReport(message: string, extra: Record<string, unkn
 }
 
 /**
+ * Purge SQLite d’isolation (changement de compte / foreign).
+ * Cause fréquente de « profil disparu » après Apple ≠ e-mail — doit être visible Sentry.
+ */
+export function captureAccountWorkspaceCleared(params: {
+  reason: string;
+  prevUserId?: string | null;
+  nextUserId?: string | null;
+  localChildrenBefore?: number;
+}): string | null {
+  if (!isSentryEnabled()) return null;
+  const reason = (params.reason || 'unknown').trim().slice(0, 120);
+  const err = new Error(`auth.workspace.cleared: ${reason}`);
+  return Sentry.captureException(err, {
+    level: 'warning',
+    tags: {
+      'app.errorScope': 'auth.workspace',
+      'app.workspaceClear': reason.split(':')[0] || reason,
+    },
+    fingerprint: ['auth', 'workspace-cleared', reason.split(':')[0] || 'unknown'],
+    extra: {
+      reason,
+      prevUserId: params.prevUserId ? String(params.prevUserId).slice(0, 8) : undefined,
+      nextUserId: params.nextUserId ? String(params.nextUserId).slice(0, 8) : undefined,
+      localChildrenBefore: params.localChildrenBefore ?? undefined,
+    },
+  });
+}
+
+/**
+ * Hang / timeout sur un gate auth (Apple / login / finishAfterAuth).
+ * Un await réseau sans throw = **aucun** event Sentry sans cet appel explicite.
+ */
+export function captureAuthGateTimeout(params: {
+  gate: string;
+  detail?: string;
+}): string | null {
+  if (!isSentryEnabled()) return null;
+  const gate = (params.gate || 'unknown').trim().slice(0, 80);
+  const detail = (params.detail ?? '').trim().slice(0, 200);
+  const err = new Error(`auth.gate.timeout: ${gate}${detail ? ` — ${detail}` : ''}`);
+  return Sentry.captureException(err, {
+    level: 'error',
+    tags: {
+      'app.errorScope': 'auth.gate',
+      'app.authGate': gate,
+    },
+    fingerprint: ['auth', 'gate-timeout', gate],
+    extra: { gate, detail: detail || undefined },
+  });
+}
+
+/**
  * Échec achat / restore Petitmo+ (hors annulation utilisatrice).
  * → issue Sentry (et mail fondateur si webhook issue configuré).
  */
@@ -137,6 +189,8 @@ export function capturePaywallPurchaseFailure(params: {
   kind: 'purchase' | 'restore';
   plan?: string;
   message: string;
+  /** Snapshot StoreKit / offerings au moment du tap (pas de secrets). */
+  diagnostic?: Record<string, unknown>;
 }): string | null {
   if (!isSentryEnabled()) return null;
   const msg = (params.message || 'unknown').trim().slice(0, 280);
@@ -151,7 +205,7 @@ export function capturePaywallPurchaseFailure(params: {
       ...(plan ? { 'app.paywallPlan': plan } : {}),
     },
     fingerprint: ['paywall', kind, msg.slice(0, 80)],
-    extra: { message: msg, plan: plan || undefined },
+    extra: { message: msg, plan: plan || undefined, diagnostic: params.diagnostic },
   });
 }
 

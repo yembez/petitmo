@@ -1,4 +1,7 @@
-import { getAllLocalMemories } from '@/lib/localDb';
+import {
+  listMemoriesVisibleForAccount,
+  peekLastRealAuthUserId,
+} from '@/services/accountLocalReset';
 import { getFamilyMemories } from '@/services/media';
 import {
   applyFeedHydrationFavoriteFlagsToLocal,
@@ -20,7 +23,7 @@ export function memoryShouldAppearInFavoris(m: Memory): boolean {
 /** Lecture SQLite synchrone — peindre Favoris sans await (local-first). */
 export function loadMemoriesForFavorisTabSync(): Memory[] {
   applyFeedHydrationFavoriteFlagsToLocal();
-  return getAllLocalMemories();
+  return listMemoriesVisibleForAccount(peekLastRealAuthUserId());
 }
 
 /**
@@ -36,7 +39,7 @@ export async function loadMemoriesForFavorisTab(opts?: {
     await getFamilyMemories();
     applyFeedHydrationFavoriteFlagsToLocal();
     await reconcileFavoritesAfterCloudSync();
-    return getAllLocalMemories();
+    return listMemoriesVisibleForAccount(peekLastRealAuthUserId());
   }
 
   return loadMemoriesForFavorisTabSync();
@@ -57,5 +60,5 @@ export function syncFavorisMemoriesFromCloudInBackground(
 }
 
 export function listLocalMemoriesMarkedForFavoris(): Memory[] {
-  return getAllLocalMemories().filter(memoryShouldAppearInFavoris);
+  return listMemoriesVisibleForAccount(peekLastRealAuthUserId()).filter(memoryShouldAppearInFavoris);
 }

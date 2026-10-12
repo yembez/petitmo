@@ -46,9 +46,13 @@ export default function Index() {
         return;
       }
 
-      // Cold : SQLite vide → pull cloud légitime avant redirect create-child vs tabs.
-      const children = await getChildren();
-      if (children.length > 0) {
+      // Cold : SQLite vide → pull cloud avant create-child vs tabs.
+      // Timeout : un await réseau sans filet = spinner figé après splash (réseau / Supabase hang).
+      const children = await Promise.race([
+        getChildren(),
+        new Promise<null>(resolve => setTimeout(() => resolve(null), 8_000)),
+      ]);
+      if (children && children.length > 0) {
         hydrateTabScreensFromSqliteSync();
         setHref('/(tabs)');
         setIsChecking(false);

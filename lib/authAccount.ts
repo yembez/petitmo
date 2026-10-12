@@ -252,9 +252,11 @@ function rememberRealAuthUser(user: User | null | undefined): void {
     (typeof user.user_metadata?.email === 'string' ? user.user_metadata.email : '') ??
     '';
   realAuthEmailMemory = raw.trim() || null;
-  if (realAuthEmailMemory) {
-    void setLastRealAuthEmail(realAuthEmailMemory);
-  }
+  /**
+   * Ne pas écrire `lastRealAuthEmail` ici. `prepareLocalWorkspaceForRealUser`
+   * compare encore l’e-mail du compte précédent : l’écraser avant = rekey
+   * au lieu d’une purge, et les souvenirs de l’autre compte restent affichés.
+   */
 }
 
 export type AuthAccountResult =
@@ -455,7 +457,11 @@ export async function activateCloudSyncAfterRealAuth(user: User): Promise<void> 
    * `setLastRealAuthUserId` est aussi appelé en fin de prepare — double pose OK.
    */
   try {
-    await prepareLocalWorkspaceForRealUser(user.id);
+    await prepareLocalWorkspaceForRealUser(user.id, {
+      sessionEmail:
+        user.email ??
+        (typeof user.user_metadata?.email === 'string' ? user.user_metadata.email : null),
+    });
   } catch (e) {
     console.warn('[auth] prepareLocalWorkspaceForRealUser', e);
     try {
@@ -543,7 +549,11 @@ export async function syncCloudAccountKindFromSession(): Promise<void> {
   rememberRealAuthUser(user);
 
   try {
-    await prepareLocalWorkspaceForRealUser(user.id);
+    await prepareLocalWorkspaceForRealUser(user.id, {
+      sessionEmail:
+        user.email ??
+        (typeof user.user_metadata?.email === 'string' ? user.user_metadata.email : null),
+    });
   } catch (e) {
     console.warn('[auth] prepareLocalWorkspaceForRealUser (boot)', e);
   }
@@ -1021,10 +1031,29 @@ export async function signInWithAppleNative(): Promise<AuthAccountResult> {
     return { ok: false, error: 'Jeton Apple manquant.' };
   }
 
-  const { data, error } = await supabase.auth.signInWithIdToken({
-    provider: 'apple',
-    token: credential.identityToken,
-  });
+  /** Sans timeout : GoTrue / réseau pendu = spinner auth mort (pas d’exception → pas Sentry). */
+  const idTokenResult = await Promise.race([
+    supabase.auth.signInWithIdToken({
+      provider: 'apple',
+      token: credential.identityToken,
+    }),
+    new Promise<null>(resolve => setTimeout(() => resolve(null), 12_000)),
+  ]);
+
+  if (!idTokenResult) {
+    try {
+      const { captureAuthGateTimeout } = await import('@/lib/sentry');
+      captureAuthGateTimeout({ gate: 'apple.signInWithIdToken' });
+    } catch {
+      /* */
+    }
+    return {
+      ok: false,
+      error: 'Connexion Apple trop longue. Vérifie le réseau et réessaie.',
+    };
+  }
+
+  const { data, error } = idTokenResult;
 
   if (error) {
     return { ok: false, error: mapAuthError(error.message) };

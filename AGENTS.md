@@ -218,6 +218,7 @@ flowchart LR
 7. Mise à jour `docs/specs/architecture-locale-cloud.md` + `supabase-write-policy.mdc`  
 8. **Lifecycle abo / inactivité / mails** — spec [`docs/specs/subscription-lifecycle-retention.md`](docs/specs/subscription-lifecycle-retention.md) : **sans grâce** ; EXPIRATION → **plan gratuit** (plafond **50**, comme never-paid) ; cancel → mail only ; billing issue → mail + bandeau ; re-subscribe → paid. **Pas d’archive >50 en V1** (tout reste visible). Inactivité 24 mois = P2.  
 9. QR livres = **15 ans** (code + Railway/Edge) ; delete volontaire purge QR ; delete inactivité conserve QR jusqu’à échéance — détail même spec
+10. **Santé cloud prod (reporté)** — incident 2026-10-12 : Nano + Disk IO budget → Postgres timeout (app + dashboard). Compute **Small** (~$30/mois Pro). Reste à livrer avant prod large : page admin fondateur (sonde Auth + REST + Sentry si KO) ; cron Edge + alerte ensuite. Le budget Disk IO Advisors n’est pas exposé en API publique. Plan : page only d’abord, pas de bannière utilisatrice.
 
 ---
 

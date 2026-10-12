@@ -70,6 +70,7 @@ import {
 import { isVoiceDocumentPickerAvailable } from '@/services/voiceImport';
 import { takePendingSharedVoice } from '@/lib/pendingShareMedia';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
+import { signedInAccountHasSeveralChildren } from '@/utils/accountChildCount';
 import { isDeviceStorageFullError } from '@/utils/deviceStorageFull';
 import {
   estimatedVoiceFileBytes,
@@ -1319,7 +1320,11 @@ export default function RecordVoiceScreen() {
       ) : (
         <View style={styles.preRecordBody}>
           <View style={styles.titleSection}>
-            <Text style={styles.title}>{t('recordVoice.title')}</Text>
+            <Text style={styles.title}>
+              {signedInAccountHasSeveralChildren()
+                ? t('recordVoice.titleMany')
+                : t('recordVoice.title')}
+            </Text>
           </View>
 
           {isRecording ? (

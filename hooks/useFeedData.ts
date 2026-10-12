@@ -14,7 +14,6 @@ import {
   getLocalChild,
   listLocalChildren,
   listLocalChildrenForUser,
-  getAllLocalMemories,
 } from '@/lib/localDb';
 import { useFocusEffect } from '@react-navigation/native';
 import { setStatusBarStyle } from 'expo-status-bar';
@@ -63,7 +62,12 @@ import {
   PETITMO_AUTH_SIGNED_OUT_EVENT,
   peekHasRealAuthAccount,
 } from '@/lib/authAccount';
-import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
+import {
+  entityVisibleForAccount,
+  isForeignToCurrentAccount,
+  listMemoriesVisibleForAccount,
+  peekLastRealAuthUserId,
+} from '@/services/accountLocalReset';
 
 function readFamilyChildrenFromLocal(): Child[] {
   if (!peekHasRealAuthAccount()) return [];
@@ -110,7 +114,7 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
     if (feedChildHydrationSnapshot != null) return false;
     if (peekSilentInitialFilLoadArmed()) return false;
     // SQLite déjà rempli → pas de spinner plein écran en attendant le 1er load async.
-    if (getAllLocalMemories().length > 0) return false;
+    if (listMemoriesVisibleForAccount(peekLastRealAuthUserId()).length > 0) return false;
     if (listLocalChildren().length > 0) return false;
     return true;
   });
@@ -141,18 +145,29 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
       /**
        * Local-first : peindre SQLite **avant** tout réseau.
        * Sinon le 1er ouverture du fil après reconnexion attend le pull cloud → roue longue.
+       * Un autre compte encore en mémoire ne doit pas rester affiché.
        */
+      if (childRef.current && isForeignToCurrentAccount(childRef.current.user_id)) {
+        setChild(null);
+        childRef.current = null;
+      }
+
       setFamilyChildren(readFamilyChildrenFromLocal());
-      const localMemoriesNow = getAllLocalMemories();
+      const accountUid = peekLastRealAuthUserId();
+      const localMemoriesNow = listMemoriesVisibleForAccount(accountUid);
       if (localMemoriesNow.length > 0) {
         setMemories(prev =>
-          mergeMemoriesListPreservingVisualRowRefs(prev, localMemoriesNow as Memory[]),
+          mergeMemoriesListPreservingVisualRowRefs(
+            prev.filter(m => entityVisibleForAccount(m.user_id, accountUid)),
+            localMemoriesNow as Memory[],
+          ),
         );
         if (!silent) {
           setIsLoading(false);
         }
-      } else if (!silent) {
-        setIsLoading(true);
+      } else {
+        setMemories([]);
+        if (!silent) setIsLoading(true);
       }
 
       const selectedChildId = await getOrSelectFirstChild();
@@ -253,7 +268,15 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
         listBooks(),
       ]);
       if (seq !== loadDataSeqRef.current) return;
-      setMemories(prev => mergeMemoriesListPreservingVisualRowRefs(prev, memoriesData));
+      const scopedIncoming = (memoriesData as Memory[]).filter(m =>
+        entityVisibleForAccount(m.user_id, peekLastRealAuthUserId()),
+      );
+      setMemories(prev =>
+        mergeMemoriesListPreservingVisualRowRefs(
+          prev.filter(m => entityVisibleForAccount(m.user_id, peekLastRealAuthUserId())),
+          scopedIncoming,
+        ),
+      );
       setBooks(loadedBooks);
       void primeFeedVideoPosterStableCache(memoriesData);
       if (!silent) {
@@ -269,7 +292,7 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
             /* hors ligne */
           }
           if (seq !== loadDataSeqRef.current) return;
-          const fresh = getAllLocalMemories() as Memory[];
+          const fresh = listMemoriesVisibleForAccount(peekLastRealAuthUserId()) as Memory[];
           setMemories(prev => mergeMemoriesListPreservingVisualRowRefs(prev, fresh));
           void primeFeedVideoPosterStableCache(fresh);
           InteractionManager.runAfterInteractions(() => {
@@ -523,7 +546,7 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
         setIsLoading(false);
       } else if (memoriesRef.current.length > 0) {
         // Réaligner l’ordre sur created_at (guérit un fil faussé par d’anciens prepends).
-        const local = getAllLocalMemories() as Memory[];
+        const local = listMemoriesVisibleForAccount(peekLastRealAuthUserId()) as Memory[];
         if (local.length > 0) {
           setMemories(prev => mergeMemoriesListPreservingVisualRowRefs(prev, local));
         }
@@ -605,11 +628,28 @@ export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult 
     setIsRefreshing(false);
   }, [loadData]);
 
+  const visibleAccountUid = peekLastRealAuthUserId();
+  const keepUntilUidKnown = peekHasRealAuthAccount() && !visibleAccountUid;
+  const visibleMemories = !peekHasRealAuthAccount()
+    ? []
+    : keepUntilUidKnown
+      ? memories
+      : memories.filter(m => entityVisibleForAccount(m.user_id, visibleAccountUid));
+  const visibleChild =
+    peekHasRealAuthAccount() && child && !isForeignToCurrentAccount(child.user_id)
+      ? child
+      : null;
+  const visibleFamily = !peekHasRealAuthAccount()
+    ? []
+    : keepUntilUidKnown
+      ? familyChildren
+      : familyChildren.filter(c => entityVisibleForAccount(c.user_id, visibleAccountUid));
+
   return {
-    memories,
+    memories: visibleMemories,
     setMemories,
-    child,
-    familyChildren,
+    child: visibleChild,
+    familyChildren: visibleFamily,
     books,
     isLoading,
     isRefreshing,

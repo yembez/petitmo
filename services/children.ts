@@ -686,10 +686,35 @@ export async function getChildren() {
       return sortChildrenByBirthdateAsc(repairedOffline);
     }
 
-    const { data, error } = await supabase
+    /**
+     * Fetch Supabase **sans** AbortSignal = hang possible (Wi‑Fi zombie).
+     * Filet 8 s → repli SQLite (éventuellement vide) ; jamais spinner auth/index infini.
+     */
+    const remoteQuery = supabase
       .from('children')
       .select('*')
       .order('created_at', { ascending: false });
+    const timedRemote = await Promise.race([
+      Promise.resolve(remoteQuery).then(r => r),
+      new Promise<null>(resolve => setTimeout(() => resolve(null), 8_000)),
+    ]);
+    if (!timedRemote) {
+      console.warn('[children] getChildren remote timeout — repli local');
+      try {
+        const { captureAuthGateTimeout } = await import('@/lib/sentry');
+        captureAuthGateTimeout({
+          gate: 'getChildren.remote',
+          detail: `local=${localChildren.length}`,
+        });
+      } catch {
+        /* */
+      }
+      const repairedTimeout = repairSiblingDuplicateChildPhotoUrls(localChildren);
+      scheduleChildFaceBoundsBackfill(repairedTimeout);
+      return sortChildrenByBirthdateAsc(repairedTimeout);
+    }
+
+    const { data, error } = timedRemote;
 
     if (error) throw error;
 

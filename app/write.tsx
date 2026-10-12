@@ -31,6 +31,7 @@ import { getCachedUserMode } from '@/lib/userMode';
 import { checkMemoryLimit, invalidateMemoryLimitCache } from '@/lib/limits';
 import { promptFreeTierLimitThenPaywall, freeTierLimitKindFromCheck } from '@/utils/freeTierLimitGate';
 import { getOrSelectFirstChild } from '@/services/children';
+import { signedInAccountHasSeveralChildren } from '@/utils/accountChildCount';
 import { armFeedSnapToLatestOnFocus } from '@/services/feedScrollRestore';
 import { selectAppTab } from '@/services/selectAppTab';
 import {
@@ -450,7 +451,11 @@ export default function WriteScreen() {
         <TextInput
           style={styles.input}
           multiline
-          placeholder="Écris-lui ce que tu aimerais lui dire aujourd'hui…"
+          placeholder={
+            signedInAccountHasSeveralChildren()
+              ? t('write.placeholderMany')
+              : t('write.placeholderOne')
+          }
           placeholderTextColor="#0F0F0F"
           value={content}
           onChangeText={t =>
