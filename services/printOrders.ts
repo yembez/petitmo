@@ -63,23 +63,23 @@ function mergePrintOrders(
   cached: PrintOrderSummary[],
   server: PrintOrderSummary[],
 ): PrintOrderSummary[] {
-  const byId = new Map<string, PrintOrderSummary>();
-  for (const o of cached) byId.set(o.id, o);
-  for (const o of server) {
-    const prev = byId.get(o.id);
-    byId.set(o.id, {
-      ...prev,
-      ...o,
-      bookId: o.bookId || prev?.bookId || '',
-      childId: o.childId || prev?.childId || '',
-      bookTitle: o.bookTitle.trim() || prev?.bookTitle || '',
+  const cachedById = new Map(cached.map(o => [o.id, o]));
+  return server
+    .map(o => {
+      const prev = cachedById.get(o.id);
+      return {
+        ...prev,
+        ...o,
+        bookId: o.bookId || prev?.bookId || '',
+        childId: o.childId || prev?.childId || '',
+        bookTitle: o.bookTitle.trim() || prev?.bookTitle || '',
+      };
+    })
+    .sort((a, b) => {
+      const ta = Date.parse(a.createdAt) || 0;
+      const tb = Date.parse(b.createdAt) || 0;
+      return tb - ta;
     });
-  }
-  return [...byId.values()].sort((a, b) => {
-    const ta = Date.parse(a.createdAt) || 0;
-    const tb = Date.parse(b.createdAt) || 0;
-    return tb - ta;
-  });
 }
 
 let fetchInFlight: Promise<PrintOrderSummary[]> | null = null;
@@ -117,9 +117,7 @@ async function fetchPrintOrdersForAccountOnce(): Promise<PrintOrderSummary[]> {
   const json = (await res.json().catch(() => ({}))) as { orders?: unknown };
   const server = parsePrintOrderList(json.orders);
   const cached = await getCachedPrintOrders();
-  const merged = hydratePrintOrderTitles(
-    server.length === 0 && cached.length > 0 ? cached : mergePrintOrders(cached, server),
-  );
+  const merged = hydratePrintOrderTitles(mergePrintOrders(cached, server));
   await setCachedPrintOrders(merged);
   DeviceEventEmitter.emit(PETITMO_PRINT_ORDERS_UPDATED_EVENT);
   return merged;
