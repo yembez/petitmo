@@ -349,15 +349,17 @@ export default function ParentApplicationScreen() {
             ) : null}
           </>
         ) : null}
-        <MenuRow
-          bordered
-          icon={menuIcon(Share2)}
-          label={t('parent.application.copyPushToken')}
-          detail={t('parent.application.pushTokenHint')}
-          labelFontFamily={dm500}
-          onPress={handleSharePushToken}
-          accessibilityLabel={t('parent.application.copyPushToken')}
-        />
+        {__DEV__ ? (
+          <MenuRow
+            bordered
+            icon={menuIcon(Share2)}
+            label={t('parent.application.copyPushToken')}
+            detail={t('parent.application.pushTokenHint')}
+            labelFontFamily={dm500}
+            onPress={handleSharePushToken}
+            accessibilityLabel={t('parent.application.copyPushToken')}
+          />
+        ) : null}
         {hasRealAccount ? (
           <MenuRow
             bordered
