@@ -6,6 +6,11 @@ import { pullFamilyMemoriesFromRemoteToLocal } from '@/services/memoriesLocalSyn
 /** Prod : 50. Valeur de test éventuelle à documenter ici si on baisse temporairement. */
 export const FREE_TIER_LIMIT = 50
 /**
+ * Garde-fou Petitmo+ (coût Storage / abus) — assez haut pour un usage parental normal.
+ * Copy paywall : « Jusqu’à 5000 souvenirs » (pas « illimité »).
+ */
+export const PAID_TIER_LIMIT = 5000
+/**
  * @deprecated V2 : plus de plafond **nombre** de vidéos en gratuit (borné par les 50 souvenirs).
  * Conservé pour imports / paywall historique — ne plus gate UX dessus.
  * La **durée** reste plafonnée (`FREE_TIER_VIDEO_MAX_DURATION`).
@@ -71,8 +76,20 @@ export type LimitCheck = {
   current: number
   limit: number
   isAtLimit: boolean
-  /** Legacy — plus utilisé pour bloquer (ex-paid = gratuit 50). Conservé pour typage. */
-  reason?: 'capture_locked' | null
+  /**
+   * `capture_locked` : legacy (ne plus poser).
+   * `paid_cap` : plafond Petitmo+ (`PAID_TIER_LIMIT`) — pas de paywall « 50 ».
+   */
+  reason?: 'capture_locked' | 'paid_cap' | null
+}
+
+/** Code d’erreur métier aligné sur les catch Capturer / import / media. */
+export function memoryLimitErrorCode(
+  check: Pick<LimitCheck, 'reason'>,
+): 'CAPTURE_LOCKED' | 'PAID_LIMIT_REACHED' | 'LIMIT_REACHED' {
+  if (check.reason === 'capture_locked') return 'CAPTURE_LOCKED'
+  if (check.reason === 'paid_cap') return 'PAID_LIMIT_REACHED'
+  return 'LIMIT_REACHED'
 }
 
 const FAMILY_LIMIT_CACHE_KEY = '__family__'
@@ -111,18 +128,6 @@ export async function checkMemoryLimit(
 
   const tier = await getUserTier()
 
-  if (tier === 'paid') {
-    const paid: LimitCheck = {
-      canCreate: true,
-      current: 0,
-      limit: Infinity,
-      isAtLimit: false,
-      reason: null,
-    }
-    memoryLimitCache = { childId: FAMILY_LIMIT_CACHE_KEY, at: now, result: paid }
-    return paid
-  }
-
   if (!opts?.skipRemotePull) {
     try {
       if ((await getCachedUserMode()) === 'cloud') {
@@ -134,13 +139,15 @@ export async function checkMemoryLimit(
   }
 
   const current = getAllLocalMemories().length
+  const limit = tier === 'paid' ? PAID_TIER_LIMIT : FREE_TIER_LIMIT
+  const isAtLimit = current >= limit
 
   const result: LimitCheck = {
-    canCreate: current < FREE_TIER_LIMIT,
+    canCreate: !isAtLimit,
     current,
-    limit: FREE_TIER_LIMIT,
-    isAtLimit: current >= FREE_TIER_LIMIT,
-    reason: null,
+    limit,
+    isAtLimit,
+    reason: tier === 'paid' && isAtLimit ? 'paid_cap' : null,
   }
   memoryLimitCache = { childId: FAMILY_LIMIT_CACHE_KEY, at: now, result }
   return result

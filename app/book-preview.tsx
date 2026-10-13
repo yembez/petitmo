@@ -2530,7 +2530,7 @@ export default function BookPreviewScreen() {
         if (e instanceof Error && e.message === 'LIMIT_REACHED') {
           Alert.alert(
             'Limite atteinte',
-            'Tu as atteint le nombre maximum de souvenirs gratuits. Passe à Petit Cœur+ pour continuer.',
+            'Tu as atteint le nombre maximum de souvenirs gratuits. Passe à l’abonnement Petit Cœur pour continuer.',
           );
           return;
         }

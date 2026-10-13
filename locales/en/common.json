@@ -91,7 +91,7 @@
     "switchToLoginAction": "Sign in",
     "switchToSignupPrefix": "No account yet? ",
     "switchToSignupAction": "Create one",
-    "discoverPlus": "Discover Petit Cœur+",
+    "discoverPlus": "Discover Petit Cœur subscription",
     "benefitMemoriesTitle": "Up to {{count}} memories",
     "benefitMemoriesBody": "Text, photos, audio and video.",
     "benefitSavedTitle": "Your memories saved",
@@ -109,8 +109,8 @@
       "loginTitle": "Good to see you again…",
       "loginSubtitle": "Keep writing \"your\" story.",
       "signupCta": "Create my account",
-      "badge": "Petit Cœur+",
-      "benefitUnlimitedTitle": "Unlimited number of memories.",
+      "badge": "Subscription",
+      "benefitUnlimitedTitle": "Up to {{count}} memories.",
       "benefitUnlimitedBody": "Text, photos, videos up to 3 min, audio up to 5 min.",
       "benefitCloudTitle": "Secure cloud",
       "benefitCloudBody": "Even after switching phones.",
@@ -264,9 +264,11 @@
       "voicesBody": "You’ve used all {{count}} free-plan audio memories. Subscribe to Petit Cœur to add more.",
       "captureLockedTitle": "Adding memories is paused",
       "captureLockedBody": "Your subscription has ended: you can still view and share all your memories. Reactivate Petit Cœur to capture new ones.",
+      "paidCapTitle": "Memory limit reached",
+      "paidCapBody": "You’ve reached the Petit Cœur subscription limit of {{count}} memories. Delete some to add more, or contact support if you need a higher limit.",
       "slotsLeftTitle": "Free limit reached",
-      "slotsLeftBody_one": "You have {{count}} slot left for this profile. Reduce the number of photos, or subscribe to Petit Cœur to add memories without limits.",
-      "slotsLeftBody_other": "You have {{count}} slots left for this profile. Reduce the number of photos, or subscribe to Petit Cœur to add memories without limits."
+      "slotsLeftBody_one": "You have {{count}} slot left for this profile. Reduce the number of photos, or subscribe to Petit Cœur for up to {{paidCount}} memories.",
+      "slotsLeftBody_other": "You have {{count}} slots left for this profile. Reduce the number of photos, or subscribe to Petit Cœur for up to {{paidCount}} memories."
     }
   },
   "import": {
@@ -507,8 +509,8 @@
     "exporting": "Shortening video…"
   },
   "paywall": {
-    "premiumLabel": "Premium",
-    "brandA11y": "Petit Cœur Premium",
+    "premiumLabel": "Subscription",
+    "brandA11y": "Petit Cœur subscription",
     "purchaseFailed": "Couldn't complete the purchase.",
     "restore": "Restore purchases",
     "restoreSuccessTitle": "Subscription restored",

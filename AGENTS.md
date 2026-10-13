@@ -104,7 +104,7 @@ Petitmo a **deux plans** sur une **même identité** (compte obligatoire) :
 ### 2. PLAN PETITMO+ — abonnement payant
 
 - Même compte ; `subscriptionTier=paid` côté serveur.
-- Débloque notamment : quotas étendus / sans les plafonds gratuits, **HD photo cloud**, avantages print (**−10 %**), et le reste des features payantes définies au paywall.
+- Débloque notamment : quotas étendus (**jusqu’à 5000** souvenirs — `PAID_TIER_LIMIT`, pas « illimité »), **HD photo cloud**, avantages print (**−10 %**), et le reste des features payantes définies au paywall.
 - Local-first **conservé** : sync / pull / materialisation comme aujourd’hui pour le cloud.
 
 ---

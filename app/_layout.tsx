@@ -51,12 +51,10 @@ import { enrichSentryUserContext, initPetitmoSentry, Sentry } from '@/lib/sentry
 
 initPetitmoSentry();
 
-/** OTA le plus tôt possible (avant auth / materialize) — pas de build natif. */
-if (!__DEV__) {
-  void import('@/services/applyOtaUpdate')
-    .then(m => m.applyAvailableOtaUpdate({ waitForNativeDownloadMs: 25_000 }))
-    .catch(() => {});
-}
+/**
+ * Pas d’OTA auto au lancement : Apple Review doit tester le JS embarqué du build soumis.
+ * Mise à jour manuelle uniquement : Espace parent → Application → Rechercher une mise à jour.
+ */
 
 void SplashScreen.preventAutoHideAsync();
 
@@ -199,15 +197,6 @@ function RootLayoutNav() {
         console.warn('[boot] revenueCat', e);
       }
     })();
-  }, [isAuthReady]);
-
-  /** Relance OTA après auth si le fetch au boot n’a pas suffi. */
-  useEffect(() => {
-    if (!isAuthReady) return;
-    const t = setTimeout(() => {
-      void import('@/services/applyOtaUpdate').then(m => m.applyAvailableOtaUpdate());
-    }, 800);
-    return () => clearTimeout(t);
   }, [isAuthReady]);
 
   /** Token push : fond uniquement, après session (permission déjà accordée ou non). */

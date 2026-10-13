@@ -337,7 +337,7 @@ export async function purchasePetitmoPlusPlan(
       return {
         ok: false,
         cancelled: false,
-        message: 'Aucune offre Petitmo+ disponible. Vérifie RevenueCat / App Store Connect.',
+        message: 'Aucune offre d’abonnement Petit Cœur disponible. Vérifie RevenueCat / App Store Connect.',
         diagnostic: await diagnosePetitmoPlusStore(),
       };
     }
@@ -359,7 +359,7 @@ export async function purchasePetitmoPlusPlan(
       return {
         ok: false,
         cancelled: false,
-        message: 'Achat terminé mais l’accès Petitmo+ n’est pas encore actif. Réessaie ou restaure les achats.',
+        message: 'Achat terminé mais l’abonnement Petit Cœur n’est pas encore actif. Réessaie ou restaure les achats.',
       };
     }
     await applyUserTierFromCustomerInfo(customerInfo);
@@ -401,7 +401,7 @@ export async function restorePetitmoPlusPurchases(): Promise<PurchasePetitmoPlus
       return {
         ok: false,
         cancelled: false,
-        message: 'Aucun abonnement Petitmo+ à restaurer sur ce compte Apple / Google.',
+        message: 'Aucun abonnement Petit Cœur à restaurer sur ce compte Apple / Google.',
       };
     }
     return { ok: true, customerInfo };

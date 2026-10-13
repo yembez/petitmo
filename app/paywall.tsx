@@ -37,7 +37,7 @@ import { getChildren } from '@/services/children'
 import { listLocalChildrenForUser } from '@/lib/localDb'
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset'
 import { grantDigitalExportPurchase } from '@/lib/digitalExportPurchase'
-import { FREE_TIER_LIMIT, PAID_TIER_VIDEO_MAX_DURATION } from '@/lib/limits'
+import { FREE_TIER_LIMIT, PAID_TIER_LIMIT, PAID_TIER_VIDEO_MAX_DURATION } from '@/lib/limits'
 import { recordAction, recordCaughtError, recordWarn } from '@/lib/diagnosticTrail'
 import { THEME } from '@/constants/theme'
 import { hp, scale, screenHeight, screenWidth, verticalScale } from '@/utils/responsive'
@@ -114,14 +114,14 @@ const PAYWALL_MESSAGES: Record<
   }
 > = {
   GENERAL: {
-    eyebrow: 'Petitmo+',
-    title: () => 'Premium',
+    eyebrow: 'Abonnement Petit Cœur',
+    title: () => 'Les abonnements pour préserver chaque moment',
     subtitle: '',
   },
   LIMIT_REACHED: {
     eyebrow: 'Petit Cœur',
     title: n => `Tu as atteint tes ${FREE_TIER_LIMIT} souvenirs de ${n}.`,
-    subtitle: 'Continue à capturer chaque moment sans limite.',
+    subtitle: 'Continue à capturer chaque moment avec l’abonnement Petit Cœur.',
   },
   VIDEO_LIMIT_REACHED: {
     eyebrow: 'Petit Cœur',
@@ -135,7 +135,7 @@ const PAYWALL_MESSAGES: Record<
     subtitle: 'Tes souvenirs sont toujours là. Réactive ton abonnement pour en capturer de nouveaux.',
   },
   EXPORT_PAYWALL: {
-    eyebrow: 'Petitmo+',
+    eyebrow: 'Abonnement Petit Cœur',
     title: n => `Exporte tous les souvenirs de ${n}.`,
     subtitle: 'Archive complète en ZIP, accessible à tout moment.',
   },
@@ -146,22 +146,22 @@ const PAYWALL_MESSAGES: Record<
       'Paiement unique 4,99 € : génération haute qualité sur nos serveurs (mise en page stable, QR médias). Abonnement non requis.',
   },
   BOOK_ORDER: {
-    eyebrow: 'Petitmo+',
+    eyebrow: 'Abonnement Petit Cœur',
     title: n => `Le livre de ${n} est prêt.`,
     subtitle: 'Abonne-toi : −10 % sur l’impression et QR audio/vidéo illimités.',
   },
   DAY_30: {
-    eyebrow: 'Petitmo+',
+    eyebrow: 'Abonnement Petit Cœur',
     title: n => `Les souvenirs de ${n} méritent d'être protégés.`,
-    subtitle: 'Sauvegarde illimitée dans le cloud, même si tu perds ton téléphone.',
+    subtitle: 'Sauvegarde cloud sécurisée, même si tu perds ton téléphone.',
   },
   DAY_60: {
-    eyebrow: 'Petitmo+',
+    eyebrow: 'Abonnement Petit Cœur',
     title: n => `${n} grandit vite — ne perds aucun moment.`,
-    subtitle: 'Souvenirs illimités, cloud sécurisé, livres −10 % et QR illimités.',
+    subtitle: `Jusqu’à ${PAID_TIER_LIMIT.toLocaleString('fr-FR')} souvenirs, cloud sécurisé, livres −10 % et QR illimités.`,
   },
   DAY_90: {
-    eyebrow: 'Petitmo+',
+    eyebrow: 'Abonnement Petit Cœur',
     title: n => `Bientôt 3 mois de souvenirs de ${n}.`,
     subtitle: "Ils méritent d'être en sécurité pour toujours.",
   },
@@ -538,7 +538,7 @@ export default function PaywallScreen() {
               <Text style={styles.headlineHeart}>♥</Text>
             </Text>
             <Text style={[styles.subline, dm500 && { fontFamily: dm500 }]}>
-              Continue à préserver chaque moment, {'\n'}sans limite.
+              Continue à préserver chaque moment{'\n'}avec l’abonnement Petit Cœur.
             </Text>
           </>
         ) : null}
@@ -641,8 +641,8 @@ export default function PaywallScreen() {
 
         <View style={styles.benefitsCard}>
           <BenefitRow
-            icon={<Text style={styles.benefitInfinityGlyph}>∞</Text>}
-            title="Nombre de souvenirs illimités."
+            icon={<Text style={styles.benefitInfinityGlyph}>5k</Text>}
+            title={`Jusqu'à ${PAID_TIER_LIMIT.toLocaleString('fr-FR')} souvenirs.`}
             desc="Textes, photos, vidéos jusqu'à 3mn, audios jusqu'à 5mn."
             dm600={dm600}
             dm500={dm500}
@@ -690,7 +690,7 @@ export default function PaywallScreen() {
           </View>
         </PetitmoPrimaryMorphButton>
 
-        {/** Apple 3.1.2 — liens visibles près du CTA (sans scroll). */}
+        {/** Apple 3.1.2 — liens + restore visibles près du CTA (sans scroll). */}
         <View style={styles.legalRow}>
           <Pressable
             onPress={() => void Linking.openURL(LEGAL_TERMS_URL)}
@@ -715,10 +715,6 @@ export default function PaywallScreen() {
           </Pressable>
         </View>
 
-        <Text style={[styles.finePrint, dm500 && { fontFamily: dm500 }]}>
-          Renouvellement automatique. Résiliable à tout moment{'\n'}dans les réglages de l&apos;App Store.
-        </Text>
-
         <Pressable
           onPress={() => void handleRestorePurchases()}
           disabled={isLoading}
@@ -730,6 +726,10 @@ export default function PaywallScreen() {
             {t('paywall.restore')}
           </Text>
         </Pressable>
+
+        <Text style={[styles.finePrint, dm500 && { fontFamily: dm500 }]}>
+          Renouvellement automatique. Résiliable à tout moment{'\n'}dans les réglages de l&apos;App Store.
+        </Text>
 
         <Pressable
           onPress={dismissPaywall}

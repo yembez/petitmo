@@ -74,6 +74,7 @@ export function readFreeDiskBytes(): number | null {
 export type VoiceCapturePreflightFailReason =
   | 'no_child'
   | 'limit'
+  | 'paid_cap'
   | 'capture_locked'
   | 'storage'
   | 'write'
@@ -105,7 +106,12 @@ export async function preflightVoiceCapture(opts?: {
     if (!memLimit.canCreate) {
       return {
         ok: false,
-        reason: memLimit.reason === 'capture_locked' ? 'capture_locked' : 'limit',
+        reason:
+          memLimit.reason === 'capture_locked'
+            ? 'capture_locked'
+            : memLimit.reason === 'paid_cap'
+              ? 'paid_cap'
+              : 'limit',
         detail: memLimit.reason ?? undefined,
       };
     }

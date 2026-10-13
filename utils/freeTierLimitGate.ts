@@ -3,6 +3,7 @@ import type { Router } from 'expo-router';
 import i18n from '@/lib/i18n';
 import {
   FREE_TIER_LIMIT,
+  PAID_TIER_LIMIT,
   type LimitCheck,
 } from '@/lib/limits';
 
@@ -13,16 +14,24 @@ export type FreeTierPaywallContext =
   | 'EX_SUBSCRIBER'
   | 'GENERAL';
 
-export type FreeTierLimitKind = 'memories' | 'videos' | 'capture_locked';
+export type FreeTierLimitKind = 'memories' | 'videos' | 'capture_locked' | 'paid_cap';
 
 type LimitCopy = {
   title: string;
   body: string;
-  context: FreeTierPaywallContext;
+  context: FreeTierPaywallContext | null;
 };
 
 function copyForKind(kind: FreeTierLimitKind): LimitCopy {
   switch (kind) {
+    case 'paid_cap':
+      return {
+        title: i18n.t('parent.freeTierLimit.paidCapTitle'),
+        body: i18n.t('parent.freeTierLimit.paidCapBody', {
+          count: PAID_TIER_LIMIT,
+        }),
+        context: null,
+      };
     case 'capture_locked':
       return {
         title: i18n.t('parent.freeTierLimit.captureLockedTitle'),
@@ -53,20 +62,24 @@ function copyForKind(kind: FreeTierLimitKind): LimitCopy {
 /** Mappe un `LimitCheck` bloquant → kind d’alerte. */
 export function freeTierLimitKindFromCheck(check: LimitCheck): FreeTierLimitKind {
   if (check.reason === 'capture_locked') return 'capture_locked';
+  if (check.reason === 'paid_cap' || check.limit === PAID_TIER_LIMIT) return 'paid_cap';
   return 'memories';
 }
 
 /** Même mapping pour le garde vidéo (ex-abo ne doit pas afficher « 50 souvenirs »). */
 export function freeTierLimitKindFromVideoCheck(check: {
   reason?: LimitCheck['reason'];
+  limit?: number;
 }): FreeTierLimitKind {
   if (check.reason === 'capture_locked') return 'capture_locked';
+  if (check.reason === 'paid_cap' || check.limit === PAID_TIER_LIMIT) return 'paid_cap';
   return 'videos';
 }
 
 /**
  * Message explicite **avant** le paywall pour toute limite du plan gratuit / ex-paid.
- * Bouton secondaire = rester ; principal = ouvrir le paywall.
+ * Plafond Petitmo+ (`paid_cap`) : alerte seule, pas de CTA abonnement.
+ * Bouton secondaire = rester ; principal = ouvrir le paywall (si applicable).
  */
 export function promptFreeTierLimitThenPaywall(opts: {
   kind: FreeTierLimitKind;
@@ -77,6 +90,20 @@ export function promptFreeTierLimitThenPaywall(opts: {
   onDismiss?: () => void;
 }): void {
   const { title, body, context } = copyForKind(opts.kind);
+
+  const onLater = () => {
+    opts.onDismiss?.();
+    /** Repli fil : ne pas laisser l’écran Importer / Capturer derrière l’Alert. */
+    if (opts.returnTo === 'fil') {
+      opts.router.replace('/(tabs)/fil');
+    }
+  };
+
+  if (!context) {
+    Alert.alert(title, body, [{ text: i18n.t('ok'), style: 'cancel', onPress: onLater }]);
+    return;
+  }
+
   const goPaywall = () => {
     const params: Record<string, string> = { context };
     if (opts.returnTo?.trim()) params.returnTo = opts.returnTo.trim();
@@ -91,13 +118,7 @@ export function promptFreeTierLimitThenPaywall(opts: {
     {
       text: i18n.t('parent.freeTierLimit.later'),
       style: 'cancel',
-      onPress: () => {
-        opts.onDismiss?.();
-        /** Repli fil : ne pas laisser l’écran Importer / Capturer derrière l’Alert. */
-        if (opts.returnTo === 'fil') {
-          opts.router.replace('/(tabs)/fil');
-        }
-      },
+      onPress: onLater,
     },
     {
       text: i18n.t('parent.freeTierLimit.ctaPlus'),
@@ -118,6 +139,10 @@ export function promptFreeTierLimitFromError(
   }
   if (message === 'CAPTURE_LOCKED') {
     promptFreeTierLimitThenPaywall({ ...opts, kind: 'capture_locked' });
+    return true;
+  }
+  if (message === 'PAID_LIMIT_REACHED') {
+    promptFreeTierLimitThenPaywall({ ...opts, kind: 'paid_cap' });
     return true;
   }
   if (message === 'LIMIT_REACHED') {

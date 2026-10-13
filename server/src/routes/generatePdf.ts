@@ -188,7 +188,7 @@ export function registerGeneratePdfRoute(app: Express, supabase: SupabaseClient,
 
     if (!isPrint && body.subscriptionTier === 'free' && !body.digitalExportPaid) {
       res.status(402).json({
-        error: 'Export digital : Petit Cœur+ ou achat à l’acte requis.',
+        error: 'Export digital : abonnement Petit Cœur ou achat à l’acte requis.',
         code: 'EXPORT_PAYMENT_REQUIRED',
       });
       return;
@@ -470,7 +470,7 @@ async function handleTicketPdf(
 
   if (row.subscription_tier === 'free' && !body.digitalExportPaid) {
     res.status(402).json({
-      error: 'Export digital : Petit Cœur+ ou achat à l’acte requis.',
+      error: 'Export digital : abonnement Petit Cœur ou achat à l’acte requis.',
       code: 'EXPORT_PAYMENT_REQUIRED',
     });
     return;

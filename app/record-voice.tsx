@@ -51,7 +51,13 @@ import {
   shouldShowLocationSoftPrompt,
 } from '@/lib/memoryLocation';
 import { getUserTier } from '@/lib/userTier';
-import { FREE_TIER_LIMIT, FREE_TIER_VOICE_MAX_DURATION, PAID_TIER_VOICE_MAX_DURATION, checkMemoryLimit } from '@/lib/limits';
+import {
+  FREE_TIER_LIMIT,
+  FREE_TIER_VOICE_MAX_DURATION,
+  PAID_TIER_LIMIT,
+  PAID_TIER_VOICE_MAX_DURATION,
+  checkMemoryLimit,
+} from '@/lib/limits';
 import { promptFreeTierLimitThenPaywall } from '@/utils/freeTierLimitGate';
 import { isAudioTrimAvailable, trimAudioToLocalFile } from '@/services/audioTrim';
 import { AudioTrimEditor } from '@/components/AudioTrimEditor';
@@ -222,6 +228,8 @@ export default function RecordVoiceScreen() {
           return t('recordVoice.preflightNoChild');
         case 'limit':
           return t('parent.freeTierLimit.memoriesBody', { count: FREE_TIER_LIMIT });
+        case 'paid_cap':
+          return t('parent.freeTierLimit.paidCapBody', { count: PAID_TIER_LIMIT });
         case 'capture_locked':
           return t('parent.freeTierLimit.captureLockedBody');
         default:
@@ -248,9 +256,17 @@ export default function RecordVoiceScreen() {
       pre: { ok: false; reason: VoiceCapturePreflightFailReason },
       opts: { takeKept: boolean },
     ) => {
-      if (!opts.takeKept && (pre.reason === 'limit' || pre.reason === 'capture_locked')) {
+      if (
+        !opts.takeKept &&
+        (pre.reason === 'limit' || pre.reason === 'paid_cap' || pre.reason === 'capture_locked')
+      ) {
         promptFreeTierLimitThenPaywall({
-          kind: pre.reason === 'capture_locked' ? 'capture_locked' : 'memories',
+          kind:
+            pre.reason === 'capture_locked'
+              ? 'capture_locked'
+              : pre.reason === 'paid_cap'
+                ? 'paid_cap'
+                : 'memories',
           router,
           returnTo: 'fil',
         });
@@ -280,7 +296,9 @@ export default function RecordVoiceScreen() {
           },
         });
       }
-      if (pre.reason === 'limit' || pre.reason === 'capture_locked') {
+      if (pre.reason === 'paid_cap') {
+        buttons.push({ text: t('ok'), style: 'cancel' });
+      } else if (pre.reason === 'limit' || pre.reason === 'capture_locked') {
         buttons.push({ text: t('parent.freeTierLimit.later'), style: 'cancel' });
         buttons.push({
           text: t('parent.freeTierLimit.ctaPlus'),
@@ -1005,7 +1023,13 @@ export default function RecordVoiceScreen() {
         Alert.alert(t('error'), t('recordVoice.saveFailedKeep'));
       }
     } catch (error) {
-      if (error instanceof Error && (error.message === 'LIMIT_REACHED' || error.message === 'CAPTURE_LOCKED' || error.message === 'VIDEO_LIMIT_REACHED')) {
+      if (
+        error instanceof Error &&
+        (error.message === 'LIMIT_REACHED' ||
+          error.message === 'PAID_LIMIT_REACHED' ||
+          error.message === 'CAPTURE_LOCKED' ||
+          error.message === 'VIDEO_LIMIT_REACHED')
+      ) {
         const reason = error.message === 'CAPTURE_LOCKED' ? 'capture_locked' : 'limit';
         setSaveBlockReason(reason);
         setCtaPhase('idle');

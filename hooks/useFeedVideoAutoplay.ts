@@ -21,10 +21,14 @@ import {
 /** Backup après fin de scroll si la viewability n’a pas re-tiré (immédiat). */
 const FEED_SCROLL_IDLE_MS = 0;
 
-/** Arrêt lecture : sous ce % de la ligne visible, la vidéo n’est plus « à l’écran ». */
-export const FEED_VIDEO_ON_SCREEN_VISIBLE_PCT = 50;
+/**
+ * Arrêt lecture : sous ce % de la **ligne** (header + média + légende), hors écran.
+ * Doit rester **plus bas** que le seuil de démarrage (hystérésis) — sinon un léger
+ * scroll coupe la lecture alors que la vignette est encore bien visible.
+ */
+export const FEED_VIDEO_ON_SCREEN_VISIBLE_PCT = 15;
 
-/** Déclenchement lecture : au moins ce % de la vignette visible. */
+/** Déclenchement lecture : au moins ce % de la ligne visible. */
 export const FEED_VIDEO_AUTOPLAY_START_VISIBLE_PCT = 50;
 
 function memoryFromFeedListItem(item: ViewToken['item']): Memory | null {
@@ -86,7 +90,8 @@ function pickBestVideoId(eligible: Map<string, number>): string | null {
 
 /**
  * Prefetch médias + sélection d’**une** vidéo « active » dans le fil (lecture auto muette).
- * Lecture / arrêt à ≥50 % de la ligne visible ; si plusieurs éligibles, la plus haute (index bas) gagne.
+ * Démarre ≥50 % visible ; continue jusqu’à <15 % (hystérésis). Si plusieurs éligibles,
+ * la plus haute (index bas) gagne.
  */
 export function useFeedVideoAutoplay(
   onPrefetchViewable: (info: { viewableItems: ViewToken[]; changed: ViewToken[] }) => void,
@@ -130,8 +135,22 @@ export function useFeedVideoAutoplay(
 
     if (!allowNewPick) return;
 
-    /** Toujours la plus haute éligible — évite qu’un bandeau du post précédent garde la lecture. */
-    setFeedAutoplayActiveMemoryId(pickBestVideoId(eligible));
+    const best = pickBestVideoId(eligible);
+
+    /**
+     * Hystérésis : si la vidéo active est encore « à l’écran » (≥15 %) mais sous le
+     * seuil de démarrage (50 %), elle n’est plus dans `eligible`. Sans garde, on
+     * remettait `null` et la lecture coupait au moindre scroll.
+     * On ne bascule que si une autre vignette est clairement éligible (ex. scroll up).
+     */
+    if (current && onScreen.has(current)) {
+      if (best && best !== current) {
+        setFeedAutoplayActiveMemoryId(best);
+      }
+      return;
+    }
+
+    setFeedAutoplayActiveMemoryId(best);
   }, []);
 
   const onOnScreenViewableChanged = useCallback(

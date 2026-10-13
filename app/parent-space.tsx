@@ -33,6 +33,7 @@ import {
   getRealAuthUser,
   peekHasRealAuthAccount,
   peekOfflineLocalResumeActive,
+  syncUserTierFromSessionUser,
 } from '@/lib/authAccount';
 import { listLocalChildren, listLocalChildrenForUser } from '@/lib/localDb';
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
@@ -78,6 +79,12 @@ export default function ParentSpaceScreen() {
     void getRealAuthUser().then((realUser) => {
       if (realUser) {
         setHasRealAccount(true);
+        /**
+         * Logout pose le cache UX à `free`. Au retour sur Espace parent, resync
+         * depuis `app_metadata` (ex. subscriptionTier=paid) — sinon CTA « S’abonner »
+         * alors que le compte est déjà paid côté serveur / RC.
+         */
+        void syncUserTierFromSessionUser(realUser).then(setTierState);
         void syncBillingIssueFromUser(realUser).then(setBillingIssue);
         void syncCaptureLockedFromUser(realUser).then(setCaptureLocked);
         return;

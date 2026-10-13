@@ -5,6 +5,10 @@
  * CANCELLATION → mail sub.cancelled uniquement (reste paid jusqu’à EXPIRATION)
  * EXPIRATION/REFUND → free + quotas gratuits (50) ; clear captureLocked ; restore archives legacy + mail
  * RENEWAL/… → paid + clear captureLocked/billingIssue + restore + mail sub.reactivated (si venait de free)
+ *
+ * Sandbox (TestFlight / StoreKit test) : **même sync tier**, **aucun** mail lifecycle
+ * (évite « abo terminé » trompeur pour review / QA).
+ * TRANSFER : ne met **pas** transferred_from en free (évite faux downgrade + mail au relogin/restore).
  */
 import { createClient } from 'npm:@supabase/supabase-js@2.58.0';
 import { restoreDowngradeArchivedMemories } from '../_shared/memoryArchive.ts';
@@ -18,6 +22,8 @@ type RcEvent = {
   expiration_at_ms?: number | null;
   transferred_from?: string[] | null;
   transferred_to?: string[] | null;
+  /** `SANDBOX` | `PRODUCTION` — toujours présent côté RC. */
+  environment?: string | null;
 };
 
 type RcPayload = {
@@ -51,6 +57,12 @@ function entitlementId(): string {
 function isOurEntitlement(ids: string[] | null | undefined): boolean {
   if (!ids || ids.length === 0) return true;
   return ids.includes(entitlementId());
+}
+
+/** Achats TestFlight / sandbox StoreKit — mails lifecycle interdits. */
+function isSandboxEvent(event: RcEvent): boolean {
+  const env = typeof event.environment === 'string' ? event.environment.trim().toUpperCase() : '';
+  return env === 'SANDBOX';
 }
 
 function resolveTier(event: RcEvent): 'paid' | 'free' | null {
@@ -125,9 +137,10 @@ Deno.serve(async (req: Request) => {
   }
 
   const type = typeof event.type === 'string' ? event.type : '';
+  const sandbox = isSandboxEvent(event);
   const supabase = createClient(url, serviceKey);
 
-  // --- BILLING_ISSUE : flag + mail, pas de downgrade ---
+  // --- BILLING_ISSUE : flag + mail (prod only), pas de downgrade ---
   if (type === 'BILLING_ISSUE' && isOurEntitlement(event.entitlement_ids)) {
     for (const userId of collectUserIds(event)) {
       const { data: existing, error: getErr } = await supabase.auth.admin.getUserById(userId);
@@ -147,6 +160,10 @@ Deno.serve(async (req: Request) => {
         console.error('[revenuecat-webhook] billingIssue meta', updErr.message);
         continue;
       }
+      if (sandbox) {
+        console.log('[revenuecat-webhook] BILLING_ISSUE sandbox — skip mail', userId.slice(0, 8));
+        continue;
+      }
       const mail = await sendLifecycleEmail({
         admin: supabase,
         userId,
@@ -155,11 +172,15 @@ Deno.serve(async (req: Request) => {
       });
       console.log('[revenuecat-webhook] BILLING_ISSUE', userId.slice(0, 8), mail);
     }
-    return jsonRes({ received: true, billingIssue: true }, 200);
+    return jsonRes({ received: true, billingIssue: true, sandbox }, 200);
   }
 
-  // --- CANCELLATION : mail info uniquement (accès paid jusqu’à EXPIRATION) ---
+  // --- CANCELLATION : mail info uniquement (prod) ; accès paid jusqu’à EXPIRATION ---
   if (type === 'CANCELLATION' && isOurEntitlement(event.entitlement_ids)) {
+    if (sandbox) {
+      console.log('[revenuecat-webhook] CANCELLATION sandbox — skip mail');
+      return jsonRes({ received: true, cancelled: true, sandbox: true, mailSkipped: true }, 200);
+    }
     const accessEndsOn = formatAccessEndsOn(event.expiration_at_ms);
     for (const userId of collectUserIds(event)) {
       const { data: existing, error: getErr } = await supabase.auth.admin.getUserById(userId);
@@ -182,14 +203,11 @@ Deno.serve(async (req: Request) => {
   const updates: { userId: string; tier: 'paid' | 'free' }[] = [];
 
   if (type === 'TRANSFER') {
-    if (Array.isArray(event.transferred_from)) {
-      for (const raw of event.transferred_from) {
-        const id = typeof raw === 'string' ? raw.trim() : '';
-        if (id && !id.startsWith('$RCAnonymousID:')) {
-          updates.push({ userId: id, tier: 'free' });
-        }
-      }
-    }
+    /**
+     * Identité RC (anonyme → UUID) / restore : on **active** paid sur `transferred_to`.
+     * On ne force **pas** free sur `transferred_from` (faux « abo terminé » + mail au relogin).
+     * Un vrai retrait d’accès arrive via EXPIRATION / REFUND.
+     */
     if (Array.isArray(event.transferred_to)) {
       for (const raw of event.transferred_to) {
         const id = typeof raw === 'string' ? raw.trim() : '';
@@ -234,12 +252,30 @@ Deno.serve(async (req: Request) => {
       console.error('[revenuecat-webhook] updateUserById', userId, updErr.message);
       return jsonRes({ error: 'Failed to update user' }, 500);
     }
-    console.log('[revenuecat-webhook]', type, userId.slice(0, 8), prevTier, '→', tier);
+    console.log(
+      '[revenuecat-webhook]',
+      type,
+      sandbox ? 'SANDBOX' : 'PRODUCTION',
+      userId.slice(0, 8),
+      prevTier,
+      '→',
+      tier,
+    );
 
     try {
       // V1 : toujours restaurer d’éventuelles archives downgrade legacy (plus d’archivage à l’expiration).
       const r = await restoreDowngradeArchivedMemories(supabase, userId);
       console.log('[revenuecat-webhook] restore', userId.slice(0, 8), r);
+
+      if (sandbox) {
+        console.log('[revenuecat-webhook] sandbox — skip lifecycle mail', type, userId.slice(0, 8));
+        continue;
+      }
+      // TRANSFER : sync meta only — pas de mail « terminé » / « réactivé ».
+      if (type === 'TRANSFER') {
+        continue;
+      }
+
       if (tier === 'free' && prevTier === 'paid') {
         const mail = await sendLifecycleEmail({
           admin: supabase,
@@ -262,5 +298,5 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  return jsonRes({ received: true, updated: updates.length }, 200);
+  return jsonRes({ received: true, updated: updates.length, sandbox }, 200);
 });

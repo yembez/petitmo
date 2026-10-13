@@ -72,11 +72,15 @@ Toute activité remet `last_active_at = now()` et annule le calendrier d’alert
 
 | Id | Déclencheur |
 |----|-------------|
-| `sub.billing_issue` | `BILLING_ISSUE` RC |
-| `sub.cancelled` | `CANCELLATION` RC |
-| `sub.downgraded` | EXPIRATION/REFUND (retour gratuit 50) |
-| `sub.reactivated` | Re-subscribe |
+| `sub.billing_issue` | `BILLING_ISSUE` RC (**PRODUCTION only**) |
+| `sub.cancelled` | `CANCELLATION` RC (**PRODUCTION only**) |
+| `sub.downgraded` | EXPIRATION/REFUND (retour gratuit 50) — **PRODUCTION only** |
+| `sub.reactivated` | Re-subscribe — **PRODUCTION only** |
 | `inactive.j90` / `j30` / `j7` / `deleted` | Cron inactivité |
+
+**Sandbox / TestFlight** (`event.environment === SANDBOX`) : le webhook met toujours à jour `subscriptionTier`, mais **n’envoie aucun** mail lifecycle (évite « abo terminé » pendant review / QA).
+
+**TRANSFER** RC (relogin / restore) : active `paid` sur `transferred_to` uniquement — **pas** de passage forcé `free` + mail sur `transferred_from`.
 
 ---
 

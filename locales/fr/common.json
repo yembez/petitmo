@@ -91,7 +91,7 @@
     "switchToLoginAction": "Se connecter",
     "switchToSignupPrefix": "Pas encore de compte ? ",
     "switchToSignupAction": "En créer un",
-    "discoverPlus": "Découvrir Petit Cœur+",
+    "discoverPlus": "Découvrir l’abonnement Petit Cœur",
     "benefitMemoriesTitle": "Jusqu'à {{count}} souvenirs",
     "benefitMemoriesBody": "Textes, photos, audios et vidéos.",
     "benefitSavedTitle": "Vos souvenirs sauvegardés",
@@ -109,8 +109,8 @@
       "loginTitle": "Ravi de te revoir…",
       "loginSubtitle": "Continue à écrire \"votre\" histoire.",
       "signupCta": "Créer mon compte",
-      "badge": "Petit Cœur+",
-      "benefitUnlimitedTitle": "Nombre de souvenirs illimités.",
+      "badge": "Abonnement",
+      "benefitUnlimitedTitle": "Jusqu'à {{count}} souvenirs.",
       "benefitUnlimitedBody": "Textes, photos, vidéos jusqu'à 3mn, audios jusqu'à 5mn.",
       "benefitCloudTitle": "Cloud sécurisé",
       "benefitCloudBody": "Même après un changement de téléphone.",
@@ -264,9 +264,11 @@
       "voicesBody": "Tu as déjà utilisé tes {{count}} souvenirs audio du plan gratuit. Pour en ajouter, abonne-toi à Petit Cœur.",
       "captureLockedTitle": "Ajout de souvenirs en pause",
       "captureLockedBody": "Ton abonnement est terminé : tu peux toujours revoir et partager tous tes souvenirs. Pour en capturer de nouveaux, réactive ton abonnement Petit Cœur.",
+      "paidCapTitle": "Limite de souvenirs atteinte",
+      "paidCapBody": "Tu as atteint la limite de {{count}} souvenirs de l’abonnement Petit Cœur. Supprime des souvenirs pour en ajouter d’autres, ou contacte le support si tu as besoin d’augmenter ce plafond.",
       "slotsLeftTitle": "Limite gratuite atteinte",
-      "slotsLeftBody_one": "Il reste {{count}} emplacement pour ce profil. Réduis le nombre de photos, ou abonne-toi à Petit Cœur pour ajouter des souvenirs sans limites.",
-      "slotsLeftBody_other": "Il reste {{count}} emplacements pour ce profil. Réduis le nombre de photos, ou abonne-toi à Petit Cœur pour ajouter des souvenirs sans limites."
+      "slotsLeftBody_one": "Il reste {{count}} emplacement pour ce profil. Réduis le nombre de photos, ou abonne-toi à Petit Cœur pour aller jusqu’à {{paidCount}} souvenirs.",
+      "slotsLeftBody_other": "Il reste {{count}} emplacements pour ce profil. Réduis le nombre de photos, ou abonne-toi à Petit Cœur pour aller jusqu’à {{paidCount}} souvenirs."
     }
   },
   "import": {
@@ -507,8 +509,8 @@
     "exporting": "Raccourcissement de la vidéo…"
   },
   "paywall": {
-    "premiumLabel": "Premium",
-    "brandA11y": "Petit Cœur Premium",
+    "premiumLabel": "Abonnement",
+    "brandA11y": "Abonnement Petit Cœur",
     "purchaseFailed": "Impossible de finaliser l'achat.",
     "restore": "Restaurer les achats",
     "restoreSuccessTitle": "Abonnement restauré",

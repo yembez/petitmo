@@ -27,7 +27,14 @@ import { IMPORT_PHOTO_PICKER_OPTS } from '@/constants/importPicker';
 import { IMPORT_MULTI_PHOTO_ALBUM_ENABLED } from '@/constants/featureFlags';
 import { buildImportMetadataFromPickerAsset } from '@/utils/mediaExif';
 import { getUserTier } from '@/lib/userTier';
-import { checkMemoryLimit, checkVideoLimit, FREE_TIER_VIDEO_MAX_DURATION, PAID_TIER_VIDEO_MAX_DURATION } from '@/lib/limits';
+import {
+  checkMemoryLimit,
+  checkVideoLimit,
+  FREE_TIER_VIDEO_MAX_DURATION,
+  PAID_TIER_LIMIT,
+  PAID_TIER_VIDEO_MAX_DURATION,
+  memoryLimitErrorCode,
+} from '@/lib/limits';
 import { mediaDurationToSeconds } from '@/utils/mediaDuration';
 import { promptFreeTierLimitThenPaywall, freeTierLimitKindFromCheck, freeTierLimitKindFromVideoCheck } from '@/utils/freeTierLimitGate';
 import { IMPORT_DUPLICATE_ASSET } from '@/lib/importDuplicate';
@@ -117,6 +124,7 @@ async function importSeparatePhotosWithConcurrency(
         } else if (
           e instanceof Error &&
           (e.message === 'LIMIT_REACHED' ||
+            e.message === 'PAID_LIMIT_REACHED' ||
             e.message === 'CAPTURE_LOCKED' ||
             e.message === 'VIDEO_LIMIT_REACHED')
         ) {
@@ -263,7 +271,7 @@ export default function ImportMediaScreen() {
               if (!childIdForVideo) throw new Error('NO_CHILD');
               const memLimit = await checkMemoryLimit(childIdForVideo, { force: true });
               if (!memLimit.canCreate) {
-                throw new Error(memLimit.reason === 'capture_locked' ? 'CAPTURE_LOCKED' : 'LIMIT_REACHED');
+                throw new Error(memoryLimitErrorCode(memLimit));
               }
               const videoLimitCheck = await checkVideoLimit(childIdForVideo);
               if (!videoLimitCheck.canCreate) {
@@ -336,7 +344,10 @@ export default function ImportMediaScreen() {
           }
           Alert.alert(
             t('parent.freeTierLimit.slotsLeftTitle'),
-            t('parent.freeTierLimit.slotsLeftBody', { count: left }),
+            t('parent.freeTierLimit.slotsLeftBody', {
+              count: left,
+              paidCount: PAID_TIER_LIMIT,
+            }),
             [
               { text: t('parent.freeTierLimit.later'), style: 'cancel' },
               {

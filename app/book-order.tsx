@@ -2106,7 +2106,7 @@ export default function BookOrderScreen() {
                   </Text>
                 ) : (
                   <Text style={styles.priceDetailLine}>
-                    QR audio/vidéo : {printQuote.qrCount} · inclus Petit Cœur+
+                    QR audio/vidéo : {printQuote.qrCount} · inclus abonnement
                   </Text>
                 )}
                 {tier === 'paid' ? (
