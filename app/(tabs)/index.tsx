@@ -28,6 +28,7 @@ import MicIcon from '@/components/MicIcon';
 import PenIcon from '@/components/PenIcon';
 import CaptureDiscCtaGradient from '@/components/CaptureDiscCtaGradient';
 import CaptureDiscCtaOutline from '@/components/CaptureDiscCtaOutline';
+import CaptureDiscCtaGlass from '@/components/CaptureDiscCtaGlass';
 import CaptureCtaBrandGradientIcon from '@/components/CaptureCtaBrandGradientIcon';
 import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
 import { Inter_300Light_Italic } from '@expo-google-fonts/inter';
@@ -39,8 +40,10 @@ import SettingsHeaderButton from '@/components/SettingsHeaderButton';
 import { loadedFontStyle } from '@/utils/loadedFontStyle';
 import { useAppLanguage } from '@/hooks/useAppLanguage';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
-import { formatAppDate } from '@/utils/appLocale';
-import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
+import {
+  tabBarFloatingBottomInset,
+  tabBarFloatingOverlapPad,
+} from '@/constants/tabBarLayout';
 import { scale, verticalScale } from '@/utils/responsive';
 import {
   CAPTURE_SCREEN_BG,
@@ -51,6 +54,7 @@ import {
   CAPTURE_TITLE_HEART,
 } from '@/constants/captureScreenPalette';
 import {
+  CAPTURE_UI_TRIAL,
   CAPTURE_CTA_VARIANT,
   CAPTURE_CTA_ICON_SIZE,
   CAPTURE_CTA_ICON_SIZE_COMPACT,
@@ -99,13 +103,13 @@ import {
   type CaptureHeroPillBackdropMode,
 } from '@/hooks/useCaptureHeroPillBackdrop';
 import { childDisplayGivenName, childDisplayInitial } from '@/utils/childDisplayName';
-import { formatCaptureChildAge } from '@/utils/date';
+import { formatCaptureChildAge, formatCaptureHeaderDate } from '@/utils/date';
 import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 import { CaptureFamilyMosaic } from '@/components/CaptureFamilyMosaic';
 import {
   CAPTURE_HERO_IMAGE_CONTENT_POSITION,
   CAPTURE_HERO_IMAGE_OBJECT_POSITION,
-  CHILD_PROFILE_PHOTO_ASPECT,
+  CHILD_PROFILE_PHOTO_ASPECT_CLASSIC,
   CHILD_PROFILE_PHOTO_ASPECT_COMPACT,
 } from '@/utils/captureHeroMetrics';
 
@@ -138,7 +142,13 @@ const CAPTURE_HERO_PARALLAX_Y = 2;
 const CAPTURE_HERO_BREATHE_OVERSCAN = 0.06;
 
 const CAPTURE_PHOTO_CARD_RADIUS = scale(32);
-const CAPTURE_PHOTO_CARD_ASPECT = CHILD_PROFILE_PHOTO_ASPECT;
+/**
+ * Ratio carte **classic / mosaïque multi** — toujours le gabarit classic (0.93).
+ * Ne pas lier à `CHILD_PROFILE_PHOTO_ASPECT` (V9=0.58 pour crop solo) :
+ * sinon le multi hérite de la hauteur V9 et titre+CTA passent sous la tab bar.
+ * Solo V9 utilise `v9PhotoCardHeight`, pas ce ratio.
+ */
+const CAPTURE_PHOTO_CARD_ASPECT = CHILD_PROFILE_PHOTO_ASPECT_CLASSIC;
 const CAPTURE_PHOTO_CARD_ASPECT_COMPACT = CHILD_PROFILE_PHOTO_ASPECT_COMPACT;
 /** Padding horizontal du scroll ; la photo utilise `capturePhotoBleed` pour des bords symétriques. */
 const CAPTURE_CONTENT_PADDING_H = scale(20);
@@ -241,15 +251,13 @@ function CapturerScreen() {
   const { t } = useAppTranslation('common');
 
   const lang = useAppLanguage();
-  const todayLabel = formatAppDate(
-    new Date(),
-    { day: '2-digit', month: '2-digit' },
-    lang,
-  );
+  const todayLabel = formatCaptureHeaderDate(new Date(), lang);
   const [captureFontsLoaded] = useFonts({
     Manrope_400Regular,
     Manrope_700Bold,
     Inter_300Light_Italic,
+    NimbusSans_400Regular: require('@/assets/fonts/NimbusSans-Regular.otf'),
+    NimbusSans_700Bold: require('@/assets/fonts/NimbusSans-Bold.otf'),
   });
   /** Boot a déjà chargé ces faces : ne pas attendre un 2ᵉ `useFonts` (flash « ? »). */
   const captureFontsReady =
@@ -257,6 +265,12 @@ function CapturerScreen() {
     (Font.isLoaded('Manrope_400Regular') &&
       Font.isLoaded('Manrope_700Bold') &&
       Font.isLoaded('Inter_300Light_Italic'));
+  const nimbusReady =
+    captureFontsLoaded ||
+    (Font.isLoaded('NimbusSans_400Regular') && Font.isLoaded('NimbusSans_700Bold'));
+  /** Date un peu plus épaisse ; marque en Regular. */
+  const captureHeaderDateFont = nimbusReady ? 'NimbusSans_700Bold' : undefined;
+  const captureHeaderBrandFont = nimbusReady ? 'NimbusSans_400Regular' : undefined;
   /** Titre hero — police système (SF Pro sur iOS). */
   const captureTitleFont = undefined;
   const captureTitleBoldFont = undefined;
@@ -655,13 +669,24 @@ function CapturerScreen() {
   }
 
   const captureBottomReserve = tabBarFloatingOverlapPad(insets.bottom);
+  /** V9 : bas de carte calé sur le haut de la tab bar (pas le cream en dessous). */
+  const v9BottomReserve = tabBarFloatingBottomInset(insets.bottom);
   const childGivenName = childDisplayGivenName(child.name);
   const childAgeLabel = child.birthdate ? formatCaptureChildAge(child.birthdate) : '';
   const isFamilyMosaic = familyChildren.length > 1;
+  /** Essai V9 : photo dominante + CTA verre — mosaïque famille reste en layout classique. */
+  const isCaptureV9 = CAPTURE_UI_TRIAL === 'v9' && !isFamilyMosaic;
+  const captureHeaderBlockH =
+    insets.top + verticalScale(8) + CAPTURE_HEADER_ROW_H + verticalScale(12);
+  const v9PhotoCardHeight = Math.max(
+    280,
+    layoutH - captureHeaderBlockH - v9BottomReserve,
+  );
+  const ctaIconSize = compact ? CAPTURE_CTA_ICON_SIZE_COMPACT : CAPTURE_CTA_ICON_SIZE;
 
   return (
     <View style={styles.root}>
-      <StatusBar style="dark" />
+      <StatusBar style={isCaptureV9 ? 'light' : 'dark'} />
 
       <Animated.View
         style={[
@@ -677,11 +702,16 @@ function CapturerScreen() {
           style={styles.captureScroll}
           contentContainerStyle={[
             styles.captureScrollContent,
-            { paddingBottom: captureBottomReserve + verticalScale(20) },
+            {
+              paddingBottom: isCaptureV9
+                ? v9BottomReserve
+                : captureBottomReserve + verticalScale(20),
+            },
           ]}
           showsVerticalScrollIndicator={false}
-          bounces
-          alwaysBounceVertical
+          scrollEnabled={!isCaptureV9}
+          bounces={!isCaptureV9}
+          alwaysBounceVertical={!isCaptureV9}
           decelerationRate="normal"
           scrollEventThrottle={16}
           onScroll={onCaptureScroll}
@@ -697,17 +727,30 @@ function CapturerScreen() {
           <View style={{ paddingTop: insets.top + verticalScale(8) }}>
             <View style={styles.capturePageHeader}>
               <View style={styles.captureHeaderLeading} pointerEvents="none">
-                <Text
-                  style={[
-                    styles.captureHeaderDate,
-                    loadedFontStyle(captureSubtitleFont),
-                  ]}
-                  numberOfLines={1}
+                <View
+                  style={styles.captureHeaderDateRow}
                   accessibilityRole="header"
-                  accessibilityLabel={todayLabel}
+                  accessibilityLabel={`${todayLabel}, ${t('brand.name')}`}
                 >
-                  {todayLabel}
-                </Text>
+                  <Text
+                    style={[
+                      styles.captureHeaderDate,
+                      loadedFontStyle(captureHeaderDateFont),
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {todayLabel}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.captureHeaderBrand,
+                      loadedFontStyle(captureHeaderBrandFont),
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {t('brand.name')}
+                  </Text>
+                </View>
               </View>
               <View style={styles.captureHeaderTrailing}>
                 <SettingsHeaderButton size={CAPTURE_HEADER_ROW_H} />
@@ -719,13 +762,19 @@ function CapturerScreen() {
             style={[
               styles.capturePhotoBleed,
               compact && styles.capturePhotoBleedCompact,
+              isCaptureV9 && styles.capturePhotoBleedV9,
             ]}
           >
           <View
-            style={[
-              styles.capturePhotoCardOuter,
-              compact && styles.capturePhotoCardOuterCompact,
-            ]}
+            style={
+              isCaptureV9
+                ? [styles.capturePhotoCardOuterChrome, { height: v9PhotoCardHeight }]
+                : [
+                    styles.capturePhotoCardOuterChrome,
+                    styles.capturePhotoCardOuter,
+                    compact && styles.capturePhotoCardOuterCompact,
+                  ]
+            }
           >
           <View style={styles.capturePhotoCard}>
             {isFamilyMosaic ? (
@@ -779,35 +828,110 @@ function CapturerScreen() {
             {!isFamilyMosaic ? (
               <>
                 <LinearGradient
-                  colors={['rgba(0, 0, 0, 0)', 'rgba(28, 28, 30, 0.18)', 'rgba(28, 28, 30, 0.55)']}
-                  locations={[0, 0.42, 1]}
+                  colors={
+                    isCaptureV9
+                      ? ['rgba(0, 0, 0, 0)', 'rgba(0, 0, 0, 0.28)', 'rgba(0, 0, 0, 0.62)']
+                      : ['rgba(0, 0, 0, 0)', 'rgba(28, 28, 30, 0.18)', 'rgba(28, 28, 30, 0.55)']
+                  }
+                  locations={isCaptureV9 ? [0, 0.35, 1] : [0, 0.42, 1]}
                   start={{ x: 0.5, y: 0 }}
                   end={{ x: 0.5, y: 1 }}
                   pointerEvents="none"
-                  style={styles.capturePhotoBottomScrim}
+                  style={[
+                    styles.capturePhotoBottomScrim,
+                    isCaptureV9 && styles.capturePhotoBottomScrimV9,
+                  ]}
                 />
-                <View style={styles.capturePhotoTagline} pointerEvents="none">
-                  <Text
-                    style={[
-                      styles.capturePhotoTaglineText,
-                      loadedFontStyle(captureTaglineFont) ?? {
-                        fontWeight: '300',
-                        fontStyle: 'italic',
-                      },
-                    ]}
-                    numberOfLines={1}
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.85}
-                  >
-                    {CAPTURE_HERO_TAGLINE}
-                  </Text>
-                </View>
+                {!isCaptureV9 ? (
+                  <View style={styles.capturePhotoTagline} pointerEvents="none">
+                    <Text
+                      style={[
+                        styles.capturePhotoTaglineText,
+                        loadedFontStyle(captureTaglineFont) ?? {
+                          fontWeight: '300',
+                          fontStyle: 'italic',
+                        },
+                      ]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.85}
+                    >
+                      {CAPTURE_HERO_TAGLINE}
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={styles.captureV9Overlay} pointerEvents="box-none">
+                    <View style={styles.captureV9TitleRow} pointerEvents="none">
+                      <Text
+                        style={[
+                          styles.captureV9Title,
+                          loadedFontStyle(captureTitleFont) ?? { fontWeight: '500' },
+                        ]}
+                        numberOfLines={2}
+                      >
+                        Quel souvenir pour {childGivenName || "l'enfant"}{' '}
+                        <Text style={styles.captureV9TitleHeart}>❤️</Text>
+                        {'\n'}aujourd&apos;hui ?
+                      </Text>
+                    </View>
+                    <View
+                      key={`capture-cta-v9-${ctaEpoch}`}
+                      style={[styles.captureCtaRow, compact && styles.captureCtaRowCompact]}
+                    >
+                      <CaptureDiscCtaGlass
+                        label="Enregistrer"
+                        labelFontFamily={captureCtaLabelFont}
+                        accessibilityLabel="Enregistrer un audio"
+                        icon={
+                          <Mic
+                            size={ctaIconSize}
+                            color="#FFFFFF"
+                            fill="none"
+                            strokeWidth={2.4}
+                          />
+                        }
+                        onPress={() => handleCaptureCtaPress('/record-voice')}
+                        compact={compact}
+                      />
+                      <CaptureDiscCtaGlass
+                        label="Écrire"
+                        labelFontFamily={captureCtaLabelFont}
+                        icon={
+                          <PencilLine
+                            size={ctaIconSize}
+                            color="#FFFFFF"
+                            fill="none"
+                            strokeWidth={2.4}
+                          />
+                        }
+                        onPress={() => handleCaptureCtaPress('/write')}
+                        compact={compact}
+                      />
+                      <CaptureDiscCtaGlass
+                        label="Importer"
+                        labelFontFamily={captureCtaLabelFont}
+                        accessibilityLabel="Importer des photos ou vidéos"
+                        icon={
+                          <ImagePlus
+                            size={ctaIconSize}
+                            color="#FFFFFF"
+                            fill="none"
+                            strokeWidth={2.4}
+                          />
+                        }
+                        onPress={() => handleCaptureCtaPress('/import-media')}
+                        compact={compact}
+                      />
+                    </View>
+                  </View>
+                )}
               </>
             ) : null}
           </View>
           </View>
           </View>
 
+          {!isCaptureV9 ? (
           <View
             style={[
               styles.captureLowerSection,
@@ -1232,6 +1356,7 @@ function CapturerScreen() {
               </View>
             </View>
           </View>
+          ) : null}
         </ScrollView>
       </Animated.View>
     </View>
@@ -1278,12 +1403,26 @@ const styles = StyleSheet.create({
     zIndex: 1,
     minHeight: CAPTURE_HEADER_ROW_H,
   },
+  captureHeaderDateRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    flexShrink: 1,
+    gap: scale(14),
+  },
+  /** Date du jour — Nimbus Sans Bold (un peu plus épaisse). */
   captureHeaderDate: {
-    fontSize: scale(14),
-    lineHeight: scale(18),
+    fontSize: scale(15),
+    lineHeight: scale(19),
     color: THEME.textPrimary,
-    letterSpacing: -0.2,
-    textTransform: 'capitalize',
+    letterSpacing: -0.15,
+  },
+  /** Marque à droite de la date — Nimbus Sans Regular, petit. */
+  captureHeaderBrand: {
+    fontSize: scale(13),
+    lineHeight: scale(16),
+    color: THEME.textPrimary,
+    opacity: 0.55,
+    letterSpacing: -0.1,
   },
   captureHeaderTrailing: {
     flexShrink: 0,
@@ -1301,10 +1440,14 @@ const styles = StyleSheet.create({
   capturePhotoBleedCompact: {
     marginBottom: verticalScale(8),
   },
-  /** Cadre photo hero — sans contour, ombre légère. */
-  capturePhotoCardOuter: {
+  /** Essai V9 : carte jusqu’à la tab bar, bords un peu plus serrés. */
+  capturePhotoBleedV9: {
+    marginBottom: 0,
+    paddingHorizontal: scale(10),
+  },
+  /** Cadre photo hero — chrome (rayon + ombre), ratio / hauteur à part. */
+  capturePhotoCardOuterChrome: {
     width: '100%',
-    aspectRatio: CAPTURE_PHOTO_CARD_ASPECT,
     borderRadius: CAPTURE_PHOTO_CARD_RADIUS,
     ...Platform.select({
       ios: {
@@ -1318,6 +1461,9 @@ const styles = StyleSheet.create({
       },
       default: {},
     }),
+  },
+  capturePhotoCardOuter: {
+    aspectRatio: CAPTURE_PHOTO_CARD_ASPECT,
   },
   capturePhotoCardOuterCompact: {
     aspectRatio: CAPTURE_PHOTO_CARD_ASPECT_COMPACT,
@@ -1390,6 +1536,38 @@ const styles = StyleSheet.create({
     bottom: 0,
     height: '40%',
     zIndex: 3,
+  },
+  capturePhotoBottomScrimV9: {
+    height: '48%',
+  },
+  /** Essai V9 — titre + CTA verre sur la photo. */
+  captureV9Overlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 5,
+    paddingHorizontal: scale(16),
+    paddingBottom: verticalScale(18),
+    gap: verticalScale(16),
+  },
+  captureV9TitleRow: {
+    alignSelf: 'stretch',
+    paddingHorizontal: scale(4),
+  },
+  captureV9Title: {
+    fontSize: scale(22),
+    lineHeight: scale(28),
+    color: '#FFFFFF',
+    letterSpacing: -0.3,
+    /** Halo diffus (pas d’ombre dure directionnelle). */
+    textShadowColor: 'rgba(0, 0, 0, 0.28)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 12,
+    ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
+  },
+  captureV9TitleHeart: {
+    fontSize: scale(18),
   },
   capturePhotoTagline: {
     position: 'absolute',

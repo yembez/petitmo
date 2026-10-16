@@ -1,3 +1,4 @@
+import { CAPTURE_UI_TRIAL } from '@/constants/captureCtaVariant';
 import { verticalScale } from '@/utils/responsive';
 
 /**
@@ -10,12 +11,28 @@ export const CAPTURE_HERO_IMAGE_CONTENT_POSITION = { top: '32%', left: '50%' } a
 export const CAPTURE_HERO_IMAGE_OBJECT_POSITION = 'center 32%';
 
 /**
- * Ratio largeur/hauteur de la **carte photo** Capturer et du crop profil (`CropModal`).
- * Source de vérité unique — ne plus dériver le crop du ratio « 70 % écran ».
+ * Ratio largeur/hauteur carte + crop — **classic** (~carré).
+ * Conservé pour `CAPTURE_UI_TRIAL === 'classic'` (pas de régression).
  */
-export const CHILD_PROFILE_PHOTO_ASPECT = 0.93;
+export const CHILD_PROFILE_PHOTO_ASPECT_CLASSIC = 0.93;
 
-/** Variante compacte (écran bas) — affichage Capturer uniquement, pas le crop. */
+/**
+ * Ratio largeur/hauteur carte + crop — **V9** (portrait, carte jusqu’à la tab bar).
+ * Gabarit crop / create-child ; l’affichage V9 remplit encore la hauteur utile en `cover`.
+ */
+export const CHILD_PROFILE_PHOTO_ASPECT_V9 = 0.58;
+
+/**
+ * Ratio **crop / create-child** (resize profil).
+ * En essai V9 = portrait ; l’affichage carte classic/mosaïque reste sur
+ * `CHILD_PROFILE_PHOTO_ASPECT_CLASSIC` (voir Capturer `CAPTURE_PHOTO_CARD_ASPECT`).
+ */
+export const CHILD_PROFILE_PHOTO_ASPECT =
+  CAPTURE_UI_TRIAL === 'v9'
+    ? CHILD_PROFILE_PHOTO_ASPECT_V9
+    : CHILD_PROFILE_PHOTO_ASPECT_CLASSIC;
+
+/** Variante compacte (écran bas) — affichage Capturer **classic** uniquement, pas le crop. */
 export const CHILD_PROFILE_PHOTO_ASPECT_COMPACT = 0.85;
 
 /**
@@ -116,7 +133,7 @@ export function insetCropRectForChildProfilePhoto(
 }
 
 /**
- * @deprecated Préférer `insetCropRectForChildProfilePhoto` (ratio carte 0.93).
+ * @deprecated Préférer `insetCropRectForChildProfilePhoto` (ratio carte active).
  * Conservé pour appels legacy au viewport plein largeur.
  */
 export function insetCropRectForCaptureHeroViewport(

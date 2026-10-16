@@ -32,7 +32,7 @@ import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { CHILD_PROFILE_PHOTO_ASPECT } from '@/utils/captureHeroMetrics';
 
-/** Même ratio que carte Capturer / CropModal (évite 4:5 ≠ 0.93). */
+/** Même ratio que carte Capturer / CropModal (`CHILD_PROFILE_PHOTO_ASPECT`). */
 const CREATE_CHILD_PHOTO_ASPECT: [number, number] = [
   Math.round(CHILD_PROFILE_PHOTO_ASPECT * 100),
   100,

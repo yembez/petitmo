@@ -16,6 +16,7 @@ import Purchases, {
   type CustomerInfo,
   type PurchasesPackage,
 } from 'react-native-purchases';
+import { getAppLanguage } from '@/lib/i18n';
 import { setUserTier, type UserTier } from '@/lib/userTier';
 import { DEFAULT_APP_LANGUAGE } from '@/lib/i18nTypes';
 import { formatAppCurrency } from '@/utils/appLocale';
@@ -222,6 +223,19 @@ export async function fetchPetitmoPlusPlanPrices(): Promise<PetitmoPlusPlanPrice
       monthlyPkg.product.currencyCode?.trim() ||
       yearlyPkg.product.currencyCode?.trim() ||
       null;
+
+    /**
+     * TestFlight / sandbox : StoreKit renvoie souvent USD alors que la sheet Apple est en €.
+     * Cache RC = même en mode avion. Compte Google / Supabase n’y change rien.
+     * Bêta FR : on ignore ces métadonnées USD → le paywall garde les fallbacks ASC (5,99 / 49,99 €).
+     * Prod FR réelle : currencyCode = EUR → chemin inchangé. Storefront US + langue en → USD OK.
+     */
+    if ((currencyCode ?? '').toUpperCase() === 'USD' && getAppLanguage() === 'fr') {
+      console.warn(
+        '[revenueCat] ignore USD product metadata (TF/sandbox quirk) — paywall fallback EUR',
+      );
+      return null;
+    }
 
     let yearlyDiscountPercent: number | null = null;
     if (

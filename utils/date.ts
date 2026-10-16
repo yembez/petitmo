@@ -12,9 +12,43 @@ function formatNumericDayMonthYear(date: Date): string {
   return `${formatNumericDayMonth(date)}/${date.getFullYear()}`;
 }
 
-/** En-tête Capturer — ex. « 29/05 ». */
-export function formatCaptureHeaderDate(date: Date = new Date()): string {
-  return formatNumericDayMonth(date);
+/** Mois abrégés Capturer — ex. Sept, Oct (FR / EN). */
+const CAPTURE_HEADER_MONTHS_FR = [
+  'Jan',
+  'Fév',
+  'Mars',
+  'Avr',
+  'Mai',
+  'Juin',
+  'Juil',
+  'Août',
+  'Sept',
+  'Oct',
+  'Nov',
+  'Déc',
+] as const;
+const CAPTURE_HEADER_MONTHS_EN = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sept',
+  'Oct',
+  'Nov',
+  'Dec',
+] as const;
+
+/** En-tête Capturer — ex. « 15 Oct ». */
+export function formatCaptureHeaderDate(
+  date: Date = new Date(),
+  lang: 'fr' | 'en' = 'fr',
+): string {
+  const months = lang === 'en' ? CAPTURE_HEADER_MONTHS_EN : CAPTURE_HEADER_MONTHS_FR;
+  return `${date.getDate()} ${months[date.getMonth()]}`;
 }
 
 export function formatDate(dateString: string): string {

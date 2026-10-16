@@ -13,9 +13,6 @@ import {
 } from '@/constants/feedLayout';
 
 const HEADER_AVATAR_PX = scale(68);
-/** Liseré orange CTA autour de l’avatar header fil. */
-const HEADER_AVATAR_RING_WIDTH = scale(2);
-const HEADER_AVATAR_RING_PADDING = scale(2);
 /** Marge horizontale (ex. audio sans visuel) — référencé par `styles` */
 const FEED_GUTTER = scale(20);
 /** Posts texte : padding interne carte (réduit pour élargir la colonne de lecture). */
@@ -94,19 +91,6 @@ const styles = StyleSheet.create({
   headerRight: {
     marginLeft: scale(12),
     flexShrink: 0,
-  },
-  headerAvatarRing: {
-    padding: HEADER_AVATAR_RING_WIDTH,
-    borderRadius:
-      HEADER_AVATAR_PX / 2 + HEADER_AVATAR_RING_PADDING + HEADER_AVATAR_RING_WIDTH,
-    overflow: 'hidden',
-  },
-  /** Écart entre le liseré et la photo — repeint au fond écran, comme la pile multi-enfants. */
-  headerAvatarRingInner: {
-    padding: HEADER_AVATAR_RING_PADDING,
-    borderRadius: HEADER_AVATAR_PX / 2 + HEADER_AVATAR_RING_PADDING,
-    backgroundColor: THEME.familyFlowScreenBg,
-    overflow: 'hidden',
   },
   headerAvatarImg: {
     width: HEADER_AVATAR_PX,

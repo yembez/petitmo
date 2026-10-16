@@ -5,7 +5,15 @@ import {
 } from '@/constants/captureScreenPalette';
 
 /**
- * Essai UI Capturer :
+ * Essai live Capturer (réversible) :
+ * - `'classic'` = UI actuelle (carte photo + CTA bas, variante `CAPTURE_CTA_VARIANT`)
+ * - `'v9'` = photo dominante + titre/CTA verre dépoli sur la photo (mock V9)
+ * Backup classique : `backups/capture-index.classic-2026-10-15.tsx`
+ */
+export const CAPTURE_UI_TRIAL: 'classic' | 'v9' = 'v9';
+
+/**
+ * Essai UI Capturer (CTA) — utilisé si `CAPTURE_UI_TRIAL === 'classic'` :
  * - `'d1'` = outline beige + liseré gris · Mic / PencilLine / ImagePlus (corail ou dégradé)
  * - `'d2'` = disques corail Capturer `#FC5757` · icônes blanches (mock D2)
  * - `'d3'` = fond corail pâle · icônes corail (mock D3)

@@ -1,7 +1,6 @@
-import { memo, type ReactNode } from 'react';
+import { memo } from 'react';
 import { View, Text, TouchableOpacity, Platform, StyleSheet, Alert } from 'react-native';
 import { BlurView } from 'expo-blur';
-import { CAPTURE_CTA_ICON_CORAL } from '@/constants/captureScreenPalette';
 import { calculateAge } from '@/utils/date';
 import { scale } from '@/utils/responsive';
 import type { Child } from '@/utils/feedHelpers';
@@ -36,15 +35,6 @@ function familyHeaderTitle(children: Child[]): string {
   return '';
 }
 
-/** Liseré corail uni — même teinte que les icônes CTA Capturer / onglet actif. */
-function AvatarCoralRing({ children }: { children: ReactNode }) {
-  return (
-    <View style={[styles.headerAvatarRing, { backgroundColor: CAPTURE_CTA_ICON_CORAL }]}>
-      <View style={styles.headerAvatarRingInner}>{children}</View>
-    </View>
-  );
-}
-
 function FeedHeaderAvatarStack({
   familyChildren,
   onPressChild,
@@ -62,47 +52,43 @@ function FeedHeaderAvatarStack({
         accessibilityRole="button"
         accessibilityLabel={`Modifier le profil de ${givenName}`}
       >
-        <AvatarCoralRing>
-          <ChildAvatar
-            key={`${child.id}-${child.updated_at ?? ''}-${child.local_photo_path ?? ''}`}
-            child={child}
-            size={HEADER_AVATAR_PX}
-          />
-        </AvatarCoralRing>
+        <ChildAvatar
+          key={`${child.id}-${child.updated_at ?? ''}-${child.local_photo_path ?? ''}`}
+          child={child}
+          size={HEADER_AVATAR_PX}
+        />
       </TouchableOpacity>
     );
   }
 
   return (
-    <AvatarCoralRing>
-      <View style={headerAvatarStackStyles.row}>
-        {familyChildren.map((child, index) => {
-          const givenName = childDisplayGivenName(child.name) || child.name.trim() || 'Enfant';
-          return (
-            <TouchableOpacity
-              key={child.id}
-              style={[
-                headerAvatarStackStyles.slot,
-                index > 0 && { marginLeft: -AVATAR_STACK_OVERLAP },
-                { zIndex: familyChildren.length - index },
-              ]}
-              onPress={() => onPressChild(child)}
-              activeOpacity={0.85}
-              accessibilityRole="button"
-              accessibilityLabel={`Modifier le profil de ${givenName}`}
-            >
-              <View style={headerAvatarStackStyles.avatarBorder}>
-                <ChildAvatar
-                  key={`${child.id}-${child.updated_at ?? ''}-${child.local_photo_path ?? ''}`}
-                  child={child}
-                  size={HEADER_AVATAR_PX}
-                />
-              </View>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-    </AvatarCoralRing>
+    <View style={headerAvatarStackStyles.row}>
+      {familyChildren.map((child, index) => {
+        const givenName = childDisplayGivenName(child.name) || child.name.trim() || 'Enfant';
+        return (
+          <TouchableOpacity
+            key={child.id}
+            style={[
+              headerAvatarStackStyles.slot,
+              index > 0 && { marginLeft: -AVATAR_STACK_OVERLAP },
+              { zIndex: familyChildren.length - index },
+            ]}
+            onPress={() => onPressChild(child)}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel={`Modifier le profil de ${givenName}`}
+          >
+            <View style={headerAvatarStackStyles.avatarBorder}>
+              <ChildAvatar
+                key={`${child.id}-${child.updated_at ?? ''}-${child.local_photo_path ?? ''}`}
+                child={child}
+                size={HEADER_AVATAR_PX}
+              />
+            </View>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
   );
 }
 
