@@ -9,7 +9,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Camera } from 'lucide-react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -230,129 +230,139 @@ export function CropModal({ visible, imageUri, onCancel, onConfirm, onChangePhot
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onCancel}>
-      <View style={styles.root}>
-        <View style={[styles.header, { height: headerTotalH, paddingTop: insets.top }]}>
-          <TouchableOpacity onPress={onCancel} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Annuler">
-            <Text style={styles.headerCancel}>Annuler</Text>
-          </TouchableOpacity>
-          <View />
-          <View style={{ width: s(44) }} />
-        </View>
+      {/* RNGH : sans root dans le Modal iOS, pinch/pan ne répondent plus. */}
+      <GestureHandlerRootView style={styles.ghRoot}>
+        <View style={styles.root}>
+          <View style={[styles.header, { height: headerTotalH, paddingTop: insets.top }]}>
+            <TouchableOpacity onPress={onCancel} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Annuler">
+              <Text style={styles.headerCancel}>Annuler</Text>
+            </TouchableOpacity>
+            <View />
+            <View style={{ width: s(44) }} />
+          </View>
 
-        <View style={styles.body}>
-          <View style={[styles.stage, { width: stageW, height: stageH }]}>
-            <GestureDetector gesture={composedGesture}>
-              <Animated.View style={StyleSheet.absoluteFillObject}>
-                {!imgSize ? (
-                  <Image
-                    source={{ uri: imageUri }}
-                    style={StyleSheet.absoluteFillObject}
-                    contentFit="cover"
-                    onLoad={e => {
-                      const w = e.source.width ?? 0;
-                      const h = e.source.height ?? 0;
-                      if (w > 0 && h > 0) setImgSize({ width: w, height: h });
-                    }}
-                  />
-                ) : (
-                  // Image à taille native, centrée dans le stage, puis transformée (zoom/pan)
-                  <Animated.View
-                    style={[
-                      styles.imageNativeWrap,
-                      {
-                        left: (stageW - imgSize.width) / 2,
-                        top: (stageH - imgSize.height) / 2,
-                        width: imgSize.width,
-                        height: imgSize.height,
-                      },
-                      imageAnimatedStyle,
-                    ]}
-                  >
+          {/* overflow hidden : le zoom ne doit jamais déborder sous header/footer en clair. */}
+          <View style={styles.body}>
+            <View style={[styles.stage, { width: stageW, height: stageH }]}>
+              <GestureDetector gesture={composedGesture}>
+                <Animated.View style={StyleSheet.absoluteFillObject} collapsable={false}>
+                  {!imgSize ? (
                     <Image
                       source={{ uri: imageUri }}
                       style={StyleSheet.absoluteFillObject}
-                      contentFit="fill"
+                      contentFit="cover"
+                      onLoad={e => {
+                        const w = e.source.width ?? 0;
+                        const h = e.source.height ?? 0;
+                        if (w > 0 && h > 0) setImgSize({ width: w, height: h });
+                      }}
                     />
-                  </Animated.View>
-                )}
-              </Animated.View>
-            </GestureDetector>
+                  ) : (
+                    // Image à taille native, centrée dans le stage, puis transformée (zoom/pan)
+                    <Animated.View
+                      style={[
+                        styles.imageNativeWrap,
+                        {
+                          left: (stageW - imgSize.width) / 2,
+                          top: (stageH - imgSize.height) / 2,
+                          width: imgSize.width,
+                          height: imgSize.height,
+                        },
+                        imageAnimatedStyle,
+                      ]}
+                    >
+                      <Image
+                        source={{ uri: imageUri }}
+                        style={StyleSheet.absoluteFillObject}
+                        contentFit="fill"
+                        pointerEvents="none"
+                      />
+                    </Animated.View>
+                  )}
+                </Animated.View>
+              </GestureDetector>
 
-            {/* Assombrir l’extérieur de la zone de crop, tout en laissant voir l’image entière */}
-            <View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
-              <Svg width="100%" height="100%">
-                <Defs>
-                  <Mask id="cropHole">
-                    <Rect x="0" y="0" width="100%" height="100%" fill="#fff" />
-                    <Rect
-                      x={cropRectLeft}
-                      y={cropRectTop}
-                      width={cropRect.width}
-                      height={cropRect.height}
-                      fill="#000"
-                    />
-                  </Mask>
-                </Defs>
-                <Rect
-                  x="0"
-                  y="0"
-                  width="100%"
-                  height="100%"
-                  fill="rgba(0,0,0,0.5)"
-                  mask="url(#cropHole)"
+              {/* Masque hors cadre : assombri fort (pas de photo « claire » autour). */}
+              <View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
+                <Svg width={stageW} height={stageH}>
+                  <Defs>
+                    <Mask id="cropHole">
+                      <Rect x="0" y="0" width={stageW} height={stageH} fill="#fff" />
+                      <Rect
+                        x={cropRectLeft}
+                        y={cropRectTop}
+                        width={cropRect.width}
+                        height={cropRect.height}
+                        fill="#000"
+                      />
+                    </Mask>
+                  </Defs>
+                  <Rect
+                    x="0"
+                    y="0"
+                    width={stageW}
+                    height={stageH}
+                    fill="rgba(0,0,0,0.72)"
+                    mask="url(#cropHole)"
+                  />
+                </Svg>
+                <View
+                  style={[
+                    styles.cropFrame,
+                    {
+                      left: cropRectLeft,
+                      top: cropRectTop,
+                      width: cropRect.width,
+                      height: cropRect.height,
+                    },
+                  ]}
                 />
-              </Svg>
-              <View
-                style={[
-                  styles.cropFrame,
-                  {
-                    left: cropRectLeft,
-                    top: cropRectTop,
-                    width: cropRect.width,
-                    height: cropRect.height,
-                  },
-                ]}
-              />
+              </View>
+            </View>
+          </View>
+
+          <View style={[styles.footer, { height: footerTotalH, paddingBottom: insets.bottom }]}>
+            <View style={styles.footerRow}>
+              <TouchableOpacity
+                style={styles.changeBtn}
+                activeOpacity={0.85}
+                onPress={onChangePhoto}
+                accessibilityRole="button"
+                accessibilityLabel="Changer"
+              >
+                <Camera size={s(18)} color="#FFFFFF" strokeWidth={2.2} />
+                <Text style={styles.changeBtnText}>Changer</Text>
+              </TouchableOpacity>
+
+              <PetitmoPrimaryPressable
+                style={styles.validateBtn}
+                activeOpacity={0.85}
+                disabled={!imgSize || busy}
+                onPress={() => void confirmCrop()}
+                accessibilityRole="button"
+                accessibilityLabel="Valider"
+              >
+                <Text style={[petitmoCtaStyles.primaryText, styles.validateBtnText]}>Valider</Text>
+              </PetitmoPrimaryPressable>
             </View>
           </View>
         </View>
-
-        <View style={[styles.footer, { height: footerTotalH, paddingBottom: insets.bottom }]}>
-          <View style={styles.footerRow}>
-            <TouchableOpacity
-              style={styles.changeBtn}
-              activeOpacity={0.85}
-              onPress={onChangePhoto}
-              accessibilityRole="button"
-              accessibilityLabel="Changer"
-            >
-              <Camera size={s(18)} color="#FFFFFF" strokeWidth={2.2} />
-              <Text style={styles.changeBtnText}>Changer</Text>
-            </TouchableOpacity>
-
-            <PetitmoPrimaryPressable
-              style={styles.validateBtn}
-              activeOpacity={0.85}
-              disabled={!imgSize || busy}
-              onPress={() => void confirmCrop()}
-              accessibilityRole="button"
-              accessibilityLabel="Valider"
-            >
-              <Text style={[petitmoCtaStyles.primaryText, styles.validateBtnText]}>Valider</Text>
-            </PetitmoPrimaryPressable>
-          </View>
-        </View>
-      </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  ghRoot: {
+    flex: 1,
+  },
   root: {
     flex: 1,
     backgroundColor: '#000',
   },
   header: {
+    zIndex: 2,
+    backgroundColor: '#000',
     paddingHorizontal: s(14),
     flexDirection: 'row',
     alignItems: 'center',
@@ -370,11 +380,15 @@ const styles = StyleSheet.create({
   },
   body: {
     flex: 1,
+    zIndex: 1,
+    overflow: 'hidden',
+    backgroundColor: '#000',
     alignItems: 'center',
     justifyContent: 'center',
   },
   stage: {
     backgroundColor: '#000',
+    overflow: 'hidden',
   },
   imageNativeWrap: {
     position: 'absolute',
@@ -384,6 +398,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.9)',
   },
   footer: {
+    zIndex: 2,
     backgroundColor: '#111',
     paddingHorizontal: s(16),
     justifyContent: 'center',

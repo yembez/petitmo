@@ -13,7 +13,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { useState, useCallback, useEffect, useMemo } from 'react';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft, ImageIcon } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
@@ -24,19 +24,13 @@ import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmo
 import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import { createChild, setSelectedChild } from '@/services/children';
 import { hydrateTabScreensFromSqliteSync } from '@/services/tabScreensHydrate';
-import { signOutRealAccount } from '@/lib/authAccount';
 import { listLocalChildrenForUser } from '@/lib/localDb';
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
+import { clearOnboardingPermissionsSeen } from '@/lib/onboardingPermissionsSeen';
 import DatePicker from '@/components/DatePicker';
+import { CropModal } from '@/components/CropModal';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
-import { CHILD_PROFILE_PHOTO_ASPECT } from '@/utils/captureHeroMetrics';
-
-/** Même ratio que carte Capturer / CropModal (`CHILD_PROFILE_PHOTO_ASPECT`). */
-const CREATE_CHILD_PHOTO_ASPECT: [number, number] = [
-  Math.round(CHILD_PROFILE_PHOTO_ASPECT * 100),
-  100,
-];
 
 function joinSoftList(items: string[]): string {
   if (items.length <= 1) return items[0] ?? '';
@@ -46,18 +40,15 @@ function joinSoftList(items: string[]): string {
 
 export default function CreateChildScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ intent?: string }>();
   const { t } = useAppTranslation('common');
-  const authIntent =
-    (Array.isArray(params.intent) ? params.intent[0] : params.intent) === 'subscribe'
-      ? 'subscribe'
-      : undefined;
   const insets = useSafeAreaInsets();
   const { loaded: fontsLoaded, dm500, dm600, dm700 } = useDmSansFamilyFlowFonts();
   const { height: windowH } = useWindowDimensions();
   const [childName, setChildName] = useState('');
   const [birthDate, setBirthDate] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [cropVisible, setCropVisible] = useState(false);
+  const [rawImageUri, setRawImageUri] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [backBusy, setBackBusy] = useState(false);
   const [missingHint, setMissingHint] = useState<string | null>(null);
@@ -101,48 +92,55 @@ export default function CreateChildScreen() {
     try {
       const uid = peekLastRealAuthUserId();
       const localCount = uid ? listLocalChildrenForUser(uid).length : 0;
-      // Ajout d’un enfant depuis l’app (profils déjà présents) : retour normal.
-      if (localCount > 0 && router.canGoBack()) {
+      // Premier profil (post accès) : page précédente = permissions, sans déconnexion.
+      if (localCount === 0) {
+        if (router.canGoBack()) {
+          router.back();
+          return;
+        }
+        // Repli si la pile a été aplatie (replace) : réouvrir les accès.
+        await clearOnboardingPermissionsSeen(uid);
+        router.replace('/onboarding-permissions');
+        return;
+      }
+      // Ajout d’un enfant depuis l’app : retour normal.
+      if (router.canGoBack()) {
         router.back();
         return;
       }
-      await signOutRealAccount();
-      router.replace({
-        pathname: '/auth',
-        params: {
-          mode: 'signup',
-          ...(authIntent ? { intent: authIntent } : {}),
-        },
-      });
+      router.replace('/(tabs)');
     } catch (e) {
       console.warn('[create-child] handleBack', e);
-      router.replace({
-        pathname: '/auth',
-        params: {
-          mode: 'signup',
-          ...(authIntent ? { intent: authIntent } : {}),
-        },
-      });
+      if (router.canGoBack()) {
+        router.back();
+      } else {
+        router.replace('/onboarding-permissions');
+      }
     } finally {
       setBackBusy(false);
     }
-  }, [authIntent, backBusy, router]);
+  }, [backBusy, router]);
 
   /** PHPicker iOS peut s’ouvrir sans permission OS — on exige l’opt-in compte. */
-  const handlePhotoUpload = async () => {
+  const openImagePickerForCrop = useCallback(async () => {
     const { ensureMediaLibraryPickerAllowed } = await import('@/lib/mediaLibraryOptIn');
     if (!(await ensureMediaLibraryPickerAllowed())) return;
 
+    // Pas d’`allowsEditing` natif (souvent sans zoom fiable) → CropModal pinch/pan.
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: CREATE_CHILD_PHOTO_ASPECT,
-      quality: 0.8,
+      allowsEditing: false,
+      quality: 1,
     });
 
     if (!result.canceled && result.assets[0]) {
-      setPhotoUri(result.assets[0].uri);
+      setRawImageUri(result.assets[0].uri);
+      setCropVisible(true);
     }
+  }, []);
+
+  const handlePhotoUpload = () => {
+    void openImagePickerForCrop();
   };
 
   const handleContinue = async () => {
@@ -322,6 +320,23 @@ export default function CreateChildScreen() {
           )}
         </PetitmoPrimaryPressable>
       </ScrollView>
+
+      <CropModal
+        visible={cropVisible}
+        imageUri={rawImageUri ?? ''}
+        onCancel={() => {
+          setCropVisible(false);
+          setRawImageUri(null);
+        }}
+        onConfirm={(croppedUri) => {
+          setCropVisible(false);
+          setRawImageUri(null);
+          setPhotoUri(croppedUri);
+        }}
+        onChangePhoto={() => {
+          void openImagePickerForCrop();
+        }}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -396,7 +411,7 @@ const styles = StyleSheet.create({
   },
   addPhotoText: {
     fontSize: FONT_SIZES.base,
-    color: THEME.brandCtaOrange,
+    color: THEME.brandPrimary,
     fontWeight: '600',
     marginBottom: verticalScale(8),
   },

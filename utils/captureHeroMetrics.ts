@@ -1,4 +1,3 @@
-import { CAPTURE_UI_TRIAL } from '@/constants/captureCtaVariant';
 import { verticalScale } from '@/utils/responsive';
 
 /**
@@ -11,26 +10,22 @@ export const CAPTURE_HERO_IMAGE_CONTENT_POSITION = { top: '32%', left: '50%' } a
 export const CAPTURE_HERO_IMAGE_OBJECT_POSITION = 'center 32%';
 
 /**
- * Ratio largeur/hauteur carte + crop — **classic** (~carré).
- * Conservé pour `CAPTURE_UI_TRIAL === 'classic'` (pas de régression).
+ * Ratio largeur/hauteur carte Capturer + crop profil (~carré légèrement portrait).
  */
 export const CHILD_PROFILE_PHOTO_ASPECT_CLASSIC = 0.93;
 
 /**
- * Ratio largeur/hauteur carte + crop — **V9** (portrait, carte jusqu’à la tab bar).
- * Gabarit crop / create-child ; l’affichage V9 remplit encore la hauteur utile en `cover`.
+ * Ratio largeur/hauteur — essai solo V9 (hauteur utile plein écran).
+ * **Pas** le gabarit crop profil : crop + avatar + carte Capturer = classic ~0.93.
  */
 export const CHILD_PROFILE_PHOTO_ASPECT_V9 = 0.58;
 
 /**
- * Ratio **crop / create-child** (resize profil).
- * En essai V9 = portrait ; l’affichage carte classic/mosaïque reste sur
- * `CHILD_PROFILE_PHOTO_ASPECT_CLASSIC` (voir Capturer `CAPTURE_PHOTO_CARD_ASPECT`).
+ * Ratio **crop profil / create-child / edit-child** — même gabarit que la carte
+ * Capturer (`CAPTURE_PHOTO_CARD_ASPECT` / classic 0.93) et le rond avatar (cover).
+ * Toujours classic : un crop trop vertical (ex. 0.58) ne sert ni Capturer ni l’avatar.
  */
-export const CHILD_PROFILE_PHOTO_ASPECT =
-  CAPTURE_UI_TRIAL === 'v9'
-    ? CHILD_PROFILE_PHOTO_ASPECT_V9
-    : CHILD_PROFILE_PHOTO_ASPECT_CLASSIC;
+export const CHILD_PROFILE_PHOTO_ASPECT = CHILD_PROFILE_PHOTO_ASPECT_CLASSIC;
 
 /** Variante compacte (écran bas) — affichage Capturer **classic** uniquement, pas le crop. */
 export const CHILD_PROFILE_PHOTO_ASPECT_COMPACT = 0.85;

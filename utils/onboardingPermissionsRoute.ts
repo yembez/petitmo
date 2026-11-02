@@ -76,14 +76,17 @@ export async function replaceToOnboardingPermissionsOrCreateChild(
   router.replace(path);
 }
 
-/** Après l’écran permissions : profil enfant si besoin, sinon fil. */
+/**
+ * Après l’écran permissions : profil enfant si besoin, sinon fil.
+ * `push` (pas `replace`) vers create-child → Back revient bien sur les accès.
+ */
 export function replaceAfterOnboardingPermissions(
-  router: Pick<Router, 'replace'>,
+  router: Pick<Router, 'replace' | 'push'>,
 ): void {
   const uid = peekLastRealAuthUserId();
   const localCount = uid ? listLocalChildrenForUser(uid).length : 0;
   if (localCount === 0) {
-    router.replace('/create-child');
+    router.push('/create-child');
     return;
   }
   hydrateTabScreensFromSqliteSync();
