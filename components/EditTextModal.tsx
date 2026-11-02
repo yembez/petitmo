@@ -285,7 +285,7 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
                   Double saut de ligne = nouveau paragraphe (alinéa)
                 </Text>
                 <Text style={styles.charHint}>
-                  {estimateBookLines(stripTextAlineas(fieldBody), charsPerLine)}/{lineBudget} lignes · livre
+                  {estimateBookLines(stripTextAlineas(fieldBody), charsPerLine)}/{lineBudget} lignes
                 </Text>
               </View>
             </>
@@ -328,7 +328,7 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
                 autoCorrect
               />
               <Text style={styles.charHint}>
-                {estimateBookLines(stripTextAlineas(fieldBody), charsPerLine)}/{lineBudget} lignes · livre
+                {estimateBookLines(stripTextAlineas(fieldBody), charsPerLine)}/{lineBudget} lignes
               </Text>
             </>
           )
@@ -377,7 +377,7 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
                 </Text>
               ) : null}
               <Text style={styles.charHint}>
-                {estimateBookLines(stripTextAlineas(text), charsPerLine)}/{lineBudget} lignes · livre
+                {estimateBookLines(stripTextAlineas(text), charsPerLine)}/{lineBudget} lignes
               </Text>
             </View>
           </>

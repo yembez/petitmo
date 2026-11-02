@@ -477,7 +477,7 @@ export default function WriteScreen() {
           autoCorrect
         />
         <Text style={styles.charCounter}>
-          {estimateBookLines(stripTextAlineas(content))}/{MAX_BOOK_LINES} lignes · livre
+          {estimateBookLines(stripTextAlineas(content))}/{MAX_BOOK_LINES} lignes
         </Text>
 
         {Platform.OS === 'web' && isWebSpeechSupported && (
@@ -548,7 +548,7 @@ const styles = StyleSheet.create({
   charCounter: {
     position: 'absolute',
     bottom: scale(60),
-    right: 0,
+    right: SPACING.sm,
     fontSize: 12,
     color: '#AEAEB2',
   },
