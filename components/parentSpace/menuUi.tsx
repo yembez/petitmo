@@ -67,6 +67,8 @@ export function MenuRow({
   onPress,
   onLongPress,
   bordered,
+  /** Sous-option d’une ligne parente (ex. heure sous « Rappel du soir »). */
+  nested = false,
   labelFontFamily,
   labelAccent,
   destructive,
@@ -84,6 +86,7 @@ export function MenuRow({
   onPress?: () => void;
   onLongPress?: () => void;
   bordered?: boolean;
+  nested?: boolean;
   labelFontFamily?: string;
   labelAccent?: boolean;
   destructive?: boolean;
@@ -96,11 +99,16 @@ export function MenuRow({
 }) {
   const content = (
     <>
-      <View style={styles.rowIconSlot}>{icon ?? <View style={styles.rowIconPlaceholder} />}</View>
+      {nested ? (
+        <View style={styles.rowNestedInset} />
+      ) : (
+        <View style={styles.rowIconSlot}>{icon ?? <View style={styles.rowIconPlaceholder} />}</View>
+      )}
       <View style={styles.rowText}>
         <Text
           style={[
             styles.rowLabel,
+            nested && styles.rowLabelNested,
             labelAccent && styles.rowLabelAccent,
             destructive && styles.rowLabelDestructive,
             labelFontFamily ? { fontFamily: labelFontFamily } : null,
@@ -132,9 +140,14 @@ export function MenuRow({
           />
         </View>
       ) : value ? (
-        <Text style={styles.rowValue} numberOfLines={2}>
-          {value}
-        </Text>
+        <>
+          <Text style={styles.rowValue} numberOfLines={2}>
+            {value}
+          </Text>
+          {showChevron && onPress ? (
+            <ChevronRight size={ICON_SIZES.md} color={MENU_CHEVRON} strokeWidth={2} />
+          ) : null}
+        </>
       ) : showChevron && onPress ? (
         <ChevronRight size={ICON_SIZES.md} color={MENU_CHEVRON} strokeWidth={2} />
       ) : (
@@ -145,7 +158,9 @@ export function MenuRow({
 
   const wrap = (node: ReactNode) => (
     <View style={styles.rowWrap}>
-      {bordered ? <View style={styles.rowDivider} /> : null}
+      {bordered ? (
+        <View style={[styles.rowDivider, nested && styles.rowDividerNested]} />
+      ) : null}
       {node}
     </View>
   );
@@ -206,6 +221,10 @@ const styles = StyleSheet.create({
     backgroundColor: MENU_SEPARATOR,
     marginLeft: scale(52),
   },
+  /** Aligné sous le label du parent (pas sous une icône sœur). */
+  rowDividerNested: {
+    marginLeft: scale(52),
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -225,6 +244,10 @@ const styles = StyleSheet.create({
     width: scale(22),
     height: scale(22),
   },
+  /** Décale le sous-item sous le texte du parent (icône + gap). */
+  rowNestedInset: {
+    width: scale(36) + SPACING.sm,
+  },
   rowText: {
     flex: 1,
     minWidth: 0,
@@ -233,6 +256,11 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZES.lg,
     color: THEME.textPrimary,
     fontWeight: '500',
+  },
+  rowLabelNested: {
+    fontSize: FONT_SIZES.md,
+    fontWeight: '400',
+    color: THEME.textPrimary,
   },
   rowDetail: {
     fontSize: FONT_SIZES.md,

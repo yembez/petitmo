@@ -1,16 +1,16 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  AppState,
+  type AppStateStatus,
   Linking,
   Share,
-  Switch,
 } from 'react-native';
 import { usePathname } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
-import { Bell, Clock, Cloud, Image as ImageIcon, Moon, RefreshCw, Share2 } from 'lucide-react-native';
+import { Cloud, Image as ImageIcon, RefreshCw, Share2 } from 'lucide-react-native';
 import ParentSubpageShell from '@/components/parentSpace/ParentSubpageShell';
-import CaptureReminderTimeSheet from '@/components/parentSpace/CaptureReminderTimeSheet';
 import { MenuGroup, MenuRow, menuIcon } from '@/components/parentSpace/menuUi';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
@@ -26,10 +26,9 @@ import {
   registerPushTokenInBackground,
 } from '@/services/registerPushToken';
 import {
-  getNotificationsGranted,
-  isNotificationsModuleAvailable,
-  requestNotificationsAccess,
+  getPhotoLibraryAccessKind,
   requestPhotoLibraryAccess,
+  type PhotoLibraryAccessKind,
 } from '@/lib/onboardingPermissions';
 import { setMediaLibraryOptIn } from '@/lib/mediaLibraryOptIn';
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
@@ -40,14 +39,6 @@ import {
   peekHasRealAuthAccount,
   peekOfflineLocalResumeActive,
 } from '@/lib/authAccount';
-import {
-  DEFAULT_NOTIFICATION_PREFS,
-  loadNotificationPrefs,
-  peekCachedNotificationPrefs,
-  saveNotificationPrefs,
-  snapCaptureReminderTimeToSlot,
-  type NotificationPrefs,
-} from '@/lib/notificationPrefs';
 
 export default function ParentApplicationScreen() {
   const pathname = usePathname();
@@ -57,31 +48,55 @@ export default function ParentApplicationScreen() {
   const [updateCheckBusy, setUpdateCheckBusy] = useState(false);
   const [backupStatus, setBackupStatus] = useState('');
   const [hasRealAccount, setHasRealAccount] = useState(() => peekHasRealAuthAccount());
-  const [notifPrefs, setNotifPrefs] = useState<NotificationPrefs>(DEFAULT_NOTIFICATION_PREFS);
-  const [timeSheetOpen, setTimeSheetOpen] = useState(false);
+  const [photosAccess, setPhotosAccess] = useState<PhotoLibraryAccessKind>('undetermined');
+
+  const refreshPermissionRows = useCallback(async () => {
+    const photos = await getPhotoLibraryAccessKind();
+    setPhotosAccess(photos);
+    if (photos === 'full' || photos === 'limited') {
+      await setMediaLibraryOptIn(true, peekLastRealAuthUserId());
+    }
+  }, []);
+
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
 
   useFocusEffect(
     useCallback(() => {
-      setHasRealAccount(peekHasRealAuthAccount());
-      void peekCachedNotificationPrefs().then(setNotifPrefs);
-      void loadNotificationPrefs().then(setNotifPrefs);
-      void collectBugReportContext({
-        pathname,
-        sentryEnabled: isSentryEnabled(),
-      }).then((ctx) => setVersionLabel(formatAppVersionLabel(ctx)));
-      if (peekHasRealAuthAccount() || peekOfflineLocalResumeActive()) {
-        const pending = getLocalMemoriesPendingCloudSync().length;
-        setBackupStatus(
-          peekOfflineLocalResumeActive()
-            ? t('parent.account.backupOfflinePaused')
-            : pending > 0
-              ? `Synchronisation (${pending})`
-              : 'À jour',
-        );
-      } else {
-        setBackupStatus('');
-      }
-    }, [pathname, t]),
+      const refreshScreen = () => {
+        setHasRealAccount(peekHasRealAuthAccount());
+        void refreshPermissionRows();
+        void collectBugReportContext({
+          pathname,
+          sentryEnabled: isSentryEnabled(),
+        }).then((ctx) => setVersionLabel(formatAppVersionLabel(ctx)));
+        if (peekHasRealAuthAccount() || peekOfflineLocalResumeActive()) {
+          const pending = getLocalMemoriesPendingCloudSync().length;
+          setBackupStatus(
+            peekOfflineLocalResumeActive()
+              ? t('parent.account.backupOfflinePaused')
+              : pending > 0
+                ? `Synchronisation (${pending})`
+                : 'À jour',
+          );
+        } else {
+          setBackupStatus('');
+        }
+      };
+
+      refreshScreen();
+
+      const sub = AppState.addEventListener('change', (next) => {
+        const prev = appStateRef.current;
+        appStateRef.current = next;
+        if (next === 'active' && prev !== 'active') {
+          void refreshPermissionRows();
+        }
+      });
+
+      return () => {
+        sub.remove();
+      };
+    }, [pathname, refreshPermissionRows, t]),
   );
 
   const handleCheckForUpdate = useCallback(() => {
@@ -172,9 +187,15 @@ export default function ParentApplicationScreen() {
     })();
   }, [t]);
 
-  const handleEnablePhotos = useCallback(() => {
+  const handlePhotosRowPress = useCallback(() => {
     void (async () => {
+      const kind = await getPhotoLibraryAccessKind();
+      if (kind === 'full' || kind === 'limited' || kind === 'denied') {
+        void Linking.openSettings();
+        return;
+      }
       const granted = await requestPhotoLibraryAccess();
+      await refreshPermissionRows();
       if (granted) {
         await setMediaLibraryOptIn(true, peekLastRealAuthUserId());
         const { markOnboardingPermissionsSeen } = await import('@/lib/onboardingPermissionsSeen');
@@ -187,167 +208,51 @@ export default function ParentApplicationScreen() {
         { text: t('parent.application.openSettings'), onPress: () => void Linking.openSettings() },
       ]);
     })();
-  }, [t]);
-
-  const handleEnableNotifications = useCallback(() => {
-    void (async () => {
-      if (!(await isNotificationsModuleAvailable())) {
-        Alert.alert(
-          t('parent.application.notificationsDeniedTitle'),
-          t('parent.application.notificationsUnavailableBody'),
-        );
-        return;
-      }
-      if (await getNotificationsGranted()) {
-        void registerPushTokenInBackground();
-        const { markOnboardingPermissionsSeen } = await import('@/lib/onboardingPermissionsSeen');
-        await markOnboardingPermissionsSeen(peekLastRealAuthUserId());
-        Alert.alert(
-          t('parent.application.notificationsGrantedTitle'),
-          t('parent.application.notificationsGrantedBody'),
-        );
-        return;
-      }
-      const granted = await requestNotificationsAccess();
-      if (granted) {
-        void registerPushTokenInBackground();
-        const { markOnboardingPermissionsSeen } = await import('@/lib/onboardingPermissionsSeen');
-        await markOnboardingPermissionsSeen(peekLastRealAuthUserId());
-        Alert.alert(
-          t('parent.application.notificationsGrantedTitle'),
-          t('parent.application.notificationsGrantedBody'),
-        );
-        return;
-      }
-      Alert.alert(
-        t('parent.application.notificationsDeniedTitle'),
-        t('parent.application.notificationsDeniedBody'),
-        [
-          { text: t('cancel'), style: 'cancel' },
-          { text: t('parent.application.openSettings'), onPress: () => void Linking.openSettings() },
-        ],
-      );
-    })();
-  }, [t]);
-
-  const handleCaptureReminderToggle = useCallback(
-    (enabled: boolean) => {
-      void (async () => {
-        if (enabled) {
-          if (!(await isNotificationsModuleAvailable()) || !(await getNotificationsGranted())) {
-            const granted = await requestNotificationsAccess();
-            if (!granted) {
-              Alert.alert(
-                t('parent.application.captureReminderNeedNotifTitle'),
-                t('parent.application.captureReminderNeedNotifBody'),
-                [
-                  { text: t('cancel'), style: 'cancel' },
-                  {
-                    text: t('parent.application.openSettings'),
-                    onPress: () => void Linking.openSettings(),
-                  },
-                ],
-              );
-              return;
-            }
-          }
-          void registerPushTokenInBackground();
-        }
-        const next = await saveNotificationPrefs({ captureReminderEnabled: enabled });
-        setNotifPrefs(next);
-      })();
-    },
-    [t],
-  );
-
-  const handlePickReminderTime = useCallback(() => {
-    setTimeSheetOpen(true);
-  }, []);
-
-  const handleSelectReminderTime = useCallback((time: string) => {
-    const snapped = snapCaptureReminderTimeToSlot(time);
-    void saveNotificationPrefs({ captureReminderLocalTime: snapped }).then(setNotifPrefs);
-  }, []);
+  }, [refreshPermissionRows, t]);
 
   return (
     <ParentSubpageShell title="Application">
-      <CaptureReminderTimeSheet
-        visible={timeSheetOpen}
-        selectedTime={notifPrefs.captureReminderLocalTime}
-        onSelect={handleSelectReminderTime}
-        onClose={() => setTimeSheetOpen(false)}
-      />
       <MenuGroup titleFontFamily={dm600}>
         <MenuRow
-          icon={menuIcon(RefreshCw)}
-          label={t('parent.application.checkUpdate')}
-          detail={t('parent.application.versionPrefix', { label: versionLabel })}
-          labelFontFamily={dm500}
-          onPress={handleCheckForUpdate}
-          onLongPress={handleSentrySmokeLongPress}
-          disabled={updateCheckBusy}
-          trailing={
-            updateCheckBusy ? <ActivityIndicator size="small" color={THEME.textMuted} /> : undefined
-          }
-          accessibilityLabel={t('parent.application.checkUpdate')}
-        />
-        <MenuRow
-          bordered
           icon={menuIcon(ImageIcon)}
-          label={t('parent.application.enablePhotos')}
-          detail={t('parent.application.enablePhotosHint')}
+          label={
+            photosAccess === 'undetermined'
+              ? t('parent.application.enablePhotos')
+              : t('parent.application.photosLabel')
+          }
+          detail={
+            photosAccess === 'full' || photosAccess === 'limited'
+              ? t('parent.application.photosStatusOnHint')
+              : photosAccess === 'denied'
+                ? t('parent.application.photosStatusOffHint')
+                : t('parent.application.enablePhotosHint')
+          }
+          value={
+            photosAccess === 'full'
+              ? t('parent.application.photosStatusFull')
+              : photosAccess === 'limited'
+                ? t('parent.application.photosStatusLimited')
+                : photosAccess === 'denied'
+                  ? t('parent.application.photosStatusOff')
+                  : undefined
+          }
           labelFontFamily={dm500}
-          onPress={handleEnablePhotos}
-          accessibilityLabel={t('parent.application.enablePhotos')}
-        />
-        <MenuRow
-          bordered
-          icon={menuIcon(Bell)}
-          label={t('parent.application.enableNotifications')}
-          detail={t('parent.application.enableNotificationsHint')}
-          labelFontFamily={dm500}
-          onPress={handleEnableNotifications}
-          accessibilityLabel={t('parent.application.enableNotifications')}
+          onPress={handlePhotosRowPress}
+          accessibilityLabel={
+            photosAccess === 'undetermined'
+              ? t('parent.application.enablePhotos')
+              : t('parent.application.photosLabel')
+          }
         />
         {hasRealAccount ? (
-          <>
-            <MenuRow
-              bordered
-              icon={menuIcon(Moon)}
-              label={t('parent.application.captureReminder')}
-              detail={
-                notifPrefs.captureReminderEnabled
-                  ? t('parent.application.captureReminderHintOn', {
-                      time: notifPrefs.captureReminderLocalTime,
-                    })
-                  : t('parent.application.captureReminderHintOff')
-              }
-              labelFontFamily={dm500}
-              showChevron={false}
-              trailing={
-                <Switch
-                  value={notifPrefs.captureReminderEnabled}
-                  onValueChange={handleCaptureReminderToggle}
-                  trackColor={{ false: '#E5E5EA', true: 'rgba(252, 87, 87, 0.4)' }}
-                  thumbColor={notifPrefs.captureReminderEnabled ? THEME.brandPrimary : '#FFFFFF'}
-                  ios_backgroundColor="#E5E5EA"
-                  accessibilityLabel={t('parent.application.captureReminder')}
-                />
-              }
-              accessibilityLabel={t('parent.application.captureReminder')}
-            />
-            {notifPrefs.captureReminderEnabled ? (
-              <MenuRow
-                bordered
-                icon={menuIcon(Clock)}
-                label={t('parent.application.captureReminderTimeTitle')}
-                detail={notifPrefs.captureReminderLocalTime}
-                labelFontFamily={dm500}
-                onPress={handlePickReminderTime}
-                accessibilityLabel={t('parent.application.captureReminderTimeTitle')}
-              />
-            ) : null}
-          </>
+          <MenuRow
+            bordered
+            icon={menuIcon(Cloud)}
+            label="Sauvegarde cloud"
+            detail={backupStatus || 'À jour'}
+            labelFontFamily={dm500}
+            showChevron={false}
+          />
         ) : null}
         {__DEV__ ? (
           <MenuRow
@@ -360,16 +265,20 @@ export default function ParentApplicationScreen() {
             accessibilityLabel={t('parent.application.copyPushToken')}
           />
         ) : null}
-        {hasRealAccount ? (
-          <MenuRow
-            bordered
-            icon={menuIcon(Cloud)}
-            label="Sauvegarde cloud"
-            detail={backupStatus || 'À jour'}
-            labelFontFamily={dm500}
-            showChevron={false}
-          />
-        ) : null}
+        <MenuRow
+          bordered
+          icon={menuIcon(RefreshCw)}
+          label={t('parent.application.checkUpdate')}
+          detail={t('parent.application.versionPrefix', { label: versionLabel })}
+          labelFontFamily={dm500}
+          onPress={handleCheckForUpdate}
+          onLongPress={handleSentrySmokeLongPress}
+          disabled={updateCheckBusy}
+          trailing={
+            updateCheckBusy ? <ActivityIndicator size="small" color={THEME.textMuted} /> : undefined
+          }
+          accessibilityLabel={t('parent.application.checkUpdate')}
+        />
       </MenuGroup>
     </ParentSubpageShell>
   );

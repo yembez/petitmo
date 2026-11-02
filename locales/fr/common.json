@@ -140,6 +140,10 @@
     "deniedTitle": "Permission refusée",
     "photosDeniedBody": "Tu pourras l’activer plus tard dans les Réglages du téléphone, ou depuis Espace parent.",
     "notifsDeniedBody": "Tu pourras l’activer plus tard dans les Réglages du téléphone, ou depuis Espace parent.",
+    "photosEnableInSettingsTitle": "Photothèque désactivée",
+    "photosEnableInSettingsBody": "Active Petit Cœur dans les Réglages iOS (Photos), puis reviens ici pour importer.",
+    "notifsEnableInSettingsTitle": "Notifications désactivées",
+    "notifsEnableInSettingsBody": "Active Petit Cœur dans les Réglages iOS (Notifications), puis reviens ici.",
     "notifsUnavailableBody": "Les notifications nécessitent une mise à jour de l’app (rebuild). Tu pourras les activer ensuite.",
     "photosNeedEnableBody": "Nouvelle installation ou nouvel appareil : il faut réactiver l’accès à la photothèque pour importer. Tu peux aussi le faire plus tard dans Espace parent → Application.",
     "photosNeedEnableBodyDeferred": "Tu as choisi « Plus tard » pour la photothèque. Active-la maintenant, ou plus tard dans Espace parent → Application.",
@@ -203,8 +207,19 @@
       "versionPrefix": "Version {{label}}",
       "enableNotifications": "Activer les notifications",
       "enableNotificationsHint": "Affiche la demande iOS (nécessaire pour apparaître dans Réglages)",
+      "notificationsLabel": "Notifications",
+      "notificationsStatusOn": "Activées",
+      "notificationsStatusOnHint": "Tu peux modifier l’accès dans les Réglages iOS",
+      "notificationsStatusOff": "Désactivées",
+      "notificationsStatusOffHint": "Ouvre les Réglages iOS pour autoriser Petit Cœur",
       "enablePhotos": "Activer la photothèque",
       "enablePhotosHint": "Pour importer photos et vidéos (profil, Capturer, livres)",
+      "photosLabel": "Photothèque",
+      "photosStatusFull": "Accès complet",
+      "photosStatusLimited": "Accès limité",
+      "photosStatusOnHint": "Tu peux modifier l’accès dans les Réglages iOS",
+      "photosStatusOff": "Désactivée",
+      "photosStatusOffHint": "Ouvre les Réglages iOS pour autoriser Petit Cœur",
       "photosGrantedTitle": "Photothèque activée",
       "photosGrantedBody": "Tu peux maintenant importer des photos et vidéos.",
       "photosDeniedTitle": "Photothèque refusée",
@@ -223,7 +238,8 @@
       "captureReminder": "Rappel du soir",
       "captureReminderHintOff": "Off — un petit rappel pour capturer (opt-in)",
       "captureReminderHintOn": "Tous les jours à {{time}}",
-      "captureReminderTimeTitle": "Heure du rappel",
+      "captureReminderHintOnShort": "Activé — choisis l’heure ci-dessous",
+      "captureReminderTimeTitle": "Heure",
       "captureReminderTimeSheetHint": "De 17:00 à minuit, par quarts d’heure.",
       "captureReminderTimePrompt": "Format HH:mm (ex. 23:07 ou 00:00).",
       "captureReminderTimeInvalid": "Heure invalide. Utilise HH:mm entre 00:00 et 23:59.",
@@ -297,9 +313,22 @@
       "title": "Aucun profil enfant",
       "subtitle": "Crée un profil pour enregistrer des souvenirs et des favoris.",
       "cta": "Créer un profil"
+    },
+    "error": {
+      "title": "Favoris indisponibles",
+      "subtitle": "Un souci est survenu. Réessaie dans un instant.",
+      "retry": "Réessayer"
     }
   },
   "fil": {
+    "nudge": {
+      "closeA11y": "Fermer la suggestion",
+      "paywallDay30": "Tes souvenirs méritent d'être protégés ♡",
+      "paywallDay60": "Ne perds aucun moment — passe à l’abonnement Petit Cœur",
+      "paywallCta": "Découvrir →",
+      "reminderBody": "Pour ne pas oublier : programme un doux rappel",
+      "reminderCta": "Rappel"
+    },
     "empty": {
       "title": "Aucun souvenir pour le moment",
       "subtitle": "Commence à capturer des moments précieux",
@@ -331,13 +360,18 @@
     "journal": "Journal",
     "favorites": "Favoris",
     "books": "Livres",
-    "settings": "Paramètres"
+    "settings": "Paramètres",
+    "error": {
+      "title": "Écran indisponible",
+      "subtitle": "Un souci est survenu. Réessaie dans un instant.",
+      "retry": "Réessayer"
+    }
   },
   "write": {
     "emptyTitle": "Encore un petit mot ?",
     "emptyBody": "Même une phrase suffit pour garder ce moment.",
-    "placeholderOne": "Écris-lui ce que tu aimerais lui dire aujourd'hui…",
-    "placeholderMany": "Écris-leur ce que tu aimerais leur dire aujourd'hui…"
+    "placeholderOne": "Écris-lui (ou dicte) ce que tu aimerais lui dire aujourd'hui.",
+    "placeholderMany": "Écris-leur (ou dicte) ce que tu aimerais leur dire aujourd'hui."
   },
   "book": {
     "createTile": {

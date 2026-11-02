@@ -19,8 +19,6 @@ import {
   Settings,
   UserRound,
 } from 'lucide-react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { BRAND_ACTION_GRADIENT } from '@/constants/captureScreenPalette';
 import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
 import { getChildren, setSelectedChild } from '@/services/children';
@@ -52,6 +50,7 @@ import {
   menuIcon,
   openUrl,
 } from '@/components/parentSpace/menuUi';
+import ParentNotificationSettingsBlock from '@/components/parentSpace/ParentNotificationSettingsBlock';
 
 function readLocalChildrenForSettings(): Child[] {
   const uid = peekLastRealAuthUserId();
@@ -154,14 +153,9 @@ export default function ParentSpaceScreen() {
           <MenuRow
             bordered={children.length > 0}
             icon={
-              <LinearGradient
-                colors={[...BRAND_ACTION_GRADIENT]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.addChildIcon}
-              >
+              <View style={styles.addChildIcon}>
                 <Plus size={ICON_SIZES.sm} color="#FFFFFF" strokeWidth={2.5} />
-              </LinearGradient>
+              </View>
             }
             label="Ajouter un enfant"
             labelFontFamily={dm600}
@@ -232,10 +226,12 @@ export default function ParentSpaceScreen() {
           )}
         </MenuGroup>
 
-        {/* Rubriques sans titres — bandes blanches + chevrons vers pages détail */}
+        {/* Rubriques sans titres — notifs / rappel avant Mes commandes */}
         <MenuGroup>
+          <ParentNotificationSettingsBlock labelFontFamily={dm500} />
           {hasRealAccount ? (
             <MenuRow
+              bordered
               icon={menuIcon(Package)}
               label={t('parent.orders.sectionTitle')}
               labelFontFamily={dm500}
@@ -243,7 +239,7 @@ export default function ParentSpaceScreen() {
             />
           ) : null}
           <MenuRow
-            bordered={hasRealAccount}
+            bordered
             icon={menuIcon(HelpCircle)}
             label="Aide"
             labelFontFamily={dm500}
@@ -354,5 +350,6 @@ const styles = StyleSheet.create({
     borderRadius: scale(14),
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: THEME.brandPrimary,
   },
 });

@@ -22,9 +22,57 @@ export async function getPhotoLibraryGranted(): Promise<boolean> {
   return granted;
 }
 
+/**
+ * Statut OS brut — pour brancher l’UX :
+ * - `undetermined` → on peut encore afficher la boîte système
+ * - `denied` → uniquement Réglages (iOS ne re-propose plus)
+ */
+export async function getPhotoLibraryPermissionStatus(): Promise<
+  'granted' | 'denied' | 'undetermined'
+> {
+  const kind = await getPhotoLibraryAccessKind();
+  if (kind === 'full' || kind === 'limited') return 'granted';
+  if (kind === 'denied') return 'denied';
+  return 'undetermined';
+}
+
+export type PhotoLibraryAccessKind = 'full' | 'limited' | 'denied' | 'undetermined';
+
+/** Détail iOS pour menus Paramètres (Aucun / Limité / Complet). */
+export async function getPhotoLibraryAccessKind(): Promise<PhotoLibraryAccessKind> {
+  const res = await ImagePicker.getMediaLibraryPermissionsAsync();
+  const { status, granted, canAskAgain, accessPrivileges } = res;
+  if (accessPrivileges === 'limited' || status === 'limited') return 'limited';
+  if (granted || status === 'granted' || accessPrivileges === 'all') return 'full';
+  // Jamais demandé (ou encore re-promptable) — ne pas confondre avec « Aucun » Réglages.
+  // `accessPrivileges: 'none'` apparaît aussi avant la 1ʳᵉ demande → ce n’est pas un refus.
+  if (status === 'undetermined' || status === 'unavailable') return 'undetermined';
+  if (status === 'denied' && canAskAgain !== false) return 'undetermined';
+  if (status === 'denied') return 'denied';
+  return 'undetermined';
+}
+
+export async function getNotificationsPermissionStatus(): Promise<
+  'granted' | 'denied' | 'undetermined'
+> {
+  const Notifications = await loadNotifications();
+  if (!Notifications) return 'denied';
+  try {
+    const { status, canAskAgain } = await Notifications.getPermissionsAsync();
+    if (status === 'granted') return 'granted';
+    if (status === 'denied' && canAskAgain === false) return 'denied';
+    return 'undetermined';
+  } catch {
+    return 'undetermined';
+  }
+}
+
 export async function requestPhotoLibraryAccess(): Promise<boolean> {
-  const { granted } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  return granted;
+  const res = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  if (res.granted) return true;
+  if (res.accessPrivileges === 'limited' || res.status === 'limited') return true;
+  if (res.accessPrivileges === 'all' || res.status === 'granted') return true;
+  return false;
 }
 
 type NotificationsModule = typeof import('expo-notifications');

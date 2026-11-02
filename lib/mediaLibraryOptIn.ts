@@ -16,6 +16,7 @@ import { Alert, Linking } from 'react-native';
 import i18n from '@/lib/i18n';
 import {
   getPhotoLibraryGranted,
+  getPhotoLibraryPermissionStatus,
   requestPhotoLibraryAccess,
 } from '@/lib/onboardingPermissions';
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
@@ -127,39 +128,67 @@ async function softHealOptInFromOsGrant(userId?: string | null): Promise<boolean
   return true;
 }
 
+function alertOpenSettingsOnly(resolve: (ok: boolean) => void): void {
+  Alert.alert(i18n.t('permissions.deniedTitle'), i18n.t('permissions.photosDeniedBody'), [
+    { text: i18n.t('cancel'), style: 'cancel', onPress: () => resolve(false) },
+    {
+      text: i18n.t('permissions.openSettings'),
+      onPress: () => {
+        void Linking.openSettings();
+        resolve(false);
+      },
+    },
+  ]);
+}
+
+async function activateMediaLibraryNow(userId: string | null): Promise<boolean> {
+  const granted = await requestPhotoLibraryAccess();
+  if (!granted) return false;
+  await setMediaLibraryOptIn(true, userId);
+  try {
+    const { markOnboardingPermissionsSeen } = await import('@/lib/onboardingPermissionsSeen');
+    await markOnboardingPermissionsSeen(userId);
+  } catch {
+    /* */
+  }
+  return true;
+}
+
 /**
  * Avant tout picker : exige l’opt-in compte + (si besoin) la demande iOS.
  * Retourne false → ne pas ouvrir la galerie.
+ *
+ * Low Friction : après « Plus tard », on propose **Activer** (boîte système).
+ * « Ouvrir Réglages » seulement si iOS a déjà refusé (plus de re-prompt possible).
  */
 export async function ensureMediaLibraryPickerAllowed(): Promise<boolean> {
   const uid = peekLastRealAuthUserId();
+  const osStatus = await getPhotoLibraryPermissionStatus();
+
   if (await getMediaLibraryOptIn(uid)) {
-    if (await getPhotoLibraryGranted()) return true;
-    const granted = await requestPhotoLibraryAccess();
-    if (granted) return true;
-    Alert.alert(
-      i18n.t('permissions.deniedTitle'),
-      i18n.t('permissions.photosDeniedBody'),
-      [
-        { text: i18n.t('cancel'), style: 'cancel' },
-        {
-          text: i18n.t('permissions.openSettings'),
-          onPress: () => void Linking.openSettings(),
-        },
-      ],
-    );
-    return false;
+    if (osStatus === 'granted' || (await getPhotoLibraryGranted())) return true;
+    if (osStatus === 'undetermined') {
+      const ok = await activateMediaLibraryNow(uid);
+      if (ok) return true;
+    }
+    // Opt-in produit mais iOS refuse → seul chemin = Réglages.
+    return await new Promise<boolean>(resolve => alertOpenSettingsOnly(resolve));
   }
 
   // Même tel, permission déjà accordée, flag produit manquant → pas d’alerte.
   if (await softHealOptInFromOsGrant(uid)) return true;
+
+  // iOS a déjà dit non : inutile de proposer « Activer » (pas de 2ᵉ boîte système).
+  if (osStatus === 'denied') {
+    return await new Promise<boolean>(resolve => alertOpenSettingsOnly(resolve));
+  }
 
   const deferred = await getMediaLibraryDeferred(uid);
   const bodyKey = deferred
     ? 'permissions.photosNeedEnableBodyDeferred'
     : 'permissions.photosNeedEnableBody';
 
-  // Pas d’opt-in et pas encore de grant iOS : proposer d’activer maintenant.
+  // Pas d’opt-in, statut encore undetermined : Activer → boîte iOS (pas Réglages).
   return await new Promise<boolean>(resolve => {
     Alert.alert(i18n.t('permissions.photosTitle'), i18n.t(bodyKey), [
       {
@@ -168,38 +197,16 @@ export async function ensureMediaLibraryPickerAllowed(): Promise<boolean> {
         onPress: () => resolve(false),
       },
       {
-        text: i18n.t('permissions.openSettings'),
-        onPress: () => {
-          void Linking.openSettings();
-          resolve(false);
-        },
-      },
-      {
         text: i18n.t('permissions.enableNow'),
         onPress: () => {
           void (async () => {
-            const granted = await requestPhotoLibraryAccess();
-            if (granted) {
-              await setMediaLibraryOptIn(true, uid);
-              const { markOnboardingPermissionsSeen } = await import(
-                '@/lib/onboardingPermissionsSeen'
-              );
-              await markOnboardingPermissionsSeen(uid);
+            const ok = await activateMediaLibraryNow(uid);
+            if (ok) {
               resolve(true);
               return;
             }
-            Alert.alert(
-              i18n.t('permissions.deniedTitle'),
-              i18n.t('permissions.photosDeniedBody'),
-              [
-                { text: i18n.t('cancel'), style: 'cancel' },
-                {
-                  text: i18n.t('permissions.openSettings'),
-                  onPress: () => void Linking.openSettings(),
-                },
-              ],
-            );
-            resolve(false);
+            // Refus dans la boîte système → là seulement Réglages.
+            alertOpenSettingsOnly(resolve);
           })();
         },
       },

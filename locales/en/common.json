@@ -140,6 +140,10 @@
     "deniedTitle": "Permission denied",
     "photosDeniedBody": "You can enable it later in phone Settings, or from Parent space.",
     "notifsDeniedBody": "You can enable it later in phone Settings, or from Parent space.",
+    "photosEnableInSettingsTitle": "Photo library off",
+    "photosEnableInSettingsBody": "Turn on Petit Cœur in iOS Settings (Photos), then come back here to import.",
+    "notifsEnableInSettingsTitle": "Notifications off",
+    "notifsEnableInSettingsBody": "Turn on Petit Cœur in iOS Settings (Notifications), then come back here.",
     "notifsUnavailableBody": "Notifications need an app rebuild. You can enable them after updating.",
     "photosNeedEnableBody": "New install or new device: re-enable photo library access to import. You can also do this later in Parent space → Application.",
     "photosNeedEnableBodyDeferred": "You chose “Later” for the photo library. Enable it now, or later in Parent space → Application.",
@@ -203,8 +207,19 @@
       "versionPrefix": "Version {{label}}",
       "enableNotifications": "Enable notifications",
       "enableNotificationsHint": "Shows the iOS prompt (needed to appear in Settings)",
+      "notificationsLabel": "Notifications",
+      "notificationsStatusOn": "On",
+      "notificationsStatusOnHint": "You can change access in iOS Settings",
+      "notificationsStatusOff": "Off",
+      "notificationsStatusOffHint": "Open iOS Settings to allow Petit Cœur",
       "enablePhotos": "Enable photo library",
       "enablePhotosHint": "To import photos and videos (profile, Capture, books)",
+      "photosLabel": "Photo library",
+      "photosStatusFull": "Full access",
+      "photosStatusLimited": "Limited access",
+      "photosStatusOnHint": "You can change access in iOS Settings",
+      "photosStatusOff": "Off",
+      "photosStatusOffHint": "Open iOS Settings to allow Petit Cœur",
       "photosGrantedTitle": "Photo library enabled",
       "photosGrantedBody": "You can now import photos and videos.",
       "photosDeniedTitle": "Photo library denied",
@@ -223,7 +238,8 @@
       "captureReminder": "Evening reminder",
       "captureReminderHintOff": "Off — a gentle reminder to capture (opt-in)",
       "captureReminderHintOn": "Every day at {{time}}",
-      "captureReminderTimeTitle": "Reminder time",
+      "captureReminderHintOnShort": "On — pick a time below",
+      "captureReminderTimeTitle": "Time",
       "captureReminderTimeSheetHint": "From 5:00 PM to midnight, every 15 minutes.",
       "captureReminderTimePrompt": "Use HH:mm (e.g. 23:07 or 00:00).",
       "captureReminderTimeInvalid": "Invalid time. Use HH:mm between 00:00 and 23:59.",
@@ -297,9 +313,22 @@
       "title": "No child profile",
       "subtitle": "Create a profile to save memories and favorites.",
       "cta": "Create a profile"
+    },
+    "error": {
+      "title": "Favorites unavailable",
+      "subtitle": "Something went wrong. Please try again in a moment.",
+      "retry": "Try again"
     }
   },
   "fil": {
+    "nudge": {
+      "closeA11y": "Dismiss suggestion",
+      "paywallDay30": "Your memories deserve to be protected ♡",
+      "paywallDay60": "Don’t miss a moment — upgrade to Petit Cœur",
+      "paywallCta": "Discover →",
+      "reminderBody": "So you don’t forget: set a gentle evening reminder",
+      "reminderCta": "Reminder"
+    },
     "empty": {
       "title": "No memories yet",
       "subtitle": "Start capturing precious moments",
@@ -331,13 +360,18 @@
     "journal": "Journal",
     "favorites": "Favorites",
     "books": "Books",
-    "settings": "Settings"
+    "settings": "Settings",
+    "error": {
+      "title": "Screen unavailable",
+      "subtitle": "Something went wrong. Please try again in a moment.",
+      "retry": "Try again"
+    }
   },
   "write": {
     "emptyTitle": "One little note?",
     "emptyBody": "Even a single sentence is enough to keep this moment.",
-    "placeholderOne": "Write what you'd like to tell them today…",
-    "placeholderMany": "Write what you'd like to tell them today…"
+    "placeholderOne": "Write (or dictate) what you'd like to tell them today.",
+    "placeholderMany": "Write them (or dictate) what you'd like to tell them today."
   },
   "book": {
     "createTile": {

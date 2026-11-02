@@ -29,6 +29,8 @@ import { scale, verticalScale } from '@/utils/responsive';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
 import {
+  getNotificationsPermissionStatus,
+  getPhotoLibraryAccessKind,
   isNotificationsModuleAvailable,
   requestNotificationsAccess,
   requestPhotoLibraryAccess,
@@ -39,6 +41,16 @@ import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
 import { listLocalChildrenForUser } from '@/lib/localDb';
 import { replaceAfterOnboardingPermissions } from '@/utils/onboardingPermissionsRoute';
 import { hydrateTabScreensFromSqliteSync } from '@/services/tabScreensHydrate';
+import { saveNotificationPrefs } from '@/lib/notificationPrefs';
+
+/** Notifs accordées sur cet écran → rappel du soir ON (défaut produit, Low Friction). */
+async function enableEveningReminderWithNotifs(): Promise<void> {
+  try {
+    await saveNotificationPrefs({ captureReminderEnabled: true });
+  } catch (e) {
+    console.warn('[onboarding-permissions] capture reminder default', e);
+  }
+}
 
 export default function OnboardingPermissionsScreen() {
   const router = useRouter();
@@ -115,19 +127,53 @@ export default function OnboardingPermissionsScreen() {
         void setMediaLibraryOptIn(false, peekLastRealAuthUserId());
         return;
       }
+      const uid = peekLastRealAuthUserId();
+      // Même appareil / compte précédent : iOS a déjà accordé → opt-in silencieux (Low Friction).
+      const before = await getPhotoLibraryAccessKind();
+      if (before === 'full' || before === 'limited') {
+        setPhotosOn(true);
+        await setMediaLibraryOptIn(true, uid);
+        return;
+      }
+      // Refus OS déjà figé (ex. Photos → Aucun) : pas de boîte système — Réglages seulement.
+      if (before === 'denied') {
+        setPhotosOn(false);
+        Alert.alert(
+          t('permissions.photosEnableInSettingsTitle'),
+          t('permissions.photosEnableInSettingsBody'),
+          [
+            { text: t('cancel'), style: 'cancel' },
+            {
+              text: t('permissions.openSettings'),
+              onPress: () => void Linking.openSettings(),
+            },
+          ],
+        );
+        return;
+      }
+      // undetermined → vraie demande iOS
       const granted = await requestPhotoLibraryAccess();
       setPhotosOn(granted);
       if (granted) {
-        await setMediaLibraryOptIn(true, peekLastRealAuthUserId());
-      } else {
-        Alert.alert(t('permissions.deniedTitle'), t('permissions.photosDeniedBody'), [
+        await setMediaLibraryOptIn(true, uid);
+        return;
+      }
+      const after = await getPhotoLibraryAccessKind();
+      Alert.alert(
+        after === 'denied'
+          ? t('permissions.photosEnableInSettingsTitle')
+          : t('permissions.deniedTitle'),
+        after === 'denied'
+          ? t('permissions.photosEnableInSettingsBody')
+          : t('permissions.photosDeniedBody'),
+        [
           { text: t('cancel'), style: 'cancel' },
           {
             text: t('permissions.openSettings'),
             onPress: () => void Linking.openSettings(),
           },
-        ]);
-      }
+        ],
+      );
     },
     [t],
   );
@@ -141,21 +187,55 @@ export default function OnboardingPermissionsScreen() {
       }
       if (!next) {
         setNotifsOn(false);
+        // Cohérence : pas de rappel sans notifs volontairement coupées ici.
+        void saveNotificationPrefs({ captureReminderEnabled: false });
+        return;
+      }
+      const before = await getNotificationsPermissionStatus();
+      if (before === 'granted') {
+        setNotifsOn(true);
+        void import('@/services/registerPushToken').then(m => m.registerPushTokenInBackground());
+        await enableEveningReminderWithNotifs();
+        return;
+      }
+      if (before === 'denied') {
+        setNotifsOn(false);
+        Alert.alert(
+          t('permissions.notifsEnableInSettingsTitle'),
+          t('permissions.notifsEnableInSettingsBody'),
+          [
+            { text: t('cancel'), style: 'cancel' },
+            {
+              text: t('permissions.openSettings'),
+              onPress: () => void Linking.openSettings(),
+            },
+          ],
+        );
         return;
       }
       const granted = await requestNotificationsAccess();
       setNotifsOn(granted);
       if (granted) {
         void import('@/services/registerPushToken').then(m => m.registerPushTokenInBackground());
-      } else {
-        Alert.alert(t('permissions.deniedTitle'), t('permissions.notifsDeniedBody'), [
+        await enableEveningReminderWithNotifs();
+        return;
+      }
+      const after = await getNotificationsPermissionStatus();
+      Alert.alert(
+        after === 'denied'
+          ? t('permissions.notifsEnableInSettingsTitle')
+          : t('permissions.deniedTitle'),
+        after === 'denied'
+          ? t('permissions.notifsEnableInSettingsBody')
+          : t('permissions.notifsDeniedBody'),
+        [
           { text: t('cancel'), style: 'cancel' },
           {
             text: t('permissions.openSettings'),
             onPress: () => void Linking.openSettings(),
           },
-        ]);
-      }
+        ],
+      );
     },
     [notifsAvailable, t],
   );
@@ -163,7 +243,7 @@ export default function OnboardingPermissionsScreen() {
   if (!fontsLoaded || !ready) {
     return (
       <View style={[styles.shell, styles.center]}>
-        <ActivityIndicator color={THEME.brandCtaOrange} size="large" />
+        <ActivityIndicator color={THEME.brandPrimary} size="large" />
       </View>
     );
   }
@@ -192,7 +272,7 @@ export default function OnboardingPermissionsScreen() {
         <View style={styles.rows}>
           <View style={styles.row}>
             <View style={styles.iconWrap}>
-              <Images size={ICON_SIZES.lg} color={THEME.brandCtaOrange} strokeWidth={2} />
+              <Images size={ICON_SIZES.lg} color={THEME.brandPrimary} strokeWidth={2} />
             </View>
             <View style={styles.rowText}>
               <Text style={[styles.rowTitle, dm600 && { fontFamily: dm600 }]}>
@@ -205,8 +285,8 @@ export default function OnboardingPermissionsScreen() {
             <Switch
               value={photosOn}
               onValueChange={v => void onTogglePhotos(v)}
-              trackColor={{ false: '#E5E5EA', true: 'rgba(253, 119, 100, 0.45)' }}
-              thumbColor={photosOn ? THEME.brandCtaOrange : '#FFFFFF'}
+              trackColor={{ false: '#E5E5EA', true: 'rgba(252, 87, 87, 0.4)' }}
+              thumbColor={photosOn ? THEME.brandPrimary : '#FFFFFF'}
               ios_backgroundColor="#E5E5EA"
               accessibilityLabel={t('permissions.photosTitle')}
             />
@@ -315,7 +395,7 @@ const styles = StyleSheet.create({
     width: scale(40),
     height: scale(40),
     borderRadius: scale(12),
-    backgroundColor: 'rgba(253, 119, 100, 0.1)',
+    backgroundColor: 'rgba(252, 87, 87, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
   },
