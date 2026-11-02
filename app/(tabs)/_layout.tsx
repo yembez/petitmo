@@ -1,16 +1,16 @@
 import { useEffect } from 'react';
-import { DeviceEventEmitter, Easing } from 'react-native';
+import { DeviceEventEmitter } from 'react-native';
 import { Tabs, useRouter } from 'expo-router';
 import { useNavigation } from '@react-navigation/native';
 import { TabTransitionProvider, useTabTransition } from '@/contexts/TabTransitionContext';
 import { MemoryTextFontProvider } from '@/contexts/MemoryTextFontContext';
 import PetitmoContextTabBar from '@/components/PetitmoContextTabBar';
 import { THEME } from '@/constants/theme';
-import { TAB_TRANSITION_DURATION_MS } from '@/constants/tabTransition';
 import { PETITMO_SELECT_TAB, type AppTabName } from '@/services/selectAppTab';
 import { hasRealAuthAccount, peekHasRealAuthAccount, isDeviceUserEmail, PETITMO_AUTH_SIGNED_OUT_EVENT, peekIntentionalSignedOut } from '@/lib/authAccount';
 import { supabase } from '@/lib/supabase';
 import { resetNavigationToOnboarding } from '@/utils/resetNavigationToOnboarding';
+import { recordTabPress } from '@/lib/tabBlankWatchdog';
 
 export default function TabLayout() {
   return (
@@ -36,6 +36,7 @@ function TabSelectListener({
         if (name !== 'fil' && name !== 'index' && name !== 'favoris' && name !== 'livres') {
           return;
         }
+        recordTabPress(name, 'jumpTo');
         navigation.jumpTo(name);
       },
     );
@@ -124,17 +125,11 @@ function TabLayoutInner() {
          */
         freezeOnBlur: false,
         /**
-         * Cross-fade natif (évite le cut sec). `detachInactiveScreens: false` limite
-         * les écrans blancs connus avec `animation: 'fade'` + react-native-screens.
+         * Pas de `animation: 'fade'` : avec react-native-screens, le cross-fade peut
+         * laisser l’onglet entrant à opacity 0 (écran blanc figé, zéro exception Sentry).
+         * Cut immédiat — lisible et stable (Capturer → Favoris / Fil / Livres).
          */
-        animation: 'fade',
-        transitionSpec: {
-          animation: 'timing',
-          config: {
-            duration: TAB_TRANSITION_DURATION_MS,
-            easing: Easing.bezier(0.22, 0.61, 0.36, 1),
-          },
-        },
+        animation: 'none',
         detachInactiveScreens: false,
         sceneStyle: { backgroundColor: THEME.bg },
       }}>

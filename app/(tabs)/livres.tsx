@@ -64,6 +64,8 @@ import {
   BOOK_COVER_THUMB_WIDTH,
 } from '@/constants/bookCoverThumbnail';
 import TabSceneTransition from '@/components/TabSceneTransition';
+import TabScreenErrorBoundary from '@/components/TabScreenErrorBoundary';
+import { useTabBlankWatchdog } from '@/hooks/useTabBlankWatchdog';
 import {
   setFavorisAddToBookSession,
   setPendingFavorisAddToBookId,
@@ -499,6 +501,12 @@ function LivresScreen() {
     });
   }, [draftTitle, router]);
 
+  useTabBlankWatchdog('livres', {
+    blank: false,
+    reason: 'ok',
+    detail: `books=${books.length}`,
+  });
+
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + verticalScale(12) }]}>
@@ -584,9 +592,11 @@ function LivresScreen() {
 
 export default function LivresScreenTab() {
   return (
-    <TabSceneTransition>
-      <LivresScreen />
-    </TabSceneTransition>
+    <TabScreenErrorBoundary tab="livres">
+      <TabSceneTransition>
+        <LivresScreen />
+      </TabSceneTransition>
+    </TabScreenErrorBoundary>
   );
 }
 

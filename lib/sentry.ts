@@ -210,6 +210,40 @@ export function capturePaywallPurchaseFailure(params: {
 }
 
 /**
+ * Onglet resté « blanc » / vide après focus (opacity 0, loading bloqué, View vide).
+ * Pas d’exception JS → event explicite pour sourcer les blancs aléatoires.
+ */
+export function captureTabBlankStuck(params: {
+  tab: string;
+  reason: string;
+  detail?: string;
+  focusedMs: number;
+  trail?: Array<{ ts: string; type: string; name: string; detail?: string }>;
+}): string | null {
+  if (!isSentryEnabled()) return null;
+  const tab = (params.tab || 'unknown').trim().slice(0, 24);
+  const reason = (params.reason || 'unknown').trim().slice(0, 40);
+  const detail = (params.detail ?? '').trim().slice(0, 160);
+  const err = new Error(`tab.blank.stuck: ${tab}/${reason}${detail ? ` — ${detail}` : ''}`);
+  return Sentry.captureException(err, {
+    level: 'error',
+    tags: {
+      'app.errorScope': 'tab.blank',
+      'app.tab': tab,
+      'app.tabBlankReason': reason,
+    },
+    fingerprint: ['tab', 'blank-stuck', tab, reason],
+    extra: {
+      tab,
+      reason,
+      detail: detail || undefined,
+      focusedMs: params.focusedMs,
+      trail: params.trail?.slice(-12),
+    },
+  });
+}
+
+/**
  * Smoke HITL (appui long version Espace parent).
  * Fingerprint unique à chaque envoi → nouvelle issue Sentry → webhook fondateur.
  */

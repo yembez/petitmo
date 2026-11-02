@@ -34,6 +34,7 @@ import {
   peekFavorisAddToBookSession,
   subscribeFavorisAddToBookSession,
 } from '@/services/favorisBookAddFlow';
+import { recordTabPress, type MainTabWatchName } from '@/lib/tabBlankWatchdog';
 
 const TAB_ICON_SIZE = scale(24);
 const TAB_ICON_ROW_H = scale(28);
@@ -326,6 +327,7 @@ export default function PetitmoContextTabBar({
             });
             if (!isFocused && !event.defaultPrevented) {
               hapticSelection();
+              recordTabPress(routeName as MainTabWatchName, activeRoute);
               navigation.navigate(route.name, route.params);
             }
           };

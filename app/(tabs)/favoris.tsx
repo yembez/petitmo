@@ -71,7 +71,10 @@ import { requestMissingMediaDerivatives } from '@/services/media';
 import { healDeadLocalMediaPointersForMemories } from '@/services/memoryDisplayHeal';
 import FavorisVideoThumb from '@/components/feed/FavorisVideoThumb';
 import { useFeedVideoPosterDisplayUrl } from '@/hooks/useFeedVideoPosterDisplayUrl';
-import { getOrSelectFirstChild } from '@/services/children';
+import {
+  getOrSelectFirstChild,
+  peekSelectedChildIdLastKnown,
+} from '@/services/children';
 import { getLocalMemoryById, listLocalChildren } from '@/lib/localDb';
 import {
   feedChildHydrationSnapshot,
@@ -82,6 +85,9 @@ import {
   PETITMO_AUTH_SIGNED_OUT_EVENT,
   peekHasRealAuthAccount,
 } from '@/lib/authAccount';
+import { recordCaughtError } from '@/lib/diagnosticTrail';
+import TabScreenErrorBoundary from '@/components/TabScreenErrorBoundary';
+import { useTabBlankWatchdog } from '@/hooks/useTabBlankWatchdog';
 import {
   filMemoryVisualEqual,
   mergeMemoriesListPreservingVisualRowRefs,
@@ -1274,7 +1280,7 @@ export const FavorisScreen = memo(function FavorisScreen({
     addToBookId?: string;
   }>();
   const insets = useSafeAreaInsets();
-  /** Boot local-first : peindre SQLite tout de suite ; dots seulement si rien à peindre encore. */
+  /** Boot local-first : peindre SQLite tout de suite ; dots seulement si vraiment rien de local. */
   const [loading, setLoading] = useState(() => {
     if (feedChildHydrationSnapshot === null) {
       hydrateTabScreensFromSqliteSync();
@@ -1283,9 +1289,13 @@ export const FavorisScreen = memo(function FavorisScreen({
       feedMemoriesHydrationSnapshot.length > 0
         ? feedMemoriesHydrationSnapshot
         : loadMemoriesForFavorisTabSync();
-    // Souvenirs locaux déjà là → peindre (grille ou empty favoris), pas de blanc.
+    // Souvenirs locaux → peindre (grille ou empty favoris).
     if (boot.length > 0) return false;
-    // Liste encore vide (race post-reconnexion ou 1er paint) → dots jusqu’au 1er load.
+    // Profil enfant local déjà là (Capturer OK) → empty Favoris, pas de roue / blanc.
+    if (feedChildHydrationSnapshot !== null || listLocalChildren().length > 0) {
+      return false;
+    }
+    // Cold : rien en SQLite encore → dots jusqu’au 1er load.
     return true;
   });
   const [memories, setMemories] = useState<Memory[]>(() => {
@@ -1297,7 +1307,10 @@ export const FavorisScreen = memo(function FavorisScreen({
   const memoriesRef = useRef(memories);
   memoriesRef.current = memories;
   const [hasChild, setHasChild] = useState(
-    () => feedChildHydrationSnapshot !== null || listLocalChildren().length > 0,
+    () =>
+      feedChildHydrationSnapshot !== null ||
+      listLocalChildren().length > 0 ||
+      !!peekSelectedChildIdLastKnown(),
   );
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
@@ -1333,19 +1346,24 @@ export const FavorisScreen = memo(function FavorisScreen({
       return;
     }
 
-    // Local-first : peindre SQLite **avant** tout await (évite écran blanc).
+    // Local-first : peindre SQLite **avant** tout await (évite écran blanc / hang).
     const localNow = loadMemoriesForFavorisTabSync();
+    const localKids = listLocalChildren();
     const hasKids =
-      listLocalChildren().length > 0 || feedChildHydrationSnapshot !== null;
+      localKids.length > 0 ||
+      feedChildHydrationSnapshot !== null ||
+      !!peekSelectedChildIdLastKnown();
     if (hasKids) {
       setHasChild(true);
       if (localNow.length > 0) {
         setMemories(prev => mergeMemoriesListPreservingVisualRowRefs(prev, localNow));
-        setLoading(false);
-      } else if (!background) {
-        // Enfants OK mais souvenirs pas encore lisibles (race post-login) → dots, pas blanc.
-        setLoading(true);
       }
+      // Profil local = peindre tout de suite (grille ou empty) — ne jamais attendre le réseau.
+      setLoading(false);
+    } else if (localNow.length > 0) {
+      setMemories(prev => mergeMemoriesListPreservingVisualRowRefs(prev, localNow));
+      setHasChild(true);
+      setLoading(false);
     } else if (!background) {
       setLoading(true);
     } else {
@@ -1353,10 +1371,23 @@ export const FavorisScreen = memo(function FavorisScreen({
     }
 
     try {
-      const childId = await getOrSelectFirstChild();
+      /**
+       * Soft resolve : timeout court. `getOrSelectFirstChild` peut pendre sur
+       * `getChildren()` (réseau) si la session Auth n’est pas encore prête alors
+       * que SQLite a déjà le profil — hang = blanc figé, zéro Sentry.
+       */
+      const childId = await Promise.race([
+        getOrSelectFirstChild(),
+        new Promise<null>(resolve => {
+          setTimeout(() => resolve(null), 2500);
+        }),
+      ]);
       if (!childId) {
-        setMemories([]);
-        setHasChild(false);
+        // Ne jamais vider l’UI si le local a déjà un enfant / des souvenirs (Capturer OK).
+        if (!hasKids && localNow.length === 0) {
+          setMemories([]);
+          setHasChild(false);
+        }
         setLoading(false);
         return;
       }
@@ -1398,6 +1429,7 @@ export const FavorisScreen = memo(function FavorisScreen({
       });
     } catch (e) {
       console.warn('[FavorisScreen] load', e);
+      recordCaughtError('favoris.load', e);
       setLoading(false);
     }
   }, []);
@@ -1501,8 +1533,14 @@ export const FavorisScreen = memo(function FavorisScreen({
 
       // Peindre SQLite sync dès le focus (évite blanc post-login avant le 1er await).
       const localNow = loadMemoriesForFavorisTabSync();
-      if (localNow.length > 0) {
-        setMemories(prev => mergeMemoriesListPreservingVisualRowRefs(prev, localNow));
+      const localHasKids =
+        listLocalChildren().length > 0 ||
+        feedChildHydrationSnapshot !== null ||
+        !!peekSelectedChildIdLastKnown();
+      if (localNow.length > 0 || localHasKids) {
+        if (localNow.length > 0) {
+          setMemories(prev => mergeMemoriesListPreservingVisualRowRefs(prev, localNow));
+        }
         setHasChild(true);
         setLoading(false);
         void load({ background: true });
@@ -1512,12 +1550,10 @@ export const FavorisScreen = memo(function FavorisScreen({
         if (hasCached) {
           if (feedMemoriesHydrationSnapshot.length > 0) {
             setMemories([...feedMemoriesHydrationSnapshot]);
-            setLoading(false);
-          } else {
-            setLoading(true);
           }
           setHasChild(feedChildHydrationSnapshot !== null || listLocalChildren().length > 0);
-          void load({ background: feedMemoriesHydrationSnapshot.length > 0 });
+          setLoading(false);
+          void load({ background: true });
         } else {
           setLoading(true);
           void load();
@@ -1898,6 +1934,12 @@ export const FavorisScreen = memo(function FavorisScreen({
     [galleryScrollY],
   );
 
+  useTabBlankWatchdog('favoris', {
+    blank: loading || (!hasChild && !peekHasRealAuthAccount()),
+    reason: loading ? 'loading' : !hasChild ? 'no_child' : 'ok',
+    detail: `items=${galleryItems.length}`,
+  });
+
   return (
     <View style={styles.container}>
       {isScreenActive ? <StatusBar style={isBookAddFromSpreadFlow ? 'dark' : 'light'} /> : null}
@@ -1910,25 +1952,23 @@ export const FavorisScreen = memo(function FavorisScreen({
           <FeedLoadingDots color={THEME.textPrimary} />
         </View>
       ) : !hasChild ? (
-        !peekHasRealAuthAccount() ? (
-          <View style={styles.centered} />
-        ) : (
         <View style={[styles.centered, styles.noChildPad]}>
           <Text style={emptyStateStyles.title}>{t('favoris.noChild.title')}</Text>
           <Text style={[emptyStateStyles.subtitle, styles.noChildSubGap]}>
             {t('favoris.noChild.subtitle')}
           </Text>
-          <PetitmoPrimaryPressable
-            style={styles.noChildCta}
-            onPress={() => router.push('/create-child')}
-            activeOpacity={0.85}
-          >
-            <Text style={[petitmoCtaStyles.primaryText, styles.noChildCtaText]}>
-              {t('favoris.noChild.cta')}
-            </Text>
-          </PetitmoPrimaryPressable>
+          {peekHasRealAuthAccount() ? (
+            <PetitmoPrimaryPressable
+              style={styles.noChildCta}
+              onPress={() => router.push('/create-child')}
+              activeOpacity={0.85}
+            >
+              <Text style={[petitmoCtaStyles.primaryText, styles.noChildCtaText]}>
+                {t('favoris.noChild.cta')}
+              </Text>
+            </PetitmoPrimaryPressable>
+          ) : null}
         </View>
-        )
       ) : (
         <View
           style={[
@@ -2083,9 +2123,11 @@ export const FavorisScreen = memo(function FavorisScreen({
 
 export default function FavorisScreenTab() {
   return (
-    <TabSceneTransition>
-      <FavorisScreen />
-    </TabSceneTransition>
+    <TabScreenErrorBoundary tab="favoris">
+      <TabSceneTransition>
+        <FavorisScreen />
+      </TabSceneTransition>
+    </TabScreenErrorBoundary>
   );
 }
 

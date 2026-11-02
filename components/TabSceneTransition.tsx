@@ -11,9 +11,8 @@ type Props = {
 /**
  * Conteneur d’onglet (fond stable).
  *
- * Le cross-fade entre onglets est géré par Bottom Tabs (`animation: 'fade'`
- * dans `(tabs)/_layout`). Pas de fondu opacity local ici (évite un 2ᵉ paint
- * après focus sous charge JS).
+ * Les onglets utilisent `animation: 'none'` (cut) — le fade RN Screens
+ * pouvait laisser l’écran entrant à opacity 0 (blanc figé, sans Sentry).
  */
 export default function TabSceneTransition({
   children,
