@@ -9,10 +9,10 @@ import {
   Easing,
   Dimensions,
   Platform,
-  ActivityIndicator,
   ScrollView,
   useWindowDimensions,
   DeviceEventEmitter,
+  Linking,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
@@ -36,7 +36,23 @@ import { useFonts } from 'expo-font';
 import * as Font from 'expo-font';
 import { Manrope_400Regular, Manrope_700Bold } from '@expo-google-fonts/manrope';
 import TabSceneTransition from '@/components/TabSceneTransition';
+import TabScreenErrorBoundary from '@/components/TabScreenErrorBoundary';
+import { FeedLoadingDots } from '@/components/FeedLoadingDots';
+import { useTabBlankWatchdog } from '@/hooks/useTabBlankWatchdog';
 import SettingsHeaderButton from '@/components/SettingsHeaderButton';
+import SoftNudgeBanner from '@/components/SoftNudgeBanner';
+import CaptureReminderTimeSheet from '@/components/parentSpace/CaptureReminderTimeSheet';
+import {
+  activateCaptureReminderFromNudge,
+  markCaptureReminderNudgeSeen,
+  shouldShowCaptureReminderNudge,
+} from '@/lib/captureReminderNudge';
+import {
+  DEFAULT_NOTIFICATION_PREFS,
+  peekCachedNotificationPrefs,
+  saveNotificationPrefs,
+  snapCaptureReminderTimeToSlot,
+} from '@/lib/notificationPrefs';
 import { loadedFontStyle } from '@/utils/loadedFontStyle';
 import { useAppLanguage } from '@/hooks/useAppLanguage';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
@@ -143,9 +159,8 @@ const CAPTURE_HERO_BREATHE_OVERSCAN = 0.06;
 
 const CAPTURE_PHOTO_CARD_RADIUS = scale(32);
 /**
- * Ratio carte **classic / mosaïque multi** — toujours le gabarit classic (0.93).
- * Ne pas lier à `CHILD_PROFILE_PHOTO_ASPECT` (V9=0.58 pour crop solo) :
- * sinon le multi hérite de la hauteur V9 et titre+CTA passent sous la tab bar.
+ * Ratio carte **classic / mosaïque multi** — gabarit classic (0.93).
+ * Aligné avec `CHILD_PROFILE_PHOTO_ASPECT` (crop profil / avatar).
  * Solo V9 utilise `v9PhotoCardHeight`, pas ce ratio.
  */
 const CAPTURE_PHOTO_CARD_ASPECT = CHILD_PROFILE_PHOTO_ASPECT_CLASSIC;
@@ -244,6 +259,11 @@ function CapturerScreen() {
   const isTabFocused = useIsFocused();
   /** Remonte les CTA à chaque retour focus (évite Pressable coincé après write/import/record). */
   const [ctaEpoch, setCtaEpoch] = useState(0);
+  const [showReminderNudge, setShowReminderNudge] = useState(false);
+  const [reminderTimeSheetOpen, setReminderTimeSheetOpen] = useState(false);
+  const [reminderLocalTime, setReminderLocalTime] = useState(
+    DEFAULT_NOTIFICATION_PREFS.captureReminderLocalTime,
+  );
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const frame = useSafeAreaFrame();
@@ -514,6 +534,15 @@ function CapturerScreen() {
 
       let cancelled = false;
 
+      void peekCachedNotificationPrefs().then(p => {
+        if (!cancelled) setReminderLocalTime(p.captureReminderLocalTime);
+      });
+      void shouldShowCaptureReminderNudge().then(show => {
+        if (cancelled || !show) return;
+        void markCaptureReminderNudgeSeen();
+        setShowReminderNudge(true);
+      });
+
       const run = async () => {
         // Sans compte produit : jamais peindre SQLite (lastRealAuthUserId peut rester).
         if (!peekHasRealAuthAccount()) {
@@ -631,6 +660,25 @@ function CapturerScreen() {
     }, [navigation, router])
   );
 
+  const captureBlank =
+    !peekHasRealAuthAccount() ||
+    hidingForeignProfileRef.current ||
+    (child != null && shownChild == null) ||
+    (isLoading && !shownChild);
+  useTabBlankWatchdog('index', {
+    blank: captureBlank,
+    reason: !peekHasRealAuthAccount()
+      ? 'no_auth_blank'
+      : hidingForeignProfileRef.current || (child != null && shownChild == null)
+        ? 'hiding_foreign'
+        : isLoading && !shownChild
+          ? 'loading'
+          : !child || familyChildren.length === 0
+            ? 'no_child'
+            : 'ok',
+    detail: shownChild?.id ? `child=${shownChild.id.slice(0, 8)}` : 'no_child',
+  });
+
   if (
     !peekHasRealAuthAccount() ||
     hidingForeignProfileRef.current ||
@@ -639,6 +687,7 @@ function CapturerScreen() {
     return (
       <View style={[styles.root, styles.loadingContainer]}>
         <StatusBar style="dark" />
+        <FeedLoadingDots color={THEME.textPrimary} />
       </View>
     );
   }
@@ -647,7 +696,7 @@ function CapturerScreen() {
     return (
       <View style={[styles.root, styles.loadingContainer]}>
         <StatusBar style="dark" />
-        <ActivityIndicator size="large" color={THEME.textPrimary} />
+        <FeedLoadingDots color={THEME.textPrimary} />
       </View>
     );
   }
@@ -686,7 +735,8 @@ function CapturerScreen() {
 
   return (
     <View style={styles.root}>
-      <StatusBar style={isCaptureV9 ? 'light' : 'dark'} />
+      {/* Fond Capturer clair (V9 inclus) → icônes status bar sombres. */}
+      <StatusBar style="dark" />
 
       <Animated.View
         style={[
@@ -786,13 +836,7 @@ function CapturerScreen() {
                 style={StyleSheet.absoluteFillObject}
               />
             ) : (
-              <TouchableOpacity
-                activeOpacity={0.92}
-                onPress={openEditChild}
-                style={StyleSheet.absoluteFillObject}
-                accessibilityRole="button"
-                accessibilityLabel="Modifier le profil de l'enfant"
-              >
+              <>
                 {photoUri ? (
                   <CaptureHeroImageStack
                     photoUri={photoUri}
@@ -805,6 +849,23 @@ function CapturerScreen() {
                     <Text style={styles.heroPlaceholderText}>{childDisplayInitial(child.name)}</Text>
                   </View>
                 )}
+                {/**
+                 * Solo : tap édition profil = zone photo seule.
+                 * S’arrête au-dessus du titre V9 (et du tagline classique) pour
+                 * ne pas voler les taps titre / CTA (overlay en `pointerEvents="none"`).
+                 */}
+                <TouchableOpacity
+                  activeOpacity={0.92}
+                  onPress={openEditChild}
+                  style={[
+                    styles.captureHeroEditHit,
+                    isCaptureV9
+                      ? styles.captureHeroEditHitV9
+                      : styles.captureHeroEditHitClassic,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Modifier le profil de l'enfant"
+                />
                 <View style={styles.capturePhotoPillsBar} pointerEvents="none">
                   <CapturePhotoGlassPill
                     label={childGivenName || 'Enfant'}
@@ -823,7 +884,7 @@ function CapturerScreen() {
                     />
                   ) : null}
                 </View>
-              </TouchableOpacity>
+              </>
             )}
             {!isFamilyMosaic ? (
               <>
@@ -862,16 +923,27 @@ function CapturerScreen() {
                 ) : (
                   <View style={styles.captureV9Overlay} pointerEvents="box-none">
                     <View style={styles.captureV9TitleRow} pointerEvents="none">
+                      {/* 2 lignes stables : un prénom long ne doit jamais manger « aujourd’hui ». */}
                       <Text
                         style={[
                           styles.captureV9Title,
                           loadedFontStyle(captureTitleFont) ?? { fontWeight: '500' },
                         ]}
-                        numberOfLines={2}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.78}
                       >
                         Quel souvenir pour {childGivenName || "l'enfant"}{' '}
                         <Text style={styles.captureV9TitleHeart}>❤️</Text>
-                        {'\n'}aujourd&apos;hui ?
+                      </Text>
+                      <Text
+                        style={[
+                          styles.captureV9Title,
+                          loadedFontStyle(captureTitleFont) ?? { fontWeight: '500' },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        aujourd&apos;hui ?
                       </Text>
                     </View>
                     <View
@@ -1359,6 +1431,46 @@ function CapturerScreen() {
           ) : null}
         </ScrollView>
       </Animated.View>
+      {showReminderNudge ? (
+        <SoftNudgeBanner
+          bottom={tabBarFloatingBottomInset(insets.bottom) + verticalScale(10)}
+          body={t('fil.nudge.reminderBody')}
+          cta={t('fil.nudge.reminderCta')}
+          closeA11y={t('fil.nudge.closeA11y')}
+          onClose={() => {
+            void markCaptureReminderNudgeSeen();
+            setShowReminderNudge(false);
+          }}
+          onPress={() => {
+            setShowReminderNudge(false);
+            void (async () => {
+              void markCaptureReminderNudgeSeen();
+              const result = await activateCaptureReminderFromNudge();
+              if (result === 'enabled') {
+                const prefs = await peekCachedNotificationPrefs();
+                setReminderLocalTime(prefs.captureReminderLocalTime);
+                setReminderTimeSheetOpen(true);
+                return;
+              }
+              if (result === 'needs_settings') {
+                void Linking.openSettings();
+                return;
+              }
+              router.push('/parent-space');
+            })();
+          }}
+        />
+      ) : null}
+      <CaptureReminderTimeSheet
+        visible={reminderTimeSheetOpen}
+        selectedTime={reminderLocalTime}
+        onSelect={time => {
+          const snapped = snapCaptureReminderTimeToSlot(time);
+          setReminderLocalTime(snapped);
+          void saveNotificationPrefs({ captureReminderLocalTime: snapped });
+        }}
+        onClose={() => setReminderTimeSheetOpen(false)}
+      />
     </View>
   );
 }
@@ -1474,6 +1586,22 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: CAPTURE_SCREEN_BG,
   },
+  /** Hit-slop édition profil — sous les pills, au-dessus du titre / CTA. */
+  captureHeroEditHit: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 2,
+  },
+  /** V9 : aligne le bas du hit sur le haut du bloc titre (~scrim 48 %). */
+  captureHeroEditHitV9: {
+    bottom: '48%',
+  },
+  /** Classique : laisse le tagline bas hors zone. */
+  captureHeroEditHitClassic: {
+    bottom: '28%',
+  },
   capturePhotoPillsBar: {
     position: 'absolute',
     top: scale(12),
@@ -1554,6 +1682,7 @@ const styles = StyleSheet.create({
   captureV9TitleRow: {
     alignSelf: 'stretch',
     paddingHorizontal: scale(4),
+    gap: verticalScale(2),
   },
   captureV9Title: {
     fontSize: scale(22),
@@ -1849,8 +1978,10 @@ function CaptureHeroImageStack({
 
 export default function CapturerScreenTab() {
   return (
-    <TabSceneTransition backgroundColor={CAPTURE_SCREEN_BG}>
-      <CapturerScreen />
-    </TabSceneTransition>
+    <TabScreenErrorBoundary tab="index">
+      <TabSceneTransition backgroundColor={CAPTURE_SCREEN_BG}>
+        <CapturerScreen />
+      </TabSceneTransition>
+    </TabScreenErrorBoundary>
   );
 }

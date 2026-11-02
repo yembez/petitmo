@@ -5,7 +5,6 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
-  StyleSheet,
   InteractionManager,
   DeviceEventEmitter,
   useWindowDimensions,
@@ -37,7 +36,10 @@ import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { peekHasRealAuthAccount } from '@/lib/authAccount';
 import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
-import { tabBarFloatingOverlapPad } from '@/constants/tabBarLayout';
+import {
+  tabBarFloatingBottomInset,
+  tabBarFloatingOverlapPad,
+} from '@/constants/tabBarLayout';
 import { FeedHeader } from '@/components/feed/FeedHeader';
 import FeedFlashDebugBar from '@/components/feed/FeedFlashDebugBar';
 import SettingsHeaderButton from '@/components/SettingsHeaderButton';
@@ -63,12 +65,17 @@ import {
 import { hasFeedImmersiveHost } from '@/utils/feedImmersiveHostRegistry';
 import { useFocusEffect } from '@react-navigation/native';
 import { getTimingNudge, markNudgeSeen, recordInstallDate } from '@/lib/paywallTiming';
+import SoftNudgeBanner from '@/components/SoftNudgeBanner';
 import type { Child, Memory } from '@/types/local';
 import {
   buildOptimisticMemoryForPending,
   canRenderOptimisticPendingRow,
 } from '@/utils/feedHelpers';
 import TabSceneTransition from '@/components/TabSceneTransition';
+import TabScreenErrorBoundary from '@/components/TabScreenErrorBoundary';
+import { useTabBlankWatchdog } from '@/hooks/useTabBlankWatchdog';
+import { recordWarn } from '@/lib/diagnosticTrail';
+import { FeedLoadingDots } from '@/components/FeedLoadingDots';
 
 function FilScreen() {
   const router = useRouter();
@@ -76,7 +83,8 @@ function FilScreen() {
   const { pending: pendingUploads } = usePendingMediaUploads();
   const insets = useSafeAreaInsets();
   const { width: screenW } = useWindowDimensions();
-  const [timingNudge, setTimingNudge] = useState<'DAY_30' | 'DAY_60' | null>(null);
+  /** Nudge abo Fil uniquement — pas de bannière rappel ici (sheet Modal OK sur Capturer). */
+  const [paywallNudge, setPaywallNudge] = useState<'DAY_30' | 'DAY_60' | null>(null);
   const listRef = useRef<FlatList<FeedListItem> | null>(null);
   const feedScrollOffsetRef = useRef(0);
   /** Après delete : re-pin cet offset (évite le saut FlatList). */
@@ -517,13 +525,24 @@ function FilScreen() {
           return;
         }
         if (nudge === 'DAY_30' || nudge === 'DAY_60') {
-          setTimingNudge(nudge);
+          setPaywallNudge(nudge);
         }
       });
 
       return () => {
         cancelAnimationFrame(viewabilityFrame);
         scrollTask?.cancel();
+        /**
+         * Quitter l’onglet avec opacity 0 (intent annulé / race InteractionManager)
+         * = fil blanc au retour + parfois composite blanc sous les autres onglets.
+         */
+        if (immersiveRevealTimerRef.current) {
+          clearTimeout(immersiveRevealTimerRef.current);
+          immersiveRevealTimerRef.current = null;
+        }
+        immersiveSnapInFlightRef.current = false;
+        pendingScrollIntentRef.current = null;
+        setFeedListOpacity(1);
         /** Relais immersif : le lecteur doit continuer, pas s’arrêter au blur du fil. */
         if (!isAnyVideoKeepAlive()) suspendFeedInlineVideo();
       };
@@ -568,12 +587,37 @@ function FilScreen() {
   useEffect(() => {
     if (feedListOpacity !== 0) return;
     const fallback = setTimeout(() => {
+      const wasImmersive = immersiveSnapInFlightRef.current;
       pendingScrollIntentRef.current = null;
       immersiveSnapInFlightRef.current = false;
       setFeedListOpacity(1);
+      recordWarn(
+        'fil.opacity.forceReveal',
+        wasImmersive ? 'immersive_timeout' : 'scroll_intent_timeout',
+      );
     }, immersiveSnapInFlightRef.current ? 900 : 500);
     return () => clearTimeout(fallback);
   }, [feedListOpacity]);
+
+  const filPaintBlank =
+    feedListOpacity < 0.05 ||
+    (isLoading && pendingUploads.length === 0 && !peekSilentInitialFilLoadArmed()) ||
+    (familyChildren.length === 0 && pendingUploads.length === 0 && !peekHasRealAuthAccount());
+  const filPaintReason =
+    feedListOpacity < 0.05
+      ? 'opacity0'
+      : isLoading && pendingUploads.length === 0 && !peekSilentInitialFilLoadArmed()
+        ? 'loading'
+        : familyChildren.length === 0 && !peekHasRealAuthAccount()
+          ? 'no_auth_blank'
+          : familyChildren.length === 0
+            ? 'no_child'
+            : 'ok';
+  useTabBlankWatchdog('fil', {
+    blank: filPaintBlank && filPaintReason !== 'ok',
+    reason: filPaintBlank ? filPaintReason : 'ok',
+    detail: `op=${feedListOpacity}`,
+  });
 
   /** Import / replace vers le fil déjà actif : le focus ne repasse pas, on consomme l’intent au changement de données. */
   useEffect(() => {
@@ -617,11 +661,12 @@ function FilScreen() {
   }
 
   if (familyChildren.length === 0 && pendingUploads.length === 0) {
-    // Déconnecté / ghost : jamais « Créer un profil » — sortir vers onboarding.
+    // Déconnecté / ghost : jamais « Créer un profil » — dots le temps que la gate kick.
     if (!peekHasRealAuthAccount()) {
       return (
         <View style={[styles.container, styles.centered]}>
           <StatusBar style="dark" />
+          <FeedLoadingDots color={THEME.textPrimary} />
         </View>
       );
     }
@@ -700,9 +745,9 @@ function FilScreen() {
               return;
             }
           }}
-          bounces={false}
-          overScrollMode="never"
-          alwaysBounceVertical={false}
+          bounces
+          alwaysBounceVertical
+          overScrollMode="auto"
           style={styles.scrollView}
           contentContainerStyle={listContentContainerStyle}
           showsVerticalScrollIndicator={false}
@@ -764,23 +809,27 @@ function FilScreen() {
           onPressChild={onFeedHeaderChildPress}
         />
       </View>
-      {timingNudge && (
-        <TouchableOpacity
-          style={[localStyles.nudgeBanner, { bottom: Math.max(insets.bottom, 0) + verticalScale(10) }]}
-          activeOpacity={0.9}
-          onPress={() => {
-            router.push({ pathname: '/paywall', params: { context: timingNudge } });
-            setTimingNudge(null);
+      {paywallNudge ? (
+        <SoftNudgeBanner
+          bottom={tabBarFloatingBottomInset(insets.bottom) + verticalScale(10)}
+          body={
+            paywallNudge === 'DAY_30'
+              ? t('fil.nudge.paywallDay30')
+              : t('fil.nudge.paywallDay60')
+          }
+          cta={t('fil.nudge.paywallCta')}
+          closeA11y={t('fil.nudge.closeA11y')}
+          onClose={() => {
+            void markNudgeSeen();
+            setPaywallNudge(null);
           }}
-        >
-          <Text style={localStyles.nudgeText} numberOfLines={2}>
-            {timingNudge === 'DAY_30'
-              ? "Tes souvenirs méritent d'être protégés ♡"
-              : 'Ne perds aucun moment — passe à l’abonnement Petit Cœur'}
-          </Text>
-          <Text style={localStyles.nudgeCta}>Découvrir →</Text>
-        </TouchableOpacity>
-      )}
+          onPress={() => {
+            const context = paywallNudge;
+            setPaywallNudge(null);
+            router.push({ pathname: '/paywall', params: { context } });
+          }}
+        />
+      ) : null}
       <EditTextModal
         key={editingMemory?.id ?? 'edit-caption-modal-closed'}
         visible={editModalVisible}
@@ -813,34 +862,10 @@ function FilScreen() {
 
 export default function FilScreenTab() {
   return (
-    <TabSceneTransition>
-      <FilScreen />
-    </TabSceneTransition>
+    <TabScreenErrorBoundary tab="fil">
+      <TabSceneTransition>
+        <FilScreen />
+      </TabSceneTransition>
+    </TabScreenErrorBoundary>
   );
 }
-
-const localStyles = StyleSheet.create({
-  nudgeBanner: {
-    position: 'absolute',
-    left: 20,
-    right: 20,
-    backgroundColor: '#1C1C1E',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderRadius: 14,
-  },
-  nudgeText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    flex: 1,
-  },
-  nudgeCta: {
-    color: THEME.brandCtaOrange,
-    fontSize: 13,
-    fontWeight: '600',
-    marginLeft: 8,
-  },
-});
