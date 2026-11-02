@@ -171,7 +171,7 @@ type Plan = 'yearly' | 'monthly'
 
 const PAYWALL_BG = THEME.bg
 /** Orange CTA charte plein — paywall (CTA, badges, sélection plan). */
-const ACCENT = THEME.brandCtaOrange
+const ACCENT = THEME.brandPrimary
 const ACCENT_SOFT = THEME.tabBarActivePill
 /** Cœur hero paywall uniquement — rosé charte. */
 const PAYWALL_HEART = THEME.brandPrimary

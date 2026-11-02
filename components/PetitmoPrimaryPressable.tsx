@@ -1,13 +1,10 @@
 import type { ReactNode } from 'react';
 import {
-  StyleSheet,
   type GestureResponderEvent,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import MotionPressable from '@/components/MotionPressable';
-import { BRAND_ACTION_GRADIENT } from '@/constants/captureScreenPalette';
 import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 
 type Props = {
@@ -25,7 +22,7 @@ type Props = {
 };
 
 /**
- * CTA primaire — dégradé rose→corail Capturer (`#FC5757`), texte blanc via `petitmoCtaStyles.primaryText`.
+ * CTA primaire — corail Capturer uni (`THEME.brandPrimary` / `#FC5757`), texte blanc.
  * Appui = scale (pas d’activeOpacity translucide).
  */
 export default function PetitmoPrimaryPressable({
@@ -48,12 +45,6 @@ export default function PetitmoPrimaryPressable({
       testID={testID}
       style={[petitmoCtaStyles.primary, style, disabled ? petitmoCtaStyles.primaryDisabled : null]}
     >
-      <LinearGradient
-        colors={[...BRAND_ACTION_GRADIENT]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={StyleSheet.absoluteFillObject}
-      />
       {children}
     </MotionPressable>
   );

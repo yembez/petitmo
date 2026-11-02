@@ -261,7 +261,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   pickerItemSelected: {
-    backgroundColor: THEME.brandCtaOrange,
+    backgroundColor: THEME.brandPrimary,
     marginHorizontal: SPACING.xs,
     borderRadius: scale(6),
   },

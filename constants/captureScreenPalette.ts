@@ -46,10 +46,10 @@ export const CAPTURE_CTA_IMPORT_GRADIENT = ['#FD6F9F', '#FD7D4D'] as const;
  */
 export const CAPTURE_CTA_ICON_CORAL = '#FC5757';
 /**
- * CTA primaire app (`PetitmoPrimaryPressable` / Morph / Commander livre…).
- * Rose → corail Capturer `#FC5757` (même teinte que les disques d2).
+ * @deprecated CTA primaires = corail uni `CAPTURE_CTA_ICON_CORAL` / `THEME.brandPrimary`.
+ * Conservé plat (2 stops identiques) pour call-sites legacy encore en LinearGradient.
  */
-export const BRAND_ACTION_GRADIENT = ['#FD628D', CAPTURE_CTA_ICON_CORAL] as const;
+export const BRAND_ACTION_GRADIENT = [CAPTURE_CTA_ICON_CORAL, CAPTURE_CTA_ICON_CORAL] as const;
 /** @deprecated alias — `BRAND_ACTION_GRADIENT`. */
 export const CAPTURE_CTA_BRAND_GRADIENT = BRAND_ACTION_GRADIENT;
 /**

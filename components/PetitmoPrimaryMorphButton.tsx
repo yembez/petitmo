@@ -20,8 +20,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
-import { LinearGradient } from 'expo-linear-gradient';
-import { BRAND_ACTION_GRADIENT } from '@/constants/captureScreenPalette';
+import { THEME } from '@/constants/theme';
 import {
   MOTION_CTA_MORPH_CHECK_MS,
   MOTION_CTA_MORPH_DISK_PT,
@@ -299,12 +298,7 @@ export default function PetitmoPrimaryMorphButton({
                 pressed.value = withSpring(0, MOTION_SPRING.standard);
               }}
             >
-              <LinearGradient
-                colors={[...BRAND_ACTION_GRADIENT]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={StyleSheet.absoluteFillObject}
-              />
+              <View style={[StyleSheet.absoluteFillObject, styles.solidFill]} />
               {/* Liseré haut — matière, pas un aplat mort. */}
               <View pointerEvents="none" style={styles.sheen} />
               <Animated.View style={[styles.layer, labelStyle]} pointerEvents="none">
@@ -341,10 +335,13 @@ const styles = StyleSheet.create({
   },
   contactHost: {
     flex: 1,
-    backgroundColor: BRAND_ACTION_GRADIENT[0],
+    backgroundColor: THEME.brandPrimary,
   },
   face: {
-    backgroundColor: BRAND_ACTION_GRADIENT[0],
+    backgroundColor: THEME.brandPrimary,
+  },
+  solidFill: {
+    backgroundColor: THEME.brandPrimary,
   },
   hit: {
     flex: 1,

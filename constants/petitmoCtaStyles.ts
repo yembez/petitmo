@@ -26,16 +26,15 @@ export const PETITMO_CTA_SOFT_ELEVATION = Platform.select({
   default: {},
 });
 
-/** Spinner sur fond CTA dégradé (texte blanc). */
+/** Spinner sur fond CTA corail (texte blanc). */
 export const PETITMO_CTA_SPINNER_COLOR = '#FFFFFF';
 
 /**
- * CTA primaire app : texte blanc, coins arrondis.
- * Envelopper le contenu avec `PetitmoPrimaryGradient` (fond `#FD628D` → corail Capturer `#FC5757`).
+ * CTA primaire app : corail Capturer uni (`#FC5757`), texte blanc, coins arrondis.
+ * Utiliser via `PetitmoPrimaryPressable` / `PetitmoPrimaryMorphButton`.
  */
 export const petitmoCtaStyles = StyleSheet.create({
   primary: {
-    /** Fallback unie si pas de `PetitmoPrimaryPressable` / gradient enfant. */
     backgroundColor: THEME.captureScreenCtaBackground,
     borderRadius: PETITMO_CTA_BORDER_RADIUS,
     alignItems: 'center',

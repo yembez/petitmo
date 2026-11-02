@@ -1,23 +1,17 @@
 import type { ReactNode } from 'react';
-import { type StyleProp, type ViewStyle } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { BRAND_ACTION_GRADIENT } from '@/constants/captureScreenPalette';
+import { View, type StyleProp, type ViewStyle } from 'react-native';
+import { THEME } from '@/constants/theme';
 
 type Props = {
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
 };
 
-/** Fond dégradé rose→corail Capturer (`#FC5757`) pour CTA primaires. */
+/** Fond CTA primaire — corail Capturer uni (`#FC5757`). Nom historique « Gradient ». */
 export default function PetitmoPrimaryGradient({ children, style }: Props) {
   return (
-    <LinearGradient
-      colors={[...BRAND_ACTION_GRADIENT]}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={style}
-    >
+    <View style={[{ backgroundColor: THEME.brandPrimary }, style]}>
       {children}
-    </LinearGradient>
+    </View>
   );
 }

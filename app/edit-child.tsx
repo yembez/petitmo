@@ -14,14 +14,12 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { LinearGradient } from 'expo-linear-gradient';
 import { ArrowLeft, Camera, Menu, Trash2 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { scale, verticalScale } from '@/utils/responsive';
 import { SPACING, FONT_SIZES, PROFILE_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
-import { CAPTURE_CTA_IMPORT_GRADIENT } from '@/constants/captureScreenPalette';
 import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import PetitmoPrimaryMorphButton, {
   type PetitmoMorphPhase,
@@ -406,14 +404,9 @@ export default function EditChildScreen() {
                 <ActivityIndicator size="small" color="#FFFFFF" />
               </View>
             ) : (
-              <LinearGradient
-                colors={[...CAPTURE_CTA_IMPORT_GRADIENT]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.photoIconContainer}
-              >
+              <View style={[styles.photoIconContainer, { backgroundColor: THEME.brandPrimary }]}>
                 <Camera size={20} color="#FFFFFF" strokeWidth={2} />
-              </LinearGradient>
+              </View>
             )}
           </TouchableOpacity>
           <Text style={[styles.photoHint, dm500 ? { fontFamily: dm500 } : null]}>Appuyez pour recadrer</Text>

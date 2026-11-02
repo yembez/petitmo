@@ -1,7 +1,6 @@
 import {
   BRAND_ACTION_ACCENT,
   BRAND_ACTION_ACCENT_RGB,
-  BRAND_ACTION_GRADIENT,
   BRAND_SPLASH_GRADIENT,
   CAPTURE_SCREEN_BG,
   CAPTURE_CTA_BORDER,
@@ -99,9 +98,9 @@ export const THEME = {
   captureCoralCtaBackground: BRAND_CTA_ACCENT,
   /** @deprecated — `captureScreenCtaBackground` */
   captureAccentYellow: BRAND_CTA_ACCENT,
-  /** Fond CTA primaire app (fallback solid) — préfère `BRAND_ACTION_GRADIENT`. */
-  captureScreenCtaBackground: BRAND_CTA_ACCENT,
-  /** Libellé + icône sur fond CTA primaire (dégradé rose→corail Capturer). */
+  /** Fond CTA primaire app — corail Capturer / disques d2 (`#FC5757`), uni (plus de dégradé). */
+  captureScreenCtaBackground: BRAND_PRIMARY,
+  /** Libellé + icône sur fond CTA primaire corail. */
   captureScreenCtaForeground: '#FFFFFF',
   /** @deprecated — `captureScreenCtaBackground` */
   captureWriteCtaRose: BRAND_CTA_ACCENT,
