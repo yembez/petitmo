@@ -429,23 +429,20 @@ async function materializeVideoMemory(row: Memory): Promise<boolean> {
     return ok;
   };
 
-  if (!(await hasReadableVideoOriginal(memory)) && hasCloudOriginalRef(memory)) {
-    const ok = await matLog('video', async () => {
-      const localVideo = await downloadCloudOriginalToSandbox(memory, 'video');
-      return !!localVideo;
-    });
-    if (ok) {
-      changed = true;
-      memory = getLocalMemoryById(row.id) ?? memory;
-    }
-  }
+  /**
+   * Poster JPEG cloud **en parallèle** de l’original vidéo (pas avant, pas bloquant).
+   * Restore 1ʳᵉ session : peindre fil / Favoris pendant le DL vidéo (~10–20 s).
+   * Interdit : await posterLocal/extract avant la vidéo (deadlock OTA poster-first).
+   */
+  const needsVideo =
+    !(await hasReadableVideoOriginal(memory)) && hasCloudOriginalRef(memory);
+  const needsPosterRemote =
+    !(await hasReadableVideoFeedPoster(memory)) && !!remoteVideoPosterRef(memory);
 
-  memory = getLocalMemoryById(row.id) ?? memory;
-
-  if (!(await hasReadableVideoFeedPoster(memory))) {
-    const remotePoster = remoteVideoPosterRef(memory);
-    if (remotePoster) {
-      const ok = await matLog('posterRemote', async () => {
+  const posterRemotePromise = needsPosterRemote
+    ? matLog('posterRemote', async () => {
+        const remotePoster = remoteVideoPosterRef(memory);
+        if (!remotePoster) return false;
         const localPoster = await downloadCloudFileToSandbox(
           memory.id,
           remotePoster,
@@ -459,13 +456,36 @@ async function materializeVideoMemory(row: Memory): Promise<boolean> {
           thumbnail_url: localPoster,
           updated_at: new Date().toISOString(),
         });
+        try {
+          const { setFeedVideoPosterStableCache } = await import(
+            '@/hooks/feedVideoPosterStableCache'
+          );
+          setFeedVideoPosterStableCache(memory.id, localPoster);
+        } catch {
+          /* ignore */
+        }
+        /** UI avant la fin du DL vidéo — hook poster re-résout via memories-updated. */
+        DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId: memory.id });
         return true;
-      });
-      if (ok) {
-        changed = true;
-        memory = getLocalMemoryById(row.id) ?? memory;
-      }
+      })
+    : Promise.resolve(false);
+
+  if (needsVideo) {
+    const ok = await matLog('video', async () => {
+      const localVideo = await downloadCloudOriginalToSandbox(memory, 'video');
+      return !!localVideo;
+    });
+    if (ok) {
+      changed = true;
+      memory = getLocalMemoryById(row.id) ?? memory;
     }
+  }
+
+  if (await posterRemotePromise) {
+    changed = true;
+    memory = getLocalMemoryById(row.id) ?? memory;
+  } else {
+    memory = getLocalMemoryById(row.id) ?? memory;
   }
 
   if (!(await hasReadableVideoFeedPoster(memory))) {

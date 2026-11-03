@@ -80,13 +80,22 @@ export async function resolveFeedVideoPosterDisplayUri(memory: Memory): Promise<
   return '';
 }
 
-/** Sync : cache session ou chemin DB connu (1er paint fil / favoris). */
+/**
+ * Sync : cache session ou ref cloud HTTPS (1er paint fil / Favoris).
+ * Ne jamais peindre un chemin sandbox non vérifié — Image morte → Favoris gris / fil noir
+ * jusqu’à la 2ᵉ session (H3 restore).
+ */
 export function peekSyncFeedVideoPosterDisplayUri(memory: Memory): string {
   if (memory.type !== 'video') return '';
   const cached = peekFeedVideoPosterStableCache(memory.id);
   if (cached && isUsableFeedPosterUri(cached)) {
     return normalizePosterDisplay(cached, memory.updated_at);
   }
+  if (cached) invalidateFeedVideoPosterStableCache(memory.id);
+
   const sync = getVideoPosterUriForFeedAndViewer(memory).trim();
-  return sync ? normalizePosterDisplay(sync, memory.updated_at) : '';
+  if (!sync) return '';
+  if (isDeviceLocalMediaUri(sync)) return '';
+  if (!/^https?:\/\//i.test(sync)) return '';
+  return normalizePosterDisplay(sync, memory.updated_at);
 }
