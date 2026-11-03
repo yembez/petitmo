@@ -357,7 +357,13 @@ export default function BookOrderScreen() {
 
   /** Prefill synchrone (mémoire) — évite formulaire vide puis « pop » AsyncStorage/CRM. */
   const seedForm = peekLastPrintOrderForm();
-  const [email, setEmail] = useState(seedForm?.email ?? '');
+  /** Low Friction : dernière commande → guest export → e-mail du compte Auth. */
+  const seedEmail = (
+    seedForm?.email?.trim() ||
+    peekRealAuthEmail().trim() ||
+    ''
+  ).toLowerCase();
+  const [email, setEmail] = useState(seedEmail);
   const [fullName, setFullName] = useState(seedForm?.fullName ?? '');
   /** Case légale impression — décochée par défaut. */
   const [contentVerified, setContentVerified] = useState(false);
@@ -379,7 +385,7 @@ export default function BookOrderScreen() {
    * jamais l’état — c’est ce qui part au serveur / Gelato.
    */
   const liveFormRef = useRef<Record<LiveTextField, string>>({
-    email: seedForm?.email ?? '',
+    email: seedEmail,
     fullName: seedForm?.fullName ?? '',
     shippingName: seedForm?.shippingName ?? '',
     line1: seedForm?.line1 ?? '',
@@ -519,9 +525,18 @@ export default function BookOrderScreen() {
         setMemoryPageCount(mpc);
 
         // Prefill local immédiat (avant paint) — CRM en fond ne fait que combler les vides.
-        const startEmail = (localForm?.email || tLast || '').trim().toLowerCase();
+        const startEmail = (
+          localForm?.email ||
+          tLast ||
+          peekRealAuthEmail() ||
+          ''
+        )
+          .trim()
+          .toLowerCase();
         if (startEmail) {
-          applyField('email', startEmail);
+          if (!liveFormRef.current.email.trim()) {
+            applyField('email', startEmail);
+          }
           setEmailEditing(false);
         }
         if (localForm) {

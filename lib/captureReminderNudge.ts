@@ -17,6 +17,12 @@ import {
 } from '@/lib/notificationPrefs';
 import { registerPushTokenInBackground } from '@/services/registerPushToken';
 
+/**
+ * TF / App Review : `false` — nouveau device = nudge systématique, pollue la review.
+ * Remettre `true` pour la prod publique.
+ */
+export const CAPTURE_REMINDER_NUDGE_ENABLED = false;
+
 const LAST_NUDGE_KEY = 'petitmo_last_capture_reminder_nudge';
 
 export type ActivateCaptureReminderResult =
@@ -33,6 +39,7 @@ export async function isCaptureReminderEffectivelyOff(): Promise<boolean> {
 }
 
 export async function shouldShowCaptureReminderNudge(): Promise<boolean> {
+  if (!CAPTURE_REMINDER_NUDGE_ENABLED) return false;
   if (!(await isCaptureReminderEffectivelyOff())) return false;
 
   const lastNudgeStr = await AsyncStorage.getItem(LAST_NUDGE_KEY);
