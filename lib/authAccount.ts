@@ -598,7 +598,13 @@ function mapAuthError(message: string): string {
   if (m.includes('user already registered') || m.includes('already been registered')) {
     return 'Un compte existe déjà avec cet e-mail. Connecte-toi ou réinitialise ton mot de passe.';
   }
-  if (m.includes('password should be at least') || m.includes('password')) {
+  if (m.includes('over_email_send_rate_limit') || m.includes('only request this after') || m.includes('rate limit')) {
+    return 'Trop de demandes d’e-mail. Réessaie dans une minute.';
+  }
+  if (m.includes('password should be at least')) {
+    return 'Le mot de passe doit contenir au moins 8 caractères.';
+  }
+  if (m.includes('password') && (m.includes('weak') || m.includes('least') || m.includes('characters'))) {
     return 'Le mot de passe doit contenir au moins 8 caractères.';
   }
   if (m.includes('email')) {
