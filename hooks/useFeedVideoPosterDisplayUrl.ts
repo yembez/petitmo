@@ -6,6 +6,7 @@ import {
   peekSyncFeedVideoPosterDisplayUri,
   resolveFeedVideoPosterDisplayUri,
 } from '@/utils/feedVideoPosterUri';
+import { feedFlashLog, feedFlashUriKind } from '@/lib/feedFlashDebug';
 
 function stickyPosterUri(prev: string, next: string): string {
   const n = next.trim();
@@ -51,6 +52,12 @@ export function useFeedVideoPosterDisplayUrl(memory: Memory): string {
 
     const cached = peekFeedVideoPosterStableCache(memory.id);
     if (cached) {
+      feedFlashLog('restore.posterHook', {
+        id: memory.id.slice(0, 8),
+        via: 'cache',
+        kind: feedFlashUriKind(cached),
+        localThumb: !!memory.local_thumb_path?.trim(),
+      });
       setUri(prev => stickyPosterUri(prev, cached));
       return;
     }
@@ -58,7 +65,16 @@ export function useFeedVideoPosterDisplayUrl(memory: Memory): string {
     let alive = true;
     void (async () => {
       const resolved = await resolveFeedVideoPosterDisplayUri(memory);
-      if (!alive || !resolved.trim()) return;
+      if (!alive) return;
+      feedFlashLog('restore.posterHook', {
+        id: memory.id.slice(0, 8),
+        via: 'resolve',
+        ok: !!resolved.trim(),
+        kind: feedFlashUriKind(resolved),
+        localThumb: !!memory.local_thumb_path?.trim(),
+        posterUrl: !!memory.poster_url?.trim(),
+      });
+      if (!resolved.trim()) return;
       setUri(prev => stickyPosterUri(prev, resolved));
     })();
 

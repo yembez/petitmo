@@ -13,8 +13,8 @@ import {
 import { scale } from '@/utils/responsive';
 
 /**
- * Barre debug flash fil — visible seulement si activée (appui long titre header).
- * « J’ai vu le flash » marque l’instant ; « Exporter » → coller dans le chat Cursor.
+ * Barre debug flash / restore — visible si activée (appui long titre header Fil).
+ * « J’ai vu le flash » marque l’instant ; « Exporter » → coller dans Cursor.
  */
 export default function FeedFlashDebugBar() {
   const insets = useSafeAreaInsets();

@@ -3,6 +3,7 @@ import { View, StyleSheet } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import type { Memory } from '@/types/local';
 import { useFeedVideoPosterDisplayUrl } from '@/hooks/useFeedVideoPosterDisplayUrl';
+import { feedFlashLog, feedFlashUriKind } from '@/lib/feedFlashDebug';
 
 type Props = {
   memory: Memory;
@@ -22,6 +23,23 @@ export default function FavorisVideoThumb({ memory, recyclingKey, posterUri, onR
   const poster = (posterUri ?? posterFromHook).trim();
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
+
+  useEffect(() => {
+    feedFlashLog('favoris.thumb', {
+      id: memory.id.slice(0, 8),
+      poster: !!poster,
+      posterKind: feedFlashUriKind(poster),
+      localThumb: !!memory.local_thumb_path?.trim(),
+      posterUrl: !!memory.poster_url?.trim(),
+      key: recyclingKey.slice(0, 24),
+    });
+  }, [
+    memory.id,
+    memory.local_thumb_path,
+    memory.poster_url,
+    poster,
+    recyclingKey,
+  ]);
 
   useEffect(() => {
     if (poster) return;

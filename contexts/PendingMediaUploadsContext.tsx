@@ -101,7 +101,7 @@ export function PendingMediaUploadsProvider({ children }: { children: React.Reac
         /** Scroll vers la carte où qu’elle soit chronologiquement (pas forcément le haut). */
         armFeedSnapToKeyOnFocus(tempId);
         if (kind === 'video') {
-          setFeedAutoplayActiveMemoryId(null);
+          setFeedAutoplayActiveMemoryId(null, 'pending-video');
         }
 
         let previewPosterUri: string | undefined;

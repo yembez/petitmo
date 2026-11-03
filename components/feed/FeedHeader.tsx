@@ -132,9 +132,9 @@ export const FeedHeader = memo(function FeedHeader({
               const next = !isFeedFlashDebugEnabled();
               void setFeedFlashDebugEnabled(next).then(() => {
                 Alert.alert(
-                  'Debug flash fil',
+                  'Debug restore / flash',
                   next
-                    ? 'Activé. Reproduis le flash, appuie sur « J’ai vu le flash », puis Exporter et colle le texte dans Cursor.'
+                    ? 'Activé. Wipe+login = 1ʳᵉ session : fil (noir ?) → Favoris → « J’ai vu le flash » → Exporter. Kill+rouvre = 2ᵉ session : même export. Colle les 2 textes dans Cursor.'
                     : 'Désactivé.',
                 );
               });

@@ -44,7 +44,6 @@ import { FeedHeader } from '@/components/feed/FeedHeader';
 import FeedFlashDebugBar from '@/components/feed/FeedFlashDebugBar';
 import SettingsHeaderButton from '@/components/SettingsHeaderButton';
 import type { FeedListItem } from '@/components/feed/FilMemoryRow';
-import { feedFlashLog } from '@/lib/feedFlashDebug';
 import { peekSilentInitialFilLoadArmed } from '@/services/feedAfterImportFlags';
 import { setMemoryViewerSession } from '@/services/memoryViewerSession';
 import { claimVideoKeepAlive, isAnyVideoKeepAlive } from '@/lib/videoPlayerPool';
@@ -97,9 +96,6 @@ function FilScreen() {
    */
   const [mvcWhileScrolling, setMvcWhileScrolling] = useState(false);
   const mvcScrollOffTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    feedFlashLog('fil.listOpacity', { opacity: feedListOpacity });
-  }, [feedListOpacity]);
   useEffect(
     () => () => {
       if (mvcScrollOffTimerRef.current) clearTimeout(mvcScrollOffTimerRef.current);
@@ -313,12 +309,10 @@ function FilScreen() {
       mvcScrollOffTimerRef.current = null;
     }
     setMvcWhileScrolling(true);
-    feedFlashLog('fil.scrollBegin', { y: Math.round(feedScrollOffsetRef.current) });
     onFeedScrollBegin();
   }, [onFeedScrollBegin]);
 
   const onFeedScrollStopped = useCallback(() => {
-    feedFlashLog('fil.scrollEnd', { y: Math.round(feedScrollOffsetRef.current) });
     onFeedScrollIdle();
     if (mvcScrollOffTimerRef.current) clearTimeout(mvcScrollOffTimerRef.current);
     /** Laisser le fling / les mounts batch se stabiliser avant de couper MVC. */
@@ -489,6 +483,21 @@ function FilScreen() {
     }
   }, [applyPendingFeedScrollIntent]);
 
+  /**
+   * Refs stables : `useFocusEffect` rejoue cleanup+setup dès que le callback
+   * change d’identité. `applyPendingFeedScrollIntent` dépend de `feedData` →
+   * chaque patch / mount voisin suspendait l’autoplay (flash noir / replay).
+   * Logs TF 2speek : `active→null` avec `onScreen:true`, sans reconcile.
+   */
+  const applyPendingFeedScrollIntentRef = useRef(applyPendingFeedScrollIntent);
+  applyPendingFeedScrollIntentRef.current = applyPendingFeedScrollIntent;
+  const applyImmersiveSnapHiddenRef = useRef(applyImmersiveSnapHidden);
+  applyImmersiveSnapHiddenRef.current = applyImmersiveSnapHidden;
+  const refreshFeedVideoAutoplayRef = useRef(refreshFeedVideoAutoplay);
+  refreshFeedVideoAutoplayRef.current = refreshFeedVideoAutoplay;
+  const suspendFeedInlineVideoRef = useRef(suspendFeedInlineVideo);
+  suspendFeedInlineVideoRef.current = suspendFeedInlineVideo;
+
   useFocusEffect(
     useCallback(() => {
       const intent = consumeFeedScrollIntent();
@@ -498,7 +507,7 @@ function FilScreen() {
         const immersiveJump =
           intent.type === 'snapToKey' && intent.animated !== true;
         if (immersiveJump) {
-          applyImmersiveSnapHidden();
+          applyImmersiveSnapHiddenRef.current();
         } else {
           const softScroll =
             intent.type === 'snapToKey' && intent.animated === true;
@@ -506,14 +515,14 @@ function FilScreen() {
             setFeedListOpacity(0);
           }
           scrollTask = InteractionManager.runAfterInteractions(() => {
-            applyPendingFeedScrollIntent();
+            applyPendingFeedScrollIntentRef.current();
           });
         }
       }
 
       const viewabilityFrame = requestAnimationFrame(() => {
         listRef.current?.recordInteraction?.();
-        refreshFeedVideoAutoplay();
+        refreshFeedVideoAutoplayRef.current();
       });
 
       void recordInstallDate();
@@ -544,15 +553,9 @@ function FilScreen() {
         pendingScrollIntentRef.current = null;
         setFeedListOpacity(1);
         /** Relais immersif : le lecteur doit continuer, pas s’arrêter au blur du fil. */
-        if (!isAnyVideoKeepAlive()) suspendFeedInlineVideo();
+        if (!isAnyVideoKeepAlive()) suspendFeedInlineVideoRef.current();
       };
-    }, [
-      router,
-      applyPendingFeedScrollIntent,
-      applyImmersiveSnapHidden,
-      refreshFeedVideoAutoplay,
-      suspendFeedInlineVideo,
-    ]),
+    }, [router]),
   );
 
   /**
@@ -713,11 +716,7 @@ function FilScreen() {
           onScrollEndDrag={onFeedScrollStopped}
           onMomentumScrollEnd={onFeedScrollStopped}
           scrollEventThrottle={16}
-          onContentSizeChange={(w, h) => {
-            feedFlashLog('fil.contentSize', {
-              h: Math.round(h),
-              y: Math.round(feedScrollOffsetRef.current),
-            });
+          onContentSizeChange={(_w, _h) => {
             onFeedContentSizeChange();
           }}
           onScrollToIndexFailed={info => {

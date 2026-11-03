@@ -1,5 +1,7 @@
 import { useEffect } from 'react';
 import type { VideoPlayer } from 'expo-video';
+import { feedFlashLog } from '@/lib/feedFlashDebug';
+import { recordWarn } from '@/lib/diagnosticTrail';
 
 export type VideoShouldPlayOptions = {
   /** Fil : une vidéo revue après être sortie de l’écran repart de t=0. */
@@ -12,6 +14,8 @@ export type VideoShouldPlayOptions = {
   pauseGraceMs?: number;
   /** Le viewer tient le lecteur : ne pas pauser / rembobiner pendant le relais. */
   skipPause?: boolean;
+  /** Id court pour correl logs feedFlash (investigation). */
+  debugMemoryId?: string | null;
 };
 
 /**
@@ -28,12 +32,25 @@ export function useVideoShouldPlay(
   const restartFromBeginning = options?.restartFromBeginningOnPlay === true;
   const pauseGraceMs = options?.pauseGraceMs ?? 0;
   const skipPause = options?.skipPause === true;
+  const debugId = options?.debugMemoryId?.slice(0, 8) ?? null;
 
   useEffect(() => {
     if (!player) return;
 
     if (shouldPlay) {
       try {
+        let t = 0;
+        try {
+          t = Number(player.currentTime) || 0;
+        } catch {
+          t = 0;
+        }
+        feedFlashLog('video.shouldPlay', {
+          id: debugId,
+          play: true,
+          t: Math.round(t * 100) / 100,
+          restartFlag: restartFromBeginning,
+        });
         /**
          * Le rembobinage se fait à la pause (sortie d’écran), pas ici :
          * sinon le retour du viewer remet à zéro dès que la lecture a été
@@ -46,10 +63,35 @@ export function useVideoShouldPlay(
       return;
     }
 
-    if (skipPause) return;
+    if (skipPause) {
+      feedFlashLog('video.shouldPlay', {
+        id: debugId,
+        play: false,
+        skipPause: true,
+      });
+      return;
+    }
 
     const pause = () => {
       try {
+        let t = 0;
+        try {
+          t = Number(player.currentTime) || 0;
+        } catch {
+          t = 0;
+        }
+        feedFlashLog('video.shouldPlay', {
+          id: debugId,
+          play: false,
+          t: Math.round(t * 100) / 100,
+          rewind: restartFromBeginning,
+        });
+        if (restartFromBeginning && t > 0.05) {
+          recordWarn(
+            'feed.video.rewind',
+            `${debugId ?? '?'} t=${Math.round(t * 10) / 10}s→0`,
+          );
+        }
         player.pause();
         if (restartFromBeginning) player.currentTime = 0;
       } catch {
@@ -64,5 +106,5 @@ export function useVideoShouldPlay(
 
     const timer = setTimeout(pause, pauseGraceMs);
     return () => clearTimeout(timer);
-  }, [player, shouldPlay, restartFromBeginning, pauseGraceMs, skipPause]);
+  }, [player, shouldPlay, restartFromBeginning, pauseGraceMs, skipPause, debugId]);
 }

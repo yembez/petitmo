@@ -397,10 +397,44 @@ async function materializePhotoMemory(row: Memory): Promise<boolean> {
 async function materializeVideoMemory(row: Memory): Promise<boolean> {
   let memory = getLocalMemoryById(row.id) ?? row;
   let changed = false;
+  const id8 = memory.id.slice(0, 8);
+  const matLog = async (
+    step: string,
+    run: () => Promise<boolean>,
+  ): Promise<boolean> => {
+    const t0 = Date.now();
+    try {
+      const { feedFlashLog } = await import('@/lib/feedFlashDebug');
+      feedFlashLog('restore.mat', { id: id8, step, phase: 'start' });
+    } catch {
+      /* ignore */
+    }
+    let ok = false;
+    try {
+      ok = await run();
+    } finally {
+      try {
+        const { feedFlashLog } = await import('@/lib/feedFlashDebug');
+        feedFlashLog('restore.mat', {
+          id: id8,
+          step,
+          phase: 'end',
+          ok,
+          ms: Date.now() - t0,
+        });
+      } catch {
+        /* ignore */
+      }
+    }
+    return ok;
+  };
 
   if (!(await hasReadableVideoOriginal(memory)) && hasCloudOriginalRef(memory)) {
-    const localVideo = await downloadCloudOriginalToSandbox(memory, 'video');
-    if (localVideo) {
+    const ok = await matLog('video', async () => {
+      const localVideo = await downloadCloudOriginalToSandbox(memory, 'video');
+      return !!localVideo;
+    });
+    if (ok) {
       changed = true;
       memory = getLocalMemoryById(row.id) ?? memory;
     }
@@ -411,15 +445,23 @@ async function materializeVideoMemory(row: Memory): Promise<boolean> {
   if (!(await hasReadableVideoFeedPoster(memory))) {
     const remotePoster = remoteVideoPosterRef(memory);
     if (remotePoster) {
-      const localPoster = await downloadCloudFileToSandbox(memory.id, remotePoster, 'poster.jpg');
-      if (localPoster) {
+      const ok = await matLog('posterRemote', async () => {
+        const localPoster = await downloadCloudFileToSandbox(
+          memory.id,
+          remotePoster,
+          'poster.jpg',
+        );
+        if (!localPoster) return false;
         upsertLocalMemory({
-          ...memory,
+          ...(getLocalMemoryById(row.id) ?? memory),
           local_thumb_path: localPoster,
           poster_url: localPoster,
           thumbnail_url: localPoster,
           updated_at: new Date().toISOString(),
         });
+        return true;
+      });
+      if (ok) {
         changed = true;
         memory = getLocalMemoryById(row.id) ?? memory;
       }
@@ -427,24 +469,35 @@ async function materializeVideoMemory(row: Memory): Promise<boolean> {
   }
 
   if (!(await hasReadableVideoFeedPoster(memory))) {
-    const updated = await awaitVideoPosterForBookMemory(memory.id);
-    if (updated) changed = true;
-    memory = getLocalMemoryById(row.id) ?? memory;
+    const ok = await matLog('posterLocal', async () => {
+      const updated = await awaitVideoPosterForBookMemory(memory.id);
+      return !!updated;
+    });
+    if (ok) {
+      changed = true;
+      memory = getLocalMemoryById(row.id) ?? memory;
+    }
   }
 
   if (!(await hasReadableVideoPrintPoster(memory))) {
     const remotePrint = remoteVideoPosterPrintRef(memory);
     if (remotePrint) {
-      const localPrint = await downloadCloudFileToSandbox(memory.id, remotePrint, 'poster_print.jpg');
-      if (localPrint) {
+      const ok = await matLog('print', async () => {
+        const localPrint = await downloadCloudFileToSandbox(
+          memory.id,
+          remotePrint,
+          'poster_print.jpg',
+        );
+        if (!localPrint) return false;
         upsertLocalMemory({
           ...(getLocalMemoryById(row.id) ?? memory),
           local_poster_print_path: localPrint,
           poster_print_url: localPrint,
           updated_at: new Date().toISOString(),
         });
-        changed = true;
-      }
+        return true;
+      });
+      if (ok) changed = true;
     }
   }
 

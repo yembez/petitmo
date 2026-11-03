@@ -101,7 +101,7 @@ import { styles, TEXT_POST_GUTTER } from "@/components/feed/feedStyles";
 import { memoryEditorialTextStyle } from '@/constants/memoryTextFont';
 import { ensurePlaybackAudioForListening } from '@/lib/playbackAudioMode';
 import { useIsFeedVideoAutoplay, useIsFeedVideoOnScreen } from '@/lib/feedAutoplayStore';
-import { feedFlashLog } from '@/lib/feedFlashDebug';
+import { feedFlashLog, feedFlashUriKind } from '@/lib/feedFlashDebug';
 import { setFeedRowMeasuredHeight } from '@/lib/feedRowHeightCache';
 import { loadedFontStyle } from '@/utils/loadedFontStyle';
 import {
@@ -376,6 +376,20 @@ function FilMemoryRow({
       poster: !!videoPosterUri.trim(),
       playUri: !!videoPlaybackUri.trim(),
     });
+    if (memory.type === 'video') {
+      feedFlashLog('restore.row', {
+        id: memory.id.slice(0, 8),
+        playUri: !!videoPlaybackUri.trim(),
+        poster: !!videoPosterUri.trim(),
+        playKind: feedFlashUriKind(videoPlaybackUri),
+        posterKind: feedFlashUriKind(videoPosterUri),
+        localOrig: !!memory.local_original_path?.trim(),
+        localThumb: !!memory.local_thumb_path?.trim(),
+        posterUrl: !!memory.poster_url?.trim(),
+        thumbUrl: !!memory.thumbnail_url?.trim(),
+        mediaUrl: !!memory.media_url?.trim(),
+      });
+    }
     return () => {
       feedFlashLog('row.unmount', {
         id: memory.id.slice(0, 8),
@@ -401,14 +415,29 @@ function FilMemoryRow({
       id: memory.id.slice(0, 8),
       autoplay: isFeedVideoAutoplay,
       onScreen: isFeedVideoOnScreen,
+      canInline: canAutoplayVideoInline,
       poster: !!videoPosterUri.trim(),
       playUri: !!videoPlaybackUri.trim(),
+    });
+    feedFlashLog('restore.uri', {
+      id: memory.id.slice(0, 8),
+      play: !!videoPlaybackUri.trim(),
+      poster: !!videoPosterUri.trim(),
+      playKind: feedFlashUriKind(videoPlaybackUri),
+      posterKind: feedFlashUriKind(videoPosterUri),
+      canInline: canAutoplayVideoInline,
+      onScreen: isFeedVideoOnScreen,
+      localOrig: !!memory.local_original_path?.trim(),
+      localThumb: !!memory.local_thumb_path?.trim(),
     });
   }, [
     memory.id,
     memory.type,
+    memory.local_original_path,
+    memory.local_thumb_path,
     isFeedVideoAutoplay,
     isFeedVideoOnScreen,
+    canAutoplayVideoInline,
     videoPosterUri,
     videoPlaybackUri,
   ]);
@@ -426,6 +455,8 @@ function FilMemoryRow({
   /** Garde la VideoView le temps du fondu vers le poster (sortie de zone autoplay). */
   const [keepPlayerForPosterFade, setKeepPlayerForPosterFade] = useState(false);
   const wasAutoplayingRef = useRef(false);
+  const videoPosterUriRef = useRef(videoPosterUri);
+  videoPosterUriRef.current = videoPosterUri;
   const feedInlineVideoDisplayReadyRef = useRef(false);
   feedInlineVideoDisplayReadyRef.current = feedInlineVideoDisplayReady;
   useEffect(() => {
@@ -441,13 +472,20 @@ function FilMemoryRow({
     const timer = setTimeout(() => setHandoffKeepPlayer(false), 1200);
     return () => clearTimeout(timer);
   }, [handoffKeepPlayer, viewerHoldsVideo, canAutoplayVideoInline]);
+  /**
+   * Frame entre `canAutoplay` false et `keepFade` true : sans ça le lecteur
+   * drop → remount → flash noir (surtout restore, décodeur froid).
+   */
+  const holdPlayerForExitFade =
+    wasAutoplayingRef.current && !canAutoplayVideoInline && !viewerHoldsVideo;
   const sharedVideoPlayer = useSharedVideoPlayer(
     memory.type === 'video' &&
       videoPlaybackUri.trim() &&
       (canAutoplayVideoInline ||
         viewerHoldsVideo ||
         handoffKeepPlayer ||
-        keepPlayerForPosterFade)
+        keepPlayerForPosterFade ||
+        holdPlayerForExitFade)
       ? memory.id
       : null,
     videoPlaybackUri,
@@ -487,10 +525,41 @@ function FilMemoryRow({
      * Rembobiner seulement si la carte a vraiment quitté l’écran.
      * Au retour immersif, l’autoplay peut flasher « off » une frame : ne pas
      * remettre à t=0 alors que la vignette est toujours là.
+     * Pendant le fondu sortie : ni pause/seek (sinon frame noire t=0 sous poster).
      */
-    restartFromBeginningOnPlay: !isFeedVideoOnScreen,
-    skipPause: viewerHoldsVideo || handoffKeepPlayer,
+    restartFromBeginningOnPlay:
+      !isFeedVideoOnScreen && !keepPlayerForPosterFade && !holdPlayerForExitFade,
+    skipPause:
+      viewerHoldsVideo ||
+      handoffKeepPlayer ||
+      keepPlayerForPosterFade ||
+      holdPlayerForExitFade,
+    debugMemoryId: memory.id,
   });
+
+  useEffect(() => {
+    if (memory.type !== 'video') return;
+    feedFlashLog('row.playerGate', {
+      id: memory.id.slice(0, 8),
+      hasPlayer: !!sharedVideoPlayer,
+      canInline: canAutoplayVideoInline,
+      keepAlive: viewerHoldsVideo,
+      handoff: handoffKeepPlayer,
+      keepFade: keepPlayerForPosterFade,
+      displayReady: feedInlineVideoDisplayReady,
+      rewindGate: !isFeedVideoOnScreen,
+    });
+  }, [
+    memory.id,
+    memory.type,
+    sharedVideoPlayer,
+    canAutoplayVideoInline,
+    viewerHoldsVideo,
+    handoffKeepPlayer,
+    keepPlayerForPosterFade,
+    feedInlineVideoDisplayReady,
+    isFeedVideoOnScreen,
+  ]);
 
   useEffect(() => {
     if (!sharedVideoPlayer) return;
@@ -553,26 +622,37 @@ function FilMemoryRow({
     /**
      * Reset autoplay « froid » seulement (jamais joué / déjà fondu).
      * Ne pas snaper le poster si on est en fondu de sortie ou retour immersif.
+     * Ni si la carte est encore à l’écran : un blink autoplay (ex. cleanup
+     * focus parasite) ne doit pas forcer displayReady=false → flash noir.
+     * Ni si on vient de jouer : `autoplayExit` gère le keepFade (sinon remount).
      */
     if (
       canAutoplayVideoInline ||
       viewerHoldsVideo ||
       handoffKeepPlayer ||
       keepPlayerForPosterFade ||
+      wasAutoplayingRef.current ||
+      isFeedVideoOnScreen ||
       suppressPosterAfterImmersiveRef.current
     ) {
       return;
     }
+    feedFlashLog('row.displayReset', {
+      id: memory.id.slice(0, 8),
+      reason: 'cold-off',
+    });
     setFeedInlineVideoSoundOn(false);
     setFeedInlineVideoDisplayReady(false);
     feedInlinePosterFade.setValue(1);
     feedInlineVideoReveal.setValue(0);
   }, [
+    memory.id,
     canAutoplayVideoInline,
     videoPlaybackUri,
     viewerHoldsVideo,
     handoffKeepPlayer,
     keepPlayerForPosterFade,
+    isFeedVideoOnScreen,
     feedInlinePosterFade,
     feedInlineVideoReveal,
   ]);
@@ -588,18 +668,28 @@ function FilMemoryRow({
       return;
     }
     if (!wasAutoplayingRef.current) return;
+    /** Garder le hold render jusqu’au setState keepFade (évite remount). */
+    setKeepPlayerForPosterFade(true);
     wasAutoplayingRef.current = false;
 
     if (viewerHoldsVideo || suppressPosterAfterImmersiveRef.current) {
+      feedFlashLog('row.autoplayExit', {
+        id: memory.id.slice(0, 8),
+        path: 'skip-immersive',
+      });
       setKeepPlayerForPosterFade(false);
       return;
     }
 
     const hadVisibleVideo = feedInlineVideoDisplayReadyRef.current;
-    const hasPoster = !!videoPosterUri.trim();
+    const hasPoster = !!videoPosterUriRef.current.trim();
+    feedFlashLog('row.autoplayExit', {
+      id: memory.id.slice(0, 8),
+      hadVisibleVideo,
+      hasPoster,
+    });
 
     if (hadVisibleVideo && hasPoster) {
-      setKeepPlayerForPosterFade(true);
       setFeedInlineVideoSoundOn(false);
       const anim = RNAnimated.timing(feedInlinePosterFade, {
         toValue: 1,
@@ -620,7 +710,6 @@ function FilMemoryRow({
     }
 
     if (hadVisibleVideo && !hasPoster) {
-      setKeepPlayerForPosterFade(true);
       setFeedInlineVideoSoundOn(false);
       const anim = RNAnimated.timing(feedInlineVideoReveal, {
         toValue: 0,
@@ -644,10 +733,14 @@ function FilMemoryRow({
     setFeedInlineVideoDisplayReady(false);
     feedInlinePosterFade.setValue(1);
     feedInlineVideoReveal.setValue(0);
+    /**
+     * Pas de `videoPosterUri` en deps : au restore l’URI poster se stabilise
+     * (signée → sandbox) et rejouait cleanup → remount → flash noir.
+     */
   }, [
+    memory.id,
     canAutoplayVideoInline,
     viewerHoldsVideo,
-    videoPosterUri,
     feedInlinePosterFade,
     feedInlineVideoReveal,
   ]);
@@ -957,6 +1050,10 @@ function FilMemoryRow({
                             player={sharedVideoPlayer}
                             style={StyleSheet.absoluteFillObject}
                             onFirstFrameRender={() => {
+                              feedFlashLog('row.firstFrame', {
+                                id: memory.id.slice(0, 8),
+                                wasReady: feedInlineVideoDisplayReadyRef.current,
+                              });
                               setFeedInlineVideoDisplayReady(prev => prev || true);
                               notifyFeedVideoFirstFrame(memory.id);
                             }}

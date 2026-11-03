@@ -13,6 +13,7 @@ import { peekFeedBootstrapVideoUri } from '@/services/feedLocalPhotoCache';
 import { videoPlaybackCandidateFromMemory } from '@/utils/videoMediaUri';
 import { useStableViewabilityPairsMulti } from '@/hooks/useStableViewabilityPairs';
 import { isAnyVideoKeepAlive } from '@/lib/videoPlayerPool';
+import { feedFlashLog } from '@/lib/feedFlashDebug';
 import {
   buildOptimisticMemoryForPending,
   canRenderOptimisticPendingRow,
@@ -106,6 +107,7 @@ export function useFeedVideoAutoplay(
   const eligibleVideosRef = useRef(new Map<string, number>());
   const lastEligibleViewableRef = useRef<ViewToken[]>([]);
   const scrollIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastReconcileSigRef = useRef('');
 
   const clearScrollIdleTimer = useCallback(() => {
     if (scrollIdleTimerRef.current) {
@@ -117,23 +119,54 @@ export function useFeedVideoAutoplay(
   useEffect(() => () => clearScrollIdleTimer(), [clearScrollIdleTimer]);
 
   const suspendFeedInlineVideo = useCallback(() => {
-    setFeedAutoplayActiveMemoryId(null);
+    setFeedAutoplayActiveMemoryId(null, 'suspend');
   }, []);
 
   const reconcileAutoplay = useCallback((allowNewPick: boolean) => {
     /** Relais immersif : ne pas couper l’id autoplay, sinon le fil rembobine au retour. */
-    if (isAnyVideoKeepAlive()) return;
+    if (isAnyVideoKeepAlive()) {
+      return;
+    }
 
     const current = getFeedAutoplayActiveMemoryId();
     const onScreen = onScreenVideoIdsRef.current;
     const eligible = eligibleVideosRef.current;
+    const onScreenIds = [...onScreen].map(id => id.slice(0, 8)).join(',');
+    const eligibleIds = [...eligible.entries()]
+      .map(([id, idx]) => `${id.slice(0, 8)}@${idx}`)
+      .join(',');
+
+    const logReconcile = (
+      reason: string,
+      extra?: Record<string, string | number | boolean | null | undefined>,
+    ) => {
+      const sig = `${reason}|${current?.slice(0, 8) ?? ''}|${onScreenIds}|${eligibleIds}|${allowNewPick}`;
+      /** Dedup hold/noPick spam ; toujours loguer offscreen / switch / pick. */
+      const always =
+        reason === 'offscreen→null' || reason === 'switch' || reason === 'pick';
+      if (!always && sig === lastReconcileSigRef.current) return;
+      lastReconcileSigRef.current = sig;
+      feedFlashLog('autoplay.reconcile', {
+        reason,
+        allowNewPick,
+        onScreen: onScreenIds,
+        eligible: eligibleIds,
+        ...extra,
+      });
+    };
 
     if (current && !onScreen.has(current)) {
-      setFeedAutoplayActiveMemoryId(null);
+      logReconcile('offscreen→null', { current: current.slice(0, 8) });
+      setFeedAutoplayActiveMemoryId(null, 'offscreen');
       if (!allowNewPick) return;
     }
 
-    if (!allowNewPick) return;
+    if (!allowNewPick) {
+      logReconcile('noPick', {
+        current: current ? current.slice(0, 8) : null,
+      });
+      return;
+    }
 
     const best = pickBestVideoId(eligible);
 
@@ -145,12 +178,22 @@ export function useFeedVideoAutoplay(
      */
     if (current && onScreen.has(current)) {
       if (best && best !== current) {
-        setFeedAutoplayActiveMemoryId(best);
+        logReconcile('switch', {
+          from: current.slice(0, 8),
+          to: best.slice(0, 8),
+        });
+        setFeedAutoplayActiveMemoryId(best, 'switch');
+      } else {
+        logReconcile('hysteresis-hold', {
+          current: current.slice(0, 8),
+          best: best ? best.slice(0, 8) : null,
+        });
       }
       return;
     }
 
-    setFeedAutoplayActiveMemoryId(best);
+    logReconcile('pick', { best: best ? best.slice(0, 8) : null });
+    setFeedAutoplayActiveMemoryId(best, 'pick');
   }, []);
 
   const onOnScreenViewableChanged = useCallback(
@@ -161,7 +204,13 @@ export function useFeedVideoAutoplay(
        * → coupe l’autoplay → pause + rembobinage t=0.
        */
       if (isAnyVideoKeepAlive()) return;
-      onScreenVideoIdsRef.current = collectVideoIdsFromViewable(info.viewableItems);
+      const next = collectVideoIdsFromViewable(info.viewableItems);
+      const prevSig = [...onScreenVideoIdsRef.current].map(id => id.slice(0, 8)).sort().join(',');
+      const nextSig = [...next].map(id => id.slice(0, 8)).sort().join(',');
+      if (prevSig !== nextSig) {
+        feedFlashLog('autoplay.viewable15', { from: prevSig, to: nextSig });
+      }
+      onScreenVideoIdsRef.current = next;
       setFeedOnScreenVideoIds(onScreenVideoIdsRef.current);
       reconcileAutoplay(false);
     },
@@ -173,7 +222,17 @@ export function useFeedVideoAutoplay(
       onPrefetchViewable(info);
       if (isAnyVideoKeepAlive()) return;
       lastEligibleViewableRef.current = info.viewableItems;
-      eligibleVideosRef.current = collectEligibleVideos(info.viewableItems);
+      const next = collectEligibleVideos(info.viewableItems);
+      const prevSig = [...eligibleVideosRef.current.entries()]
+        .map(([id, idx]) => `${id.slice(0, 8)}@${idx}`)
+        .join(',');
+      const nextSig = [...next.entries()]
+        .map(([id, idx]) => `${id.slice(0, 8)}@${idx}`)
+        .join(',');
+      if (prevSig !== nextSig) {
+        feedFlashLog('autoplay.viewable50', { from: prevSig, to: nextSig });
+      }
+      eligibleVideosRef.current = next;
       reconcileAutoplay(true);
     },
     [onPrefetchViewable, reconcileAutoplay],
@@ -216,6 +275,9 @@ export function useFeedVideoAutoplay(
   }, [reconcileAutoplay]);
 
   const onFeedScrollBegin = useCallback(() => {
+    feedFlashLog('autoplay.scrollBegin', {
+      active: getFeedAutoplayActiveMemoryId()?.slice(0, 8) ?? null,
+    });
     setFeedScrollIdle(false);
     clearScrollIdleTimer();
   }, [clearScrollIdleTimer]);
@@ -224,6 +286,11 @@ export function useFeedVideoAutoplay(
     clearScrollIdleTimer();
     scrollIdleTimerRef.current = setTimeout(() => {
       scrollIdleTimerRef.current = null;
+      feedFlashLog('autoplay.scrollIdle', {
+        active: getFeedAutoplayActiveMemoryId()?.slice(0, 8) ?? null,
+        eligible: [...eligibleVideosRef.current.keys()].map(id => id.slice(0, 8)).join(','),
+        onScreen: [...onScreenVideoIdsRef.current].map(id => id.slice(0, 8)).join(','),
+      });
       setFeedScrollIdle(true);
       refreshFeedVideoAutoplay();
     }, FEED_SCROLL_IDLE_MS);

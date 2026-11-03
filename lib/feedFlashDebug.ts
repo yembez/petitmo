@@ -1,7 +1,9 @@
 /**
- * Debug flash fil (TF / OTA) — ring buffer + marqueur utilisateur.
+ * Debug flash / restore vidéo (TF / OTA) — ring buffer + marqueur utilisateur.
  * Activé : appui long (~1,2 s) sur le titre du header Fil.
- * Exporter : bouton « Exporter » → Share → coller ici dans le chat.
+ * Exporter : barre « Exporter » → Share → coller dans le chat Cursor.
+ *
+ * Tags enquête écran noir 1ʳᵉ session : restore.row | restore.uri | restore.mat | favoris.thumb
  */
 import { Share } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -51,7 +53,7 @@ export async function setFeedFlashDebugEnabled(next: boolean): Promise<void> {
     /* ignore */
   }
   if (next) {
-    feedFlashLog('debug.on', {});
+    feedFlashLog('debug.on', { probe: 'restore-black-screen' });
   }
   emit();
 }
@@ -93,4 +95,17 @@ export async function shareFeedFlashDebugDump(): Promise<void> {
 export function clearFeedFlashDebugEvents(): void {
   events.length = 0;
   emit();
+}
+
+/** Préfixe court pour logs (pas d’URL complète / PII). */
+export function feedFlashUriKind(uri: string | null | undefined): string {
+  const t = (uri ?? '').trim();
+  if (!t) return '';
+  if (/^https?:\/\//i.test(t)) return 'https';
+  if (t.includes('poster_print')) return 'posterPrint';
+  if (t.includes('poster')) return 'poster';
+  if (t.includes('petitmo_feed_local_videos')) return 'feedCopy';
+  if (t.includes('petitmo_memories')) return 'sandbox';
+  if (t.startsWith('file:')) return 'file';
+  return 'other';
 }

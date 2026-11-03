@@ -34,9 +34,29 @@ export function getFeedAutoplayActiveMemoryId(): string | null {
   return activeMemoryId;
 }
 
-export function setFeedAutoplayActiveMemoryId(id: string | null): void {
+export function setFeedAutoplayActiveMemoryId(
+  id: string | null,
+  via?: string,
+): void {
   if (activeMemoryId === id) return;
+  const prev = activeMemoryId;
   activeMemoryId = id;
+  try {
+    const { feedFlashLog } = require('@/lib/feedFlashDebug') as typeof import('@/lib/feedFlashDebug');
+    feedFlashLog('autoplay.active', {
+      from: prev ? prev.slice(0, 8) : null,
+      to: id ? id.slice(0, 8) : null,
+      via: via ?? null,
+    });
+  } catch {
+    /* ignore */
+  }
+  try {
+    const { recordWarn } = require('@/lib/diagnosticTrail') as typeof import('@/lib/diagnosticTrail');
+    recordWarn('feed.video.autoplay', `${(prev ?? '∅').slice(0, 8)}→${(id ?? '∅').slice(0, 8)}`);
+  } catch {
+    /* ignore */
+  }
   emitAutoplay();
 }
 
