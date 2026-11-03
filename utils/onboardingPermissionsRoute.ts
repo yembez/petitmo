@@ -79,16 +79,62 @@ export async function replaceToOnboardingPermissionsOrCreateChild(
 /**
  * Après l’écran permissions : profil enfant si besoin, sinon fil.
  * `push` (pas `replace`) vers create-child → Back revient bien sur les accès.
+ *
+ * Important : ne pas décider sur le seul SQLite. Après login Google / restore,
+ * le local peut être vide alors que le cloud a déjà des enfants (timeout pull
+ * auth, wipe local, « Plus tard »). Même filet que `app/index.tsx` cold start.
  */
-export function replaceAfterOnboardingPermissions(
+export async function replaceAfterOnboardingPermissions(
   router: Pick<Router, 'replace' | 'push'>,
-): void {
+): Promise<void> {
   const uid = peekLastRealAuthUserId();
-  const localCount = uid ? listLocalChildrenForUser(uid).length : 0;
+  let localCount = uid ? listLocalChildrenForUser(uid).length : 0;
+
+  if (localCount === 0) {
+    try {
+      const { getChildren } = await import('@/services/children');
+      const children = await Promise.race([
+        getChildren(),
+        new Promise<null>(resolve => setTimeout(() => resolve(null), 8_000)),
+      ]);
+      if (children && children.length > 0) {
+        localCount = children.length;
+      }
+    } catch (e) {
+      console.warn('[onboardingPermissionsRoute] post-permissions getChildren', e);
+    }
+  }
+
   if (localCount === 0) {
     router.push('/create-child');
     return;
   }
+
   hydrateTabScreensFromSqliteSync();
+  try {
+    const { listMemoriesVisibleForAccount } = await import(
+      '@/services/accountLocalReset'
+    );
+    if (listMemoriesVisibleForAccount(uid).length === 0) {
+      const { restoreFamilyMemoriesFromCloudWithSoftWait } = await import(
+        '@/services/runCloudMemoriesRestore'
+      );
+      const { endCloudRestoreUi, peekCloudRestoreUi } = await import(
+        '@/lib/cloudRestoreUi'
+      );
+      await Promise.race([
+        restoreFamilyMemoriesFromCloudWithSoftWait({ softUi: true, holdUi: true }),
+        new Promise<void>(resolve => setTimeout(resolve, 20_000)),
+      ]);
+      hydrateTabScreensFromSqliteSync();
+      router.replace('/(tabs)');
+      if (peekCloudRestoreUi().active) {
+        setTimeout(() => endCloudRestoreUi(), 220);
+      }
+      return;
+    }
+  } catch (e) {
+    console.warn('[onboardingPermissionsRoute] post-permissions restore', e);
+  }
   router.replace('/(tabs)');
 }

@@ -114,7 +114,7 @@ export default function OnboardingPermissionsScreen() {
       }
       await markOnboardingPermissionsSeen(uid);
       hydrateTabScreensFromSqliteSync();
-      replaceAfterOnboardingPermissions(router);
+      await replaceAfterOnboardingPermissions(router);
     } finally {
       setBusy(false);
     }
