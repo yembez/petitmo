@@ -48,7 +48,6 @@ import {
 import { listLocalChildren, listLocalChildrenForUser } from '@/lib/localDb';
 import { sortChildrenByBirthdateAsc } from '@/utils/childrenAge';
 import { getChildren } from '@/services/children';
-import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
 import { printBreadcrumb, printCaptureError, printCaptureMessage } from '@/lib/printFlowSentry';
 import { isInitExportConfigured } from '@/services/initExportApi';
 import { initPrintOrderExport } from '@/services/printBookOrder';
@@ -113,7 +112,12 @@ import {
 import { rememberLocalPrintOrder } from '@/lib/printOrdersCache';
 import { isDeviceStorageFullError } from '@/utils/deviceStorageFull';
 import { getEmailHint } from '@/utils/emailSanity';
-import { peekRealAuthEmail } from '@/lib/authAccount';
+import { getRealAuthUser, peekRealAuthEmail } from '@/lib/authAccount';
+import {
+  getLastRealAuthEmail,
+  peekLastRealAuthEmail,
+  peekLastRealAuthUserId,
+} from '@/services/accountLocalReset';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -357,10 +361,14 @@ export default function BookOrderScreen() {
 
   /** Prefill synchrone (mémoire) — évite formulaire vide puis « pop » AsyncStorage/CRM. */
   const seedForm = peekLastPrintOrderForm();
-  /** Low Friction : dernière commande → guest export → e-mail du compte Auth. */
+  /**
+   * 1ʳᵉ commande : e-mail du compte Auth (session / lastRealAuthEmail).
+   * Commandes suivantes : dernière commande si présente, sinon compte.
+   */
   const seedEmail = (
     seedForm?.email?.trim() ||
     peekRealAuthEmail().trim() ||
+    peekLastRealAuthEmail()?.trim() ||
     ''
   ).toLowerCase();
   const [email, setEmail] = useState(seedEmail);
@@ -497,11 +505,13 @@ export default function BookOrderScreen() {
         const localChild = localKids.find(c => c.id === childId) ?? null;
         if (localChild) setChild(localChild);
 
-        const [book, t, tLast, localForm] = await Promise.all([
+        const [book, t, tLast, localForm, authUser, storedAuthEmail] = await Promise.all([
           getBook(bookId),
           getUserTier(),
           getLastGuestExportEmail(),
-          getLastPrintOrderForm()
+          getLastPrintOrderForm(),
+          getRealAuthUser(),
+          getLastRealAuthEmail(),
         ]);
         setTier(t);
         if (book) setBook(book);
@@ -524,19 +534,28 @@ export default function BookOrderScreen() {
 
         setMemoryPageCount(mpc);
 
-        // Prefill local immédiat (avant paint) — CRM en fond ne fait que combler les vides.
-        const startEmail = (
-          localForm?.email ||
-          tLast ||
+        /** Identité compte (session locale) — source de vérité dès la 1ʳᵉ commande. */
+        const accountEmail = (
+          authUser?.email ||
+          (typeof authUser?.user_metadata?.email === 'string'
+            ? authUser.user_metadata.email
+            : '') ||
+          storedAuthEmail ||
           peekRealAuthEmail() ||
           ''
         )
           .trim()
           .toLowerCase();
+        const previousOrderEmail = (localForm?.email ?? '').trim().toLowerCase();
+        // Prefill : dernière commande valide → sinon e-mail du compte → sinon guest export.
+        const startEmail = (
+          (previousOrderEmail && isValidEmail(previousOrderEmail) ? previousOrderEmail : '') ||
+          (accountEmail && isValidEmail(accountEmail) ? accountEmail : '') ||
+          (tLast && isValidEmail(tLast) ? tLast.trim().toLowerCase() : '') ||
+          ''
+        );
         if (startEmail) {
-          if (!liveFormRef.current.email.trim()) {
-            applyField('email', startEmail);
-          }
+          applyField('email', startEmail);
           setEmailEditing(false);
         }
         if (localForm) {
