@@ -13,6 +13,7 @@ import {
   Modal,
   TextInput,
   KeyboardAvoidingView,
+  DeviceEventEmitter,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -28,6 +29,7 @@ import PhotoMosaic from '@/components/PhotoMosaic';
 import AudioPlayer from '@/components/AudioPlayer';
 import EditTextModal from '@/components/EditTextModal';
 import { ModalBookCoverThumb } from '@/components/ModalBookCoverThumb';
+import { FeedMediaPrepOverlay } from '@/components/FeedMediaPrepOverlay';
 import { feedMemoryTextEditPreviewVariant } from '@/utils/memoryTextEditStyles';
 import { bookLineBudgetForMemoryType, bookCharsPerLineForMemoryType } from '@/utils/textLimits';
 import { getMemoryById, updateMemoryContent } from '@/services/media';
@@ -42,7 +44,10 @@ import {
 } from '@/utils/memoryPhotos';
 import { useFeedPhotoDisplayUrls } from '@/hooks/useFeedPhotoDisplayUrls';
 import { useFeedVideoPlaybackUri } from '@/hooks/useFeedVideoPlaybackUri';
+import { useFeedVideoPosterDisplayUrl } from '@/hooks/useFeedVideoPosterDisplayUrl';
 import { useSignedMediaUrl } from '@/lib/mediaSignedUrl';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
+import { materializeCloudMediaToSandboxForMemory } from '@/services/memoryCloudMaterialize';
 import {
   formatDateLong,
   formatDuration,
@@ -67,6 +72,7 @@ const EM_QUAD = '\u2003';
 const DOCK_BG = '#FFFFFF';
 
 export default function MemoryViewScreen() {
+  const { t } = useAppTranslation('common');
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const rawId = useLocalSearchParams<{ memoryId?: string | string[] }>().memoryId;
@@ -255,6 +261,7 @@ export default function MemoryViewScreen() {
   );
   const feedPhotoUrls = useFeedPhotoDisplayUrls(feedMediaHookMemory);
   const videoPlaybackUri = useFeedVideoPlaybackUri(feedMediaHookMemory);
+  const videoPosterFromHook = useFeedVideoPosterDisplayUrl(feedMediaHookMemory);
 
   const videoPosterRaw =
     memory?.type === 'video' ? getVideoPosterUriForFeedAndViewer(memory) : '';
@@ -269,9 +276,30 @@ export default function MemoryViewScreen() {
   const voiceCoverSigned = useSignedMediaUrl(voiceCoverRaw || null) ?? '';
   const voiceMediaSigned = useSignedMediaUrl(rawVoiceMedia || null) ?? '';
 
-  const videoPosterUri = normalizeMemoryMediaUriForDisplay(
-    (videoPosterSigned || videoPosterRaw).trim(),
-  );
+  const videoPosterUri =
+    videoPosterFromHook.trim() ||
+    normalizeMemoryMediaUriForDisplay((videoPosterSigned || videoPosterRaw).trim());
+
+  /** Favoris → détail : kick materialize + rafraîchir SQLite quand le poster/vidéo atterrit. */
+  useEffect(() => {
+    if (!memoryId || memory?.type !== 'video') return;
+    if (!videoPlaybackUri.trim()) {
+      void materializeCloudMediaToSandboxForMemory(memoryId);
+    }
+  }, [memoryId, memory?.type, videoPlaybackUri]);
+
+  useEffect(() => {
+    if (!memoryId) return;
+    const sub = DeviceEventEmitter.addListener(
+      'petitmo:memories-updated',
+      (payload: { memoryId?: string }) => {
+        if (payload?.memoryId && payload.memoryId !== memoryId) return;
+        const local = getLocalMemoryById(memoryId);
+        if (local) setMemory(local);
+      },
+    );
+    return () => sub.remove();
+  }, [memoryId]);
   const voiceCoverDetailUri = normalizeMemoryMediaUriForDisplay(
     (voiceCoverSigned || voiceCoverRaw).trim(),
   );
@@ -401,7 +429,7 @@ export default function MemoryViewScreen() {
               />
             )}
 
-            {memory.type === 'video' && (!!videoPlaybackUri || !!videoPosterUri) && (
+            {memory.type === 'video' && (
               <View style={[styles.mediaCard, styles.videoBody]}>
                 {isPlayingVideo && !!videoPlaybackUri ? (
                   <MemoryViewVideo uri={videoPlaybackUri} />
@@ -412,7 +440,7 @@ export default function MemoryViewScreen() {
                     resizeMode="cover"
                   />
                 ) : (
-                  <View style={{ width: '100%', height: '100%', backgroundColor: '#ECECEF' }} />
+                  <View style={{ width: '100%', height: '100%', backgroundColor: '#000000' }} />
                 )}
                 {!!videoPlaybackUri ? (
                   <Pressable
@@ -421,8 +449,15 @@ export default function MemoryViewScreen() {
                     accessibilityRole="button"
                     accessibilityLabel={isPlayingVideo ? 'Mettre en pause' : 'Lire la vidéo'}
                   />
-                ) : null}
-                {memory.duration ? (
+                ) : (
+                  <FeedMediaPrepOverlay
+                    compact
+                    prominent
+                    blockTouches
+                    label={t('mediaPrep.videoReady')}
+                  />
+                )}
+                {memory.duration && !!videoPlaybackUri ? (
                   <View style={styles.durationBadge} pointerEvents="none">
                     <Text style={styles.durationText}>{formatDuration(memory.duration)}</Text>
                   </View>

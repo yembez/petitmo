@@ -999,8 +999,7 @@ function FilMemoryRow({
             </View>
           )}
 
-          {memory.type === 'video' &&
-            (isOptimisticFeedPending || !!videoPlaybackUri || !!videoPosterUri) && (
+          {memory.type === 'video' && (
             <View style={{ position: 'relative' }}>
               {mediaMetaOverlay}
               {videoPlaybackUri.trim() || videoPosterUri.trim() ? (
@@ -1013,7 +1012,7 @@ function FilMemoryRow({
                     videoPosterUri.trim() || videoPlaybackUri.trim() || null,
                   )
                 }
-                disabled={skipImmersive}
+                disabled={skipImmersive || !videoPlaybackUri.trim()}
                 accessibilityRole="button"
                 accessibilityLabel="Ouvrir en plein écran"
               >
@@ -1105,21 +1104,12 @@ function FilMemoryRow({
                   ) : (
                     <View style={[styles.photoImage, { backgroundColor: '#000000' }]} />
                   )}
-                  {/**
-                   * Pas d’icône play si URI locale : autoplay fil. L’icône se cumule
-                   * sinon dans la transition immersif (poster + play stackés).
-                   */}
-                  {!skipImmersive && !canAutoplayVideoInline && !videoPlaybackUri.trim() ? (
-                    <View style={[styles.playOverlay, styles.videoPlayIconAboveTap]} pointerEvents="none">
-                      <View style={styles.playButton}>
-                        <Play size={ICON_SIZES.sm} color="#FFFFFF" fill="#FFFFFF" strokeWidth={0} />
-                      </View>
-                    </View>
-                  ) : null}
                 </View>
               </FeedMediaPressable>
               ) : (
-                <View style={[styles.mediaCard, styles.photoPlaceholder]} />
+                <View style={[styles.mediaCard, styles.videoBody, styles.videoMediaCard]}>
+                  <View style={[styles.photoImage, { backgroundColor: '#000000' }]} />
+                </View>
               )}
               {/** Pending import : points tant que le souvenir n’est pas posé en SQLite. */}
               {isOptimisticFeedPending ? (
@@ -1128,6 +1118,14 @@ function FilMemoryRow({
                   prominent
                   blockTouches
                   label={pendingPrepLabel?.trim() || t('mediaPrep.videoReady')}
+                />
+              ) : !videoPlaybackUri.trim() ? (
+                /** Restore / materialize : pas de noir+play silencieux — 3 points explicites. */
+                <FeedMediaPrepOverlay
+                  compact
+                  prominent
+                  blockTouches
+                  label={t('mediaPrep.videoReady')}
                 />
               ) : null}
               <FeedVideoDurationSoundBar
