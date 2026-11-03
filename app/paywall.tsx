@@ -29,6 +29,7 @@ import PetitmoPrimaryMorphButton, {
 import { MOTION_CTA_MORPH_DISK_PT } from '@/constants/motion'
 import { useAppTranslation } from '@/hooks/useAppTranslation'
 import { purchasePetitmoPlusPlan, restorePetitmoPlusPurchases, fetchPetitmoPlusPlanPrices } from '@/lib/revenueCat'
+import { markPetitmoPlusWelcomePending } from '@/lib/petitmoPlusWelcome'
 import { capturePaywallPurchaseFailure } from '@/lib/sentry'
 import { upgradeToFullCloud } from '@/services/migration'
 import { flushPendingCloudUploadsOnce } from '@/services/pendingCloudFlush'
@@ -360,13 +361,17 @@ export default function PaywallScreen() {
   const onPurchaseSuccessHoldEnd = useCallback(() => {
     const report = purchaseDevReportRef.current
     purchaseDevReportRef.current = null
+    const leave = async () => {
+      await markPetitmoPlusWelcomePending()
+      await continueAfterPaywall()
+    }
     if (__DEV__ && report) {
       Alert.alert('Migration cloud (dev)', report, [
-        { text: 'OK', onPress: () => void continueAfterPaywall() },
+        { text: 'OK', onPress: () => void leave() },
       ])
       return
     }
-    void continueAfterPaywall()
+    void leave()
   }, [continueAfterPaywall])
 
   const handleRestorePurchases = async () => {
@@ -388,9 +393,8 @@ export default function PaywallScreen() {
       await flushPendingCloudUploadsOnce()
       await AsyncStorage.setItem('petitmo_subscribed_at', new Date().toISOString())
       await hydrateTabScreensFromLocal()
-      Alert.alert(t('paywall.restoreSuccessTitle'), t('paywall.restoreSuccessBody'), [
-        { text: 'OK', onPress: () => void continueAfterPaywall() },
-      ])
+      await markPetitmoPlusWelcomePending()
+      await continueAfterPaywall()
     } catch (e) {
       recordCaughtError('paywall.restore', e)
       Alert.alert(

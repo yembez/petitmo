@@ -4,7 +4,8 @@ import { useRouter } from 'expo-router';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { LogOut, Trash2, UserRound } from 'lucide-react-native';
 import ParentSubpageShell from '@/components/parentSpace/ParentSubpageShell';
-import { MenuGroup, MenuRow, menuIcon } from '@/components/parentSpace/menuUi';
+import { MenuGroup, MenuRow, menuIcon, manageSubscriptionUrl, openUrl } from '@/components/parentSpace/menuUi';
+import DeleteAccountPaidWarningModal from '@/components/DeleteAccountPaidWarningModal';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
 import {
@@ -15,6 +16,7 @@ import {
   peekRealAuthEmail,
   signOutRealAccount,
 } from '@/lib/authAccount';
+import { getUserTier, peekUserTier } from '@/lib/userTier';
 import { resetNavigationToOnboarding } from '@/utils/resetNavigationToOnboarding';
 import { beginAccountClosingUi, endAccountClosingUi } from '@/lib/accountClosingUi';
 
@@ -26,6 +28,7 @@ export default function ParentAccountScreen() {
   const [accountEmail, setAccountEmail] = useState(() => peekRealAuthEmail() || '—');
   const [signOutBusy, setSignOutBusy] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [paidDeleteWarningVisible, setPaidDeleteWarningVisible] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -74,6 +77,7 @@ export default function ParentAccountScreen() {
 
   const performDeleteAccount = useCallback(async () => {
     if (deleteBusy || signOutBusy) return;
+    setPaidDeleteWarningVisible(false);
     setDeleteBusy(true);
     beginAccountClosingUi('delete');
     try {
@@ -99,14 +103,22 @@ export default function ParentAccountScreen() {
       Alert.alert(t('error'), t('parent.account.deleteNeedsNetwork'));
       return;
     }
-    Alert.alert(t('parent.account.deleteConfirmTitle'), t('parent.account.deleteConfirmBody'), [
-      { text: t('cancel'), style: 'cancel' },
-      {
-        text: t('parent.account.deleteAccount'),
-        style: 'destructive',
-        onPress: () => void performDeleteAccount(),
-      },
-    ]);
+    void (async () => {
+      /** Paid = carte résiliation in-app ; free = confirm simple. */
+      const tier = peekUserTier() === 'paid' ? 'paid' : await getUserTier();
+      if (tier === 'paid') {
+        setPaidDeleteWarningVisible(true);
+        return;
+      }
+      Alert.alert(t('parent.account.deleteConfirmTitle'), t('parent.account.deleteConfirmBody'), [
+        { text: t('cancel'), style: 'cancel' },
+        {
+          text: t('parent.account.deleteAccount'),
+          style: 'destructive',
+          onPress: () => void performDeleteAccount(),
+        },
+      ]);
+    })();
   }, [deleteBusy, performDeleteAccount, signOutBusy, t]);
 
   return (
@@ -141,6 +153,16 @@ export default function ParentAccountScreen() {
           accessibilityLabel={t('parent.account.deleteAccount')}
         />
       </MenuGroup>
+
+      <DeleteAccountPaidWarningModal
+        visible={paidDeleteWarningVisible}
+        onCancel={() => setPaidDeleteWarningVisible(false)}
+        onManageSubscription={() => {
+          setPaidDeleteWarningVisible(false);
+          void openUrl(manageSubscriptionUrl());
+        }}
+        onDeleteAccount={() => void performDeleteAccount()}
+      />
     </ParentSubpageShell>
   );
 }

@@ -68,8 +68,8 @@
     "hidePassword": "Hide password",
     "forgotPassword": "Forgot password?",
     "forgotNeedEmail": "Enter your email address first.",
-    "forgotSentTitle": "Email sent",
-    "forgotSentBody": "If an account exists for this address, you will receive a reset link.",
+    "forgotSentTitle": "Check your inbox",
+    "forgotSentBody": "If an email + password account exists for this address, you’ll get a reset link (check spam too). Google or Apple account? Sign in with the same button.",
     "resetTitle": "New password",
     "resetSubtitle": "Choose a password to get back into your space.",
     "resetPasswordConfirm": "Confirm password",
@@ -186,6 +186,15 @@
       "deleteAccount": "Delete my account",
       "deleteConfirmTitle": "Delete your account?",
       "deleteConfirmBody": "This cannot be undone. Your account and associated cloud access will be removed. Local data on this device will also be erased.",
+      "deletePaidEyebrow": "Important!",
+      "deletePaidTitle": "Deleting your account does not cancel your subscription.",
+      "deletePaidPath": "To cancel: Parent space → My subscription → Manage subscription.",
+      "deletePaidPointMemories": "If you delete the account, all memories are erased and cannot be recovered.",
+      "deletePaidPointRestore": "Restoring purchases later does not bring memories back — only the subscription.",
+      "deletePaidPointOrder": "The right order: first cancel the subscription in the app, then delete the account.",
+      "deletePaidDeleteCta": "Delete account",
+      "deleteManageSubscription": "Manage subscription",
+      "deleteAnyway": "Delete account",
       "deleteFailed": "Could not delete the account right now.",
       "deletingAccount": "Deleting account",
       "backupOfflinePaused": "Offline — sync paused",
@@ -552,6 +561,16 @@
     "restoreSuccessBody": "Your Petit Cœur subscription is active again on this account.",
     "restoreFailed": "Couldn't restore purchases.",
     "legalTerms": "Terms of Use",
-    "legalPrivacy": "Privacy Policy"
+    "legalPrivacy": "Privacy Policy",
+    "welcome": {
+      "congrats": "Congratulations! You’re subscribed to",
+      "brand": "Petit Cœur",
+      "title": "Welcome to your sweet story!",
+      "body": "You can now capture, keep, and revisit every memory that tells it — almost without limits!",
+      "benefitsLead": "With your subscription:",
+      "benefitMemories": "Up to 5,000 memories",
+      "benefitBooks": "−10% on \"living\" books",
+      "cta": "Continue"
+    }
   }
 }

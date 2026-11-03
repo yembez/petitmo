@@ -21,6 +21,7 @@ import { supabaseAnonKey, supabaseUrl } from '@/lib/supabase';
 import { PendingMediaUploadsProvider } from '@/contexts/PendingMediaUploadsContext';
 import CloudRestoreOverlay from '@/components/CloudRestoreOverlay';
 import AccountClosingOverlay from '@/components/AccountClosingOverlay';
+import PetitmoPlusWelcomeModal from '@/components/PetitmoPlusWelcomeModal';
 import { initLocalDb } from '@/lib/localDb';
 import { resetUserTierForTesting } from '@/lib/userTier';
 import { getUserTier } from '@/lib/userTier';
@@ -449,6 +450,7 @@ function RootLayoutNav() {
        */}
       <CloudRestoreOverlay />
       <AccountClosingOverlay />
+      <PetitmoPlusWelcomeModal />
       </PendingMediaUploadsProvider>
     </GestureHandlerRootView>
   );
