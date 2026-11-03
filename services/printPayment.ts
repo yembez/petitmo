@@ -62,6 +62,8 @@ export type PrintShippingAddressInput = {
   city: string;
   zip: string;
   country: string;
+  firstName?: string;
+  lastName?: string;
 };
 
 export async function createPrintPayment(input: {

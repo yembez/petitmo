@@ -112,6 +112,11 @@ import {
 import { rememberLocalPrintOrder } from '@/lib/printOrdersCache';
 import { isDeviceStorageFullError } from '@/utils/deviceStorageFull';
 import { getEmailHint } from '@/utils/emailSanity';
+import {
+  composeShippingName,
+  GELATO_NAME_MAX_LEN,
+  splitShippingName,
+} from '@/utils/shippingNameSplit';
 import { getRealAuthUser, peekRealAuthEmail } from '@/lib/authAccount';
 import {
   getLastRealAuthEmail,
@@ -141,8 +146,8 @@ type PrintCheckoutPrefetch = {
 };
 
 function printShippingKey(input: {
-  shippingName: string;
-  fullName: string;
+  firstName: string;
+  lastName: string;
   line1: string;
   line2: string;
   city: string;
@@ -150,8 +155,8 @@ function printShippingKey(input: {
   country: string;
 }): string {
   return [
-    input.shippingName.trim(),
-    input.fullName.trim(),
+    input.firstName.trim(),
+    input.lastName.trim(),
     input.line1.trim(),
     input.line2.trim(),
     input.city.trim(),
@@ -173,12 +178,12 @@ const COUNTRY_OPTIONS = [
 type CountryCode = (typeof COUNTRY_OPTIONS)[number]['code'];
 
 /** Champs texte libres du formulaire (miroir synchrone `liveFormRef`). */
-type LiveTextField = 'email' | 'fullName' | 'shippingName' | 'line1' | 'line2' | 'city' | 'zip';
+type LiveTextField = 'email' | 'firstName' | 'lastName' | 'line1' | 'line2' | 'city' | 'zip';
 
 type FieldKey =
   | 'email'
-  | 'fullName'
-  | 'shippingName'
+  | 'firstName'
+  | 'lastName'
   | 'line1'
   | 'line2'
   | 'city'
@@ -371,11 +376,17 @@ export default function BookOrderScreen() {
     peekLastRealAuthEmail()?.trim() ||
     ''
   ).toLowerCase();
+  const seedNames = (() => {
+    const first = seedForm?.firstName?.trim() ?? '';
+    const last = seedForm?.lastName?.trim() ?? '';
+    if (first || last) return { firstName: first, lastName: last };
+    return splitShippingName(seedForm?.shippingName ?? seedForm?.fullName ?? '');
+  })();
   const [email, setEmail] = useState(seedEmail);
-  const [fullName, setFullName] = useState(seedForm?.fullName ?? '');
   /** Case légale impression — décochée par défaut. */
   const [contentVerified, setContentVerified] = useState(false);
-  const [shippingName, setShippingName] = useState(seedForm?.shippingName ?? '');
+  const [firstName, setFirstName] = useState(seedNames.firstName);
+  const [lastName, setLastName] = useState(seedNames.lastName);
   const [line1, setLine1] = useState(seedForm?.line1 ?? '');
   const [line2, setLine2] = useState(seedForm?.line2 ?? '');
   const [city, setCity] = useState(seedForm?.city ?? '');
@@ -394,8 +405,8 @@ export default function BookOrderScreen() {
    */
   const liveFormRef = useRef<Record<LiveTextField, string>>({
     email: seedEmail,
-    fullName: seedForm?.fullName ?? '',
-    shippingName: seedForm?.shippingName ?? '',
+    firstName: seedNames.firstName,
+    lastName: seedNames.lastName,
     line1: seedForm?.line1 ?? '',
     line2: seedForm?.line2 ?? '',
     city: seedForm?.city ?? '',
@@ -403,8 +414,8 @@ export default function BookOrderScreen() {
   });
   const liveSetters = useRef<Record<LiveTextField, (v: string) => void>>({
     email: setEmail,
-    fullName: setFullName,
-    shippingName: setShippingName,
+    firstName: setFirstName,
+    lastName: setLastName,
     line1: setLine1,
     line2: setLine2,
     city: setCity,
@@ -416,10 +427,15 @@ export default function BookOrderScreen() {
   }, []);
   const readLiveForm = useCallback(() => {
     const f = liveFormRef.current;
+    const firstName = f.firstName.trim();
+    const lastName = f.lastName.trim();
+    const shippingName = composeShippingName(firstName, lastName);
     return {
       email: f.email.trim().toLowerCase(),
-      fullName: f.fullName.trim(),
-      shippingName: f.shippingName.trim(),
+      firstName,
+      lastName,
+      shippingName,
+      fullName: shippingName,
       line1: f.line1.trim(),
       line2: f.line2.trim(),
       city: f.city.trim(),
@@ -559,11 +575,21 @@ export default function BookOrderScreen() {
           setEmailEditing(false);
         }
         if (localForm) {
-          if (localForm.fullName && !liveFormRef.current.fullName.trim()) {
-            applyField('fullName', localForm.fullName);
-          }
-          if (localForm.shippingName && !liveFormRef.current.shippingName.trim()) {
-            applyField('shippingName', localForm.shippingName);
+          if (
+            !liveFormRef.current.firstName.trim() &&
+            !liveFormRef.current.lastName.trim()
+          ) {
+            const names =
+              localForm.firstName.trim() || localForm.lastName.trim()
+                ? {
+                    firstName: localForm.firstName.trim(),
+                    lastName: localForm.lastName.trim(),
+                  }
+                : splitShippingName(
+                    localForm.shippingName || localForm.fullName || '',
+                  );
+            if (names.firstName) applyField('firstName', names.firstName);
+            if (names.lastName) applyField('lastName', names.lastName);
           }
           if (
             !liveFormRef.current.line1.trim() &&
@@ -608,11 +634,13 @@ export default function BookOrderScreen() {
             .then(pre => {
               if (!pre) return;
               if (pre.full_name) {
-                if (!liveFormRef.current.fullName.trim()) {
-                  applyField('fullName', pre.full_name);
-                }
-                if (!liveFormRef.current.shippingName.trim()) {
-                  applyField('shippingName', pre.full_name.trim());
+                if (
+                  !liveFormRef.current.firstName.trim() &&
+                  !liveFormRef.current.lastName.trim()
+                ) {
+                  const names = splitShippingName(pre.full_name);
+                  if (names.firstName) applyField('firstName', names.firstName);
+                  if (names.lastName) applyField('lastName', names.lastName);
                 }
               }
               const addr = pickAddressFromJson(
@@ -628,8 +656,14 @@ export default function BookOrderScreen() {
                 applyField('city', addr.city);
                 applyField('zip', addr.zip);
                 setCountry(addr.country);
-                if (addr.shippingName && !live.shippingName.trim()) {
-                  applyField('shippingName', addr.shippingName);
+                if (
+                  addr.shippingName &&
+                  !live.firstName.trim() &&
+                  !live.lastName.trim()
+                ) {
+                  const names = splitShippingName(addr.shippingName);
+                  if (names.firstName) applyField('firstName', names.firstName);
+                  if (names.lastName) applyField('lastName', names.lastName);
                 }
               }
             })
@@ -719,7 +753,14 @@ export default function BookOrderScreen() {
     else if (!isValidEmail(f.email)) e.email = 'Email invalide';
 
     if (exportMode === 'print') {
-      if (!f.shippingName) e.shippingName = 'Nom sur le colis requis';
+      if (!f.firstName) e.firstName = 'Prénom requis';
+    else if (f.firstName.length > GELATO_NAME_MAX_LEN) {
+      e.firstName = `Max ${GELATO_NAME_MAX_LEN} caractères`;
+    }
+    if (!f.lastName) e.lastName = 'Nom requis';
+    else if (f.lastName.length > GELATO_NAME_MAX_LEN) {
+      e.lastName = `Max ${GELATO_NAME_MAX_LEN} caractères`;
+    }
       if (!f.line1) e.line1 = 'Adresse requise';
       if (!f.city) e.city = 'Ville requise';
       if (!f.zip) e.zip = 'Code postal requis';
@@ -732,14 +773,15 @@ export default function BookOrderScreen() {
     if (exportMode === 'print') {
       return (
         contentVerified &&
-        shippingName.trim().length > 0 &&
+        firstName.trim().length > 0 &&
+      lastName.trim().length > 0 &&
         line1.trim().length > 0 &&
         city.trim().length > 0 &&
         zip.trim().length > 0
       );
     }
     return true;
-  }, [contentVerified, email, city, exportMode, line1, shippingName, zip]);
+  }, [contentVerified, email, city, exportMode, line1, firstName, lastName, zip]);
 
   const navigateToConfirmation = useCallback(
     (p: { pricePaidEuros: number; emailNorm: string }) => {
@@ -811,12 +853,13 @@ export default function BookOrderScreen() {
     return (
       email.trim().length > 0 &&
       isValidEmail(email) &&
-      shippingName.trim().length > 0 &&
+      firstName.trim().length > 0 &&
+      lastName.trim().length > 0 &&
       line1.trim().length > 0 &&
       city.trim().length > 0 &&
       zip.trim().length > 0
     );
-  }, [city, email, exportMode, line1, shippingName, zip]);
+  }, [city, email, exportMode, line1, firstName, lastName, zip]);
 
   /**
    * Étape 1 — ticket print (init-export) : un seul aller-retour Edge, prix figé.
@@ -907,7 +950,8 @@ export default function BookOrderScreen() {
 
       if (!info) {
         const nowIso = new Date().toISOString();
-        const contactFullName = fullName.trim() || shippingName.trim() || null;
+        const liveNames = readLiveForm();
+        const contactFullName = liveNames.shippingName || null;
         const gelatoPages = catalogPagesForGelato;
         const qrCount = pendingPayload.pages.filter(
           (p: { type: string }) => p.type === 'audio' || p.type === 'video',
@@ -923,13 +967,17 @@ export default function BookOrderScreen() {
           cgvVersion: PRINT_ORDER_CGV_VERSION,
           fullName: contactFullName,
           marketingOptIn: false,
-          shippingName: shippingName.trim(),
+          shippingName: liveNames.shippingName,
           shippingAddress: {
-            line1: line1.trim(),
-            ...(line2.trim() ? { line2: line2.trim() } : {}),
-            city: city.trim(),
-            zip: zip.trim(),
+            line1: liveNames.line1 || line1.trim(),
+            ...((liveNames.line2 || line2.trim())
+              ? { line2: liveNames.line2 || line2.trim() }
+              : {}),
+            city: liveNames.city || city.trim(),
+            zip: liveNames.zip || zip.trim(),
             country,
+            firstName: liveNames.firstName,
+            lastName: liveNames.lastName,
           },
           gelatoPages,
           discountPercent,
@@ -979,7 +1027,8 @@ export default function BookOrderScreen() {
     country,
     discountPercent,
     email,
-    fullName,
+    firstName,
+    lastName,
     gelatoPagesForQuote,
     line1,
     line2,
@@ -987,7 +1036,6 @@ export default function BookOrderScreen() {
     printFormFingerprint,
     qrCountForQuote,
     readLiveForm,
-    shippingName,
     subscriptionDb,
     zip
   ]);
@@ -1089,10 +1137,13 @@ export default function BookOrderScreen() {
 
         // Cache local confort pour la prochaine commande (paint instantané).
         const live = liveFormRef.current;
+        const composedName = composeShippingName(live.firstName, live.lastName);
         void setLastPrintOrderForm({
           email: opts.emailNorm,
-          fullName: live.fullName,
-          shippingName: live.shippingName,
+          firstName: live.firstName,
+          lastName: live.lastName,
+          fullName: composedName,
+          shippingName: composedName,
           line1: live.line1,
           line2: live.line2,
           city: live.city,
@@ -1106,7 +1157,7 @@ export default function BookOrderScreen() {
             createdAt: new Date().toISOString(),
             priceCents: opts.priceCents,
             status: 'printing',
-            shippingName: live.shippingName.trim(),
+            shippingName: composedName,
             bookId: pendingPayload?.bookId || bookId,
             childId: pendingPayload?.childId || childId,
             bookTitle: (pendingPayload?.coverTitle || book?.title || '').trim(),
@@ -1214,6 +1265,8 @@ export default function BookOrderScreen() {
               city: live.city,
               zip: live.zip,
               country,
+              firstName: live.firstName,
+              lastName: live.lastName,
             },
           },
         });
@@ -1379,6 +1432,8 @@ export default function BookOrderScreen() {
         city: live.city,
         zip: live.zip,
         country,
+        firstName: live.firstName,
+        lastName: live.lastName,
       },
     };
 
@@ -1435,8 +1490,8 @@ export default function BookOrderScreen() {
 
         const contentFp = printFormFingerprint();
         const shippingKey = printShippingKey({
-          shippingName: live.shippingName,
-          fullName: live.fullName,
+          firstName: live.firstName,
+          lastName: live.lastName,
           line1: live.line1,
           line2: live.line2,
           city: live.city,
@@ -1804,7 +1859,8 @@ export default function BookOrderScreen() {
     prefetchPrintCheckout,
     printAddressReady,
     printFormFingerprint,
-    shippingName,
+    firstName,
+    lastName,
     submitting,
     zip,
   ]);
@@ -2199,7 +2255,8 @@ export default function BookOrderScreen() {
               const stamp = Date.now().toString(36);
               applyField('email', `qa+gelato-${stamp}@example.com`);
               setEmailEditing(false);
-              applyField('shippingName', 'Test Petit Cœur Gelato');
+              applyField('firstName', 'Test');
+              applyField('lastName', 'Petit Cœur');
               applyField('line1', '12 rue Example');
               applyField('line2', '');
               applyField('city', 'Paris');
@@ -2218,29 +2275,61 @@ export default function BookOrderScreen() {
               {t('bookOrder.sectionDelivery')}
             </Text>
             <View style={styles.fieldsStack}>
-              <View style={styles.fieldBlock}>
-                <Text style={styles.fieldLabel}>
-                  {t('bookOrder.fieldFullName')}
-                </Text>
-                <StableTextInput
-                  style={[
-                    styles.fieldInput,
-                    fieldErrors.shippingName && styles.inputError,
-                  ]}
-                  value={shippingName}
-                  onChangeTextImmediate={v => {
-                    liveFormRef.current.shippingName = v;
-                  }}
-                  onChangeText={v => {
-                    applyField('shippingName', v);
-                    clearError('shippingName');
-                  }}
-                  placeholder={t('bookOrder.fieldFullName')}
-                  placeholderTextColor={THEME.textSecondary}
-                />
-                {fieldErrors.shippingName ? (
-                  <Text style={styles.err}>{fieldErrors.shippingName}</Text>
-                ) : null}
+              <View style={styles.row2}>
+                <View style={[styles.grow, styles.fieldBlock]}>
+                  <Text style={styles.fieldLabel}>
+                    {t('bookOrder.fieldFirstName')}
+                  </Text>
+                  <StableTextInput
+                    style={[
+                      styles.fieldInput,
+                      fieldErrors.firstName && styles.inputError,
+                    ]}
+                    value={firstName}
+                    onChangeTextImmediate={v => {
+                      liveFormRef.current.firstName = v;
+                    }}
+                    onChangeText={v => {
+                      applyField('firstName', v);
+                      clearError('firstName');
+                    }}
+                    placeholder={t('bookOrder.fieldFirstName')}
+                    placeholderTextColor={THEME.textSecondary}
+                    autoComplete="given-name"
+                    textContentType="givenName"
+                    maxLength={GELATO_NAME_MAX_LEN}
+                  />
+                  {fieldErrors.firstName ? (
+                    <Text style={styles.err}>{fieldErrors.firstName}</Text>
+                  ) : null}
+                </View>
+                <View style={[styles.grow2, styles.fieldBlock]}>
+                  <Text style={styles.fieldLabel}>
+                    {t('bookOrder.fieldLastName')}
+                  </Text>
+                  <StableTextInput
+                    style={[
+                      styles.fieldInput,
+                      fieldErrors.lastName && styles.inputError,
+                    ]}
+                    value={lastName}
+                    onChangeTextImmediate={v => {
+                      liveFormRef.current.lastName = v;
+                    }}
+                    onChangeText={v => {
+                      applyField('lastName', v);
+                      clearError('lastName');
+                    }}
+                    placeholder={t('bookOrder.fieldLastName')}
+                    placeholderTextColor={THEME.textSecondary}
+                    autoComplete="family-name"
+                    textContentType="familyName"
+                    maxLength={GELATO_NAME_MAX_LEN}
+                  />
+                  {fieldErrors.lastName ? (
+                    <Text style={styles.err}>{fieldErrors.lastName}</Text>
+                  ) : null}
+                </View>
               </View>
 
               <View style={styles.fieldBlock}>

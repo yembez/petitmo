@@ -10,6 +10,10 @@ export type PrintShippingAddress = {
   city: string;
   zip: string;
   country: string;
+  /** Gelato ShippingAddress.firstName */
+  firstName?: string;
+  /** Gelato ShippingAddress.lastName */
+  lastName?: string;
 };
 
 export type InitPrintOrderParams = {
@@ -69,6 +73,12 @@ export async function initPrintOrderExport(params: InitPrintOrderParams): Promis
       city: params.shippingAddress.city,
       zip: params.shippingAddress.zip,
       country: params.shippingAddress.country,
+      ...(params.shippingAddress.firstName?.trim()
+        ? { firstName: params.shippingAddress.firstName.trim().slice(0, 25) }
+        : {}),
+      ...(params.shippingAddress.lastName?.trim()
+        ? { lastName: params.shippingAddress.lastName.trim().slice(0, 25) }
+        : {}),
     },
     gelato_pages: params.gelatoPages,
     // Compat Edge legacy : même valeur que gelato_pages (V1).

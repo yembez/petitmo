@@ -4,13 +4,21 @@
  * Pas de secret : AsyncStorage OK (comme l’e-mail guest export).
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  composeShippingName,
+  splitShippingName,
+} from '@/utils/shippingNameSplit';
 
 const KEY = 'petitmo_print_order_form_v1';
 
 export type PrintOrderFormPrefs = {
   email: string;
+  /** @deprecated legacy CRM — recomposé depuis first/last à l’écriture. */
   fullName: string;
+  /** @deprecated legacy colis — recomposé depuis first/last à l’écriture. */
   shippingName: string;
+  firstName: string;
+  lastName: string;
   line1: string;
   line2: string;
   city: string;
@@ -35,11 +43,25 @@ function parsePrefs(raw: string | null): PrintOrderFormPrefs | null {
     const line1 = trimStr(o.line1);
     const city = trimStr(o.city);
     const zip = trimStr(o.zip);
-    if (!email && !line1 && !city && !zip && !trimStr(o.shippingName)) return null;
+    const shippingNameLegacy = trimStr(o.shippingName);
+    let firstName = trimStr(o.firstName);
+    let lastName = trimStr(o.lastName);
+    if (!firstName && !lastName && shippingNameLegacy) {
+      const split = splitShippingName(shippingNameLegacy);
+      firstName = split.firstName;
+      lastName = split.lastName;
+    }
+    const shippingName =
+      composeShippingName(firstName, lastName) || shippingNameLegacy;
+    if (!email && !line1 && !city && !zip && !shippingName && !firstName && !lastName) {
+      return null;
+    }
     return {
       email,
-      fullName: trimStr(o.fullName),
-      shippingName: trimStr(o.shippingName),
+      fullName: trimStr(o.fullName) || shippingName,
+      shippingName,
+      firstName,
+      lastName,
       line1,
       line2: trimStr(o.line2),
       city,
@@ -72,17 +94,33 @@ export async function getLastPrintOrderForm(): Promise<PrintOrderFormPrefs | nul
 }
 
 export async function setLastPrintOrderForm(form: PrintOrderFormPrefs): Promise<void> {
+  const firstName = form.firstName.trim();
+  const lastName = form.lastName.trim();
+  const shippingName =
+    composeShippingName(firstName, lastName) || form.shippingName.trim();
   const next: PrintOrderFormPrefs = {
     email: form.email.trim().toLowerCase(),
-    fullName: form.fullName.trim(),
-    shippingName: form.shippingName.trim(),
+    firstName,
+    lastName,
+    fullName: form.fullName.trim() || shippingName,
+    shippingName,
     line1: form.line1.trim(),
     line2: form.line2.trim(),
     city: form.city.trim(),
     zip: form.zip.trim(),
     country: (form.country.trim() || 'FR').toUpperCase().slice(0, 2),
   };
-  if (!next.email && !next.line1 && !next.city && !next.zip && !next.shippingName) return;
+  if (
+    !next.email &&
+    !next.line1 &&
+    !next.city &&
+    !next.zip &&
+    !next.shippingName &&
+    !next.firstName &&
+    !next.lastName
+  ) {
+    return;
+  }
   memoryCache = next;
   try {
     await AsyncStorage.setItem(KEY, JSON.stringify(next));

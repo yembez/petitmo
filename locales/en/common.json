@@ -419,6 +419,8 @@
     "sectionDelivery": "Delivery",
     "sectionBeforeOrder": "Before ordering",
     "fieldFullName": "Full name",
+    "fieldFirstName": "First name",
+    "fieldLastName": "Last name",
     "fieldAddress": "Address",
     "fieldAddress2": "Address line 2",
     "fieldZip": "Postcode",

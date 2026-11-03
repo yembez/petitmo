@@ -20,7 +20,11 @@ export function parseShippingAddress(raw: unknown): ParsedShippingAddress {
     return { ok: false, message: 'shipping_address_json requires line1, city, zip, country' };
   }
   const line2 = typeof o.line2 === 'string' ? o.line2.trim() : '';
+  const firstName = typeof o.firstName === 'string' ? o.firstName.trim().slice(0, 25) : '';
+  const lastName = typeof o.lastName === 'string' ? o.lastName.trim().slice(0, 25) : '';
   const value: Record<string, string> = { line1, city, zip, country };
   if (line2) value.line2 = line2;
+  if (firstName) value.firstName = firstName;
+  if (lastName) value.lastName = lastName;
   return { ok: true, value };
 }

@@ -419,6 +419,8 @@
     "sectionDelivery": "Livraison",
     "sectionBeforeOrder": "Avant de commander",
     "fieldFullName": "Nom complet",
+    "fieldFirstName": "Prénom",
+    "fieldLastName": "Nom",
     "fieldAddress": "Adresse",
     "fieldAddress2": "Complément d’adresse",
     "fieldZip": "Code postal",

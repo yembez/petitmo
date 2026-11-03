@@ -4,6 +4,10 @@ export type PetitmoShippingAddressJson = {
   city?: string;
   zip?: string;
   country?: string;
+  /** Gelato firstName — prioritaire sur le split de shipping_name. */
+  firstName?: string;
+  /** Gelato lastName — prioritaire sur le split de shipping_name. */
+  lastName?: string;
 };
 
 export function parsePetitmoShippingAddress(raw: unknown): PetitmoShippingAddressJson | null {
@@ -15,7 +19,17 @@ export function parsePetitmoShippingAddress(raw: unknown): PetitmoShippingAddres
   const country = typeof o.country === 'string' ? o.country.trim().toUpperCase() : '';
   if (!line1 || !city || !zip || !country) return null;
   const line2 = typeof o.line2 === 'string' ? o.line2.trim() : '';
-  return { line1, ...(line2 ? { line2 } : {}), city, zip, country };
+  const firstName = typeof o.firstName === 'string' ? o.firstName.trim() : '';
+  const lastName = typeof o.lastName === 'string' ? o.lastName.trim() : '';
+  return {
+    line1,
+    ...(line2 ? { line2 } : {}),
+    city,
+    zip,
+    country,
+    ...(firstName ? { firstName } : {}),
+    ...(lastName ? { lastName } : {}),
+  };
 }
 
 export function splitShippingName(fullName: string): { firstName: string; lastName: string } {
@@ -32,10 +46,12 @@ export function gelatoShippingAddress(params: {
   email: string;
   phone: string;
 }): Record<string, string> {
-  const { firstName, lastName } = splitShippingName(params.shippingName);
+  const split = splitShippingName(params.shippingName);
+  const firstName = (params.address.firstName?.trim() || split.firstName).slice(0, 25);
+  const lastName = (params.address.lastName?.trim() || split.lastName).slice(0, 25);
   const out: Record<string, string> = {
-    firstName,
-    lastName,
+    firstName: firstName || 'Client',
+    lastName: lastName || '-',
     addressLine1: params.address.line1!,
     city: params.address.city!,
     postCode: params.address.zip!,
