@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Maquettes sub.welcome — Petit Cœur</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #1C1C1E;
+      color: #FAFAF7;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      padding: 28px 20px 60px;
+    }
+    h1 { margin: 0 0 8px; font-size: 22px; letter-spacing: -0.02em; }
+    .sub { color: #8E8E93; margin: 0 0 28px; font-size: 14px; line-height: 1.45; max-width: 720px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(260px, 1fr));
+      gap: 20px;
+      align-items: start;
+    }
+    @media (max-width: 980px) {
+      .grid { grid-template-columns: 1fr; max-width: 420px; margin: 0 auto; }
+    }
+    .card {
+      background: #2C2C2E;
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid #3A3A3C;
+    }
+    .card header {
+      padding: 14px 16px 12px;
+      border-bottom: 1px solid #3A3A3C;
+    }
+    .card header strong { display: block; font-size: 15px; margin-bottom: 4px; }
+    .card header span { font-size: 12px; color: #8E8E93; line-height: 1.4; }
+    iframe {
+      width: 100%;
+      height: 780px;
+      border: 0;
+      background: #e8e6e1;
+    }
+    .pick {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 28px;
+    }
+    .pick a {
+      color: #fff;
+      background: #FC5757;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 14px;
+      padding: 12px 16px;
+      border-radius: 999px;
+    }
+    .pick a.ghost {
+      background: transparent;
+      border: 1px solid #51545E;
+      color: #FAFAF7;
+    }
+  </style>
+</head>
+<body>
+  <h1>E-mail bienvenue abonnement — 3 designs</h1>
+  <p class="sub">
+    Compare les propositions A / B / C. Ouvre aussi chaque maquette seule pour un aperçu mobile.
+    Prod only · pas en Sandbox TestFlight.
+  </p>
+  <div class="grid">
+    <div class="card">
+      <header>
+        <strong>A — Minimal</strong>
+        <span>Aligné mails lifecycle Resend. Ship le plus rapide.</span>
+      </header>
+      <iframe src="A-minimal.html" title="A Minimal"></iframe>
+    </div>
+    <div class="card">
+      <header>
+        <strong>B — Carte douce</strong>
+        <span>Hero corail + bénéfices · ton modal Bienvenue in-app.</span>
+      </header>
+      <iframe src="B-carte-douce.html" title="B Carte douce"></iframe>
+    </div>
+    <div class="card">
+      <header>
+        <strong>C — Récap</strong>
+        <span>Confirmation type reçu · offre / prix / App Store.</span>
+      </header>
+      <iframe src="C-recap.html" title="C Récap"></iframe>
+    </div>
+  </div>
+  <div class="pick">
+    <a href="A-minimal.html">Ouvrir A</a>
+    <a href="B-carte-douce.html">Ouvrir B</a>
+    <a href="C-recap.html">Ouvrir C</a>
+    <a class="ghost" href="../EMAIL_SUB_WELCOME_MOCKUPS.md">Copy texte</a>
+  </div>
+</body>
+</html>

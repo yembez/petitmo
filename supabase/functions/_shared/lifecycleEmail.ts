@@ -1,11 +1,13 @@
 /**
  * E-mails lifecycle Petit Cœur (Resend) + anti-doublon SQL.
- * Templates abo + inactivité (inactive.j90 / j30 / j7 / deleted).
+ * Templates abo + inactivité + bienvenue compte (account.welcome).
  * Libellé abo : « abonnement Petit Cœur » (pas Petitmo+ / Petit Cœur+).
  */
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.58.0';
+import { buildWelcomeEmailContent } from './welcomeEmailContent.ts';
 
 export type LifecycleTemplateId =
+  | 'account.welcome'
   | 'sub.billing_issue'
   | 'sub.cancelled'
   | 'sub.downgraded'
@@ -20,6 +22,12 @@ const DEFAULT_FROM = 'Petit Cœur <contact@petitcoeur.app>';
 type TemplateVars = {
   /** Date de fin d’accès (ex. « 16 octobre 2026 ») — optionnel. */
   accessEndsOn?: string | null;
+  /** Prénom pour account.welcome — absent → « Bonjour, ». */
+  firstName?: string | null;
+  siteUrl?: string | null;
+  photoUrl?: string | null;
+  privacyUrl?: string | null;
+  supportEmail?: string | null;
 };
 
 type TemplateContent = { subject: string; text: string; html: string };
@@ -43,6 +51,14 @@ export { formatAccessEndsOn };
 function templates(templateId: LifecycleTemplateId, vars: TemplateVars = {}): TemplateContent {
   const ends = (vars.accessEndsOn ?? '').trim();
   switch (templateId) {
+    case 'account.welcome':
+      return buildWelcomeEmailContent({
+        firstName: vars.firstName,
+        siteUrl: vars.siteUrl,
+        photoUrl: vars.photoUrl,
+        privacyUrl: vars.privacyUrl,
+        supportEmail: vars.supportEmail,
+      });
     case 'sub.billing_issue':
       return {
         subject: 'Petit Cœur — le paiement n’a pas fonctionné',

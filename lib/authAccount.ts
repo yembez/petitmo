@@ -489,6 +489,11 @@ export async function activateCloudSyncAfterRealAuth(user: User): Promise<void> 
 
   void import('@/services/touchAccountActivity').then(m => m.touchAccountActivityInBackground());
 
+  // Bienvenue gratuit — fond, une fois (Edge + lifecycle_email_log). Low Friction : pas d’UI.
+  void import('@/services/welcomeEmail')
+    .then(m => m.scheduleWelcomeEmailInBackground())
+    .catch(e => console.warn('[auth] scheduleWelcomeEmail', e));
+
   void claimLocalDataForCloudUser(user.id).catch(e =>
     console.warn('[auth] claimLocalDataForCloudUser', e),
   );
