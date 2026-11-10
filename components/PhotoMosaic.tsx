@@ -13,6 +13,7 @@ import {
   MEDIA_CARD_INSET,
   MEDIA_CARD_RADIUS,
 } from '@/constants/feedLayout';
+import { FEED_MEDIA_ASPECT_DEFAULT } from '@/utils/feedMediaAspect';
 import { scale } from '@/utils/responsive';
 import type { Memory } from '@/types/local';
 import {
@@ -324,7 +325,7 @@ const styles = StyleSheet.create({
   },
   singleImg: {
     width: '100%',
-    aspectRatio: 4 / 5,
+    aspectRatio: FEED_MEDIA_ASPECT_DEFAULT,
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,

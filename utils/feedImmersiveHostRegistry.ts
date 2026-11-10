@@ -44,6 +44,18 @@ export function hasFeedImmersiveHost(itemKey: string): boolean {
   return false;
 }
 
+/** Résout la clé host (id souvenir ou 1ʳᵉ cellule album `id-album-N`). */
+function resolveFeedImmersiveHostKey(itemKey: string): string | null {
+  const key = itemKey.trim();
+  if (!key) return null;
+  if (hosts.has(key)) return key;
+  const albumPrefix = `${key}-album-`;
+  for (const k of hosts.keys()) {
+    if (k.startsWith(albumPrefix)) return k;
+  }
+  return null;
+}
+
 /**
  * Mesure la vignette fil pour une clé viewer (`memory.id` ou `id-album-N`).
  * Préférer scroller le fil sur la carte avant d’appeler.
@@ -52,9 +64,9 @@ export function measureFeedImmersiveHost(
   itemKey: string,
   onResult: (shared: ImmersiveSharedElement | null) => void,
 ): void {
-  const key = itemKey.trim();
-  const entry = key ? hosts.get(key) : undefined;
-  if (!entry) {
+  const resolved = resolveFeedImmersiveHostKey(itemKey);
+  const entry = resolved ? hosts.get(resolved) : undefined;
+  if (!resolved || !entry) {
     onResult(null);
     return;
   }
@@ -71,7 +83,7 @@ export function measureFeedImmersiveHost(
     onResult({
       origin,
       uri,
-      openedItemKey: key,
+      openedItemKey: resolved,
       cornerRadius: entry.cornerRadius,
     });
   });

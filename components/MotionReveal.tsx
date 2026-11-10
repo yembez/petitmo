@@ -8,18 +8,25 @@ import Animated, {
   withSpring,
   withTiming,
   type SharedValue,
+  type WithSpringConfig,
 } from 'react-native-reanimated';
 import {
   MOTION_ENTER_SCALE,
+  MOTION_ENTER_SCALE_SOFT,
   MOTION_ENTER_TRANSLATE_PX,
+  MOTION_ENTER_TRANSLATE_SOFT_PX,
   MOTION_EXIT_MS,
   MOTION_EXIT_STAGGER_MS,
   MOTION_SPRING_SETTLE,
+  MOTION_SPRING_SOFT,
   MOTION_STAGGER_MS,
 } from '@/constants/motion';
 
 /** Bord d’où l’élément vient se placer ; `none` = échelle et opacité seules. */
 export type MotionRevealFrom = 'top' | 'bottom' | 'none';
+
+/** `settle` = un rebond lisible ; `soft` = pose Apple (quasi sans overshoot). */
+export type MotionRevealFeel = 'settle' | 'soft';
 
 /**
  * Apparition « qui se pose » : échelle + translation + opacité sur un spring amorti.
@@ -32,6 +39,7 @@ export function MotionReveal({
   order = 0,
   from = 'bottom',
   withScale = true,
+  feel = 'settle',
   style,
   children,
 }: {
@@ -41,6 +49,7 @@ export function MotionReveal({
   from?: MotionRevealFrom;
   /** Bloc pleine largeur : couper l’échelle, sinon le contenu dérive latéralement. */
   withScale?: boolean;
+  feel?: MotionRevealFeel;
   style?: StyleProp<ViewStyle>;
   children: ReactNode;
 }) {
@@ -51,6 +60,11 @@ export function MotionReveal({
    * surgir en retard sur un écran pourtant stabilisé.
    */
   const settled = useSharedValue(false);
+  const soft = feel === 'soft';
+  const spring: WithSpringConfig = soft ? MOTION_SPRING_SOFT : MOTION_SPRING_SETTLE;
+  const enterScale = soft ? MOTION_ENTER_SCALE_SOFT : MOTION_ENTER_SCALE;
+  const enterTy = soft ? MOTION_ENTER_TRANSLATE_SOFT_PX : MOTION_ENTER_TRANSLATE_PX;
+  const stagger = soft ? 55 : MOTION_STAGGER_MS;
 
   useAnimatedReaction(
     () => (gate ? gate.value : 1),
@@ -62,7 +76,7 @@ export function MotionReveal({
       }
       if (open === previous) return;
       progress.value = open
-        ? withDelay(order * MOTION_STAGGER_MS, withSpring(1, MOTION_SPRING_SETTLE))
+        ? withDelay(order * stagger, withSpring(1, spring))
         : withDelay(
             order * MOTION_EXIT_STAGGER_MS,
             withTiming(0, { duration: MOTION_EXIT_MS }),
@@ -76,8 +90,8 @@ export function MotionReveal({
     return {
       opacity: Math.min(1, Math.max(0, p)),
       transform: [
-        { translateY: (1 - p) * MOTION_ENTER_TRANSLATE_PX * direction },
-        { scale: withScale ? MOTION_ENTER_SCALE + p * (1 - MOTION_ENTER_SCALE) : 1 },
+        { translateY: (1 - p) * enterTy * direction },
+        { scale: withScale ? enterScale + p * (1 - enterScale) : 1 },
       ],
     };
   });

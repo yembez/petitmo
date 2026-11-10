@@ -1,4 +1,5 @@
 import { DeviceEventEmitter } from 'react-native';
+import type { ImmersiveSharedElement } from '@/utils/immersiveSharedElement';
 
 /** Intentions de position du fil (survit au démontage de l’onglet / modale viewer). */
 export type FeedScrollIntent =
@@ -10,10 +11,18 @@ export type FeedScrollIntent =
    * `animated: true` : glissement visible (rare).
    * Défaut / `false` : jump immédiat — **obligatoire** au retour immersif
    * (sinon le fil réaffiche d’abord le souvenir d’ouverture).
+   * `measureKey` : clé host viewer (`id` ou `id-album-N`) pour le dézoom.
    */
-  | { type: 'snapToKey'; key: string; animated?: boolean };
+  | { type: 'snapToKey'; key: string; animated?: boolean; measureKey?: string };
 
 let pendingIntent: FeedScrollIntent | null = null;
+
+/**
+ * Callback one-shot : fil aligné + vignette mesurée (retour immersif cross-post).
+ * Le viewer attend ça avant `runSharedDismiss` — sinon measure trop tôt → fade/jump.
+ */
+type ImmersiveReturnReadyCb = (shared: ImmersiveSharedElement | null) => void;
+let immersiveReturnReadyCb: ImmersiveReturnReadyCb | null = null;
 
 /**
  * Le fil sous un `transparentModal` reste souvent « focused » :
@@ -58,15 +67,55 @@ export function armFeedSnapToLatestOnFocus(): void {
 /** Après import / retour immersif : scroller jusqu’à la carte. */
 export function armFeedSnapToKeyOnFocus(
   key: string,
-  opts?: { animated?: boolean },
+  opts?: { animated?: boolean; measureKey?: string },
 ): void {
   const k = key.trim();
   if (!k) {
     armFeedSnapToLatestOnFocus();
     return;
   }
-  pendingIntent = { type: 'snapToKey', key: k, animated: opts?.animated === true };
+  const measureKey = opts?.measureKey?.trim();
+  pendingIntent = {
+    type: 'snapToKey',
+    key: k,
+    animated: opts?.animated === true,
+    ...(measureKey ? { measureKey } : {}),
+  };
   notifyFilApplyScrollIntent();
+}
+
+/**
+ * Retour immersif après swipe : snap fil + callback quand la vignette est
+ * mesurable (pour le même spring dézoom que le retour « même post »).
+ */
+export function armFeedImmersiveReturnToKey(
+  scrollKey: string,
+  measureKey: string,
+  onReady: ImmersiveReturnReadyCb,
+): void {
+  immersiveReturnReadyCb = onReady;
+  armFeedSnapToKeyOnFocus(scrollKey, {
+    animated: false,
+    measureKey: measureKey.trim() || scrollKey,
+  });
+}
+
+/** Appelé par le fil une fois aligné (ou en échec → `null`). */
+export function completeFeedImmersiveReturn(
+  shared: ImmersiveSharedElement | null,
+): void {
+  const cb = immersiveReturnReadyCb;
+  immersiveReturnReadyCb = null;
+  if (!cb) return;
+  try {
+    cb(shared);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function cancelFeedImmersiveReturn(): void {
+  immersiveReturnReadyCb = null;
 }
 
 export function consumeFeedScrollIntent(): FeedScrollIntent | null {

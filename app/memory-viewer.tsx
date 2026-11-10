@@ -35,7 +35,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Image } from 'expo-image';
 import { PetitmoVideoView } from '@/components/PetitmoVideoView';
 import type { VideoPlayer } from 'expo-video';
-import { ChevronDown, ChevronUp, Pencil, Volume2, VolumeX, X } from 'lucide-react-native';
+import { Pencil, Volume2, VolumeX, X } from 'lucide-react-native';
 import { scale, verticalScale } from '@/utils/responsive';
 import {
   clearMemoryViewerSession,
@@ -113,7 +113,11 @@ import {
   resolveImmersiveViewerInitialIndex,
   type ImmersiveViewerItem,
 } from '@/utils/immersiveViewerItems';
-import { armFeedSnapToKeyOnFocus } from '@/services/feedScrollRestore';
+import {
+  armFeedImmersiveReturnToKey,
+  armFeedSnapToKeyOnFocus,
+  cancelFeedImmersiveReturn,
+} from '@/services/feedScrollRestore';
 import { useStableViewabilityPairs } from '@/hooks/useStableViewabilityPairs';
 import {
   draggedFullscreenRect,
@@ -121,7 +125,6 @@ import {
   isUsableSharedOrigin,
   type ImmersiveSharedElement,
 } from '@/utils/immersiveSharedElement';
-import { measureFeedImmersiveHost } from '@/utils/feedImmersiveHostRegistry';
 
 const BG = THEME.bg;
 /** Entrée : fondu + léger scale si pas de vignette mesurée. */
@@ -840,36 +843,39 @@ function MemoryViewerScreenInner() {
     const bootKey = bootOpenedItemKeyRef.current;
     const currentShared = sharedElementRef.current;
 
+    /**
+     * Même post qu’à l’ouverture : origine figée, fil déjà en place → dézoom direct.
+     */
     if (currentShared && visibleKey && visibleKey === bootKey) {
       runSharedDismiss(currentShared);
       return;
     }
 
-    /** Après swipe : scroller le fil sous le modal, re-mesurer la vignette, même shrink. */
+    /**
+     * Après swipe : attendre que le fil ait scrolé + aligné + mesuré la vignette,
+     * puis le même spring dézoom (plus de measure à 2 rAF → fade/jump).
+     */
     const memId = memoryIdFromImmersiveViewerItemKey(visibleKey);
     if (memId && visibleKey) {
       dismissSnapArmedRef.current = true;
-      armFeedSnapToKeyOnFocus(memId, { animated: false });
-      const tryMeasure = (attempt: number) => {
-        measureFeedImmersiveHost(visibleKey, measured => {
-          if (measured) {
-            runSharedDismiss(measured);
-            return;
-          }
-          if (attempt < 10) {
-            setTimeout(() => tryMeasure(attempt + 1), 64);
-            return;
-          }
-          runFadeDismiss();
-        });
+      let settled = false;
+      const onFilReady = (measured: ImmersiveSharedElement | null) => {
+        if (settled) return;
+        settled = true;
+        if (measured && isUsableSharedOrigin(measured.origin)) {
+          runSharedDismiss(measured);
+          return;
+        }
+        runFadeDismiss();
       };
-      /**
-       * Attendre le snap fil (opacity 0 + scroll jusqu’au host cible) avant
-       * de mesurer la vignette — sinon on mesure encore la carte d’ouverture.
-       */
+      armFeedImmersiveReturnToKey(memId, visibleKey, onFilReady);
+      /** Filet : fil bloqué / host manquant → fade plutôt que croix morte. */
       setTimeout(() => {
-        requestAnimationFrame(() => tryMeasure(0));
-      }, 200);
+        if (settled) return;
+        settled = true;
+        cancelFeedImmersiveReturn();
+        runFadeDismiss();
+      }, 1400);
       return;
     }
 
@@ -1656,8 +1662,6 @@ function ImmersivePage({
               topInset={textTopInset}
               viewportHeight={textViewportH}
               onTapEdit={() => onRequestEditText(memory)}
-              onToggleFavorite={toggleFavorite}
-              overlayBottomInset={favoriteBottomInset}
               showMarginNav={!!showTextMarginNav}
               canGoPrev={!!canTextNavPrev}
               canGoNext={!!canTextNavNext}
@@ -1728,7 +1732,7 @@ function ImmersivePage({
           order={2}
           style={[
             styles.editTextFab,
-            mediaChrome ? styles.editTextFabOnMedia : styles.editTextFabOnText,
+            styles.editTextFabOnMedia,
             { bottom: scale(12) + editFabBottom },
           ]}
         >
@@ -1745,11 +1749,7 @@ function ImmersivePage({
             }
             style={styles.closeBtnHit}
           >
-            <Pencil
-              size={scale(16)}
-              color={mediaChrome ? '#FFFFFF' : THEME.textPrimary}
-              strokeWidth={2.2}
-            />
+            <Pencil size={scale(16)} color="#FFFFFF" strokeWidth={2.2} />
           </MotionPressable>
         </ImmersiveChromeReveal>
         {mediaChrome && captionParagraphs.length > 0 ? (
@@ -1825,7 +1825,7 @@ function ImmersivePage({
           </ImmersiveChromeReveal>
         ) : null}
 
-        {mediaChrome ? (
+        {mediaChrome || memory.type === 'text' ? (
           <ImmersiveMediaFavoriteChrome
             memory={memory}
             albumPhotoSlot={albumPhotoSlot}
@@ -2262,6 +2262,21 @@ function ImmersiveVoicePlayerBar({
   );
 }
 
+/** ~2 cm — rail latéral discret (swipe texte hors corps). */
+const TEXT_MARGIN_RAIL_H = verticalScale(88);
+const TEXT_MARGIN_DASH_COUNT = 9;
+/** Anthracite : clair au centre → plus foncé aux extrémités. */
+const TEXT_MARGIN_ANTHRACITE = '#6E6E73';
+const TEXT_MARGIN_ANTHRACITE_DIM = 'rgba(110, 110, 115, 0.38)';
+
+function textMarginDashColor(index: number, count: number): string {
+  const mid = (count - 1) / 2;
+  const dist = mid <= 0 ? 0 : Math.abs(index - mid) / mid;
+  /** Centre clair (~0.28) → bouts plus marqués (~0.78). */
+  const alpha = 0.28 + dist * 0.5;
+  return `rgba(110, 110, 115, ${alpha.toFixed(2)})`;
+}
+
 function TextImmersiveMarginRail({
   canGoPrev,
   canGoNext,
@@ -2273,9 +2288,6 @@ function TextImmersiveMarginRail({
   onGoPrev: () => void;
   onGoNext: () => void;
 }) {
-  const hintActive = 'rgba(28, 28, 30, 0.48)';
-  const hintDisabled = 'rgba(28, 28, 30, 0.22)';
-
   const panResponder = useMemo(
     () =>
       PanResponder.create({
@@ -2297,16 +2309,36 @@ function TextImmersiveMarginRail({
       accessibilityLabel="Glisser vers le haut ou le bas pour changer de souvenir"
     >
       <View pointerEvents="none" style={styles.textMarginHint}>
-        <ChevronUp
-          color={canGoPrev ? hintActive : hintDisabled}
-          size={scale(13)}
-          strokeWidth={1.6}
+        <View
+          style={[
+            styles.textMarginArrowUp,
+            {
+              borderBottomColor: canGoPrev
+                ? TEXT_MARGIN_ANTHRACITE
+                : TEXT_MARGIN_ANTHRACITE_DIM,
+            },
+          ]}
         />
-        <View style={styles.textMarginLine} />
-        <ChevronDown
-          color={canGoNext ? hintActive : hintDisabled}
-          size={scale(13)}
-          strokeWidth={1.6}
+        <View style={styles.textMarginDashes}>
+          {Array.from({ length: TEXT_MARGIN_DASH_COUNT }, (_, i) => (
+            <View
+              key={i}
+              style={[
+                styles.textMarginDash,
+                { backgroundColor: textMarginDashColor(i, TEXT_MARGIN_DASH_COUNT) },
+              ]}
+            />
+          ))}
+        </View>
+        <View
+          style={[
+            styles.textMarginArrowDown,
+            {
+              borderTopColor: canGoNext
+                ? TEXT_MARGIN_ANTHRACITE
+                : TEXT_MARGIN_ANTHRACITE_DIM,
+            },
+          ]}
         />
       </View>
     </View>
@@ -2318,25 +2350,21 @@ function ImmersiveText({
   topInset,
   viewportHeight,
   onTapEdit,
-  onToggleFavorite,
   showMarginNav,
   canGoPrev,
   canGoNext,
   onGoPrev,
   onGoNext,
-  overlayBottomInset,
 }: {
   memory: Memory;
   topInset: number;
   viewportHeight: number;
   onTapEdit: () => void;
-  onToggleFavorite: (id: string) => void | Promise<void>;
   showMarginNav: boolean;
   canGoPrev: boolean;
   canGoNext: boolean;
   onGoPrev: () => void;
   onGoNext: () => void;
-  overlayBottomInset: number;
 }) {
   /** Exactement le même hook / styles que `FilMemoryRow` (souvenirs texte du fil). */
   const memoryEditorialFont = useMemoryEditorialFont();
@@ -2353,16 +2381,8 @@ function ImmersiveText({
   return (
     <View style={[styles.textImmersiveOuter, { top: topInset, height: viewportHeight }]}>
       <View style={styles.textImmersiveRow}>
-        {showMarginNav ? (
-          <TextImmersiveMarginRail
-            canGoPrev={canGoPrev}
-            canGoNext={canGoNext}
-            onGoPrev={onGoPrev}
-            onGoNext={onGoNext}
-          />
-        ) : (
-          <View style={styles.textMarginSpacer} />
-        )}
+        {/** Marge gauche vide — le repère swipe reste uniquement à droite. */}
+        <View style={styles.textMarginSpacer} />
         <View style={styles.textImmersiveCenter}>
           <ScrollableTextBlock
             maxHeight={viewportHeight}
@@ -2409,14 +2429,10 @@ function ImmersiveText({
           <View style={styles.textMarginSpacer} />
         )}
       </View>
-      <ImmersiveChromeReveal order={1} withScale={false} style={StyleSheet.absoluteFillObject}>
-        <FeedPhotoFavoriteOverlay
-          isFavorite={!!memory.is_favorite}
-          inkOverride={memory.captured_overlay_ink}
-          onPress={() => void onToggleFavorite(memory.id)}
-          bottomInset={overlayBottomInset}
-        />
-      </ImmersiveChromeReveal>
+      {/**
+       * Cœur / crayon : rendus au niveau page (même couche que photo),
+       * pas ici — sinon le `bottom` est relatif au bloc texte et décale.
+       */}
     </View>
   );
 }
@@ -2482,14 +2498,38 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   textMarginHint: {
+    height: TEXT_MARGIN_RAIL_H,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: verticalScale(7),
+  },
+  textMarginDashes: {
+    alignItems: 'center',
     gap: verticalScale(4),
   },
-  textMarginLine: {
-    width: StyleSheet.hairlineWidth * 1.5,
-    height: verticalScale(36),
-    backgroundColor: 'rgba(28, 28, 30, 0.40)',
+  textMarginDash: {
+    width: scale(11),
+    height: Math.max(2, verticalScale(2)),
+    borderRadius: 999,
+  },
+  /** Petits triangles pleins (pas de stroke Lucide). */
+  textMarginArrowUp: {
+    width: 0,
+    height: 0,
+    borderLeftWidth: scale(5),
+    borderRightWidth: scale(5),
+    borderBottomWidth: scale(6),
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+  },
+  textMarginArrowDown: {
+    width: 0,
+    height: 0,
+    borderLeftWidth: scale(5),
+    borderRightWidth: scale(5),
+    borderTopWidth: scale(6),
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
   },
   pageBody: {
     flex: 1,
@@ -2585,11 +2625,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  /** Même disque que le cœur média (`rgba(0,0,0,0.24–0.28)`). */
   editTextFabOnMedia: {
     backgroundColor: 'rgba(0,0,0,0.28)',
-  },
-  editTextFabOnText: {
-    backgroundColor: 'rgba(0, 0, 0, 0.06)',
   },
   /**
    * Sous le texte, au-dessus du média. Les icônes (cœur, crayon, scrubber)

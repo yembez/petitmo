@@ -55,7 +55,11 @@ export default function ParentAccountScreen() {
     try {
       await signOutRealAccount();
       resetNavigationToOnboarding(router, navigation);
-      setTimeout(() => endAccountClosingUi(), 280);
+      /** Laisser le temps aux retries dismissTo/replace (y compris hors ligne). */
+      setTimeout(() => {
+        resetNavigationToOnboarding(router, navigation);
+        endAccountClosingUi();
+      }, 560);
     } catch {
       endAccountClosingUi();
       Alert.alert(t('error'), t('parent.account.signOutFailed'));
@@ -89,7 +93,10 @@ export default function ParentAccountScreen() {
         return;
       }
       resetNavigationToOnboarding(router, navigation);
-      setTimeout(() => endAccountClosingUi(), 280);
+      setTimeout(() => {
+        resetNavigationToOnboarding(router, navigation);
+        endAccountClosingUi();
+      }, 560);
     } catch {
       endAccountClosingUi();
       Alert.alert(t('error'), t('parent.account.deleteFailed'));

@@ -39,7 +39,7 @@ function mediaHeight(screenW: number): number {
 
 /**
  * Estimation synchrone de la hauteur d’une ligne fil (anti-saut FlatList).
- * Format carte unique 4/5 + coins arrondis (layout historique).
+ * Format carte unique (`FEED_MEDIA_ASPECT_DEFAULT`) — anti-saut FlatList.
  */
 export function estimateFeedRowHeight(
   item: FeedListItem,

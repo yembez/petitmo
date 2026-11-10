@@ -69,6 +69,16 @@ export const MOTION_SPRING_SETTLE: WithSpringConfig = {
   reduceMotion: rm,
 };
 
+/**
+ * Apparition « Apple aujourd’hui » : se pose, presque pas de rebond.
+ * dampingRatio ~0.9 — souple, premium, pas jouet.
+ */
+export const MOTION_SPRING_SOFT: WithSpringConfig = {
+  duration: 520,
+  dampingRatio: 0.9,
+  reduceMotion: rm,
+};
+
 /** Relâchement d’un appui : retour net. */
 export const MOTION_SPRING_PRESS: WithSpringConfig = {
   damping: 26,
@@ -109,11 +119,15 @@ export const MOTION_EXIT_STAGGER_MS = 18;
 
 /** Échelle de départ d’une apparition — pic à ~1.012 avec `MOTION_SPRING_SETTLE`. */
 export const MOTION_ENTER_SCALE = 0.95;
+/** Entrée soft (onboarding / chrome) — à peine sous 1, pas de « pop ». */
+export const MOTION_ENTER_SCALE_SOFT = 0.97;
 /**
  * Course verticale d’une apparition, orientée vers le bord d’origine.
  * Sous ~14 px le déplacement passe inaperçu à côté d’une animation plus grande.
  */
 export const MOTION_ENTER_TRANSLATE_PX = 18;
+/** Course verticale soft — glisse courte, type sheet iOS. */
+export const MOTION_ENTER_TRANSLATE_SOFT_PX = 10;
 /** Compression sous le doigt (contrôles seulement — jamais une photo / carte). */
 export const MOTION_PRESS_SCALE = 0.965;
 /** CTA Capturer / gros disques : plus lisible sous le pouce. */

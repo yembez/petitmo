@@ -444,6 +444,14 @@ function FilMemoryRow({
 
   const [feedInlineVideoSoundOn, setFeedInlineVideoSoundOn] = useState(false);
   const [feedInlineVideoDisplayReady, setFeedInlineVideoDisplayReady] = useState(false);
+  /** JPEG poster décodé (URI peut être là 1 frame avant le paint → sinon noir sans dots). */
+  const [videoPosterPainted, setVideoPosterPainted] = useState(false);
+  const videoPosterPaintKeyRef = useRef('');
+  const posterPaintKey = `${memory.id}:${videoPosterUri.trim()}`;
+  if (videoPosterPaintKeyRef.current !== posterPaintKey) {
+    videoPosterPaintKeyRef.current = posterPaintKey;
+    if (videoPosterPainted) setVideoPosterPainted(false);
+  }
   /** Poster au-dessus de la vidéo : fondu 1→0 une fois la vidéo décodée (évite le « saut » thumbnail → frame). */
   const feedInlinePosterFade = useRef(new RNAnimated.Value(1)).current;
   const feedInlineVideoReveal = useRef(new RNAnimated.Value(0)).current;
@@ -1086,6 +1094,7 @@ function FilMemoryRow({
                             cachePolicy="memory-disk"
                             transition={0}
                             recyclingKey={`poster-${memory.id}`}
+                            onLoad={() => setVideoPosterPainted(true)}
                           />
                         </RNAnimated.View>
                       ) : null}
@@ -1099,6 +1108,7 @@ function FilMemoryRow({
                         cachePolicy="memory-disk"
                         transition={0}
                         recyclingKey={`poster-${memory.id}`}
+                        onLoad={() => setVideoPosterPainted(true)}
                       />
                     </View>
                   ) : (
@@ -1111,21 +1121,25 @@ function FilMemoryRow({
                   <View style={[styles.photoImage, { backgroundColor: '#000000' }]} />
                 </View>
               )}
-              {/** Pending import : points tant que le souvenir n’est pas posé en SQLite. */}
-              {isOptimisticFeedPending ? (
+              {/**
+               * Points d’hydratation — aussi quand lecture OK mais poster pas encore
+               * peint (sinon fond noir nu au scroll). Disparaissent dès poster paint
+               * OU 1ʳᵉ frame vidéo.
+               */}
+              {isOptimisticFeedPending ||
+              !videoPlaybackUri.trim() ||
+              (!videoPosterPainted && !feedInlineVideoDisplayReady) ? (
                 <FeedMediaPrepOverlay
                   compact
                   prominent
-                  blockTouches
-                  label={pendingPrepLabel?.trim() || t('mediaPrep.videoReady')}
-                />
-              ) : !videoPlaybackUri.trim() ? (
-                /** Restore / materialize : pas de noir+play silencieux — 3 points explicites. */
-                <FeedMediaPrepOverlay
-                  compact
-                  prominent
-                  blockTouches
-                  label={t('mediaPrep.videoReady')}
+                  blockTouches={
+                    isOptimisticFeedPending || !videoPlaybackUri.trim()
+                  }
+                  label={
+                    isOptimisticFeedPending
+                      ? pendingPrepLabel?.trim() || t('mediaPrep.videoReady')
+                      : t('mediaPrep.videoReady')
+                  }
                 />
               ) : null}
               <FeedVideoDurationSoundBar

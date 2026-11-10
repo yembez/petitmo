@@ -9,7 +9,6 @@ import {
   useWindowDimensions,
   View,
   BackHandler,
-  type ImageSourcePropType,
   type ListRenderItemInfo,
 } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -17,11 +16,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Lock, ChevronRight } from 'lucide-react-native';
 import { useNavigation } from '@react-navigation/native';
+import { useSharedValue } from 'react-native-reanimated';
 import { scale, verticalScale } from '@/utils/responsive';
 import { SPACING } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
 import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import MotionPressable from '@/components/MotionPressable';
+import { MotionReveal } from '@/components/MotionReveal';
 import PetitCoeurWordmark from '@/components/PetitCoeurWordmark';
 import { LinearGradient } from 'expo-linear-gradient';
 import { getChildren, refreshChildrenFromCloudInBackground } from '@/services/children';
@@ -29,6 +30,11 @@ import { hasRealAuthAccount, peekIntentionalSignedOut } from '@/lib/authAccount'
 import { listLocalChildrenForUser } from '@/lib/localDb';
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
+import {
+  imageSourceWithLocalUri,
+  localUriForImageModule,
+  prefetchAuthOnboardingAssets,
+} from '@/utils/prefetchAuthOnboardingAssets';
 
 /**
  * Règle d'or V2 (AGENTS.md) :
@@ -36,15 +42,28 @@ import { useAppTranslation } from '@/hooks/useAppTranslation';
  * - « J'ai déjà un compte » → login / restore.
  * - Promesse : souvenirs privés et sauvegardés.
  *
- * Stable OTA : FlatList RN + Image (pas de Reanimated / BlurView / MaskedView).
- * Typo : police système (SF Pro iOS), comme Capturer.
+ * Titre / sous-titre / logo (1ʳᵉ) : **dans** chaque slide (swipe avec la photo → zéro retard).
+ * CTA / privacy : chrome fixe, entrée soft seulement sur la dernière page.
  */
 
 type OnboardingSlide = {
   key: string;
-  image: ImageSourcePropType;
+  /** Module Metro (`require`) — prefetch → URI locale hors ligne. */
+  image: number;
   titleKey: string;
   subtitleKey: string;
+  /**
+   * Cadrage cover : fraction de la largeur écran.
+   * Négatif = décale l’image à gauche (sujet trop à droite → recentré).
+   */
+  imageOffsetX?: number;
+  /**
+   * `cover` (défaut) = plein écran croppé + zoom.
+   * `contain` = image entière visible (bandes haut/bas OK) — pour un duo paysage.
+   */
+  photoFit?: 'cover' | 'contain';
+  /** Zoom cover uniquement (ignoré si `contain`). */
+  photoZoom?: number;
 };
 
 const SLIDES: OnboardingSlide[] = [
@@ -53,6 +72,8 @@ const SLIDES: OnboardingSlide[] = [
     image: require('@/assets/images/onboarding_01_mom_child.jpg'),
     titleKey: 'onboarding.slides.bondTitle',
     subtitleKey: 'onboarding.slides.bondSubtitle',
+    /** Légèrement plus à gauche. */
+    imageOffsetX: -0.06,
   },
   {
     key: 'capture',
@@ -74,7 +95,7 @@ const SLIDES: OnboardingSlide[] = [
   },
 ];
 
-/** Zoom cover des photos onboarding. */
+/** Zoom cover des photos onboarding (slides `cover` seulement). */
 const PHOTO_ZOOM = 1.14;
 
 export default function OnboardingScreen() {
@@ -85,15 +106,55 @@ export default function OnboardingScreen() {
   const { t } = useAppTranslation('common');
   const listRef = useRef<FlatList<OnboardingSlide>>(null);
   const [index, setIndex] = useState(0);
+  const [slideLocalUris, setSlideLocalUris] = useState<Record<string, string>>({});
   const isLast = index >= SLIDES.length - 1;
-  const isFirst = index === 0;
   /** Plus petit que l’ancien wordmark (~20 % / 78) — 1ʳᵉ slide seulement. */
   const logoW = Math.min(windowWidth * 0.14, scale(54));
+
+  /** CTA / privacy : soft enter seulement quand on arrive sur (ou quitte) la dernière page. */
+  const ctaGate = useSharedValue(1);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      await prefetchAuthOnboardingAssets();
+      const next: Record<string, string> = {};
+      for (const slide of SLIDES) {
+        const uri = await localUriForImageModule(slide.image);
+        if (uri) next[slide.key] = uri;
+      }
+      if (!cancelled) setSlideLocalUris(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    ctaGate.value = 0;
+    const t = setTimeout(() => {
+      ctaGate.value = 1;
+    }, 40);
+    return () => clearTimeout(t);
+  }, [ctaGate, isLast]);
 
   const topFadeH = insets.top + verticalScale(100);
   const bottomFadeH = Math.min(windowHeight * 0.42, verticalScale(340));
   /** Dernière slide : CTA + lien + privacy — dégradé plus haut pour lisibilité. */
   const bottomFadeHLast = Math.min(windowHeight * 0.58, verticalScale(470));
+
+  /** Hauteur du chrome fixe sous le texte (CTA + lien + dots + privacy + safe area). */
+  const footerChromeH = useCallback(
+    (lastSlide: boolean) =>
+      Math.max(insets.bottom, verticalScale(8)) +
+      verticalScale(8) +
+      scale(6) +
+      verticalScale(8) +
+      verticalScale(36) +
+      verticalScale(lastSlide ? 56 : 52) +
+      (lastSlide ? verticalScale(30) : 0),
+    [insets.bottom],
+  );
 
   /**
    * Bloque le retour système / gesture vers `(tabs)` laissés sous la pile après logout.
@@ -176,58 +237,95 @@ export default function OnboardingScreen() {
   const renderItem = useCallback(
     ({ item, index: slideIndex }: ListRenderItemInfo<OnboardingSlide>) => {
       const isLastSlide = slideIndex === SLIDES.length - 1;
+      const isFirstSlide = slideIndex === 0;
       const fadeH = isLastSlide ? bottomFadeHLast : bottomFadeH;
+      const copyBottom = footerChromeH(isLastSlide);
       return (
-      <View
-        style={{
-          width: windowWidth,
-          height: windowHeight,
-          backgroundColor: '#2A1A14',
-          overflow: 'hidden',
-        }}
-      >
-        <Image
-          source={item.image}
+        <View
           style={{
-            position: 'absolute',
             width: windowWidth,
             height: windowHeight,
-            top: 0,
-            left: 0,
-            transform: [{ scale: PHOTO_ZOOM }],
+            backgroundColor: '#2A1A14',
+            overflow: 'hidden',
           }}
-          resizeMode="cover"
-        />
-        <LinearGradient
-          colors={['rgba(40, 22, 18, 0.38)', 'transparent']}
-          locations={[0, 1]}
-          style={[styles.topOverlay, { height: topFadeH }]}
-          pointerEvents="none"
-        />
-        <LinearGradient
-          colors={
-            isLastSlide
-              ? [
-                  'transparent',
-                  'rgba(40, 22, 18, 0.35)',
-                  'rgba(40, 22, 18, 0.62)',
-                  'rgba(40, 22, 18, 0.82)',
-                ]
-              : ['transparent', 'rgba(40, 22, 18, 0.5)', 'rgba(40, 22, 18, 0.78)']
-          }
-          locations={isLastSlide ? [0, 0.28, 0.62, 1] : [0, 0.48, 1]}
-          style={[styles.bottomOverlay, { height: fadeH }]}
-          pointerEvents="none"
-        />
-      </View>
+        >
+          <Image
+            source={imageSourceWithLocalUri(item.image, slideLocalUris[item.key])}
+            style={
+              item.photoFit === 'contain'
+                ? {
+                    position: 'absolute',
+                    width: windowWidth,
+                    height: windowHeight,
+                    top: 0,
+                    left: 0,
+                  }
+                : {
+                    position: 'absolute',
+                    width: windowWidth,
+                    height: windowHeight,
+                    top: 0,
+                    left: 0,
+                    transform: [
+                      { scale: item.photoZoom ?? PHOTO_ZOOM },
+                      { translateX: (item.imageOffsetX ?? 0) * windowWidth },
+                    ],
+                  }
+            }
+            resizeMode={item.photoFit === 'contain' ? 'contain' : 'cover'}
+          />
+          <LinearGradient
+            colors={['rgba(40, 22, 18, 0.38)', 'transparent']}
+            locations={[0, 1]}
+            style={[styles.topOverlay, { height: topFadeH }]}
+            pointerEvents="none"
+          />
+          <LinearGradient
+            colors={
+              isLastSlide
+                ? [
+                    'transparent',
+                    'rgba(40, 22, 18, 0.35)',
+                    'rgba(40, 22, 18, 0.62)',
+                    'rgba(40, 22, 18, 0.82)',
+                  ]
+                : ['transparent', 'rgba(40, 22, 18, 0.5)', 'rgba(40, 22, 18, 0.78)']
+            }
+            locations={isLastSlide ? [0, 0.28, 0.62, 1] : [0, 0.48, 1]}
+            style={[styles.bottomOverlay, { height: fadeH }]}
+            pointerEvents="none"
+          />
+          {isFirstSlide ? (
+            <View
+              style={[styles.logoContainer, { top: insets.top + verticalScale(8) }]}
+              pointerEvents="none"
+            >
+              <PetitCoeurWordmark width={logoW} variant="white" opacity={0.92} />
+            </View>
+          ) : null}
+          <View
+            style={[styles.slideCopy, { bottom: copyBottom, paddingHorizontal: SPACING.lg }]}
+            pointerEvents="none"
+          >
+            <Text style={styles.title}>{t(item.titleKey)}</Text>
+            <Text style={styles.subtitle}>{t(item.subtitleKey)}</Text>
+          </View>
+        </View>
       );
     },
-    [bottomFadeH, bottomFadeHLast, topFadeH, windowHeight, windowWidth],
+    [
+      bottomFadeH,
+      bottomFadeHLast,
+      footerChromeH,
+      insets.top,
+      logoW,
+      slideLocalUris,
+      t,
+      topFadeH,
+      windowHeight,
+      windowWidth,
+    ],
   );
-
-  const current = SLIDES[index] ?? SLIDES[0];
-  const title = t(current.titleKey);
-  const subtitle = t(current.subtitleKey);
 
   return (
     <View style={styles.container}>
@@ -255,15 +353,6 @@ export default function OnboardingScreen() {
         style={[styles.chrome, { paddingTop: insets.top + verticalScale(8) }]}
         pointerEvents="box-none"
       >
-        {isFirst ? (
-          <View
-            style={[styles.logoContainer, { top: insets.top + verticalScale(8) }]}
-            pointerEvents="none"
-          >
-            <PetitCoeurWordmark width={logoW} variant="white" opacity={0.92} />
-          </View>
-        ) : null}
-
         <View
           style={[
             styles.footer,
@@ -271,39 +360,34 @@ export default function OnboardingScreen() {
           ]}
           pointerEvents="box-none"
         >
-          <View style={styles.copySlot}>
-            <View style={styles.copyBlock}>
-              <Text style={styles.title}>{title}</Text>
-              <Text style={styles.subtitle}>{subtitle}</Text>
-            </View>
-          </View>
-
-          {isLast ? (
-            <PetitmoPrimaryPressable
-              style={styles.ctaButton}
-              onPress={onContinue}
-              activeOpacity={0.9}
-              accessibilityRole="button"
-              accessibilityLabel={t('onboarding.ctaStartA11y')}
-            >
-              <Text style={styles.ctaButtonText}>{t('onboarding.ctaStart')}</Text>
-            </PetitmoPrimaryPressable>
-          ) : (
-            <MotionPressable
-              onPress={onContinue}
-              haptic
-              accessibilityRole="button"
-              accessibilityLabel={t('onboarding.ctaContinue')}
-              style={styles.continueArrowHit}
-              hitSlop={16}
-            >
-              <ChevronRight
-                size={scale(40)}
-                color="#FFFFFF"
-                strokeWidth={2.4}
-              />
-            </MotionPressable>
-          )}
+          <MotionReveal gate={ctaGate} order={0} from="bottom" feel="soft">
+            {isLast ? (
+              <PetitmoPrimaryPressable
+                style={styles.ctaButton}
+                onPress={onContinue}
+                activeOpacity={0.9}
+                accessibilityRole="button"
+                accessibilityLabel={t('onboarding.ctaStartA11y')}
+              >
+                <Text style={styles.ctaButtonText}>{t('onboarding.ctaStart')}</Text>
+              </PetitmoPrimaryPressable>
+            ) : (
+              <MotionPressable
+                onPress={onContinue}
+                haptic
+                accessibilityRole="button"
+                accessibilityLabel={t('onboarding.ctaContinue')}
+                style={styles.continueArrowHit}
+                hitSlop={16}
+              >
+                <ChevronRight
+                  size={scale(40)}
+                  color="#FFFFFF"
+                  strokeWidth={2.4}
+                />
+              </MotionPressable>
+            )}
+          </MotionReveal>
 
           <View style={styles.afterCtaSlot}>
             <TouchableOpacity
@@ -333,10 +417,12 @@ export default function OnboardingScreen() {
           </View>
 
           {isLast ? (
-            <View style={styles.privacyBadge}>
-              <Lock size={scale(15)} color="rgba(255, 255, 255, 0.65)" strokeWidth={2} />
-              <Text style={styles.privacyText}>{t('onboarding.privacy')}</Text>
-            </View>
+            <MotionReveal gate={ctaGate} order={1} from="bottom" withScale={false} feel="soft">
+              <View style={styles.privacyBadge}>
+                <Lock size={scale(15)} color="rgba(255, 255, 255, 0.65)" strokeWidth={2} />
+                <Text style={styles.privacyText}>{t('onboarding.privacy')}</Text>
+              </View>
+            </MotionReveal>
           ) : null}
         </View>
       </View>
@@ -361,6 +447,12 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
   },
+  slideCopy: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
   chrome: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'flex-end',
@@ -374,16 +466,6 @@ const styles = StyleSheet.create({
   footer: {
     paddingHorizontal: SPACING.lg,
     alignItems: 'center',
-  },
-  copySlot: {
-    minHeight: verticalScale(64),
-    width: '100%',
-    justifyContent: 'flex-end',
-    marginBottom: verticalScale(2),
-  },
-  copyBlock: {
-    alignItems: 'center',
-    width: '100%',
   },
   title: {
     fontSize: scale(32),
@@ -405,7 +487,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: scale(26),
     letterSpacing: -0.1,
-    marginBottom: verticalScale(14),
+    marginBottom: verticalScale(4),
     maxWidth: scale(320),
     textShadowColor: 'rgba(40, 22, 18, 0.4)',
     textShadowOffset: { width: 0, height: 1 },

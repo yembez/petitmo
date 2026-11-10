@@ -11,6 +11,7 @@ import {
   TEXT_POST_CARD_INSET,
   TEXT_POST_CARD_RADIUS,
 } from '@/constants/feedLayout';
+import { FEED_MEDIA_ASPECT_DEFAULT } from '@/utils/feedMediaAspect';
 
 const HEADER_AVATAR_PX = scale(68);
 /** Marge horizontale (ex. audio sans visuel) — référencé par `styles` */
@@ -312,7 +313,7 @@ const styles = StyleSheet.create({
   mediaCard: {
     marginHorizontal: MEDIA_CARD_INSET,
     alignSelf: 'stretch',
-    aspectRatio: 4 / 5,
+    aspectRatio: FEED_MEDIA_ASPECT_DEFAULT,
     borderRadius: MEDIA_CARD_RADIUS,
     overflow: 'hidden',
     backgroundColor: '#ECECEF',
@@ -717,27 +718,28 @@ const styles = StyleSheet.create({
     gap: scale(8),
     flexShrink: 0,
   },
-  /** Disque crayon fil — fond blanc + liseré noir (parité CTA cœur). */
+  /**
+   * CTA bas de post : disque blanc + liseré noir, icône outline noire.
+   */
   feedPencilDiscCta: {
-    width: scale(40),
-    height: scale(40),
-    borderRadius: scale(20),
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: THEME.feedPencilDiscCtaBackground,
-    borderWidth: scale(1),
-    borderColor: 'rgba(0, 0, 0, 0.28)',
-  },
-  /** Disque favori aligné sur le crayon (sous le post). */
-  feedFavoriteDiscCta: {
-    width: scale(40),
-    height: scale(40),
-    borderRadius: scale(20),
+    width: scale(36),
+    height: scale(36),
+    borderRadius: scale(18),
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#FFFFFF',
-    borderWidth: scale(1),
-    borderColor: 'rgba(0, 0, 0, 0.28)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: FEED_BLACK_HAIRLINE,
+  },
+  feedFavoriteDiscCta: {
+    width: scale(36),
+    height: scale(36),
+    borderRadius: scale(18),
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: FEED_BLACK_HAIRLINE,
   },
   feedFavoriteDiscCtaActive: {
     backgroundColor: '#FFFFFF',

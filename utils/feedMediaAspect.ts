@@ -1,7 +1,10 @@
 import type { Memory } from '@/types/local';
 
-/** Repli fil — ratio historique carte média. */
-export const FEED_MEDIA_ASPECT_DEFAULT = 4 / 5;
+/**
+ * Repli fil — `width / height` de la carte photo / vidéo.
+ * Historique 4/5 (plus haut) ; 1 = carré (moins de hauteur à l’écran).
+ */
+export const FEED_MEDIA_ASPECT_DEFAULT = 1;
 
 /**
  * Bornes pour éviter cartes absurdes (pano ultra-large / story ultra-haute)

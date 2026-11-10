@@ -97,9 +97,21 @@ export function rekeyLocalWorkspaceUserId(fromUserId: string, toUserId: string):
 
 const LAST_REAL_AUTH_USER_ID_KEY = 'petitmo:lastRealAuthUserId';
 const LAST_REAL_AUTH_EMAIL_KEY = 'petitmo:lastRealAuthEmail';
+const LAST_AUTH_PROVIDER_KEY = 'petitmo:lastAuthProvider';
+
+/** Dernier moyen de connexion sur cet appareil (reprise hors ligne ciblée). */
+export type LastAuthProvider = 'apple' | 'google' | 'email';
 
 let lastRealAuthUserIdMemory: string | null | undefined;
 let lastRealAuthEmailMemory: string | null | undefined;
+let lastAuthProviderMemory: LastAuthProvider | null | undefined;
+
+export function normalizeLastAuthProvider(raw: unknown): LastAuthProvider {
+  const p = String(raw ?? '').trim().toLowerCase();
+  if (p === 'apple') return 'apple';
+  if (p === 'google') return 'google';
+  return 'email';
+}
 
 export async function getLastRealAuthUserId(): Promise<string | null> {
   if (lastRealAuthUserIdMemory !== undefined) {
@@ -167,9 +179,44 @@ export async function setLastRealAuthEmail(email: string | null): Promise<void> 
   }
 }
 
+export async function getLastAuthProvider(): Promise<LastAuthProvider | null> {
+  if (lastAuthProviderMemory !== undefined) {
+    return lastAuthProviderMemory;
+  }
+  try {
+    const v = (await AsyncStorage.getItem(LAST_AUTH_PROVIDER_KEY))?.trim().toLowerCase() || null;
+    if (v === 'apple' || v === 'google' || v === 'email') {
+      lastAuthProviderMemory = v;
+      return v;
+    }
+    lastAuthProviderMemory = null;
+    return null;
+  } catch {
+    lastAuthProviderMemory = null;
+    return null;
+  }
+}
+
+export function peekLastAuthProvider(): LastAuthProvider | null {
+  return lastAuthProviderMemory ?? null;
+}
+
+export async function setLastAuthProvider(provider: LastAuthProvider | null): Promise<void> {
+  lastAuthProviderMemory = provider;
+  try {
+    if (provider) {
+      await AsyncStorage.setItem(LAST_AUTH_PROVIDER_KEY, provider);
+    } else {
+      await AsyncStorage.removeItem(LAST_AUTH_PROVIDER_KEY);
+    }
+  } catch (e) {
+    console.warn('[accountLocalReset] setLastAuthProvider', e);
+  }
+}
+
 /** Au boot : hydrate caches sync id + e-mail (Capturer / auth hors-ligne). */
 export async function warmLastRealAuthIdentityFromStorage(): Promise<void> {
-  await Promise.all([getLastRealAuthUserId(), getLastRealAuthEmail()]);
+  await Promise.all([getLastRealAuthUserId(), getLastRealAuthEmail(), getLastAuthProvider()]);
 }
 
 /** True si SQLite contient des lignes déjà rattachées à un autre compte. */

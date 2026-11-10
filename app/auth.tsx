@@ -55,15 +55,22 @@ import { supabase } from '@/lib/supabase';
 import { getChildren } from '@/services/children';
 import { listLocalChildrenForUser } from '@/lib/localDb';
 import {
+  getLastAuthProvider,
   getLastRealAuthEmail,
   listMemoriesVisibleForAccount,
   peekLastRealAuthUserId,
+  type LastAuthProvider,
 } from '@/services/accountLocalReset';
 import type { User } from '@supabase/supabase-js';
 import { hydrateTabScreensFromSqliteSync } from '@/services/tabScreensHydrate';
 import { safeRouterBack } from '@/utils/safeRouterBack';
 import { LEGAL_PRIVACY_URL, LEGAL_TERMS_URL } from '@/lib/legalUrls';
 import { looksLikeNetworkAuthError, probeNetworkReachable } from '@/utils/networkProbe';
+import {
+  imageSourceWithLocalUri,
+  localUriForImageModule,
+  prefetchAuthOnboardingAssets,
+} from '@/utils/prefetchAuthOnboardingAssets';
 import { captureAuthGateTimeout } from '@/lib/sentry';
 import { consumePendingAccountSwitchNotice } from '@/lib/accountSwitchNotice';
 
@@ -88,7 +95,7 @@ type AuthIntent = 'free' | 'subscribe';
 /** `reset` = deep link recovery — nouveau MDP avant d’entrer dans l’app. */
 type AuthUiPhase = 'boot' | 'auth' | 'reset';
 
-const AUTH_BG = require('@/assets/images/auth_mother_child.jpg');
+const AUTH_BG = require('@/assets/images/auth_mother_child.jpg') as number;
 
 /** Part de l’écran réservée aux visages + titre (carte démarre en dessous). */
 const HERO_RATIO = 0.44;
@@ -177,6 +184,8 @@ export default function AuthScreen() {
   const [knownReturningAccount, setKnownReturningAccount] = useState(false);
   /** Y fenêtre où commence le noir uni (≈ haut de carte + inset coins). */
   const [scrimSolidTop, setScrimSolidTop] = useState(() => windowHeight * 0.52);
+  /** URI disque (cache Metro) — évite fond blanc hors ligne en Expo DEV. */
+  const [authBgLocalUri, setAuthBgLocalUri] = useState<string | null>(null);
   const cardOuterRef = useRef<View>(null);
 
   const syncScrimSolidTop = useCallback(() => {
@@ -203,6 +212,23 @@ export default function AuthScreen() {
       position: 'absolute' as const,
     };
   }, [windowHeight, windowWidth]);
+
+  const authBgSource = useMemo(
+    () => imageSourceWithLocalUri(AUTH_BG, authBgLocalUri),
+    [authBgLocalUri],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      await prefetchAuthOnboardingAssets();
+      const uri = await localUriForImageModule(AUTH_BG);
+      if (!cancelled && uri) setAuthBgLocalUri(uri);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const next = parseMode(params.mode);
@@ -567,7 +593,7 @@ export default function AuthScreen() {
             user?: User;
             reconnectedExisting?: boolean;
           }
-        | { ok: false; error: string; alreadyRegistered?: boolean }
+        | { ok: false; error: string; alreadyRegistered?: boolean; cancelled?: boolean }
       >,
       runOpts?: { oauth?: boolean },
     ) => {
@@ -576,12 +602,20 @@ export default function AuthScreen() {
       try {
         const result = await fn();
         if (!result.ok) {
+          // Croix / dismiss feuille Apple·Google : silence (ne pas rouvrir le dernier compte).
+          if (result.cancelled) {
+            setBusy(false);
+            return;
+          }
           if (result.alreadyRegistered && mode === 'signup') {
             setMode('login');
             Alert.alert(t('auth.loginTitle'), result.error);
           } else if (looksLikeNetworkAuthError(result.error)) {
-            // Pas d’Alert « continuer hors ligne ? » : reprise SQLite silencieuse si possible.
-            if (await trySilentOfflineResume(email)) {
+            /**
+             * Reprise SQLite **seulement** login e-mail (e-mail correspond au dernier compte).
+             * OAuth hors ligne ne doit pas forcer le dernier compte (Apple≠Google).
+             */
+            if (!runOpts?.oauth && (await trySilentOfflineResume(email))) {
               return;
             }
             Alert.alert(t('error'), t('auth.offlineContinueNeedNetwork'));
@@ -655,6 +689,52 @@ export default function AuthScreen() {
     })();
   };
 
+  /**
+   * Hors ligne : seul le **dernier** moyen de connexion (Apple / Google / e-mail)
+   * peut rouvrir le SQLite. Autre bouton OAuth → besoin réseau.
+   */
+  const runOAuth = useCallback(
+    (
+      provider: Extract<LastAuthProvider, 'apple' | 'google'>,
+      fn: () => Promise<
+        | {
+            ok: true;
+            needsEmailConfirmation?: boolean;
+            user?: User;
+            reconnectedExisting?: boolean;
+          }
+        | { ok: false; error: string; alreadyRegistered?: boolean; cancelled?: boolean }
+      >,
+    ) => {
+      void (async () => {
+        if (busy || leavingShell) return;
+        const online = await probeNetworkReachable();
+        if (!online) {
+          setBusy(true);
+          try {
+            const last = await getLastAuthProvider();
+            /** `null` = install antérieure (pas encore de stamp) → autoriser une reprise. */
+            if (
+              (last == null || last === provider) &&
+              (await trySilentOfflineResume())
+            ) {
+              return;
+            }
+            Alert.alert(t('error'), t('auth.offlineContinueNeedNetwork'));
+          } catch (e) {
+            console.warn('[auth] offline oauth', e);
+            Alert.alert(t('error'), t('error'));
+          } finally {
+            setBusy(false);
+          }
+          return;
+        }
+        void run(fn, { oauth: true });
+      })();
+    },
+    [busy, leavingShell, run, t, trySilentOfflineResume],
+  );
+
   const onForgotPassword = () => {
     void (async () => {
       if (!email.trim()) {
@@ -711,7 +791,7 @@ export default function AuthScreen() {
   if (!fontsLoaded || leavingShell || uiPhase === 'boot') {
     return (
       <View style={styles.shell}>
-        <Image source={AUTH_BG} style={bgStyle} resizeMode="cover" />
+        <Image source={authBgSource} style={bgStyle} resizeMode="cover" />
         <View style={styles.loadingOverlay}>
           <ActivityIndicator color={THEME.brandCtaOrange} size="large" />
         </View>
@@ -721,7 +801,7 @@ export default function AuthScreen() {
 
   return (
     <View style={styles.shell}>
-      <Image source={AUTH_BG} style={bgStyle} resizeMode="cover" />
+      <Image source={authBgSource} style={bgStyle} resizeMode="cover" />
 
       {/* Noir uni bas → quasi-haut carte ; dégradé au-dessus (titre). */}
       <View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
@@ -880,7 +960,7 @@ export default function AuthScreen() {
                 {appleAvailable ? (
                   <TouchableOpacity
                     style={styles.appleBtn}
-                    onPress={() => void run(signInWithAppleNative, { oauth: true })}
+                    onPress={() => runOAuth('apple', signInWithAppleNative)}
                     disabled={busy}
                     activeOpacity={0.85}
                     accessibilityRole="button"
@@ -895,7 +975,7 @@ export default function AuthScreen() {
 
                 <TouchableOpacity
                   style={styles.googleBtn}
-                  onPress={() => void run(signInWithGoogleOAuth, { oauth: true })}
+                  onPress={() => runOAuth('google', signInWithGoogleOAuth)}
                   disabled={busy}
                   activeOpacity={0.85}
                   accessibilityRole="button"

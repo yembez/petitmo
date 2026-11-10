@@ -9,6 +9,14 @@ const PASSWORD_EMAIL_KEY = 'petitmo.lastAuthPasswordEmail';
 
 async function loadSecureStore(): Promise<typeof import('expo-secure-store') | null> {
   try {
+    /**
+     * OTA sur un vieux binaire sans `expo-secure-store` : `import('expo-secure-store')`
+     * appelle `requireNativeModule` et peut faire un fatal Sentry malgré try/catch.
+     * On sonde d’abord le module optionnel.
+     */
+    const { requireOptionalNativeModule } = await import('expo-modules-core');
+    if (!requireOptionalNativeModule('ExpoSecureStore')) return null;
+
     const mod = await import('expo-secure-store');
     if (!(await mod.isAvailableAsync())) return null;
     return mod;

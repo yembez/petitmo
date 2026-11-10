@@ -28,6 +28,8 @@ export async function probeNetworkReachable(timeoutMs = 2500): Promise<boolean> 
 export function looksLikeNetworkAuthError(message: string | null | undefined): boolean {
   const m = (message ?? '').toLowerCase();
   if (!m) return false;
+  // « Connexion Apple/Google annulée » contient « connexion » mais n’est PAS une erreur réseau.
+  if (/annul/.test(m)) return false;
   return (
     m.includes('network') ||
     m.includes('fetch') ||
@@ -37,7 +39,11 @@ export function looksLikeNetworkAuthError(message: string | null | undefined): b
     m.includes('timeout') ||
     m.includes('failed to connect') ||
     m.includes('network request failed') ||
-    m.includes('connexion') ||
-    m.includes('réseau')
+    m.includes('réseau') ||
+    // FR : formulations réseau explicites seulement (pas tout « Connexion … »).
+    m.includes('pas de connexion') ||
+    m.includes('sans connexion') ||
+    m.includes('connexion impossible') ||
+    m.includes('échec de connexion')
   );
 }

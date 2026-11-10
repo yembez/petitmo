@@ -17,7 +17,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { scale, verticalScale } from '@/utils/responsive';
 import { estimateFeedRowHeight } from '@/utils/estimateFeedRowHeight';
-import { getFeedRowMeasuredHeight } from '@/lib/feedRowHeightCache';
+import { getFeedRowMeasuredHeight, syncFeedRowHeightCacheAspect } from '@/lib/feedRowHeightCache';
+import { FEED_MEDIA_ASPECT_DEFAULT } from '@/utils/feedMediaAspect';
 import EditTextModal from '@/components/EditTextModal';
 import { feedMemoryTextEditPreviewVariant } from '@/utils/memoryTextEditStyles';
 import { bookLineBudgetForMemoryType, bookCharsPerLineForMemoryType } from '@/utils/textLimits';
@@ -57,11 +58,15 @@ import {
   type ImmersiveLaunchArgs,
 } from '@/utils/immersiveSharedElement';
 import {
+  completeFeedImmersiveReturn,
   consumeFeedScrollIntent,
   PETITMO_FIL_APPLY_SCROLL_INTENT,
   type FeedScrollIntent,
 } from '@/services/feedScrollRestore';
-import { hasFeedImmersiveHost } from '@/utils/feedImmersiveHostRegistry';
+import {
+  hasFeedImmersiveHost,
+  measureFeedImmersiveHost,
+} from '@/utils/feedImmersiveHostRegistry';
 import { useFocusEffect } from '@react-navigation/native';
 import { getTimingNudge, markNudgeSeen, recordInstallDate } from '@/lib/paywallTiming';
 import SoftNudgeBanner from '@/components/SoftNudgeBanner';
@@ -73,8 +78,15 @@ import {
 import TabSceneTransition from '@/components/TabSceneTransition';
 import TabScreenErrorBoundary from '@/components/TabScreenErrorBoundary';
 import { useTabBlankWatchdog } from '@/hooks/useTabBlankWatchdog';
-import { recordWarn } from '@/lib/diagnosticTrail';
+import { recordAction, recordWarn } from '@/lib/diagnosticTrail';
 import { FeedLoadingDots } from '@/components/FeedLoadingDots';
+
+function logImmersiveSnap(phase: string, detail: Record<string, unknown>): void {
+  if (__DEV__) {
+    console.warn(`[fil.immersiveSnap] ${phase}`, detail);
+  }
+  recordAction(`fil.immersiveSnap.${phase}`, detail);
+}
 
 function FilScreen() {
   const router = useRouter();
@@ -82,6 +94,8 @@ function FilScreen() {
   const { pending: pendingUploads } = usePendingMediaUploads();
   const insets = useSafeAreaInsets();
   const { width: screenW } = useWindowDimensions();
+  /** Carré vs 4/5 : anciennes hauteurs mesurées faussaient le snap immersif. */
+  syncFeedRowHeightCacheAspect(FEED_MEDIA_ASPECT_DEFAULT);
   /** Nudge abo Fil uniquement — pas de bannière rappel ici (sheet Modal OK sur Capturer). */
   const [paywallNudge, setPaywallNudge] = useState<'DAY_30' | 'DAY_60' | null>(null);
   const listRef = useRef<FlatList<FeedListItem> | null>(null);
@@ -298,6 +312,11 @@ function FilScreen() {
   );
   const onFeedScroll = useCallback(
     (e: { nativeEvent: { contentOffset: { y: number } } }) => {
+      /**
+       * Toujours suivre l’offset réel — y compris pendant le snap immersif.
+       * Sinon la correction `cardTop` partait d’un targetY « théorique » et
+       * laissait le post trop bas (logs : delta 200–400 px).
+       */
       feedScrollOffsetRef.current = e.nativeEvent.contentOffset.y;
     },
     [],
@@ -381,18 +400,43 @@ function FilScreen() {
               memoryFlatListKeyByIdRef.current.get(item.memory.id) === key,
       );
       if (index >= 0) {
+        /**
+         * `scrollToIndex` ne met pas toujours à jour `onScroll` → sync l’offset cible.
+         * `paddingTop` = header : `viewOffset: 0`. Correction fine ensuite via mesure host.
+         */
+        const headerPad = feedHeaderHeightRef.current;
         try {
-          listRef.current.scrollToIndex({
+          const layout = getItemLayout(feedData as ArrayLike<FeedListItem>, index);
+          const measured = getFeedRowMeasuredHeight(key);
+          const targetY = Math.max(0, layout.offset);
+          logImmersiveSnap('scrollToOffset', {
+            key: key.slice(0, 36),
             index,
+            layoutOffset: Math.round(layout.offset),
+            layoutLen: Math.round(layout.length),
+            measuredH: measured != null ? Math.round(measured) : null,
+            headerPad: Math.round(headerPad),
+            targetY: Math.round(targetY),
             animated,
-            viewPosition: 0,
-            viewOffset: feedHeaderHeightRef.current,
           });
-        } catch {
+          /** `scrollToOffset` plus fiable que `scrollToIndex` (hauteurs variables). */
+          listRef.current.scrollToOffset({ offset: targetY, animated });
+        } catch (e) {
+          logImmersiveSnap('scrollToOffset_fail', {
+            key: key.slice(0, 36),
+            index,
+            err: e instanceof Error ? e.message : String(e),
+          });
           listRef.current.scrollToOffset({ offset: 0, animated });
+          feedScrollOffsetRef.current = 0;
         }
       } else if (!animated) {
+        logImmersiveSnap('key_not_found_top', {
+          key: key.slice(0, 36),
+          feedLen: feedData.length,
+        });
         listRef.current.scrollToOffset({ offset: 0, animated: false });
+        feedScrollOffsetRef.current = 0;
       }
       /**
        * Immersif : on garde l’intent pour les retries layout (`reveal: false`),
@@ -411,14 +455,12 @@ function FilScreen() {
     pendingScrollIntentRef.current = null;
     if (reveal) setFeedListOpacity(1);
     return true;
-  }, [feedData, memoryFlatListKeyByIdRef]);
+  }, [feedData, getItemLayout, memoryFlatListKeyByIdRef]);
 
   /**
-   * Retour immersif : rester opaque=0 jusqu’à ce que le scroll ait posé la
-   * vignette cible (host enregistré). Sinon reveal trop tôt → mauvais souvenir.
-   *
-   * Au reveal : **ne pas** re-`scrollToIndex` (micro-saut, surtout vidéo quand
-   * la VideoView fil se remonte) — pin l’offset le temps que le layout se pose.
+   * Retour immersif : alignement convergé sous le modal (fil **reste opaque** —
+   * le backdrop masque ; opacity 0 = flash crème). Un seul scroll théorique,
+   * puis uniquement `alignPass` (plus de rejoue qui se bat avec le pin).
    */
   const applyImmersiveSnapHidden = useCallback(() => {
     immersiveSnapInFlightRef.current = true;
@@ -426,42 +468,201 @@ function FilScreen() {
       clearTimeout(immersiveRevealTimerRef.current);
       immersiveRevealTimerRef.current = null;
     }
-    setFeedListOpacity(0);
-    const tick = () => applyPendingFeedScrollIntent({ reveal: false });
-    tick();
-    requestAnimationFrame(() => {
-      tick();
+    /** Ne pas masquer le fil : le transparentModal + backdrop couvrent le scroll. */
+    setFeedListOpacity(1);
+
+    const intentAtStart = pendingScrollIntentRef.current;
+    const scrollKey =
+      intentAtStart?.type === 'snapToKey' ? intentAtStart.key.trim() : '';
+    const measureKey =
+      intentAtStart?.type === 'snapToKey'
+        ? (intentAtStart.measureKey?.trim() || scrollKey)
+        : '';
+
+    /** Un seul scroll théorique — puis on clear l’intent pour couper les rejoues. */
+    applyPendingFeedScrollIntent({ reveal: false });
+    pendingScrollIntentRef.current = null;
+
+    let hostWait = 0;
+    const ALIGN_EPS = 2;
+    const MAX_ALIGN_PASSES = 10;
+    const MAX_HOST_WAIT = 16;
+    /** Air entre bas du header glass et haut du post. */
+    const REVEAL_GAP = verticalScale(8);
+
+    const finishReveal = (
+      pinY: number,
+      hostReady: boolean,
+      extra?: Record<string, unknown>,
+      /** Vignette déjà mesurée à la dernière passe settled — évite une 2ᵉ mesure stale. */
+      premeasured?: Parameters<typeof completeFeedImmersiveReturn>[0],
+    ) => {
+      pendingPinOffsetRef.current = pinY;
+      feedScrollOffsetRef.current = pinY;
+      listRef.current?.scrollToOffset({ offset: pinY, animated: false });
+
+      const emitReady = (shared: Parameters<typeof completeFeedImmersiveReturn>[0]) => {
+        logImmersiveSnap('reveal', {
+          snapKey: scrollKey.slice(0, 36),
+          measureKey: measureKey.slice(0, 36),
+          hostReady,
+          pinY: Math.round(pinY),
+          scrollY: Math.round(feedScrollOffsetRef.current),
+          sharedOk: !!shared,
+          ...extra,
+        });
+        if (!hostReady && hostWait >= MAX_HOST_WAIT) {
+          recordWarn('fil.immersiveReveal.host_timeout', {
+            snapKey: scrollKey.slice(0, 36),
+            pinY: Math.round(pinY),
+          });
+        }
+        completeFeedImmersiveReturn(shared);
+        immersiveSnapInFlightRef.current = false;
+        immersiveRevealTimerRef.current = null;
+        setTimeout(() => {
+          if (pendingPinOffsetRef.current === pinY) {
+            pendingPinOffsetRef.current = null;
+          }
+        }, 480);
+      };
+
+      if (premeasured) {
+        emitReady(premeasured);
+        return;
+      }
+      if (!measureKey) {
+        emitReady(null);
+        return;
+      }
+      measureFeedImmersiveHost(measureKey, shared => {
+        emitReady(shared);
+      });
+    };
+
+    const scheduleAfterLayout = (fn: () => void) => {
       requestAnimationFrame(() => {
-        tick();
-        let attempts = 0;
-        const tryReveal = () => {
-          attempts += 1;
-          tick();
-          const intent = pendingScrollIntentRef.current;
-          const snapKey =
-            intent?.type === 'snapToKey' ? intent.key.trim() : '';
-          const hostReady = !snapKey || hasFeedImmersiveHost(snapKey);
-          if (hostReady || attempts >= 14) {
-            /** Reveal sans re-scroll : évite le « léger replacement » post-vidéo. */
-            pendingScrollIntentRef.current = null;
-            const pinY = feedScrollOffsetRef.current;
-            pendingPinOffsetRef.current = pinY;
-            listRef.current?.scrollToOffset({ offset: pinY, animated: false });
-            setFeedListOpacity(1);
-            immersiveSnapInFlightRef.current = false;
-            immersiveRevealTimerRef.current = null;
-            setTimeout(() => {
-              if (pendingPinOffsetRef.current === pinY) {
-                pendingPinOffsetRef.current = null;
-              }
-            }, 480);
+        requestAnimationFrame(fn);
+      });
+    };
+
+    const alignPass = (
+      pass: number,
+      lastDelta: number | null,
+      oscCount: number,
+    ) => {
+      const desiredTop = feedHeaderHeightRef.current + REVEAL_GAP;
+      const hostKey = measureKey || scrollKey;
+      measureFeedImmersiveHost(hostKey, shared => {
+        const scrollY = feedScrollOffsetRef.current;
+        if (!shared || !isUsableSharedOrigin(shared.origin)) {
+          if (pass < MAX_ALIGN_PASSES) {
+            immersiveRevealTimerRef.current = setTimeout(
+              () => alignPass(pass + 1, lastDelta, oscCount),
+              32,
+            );
             return;
           }
-          immersiveRevealTimerRef.current = setTimeout(tryReveal, 48);
-        };
-        immersiveRevealTimerRef.current = setTimeout(tryReveal, 96);
+          finishReveal(scrollY, true, { measured: false, passes: pass });
+          return;
+        }
+
+        const cardTop = shared.origin.y;
+        const delta = cardTop - desiredTop;
+        const settled = Math.abs(delta) <= ALIGN_EPS;
+        const oscillating =
+          lastDelta != null &&
+          Math.sign(lastDelta) !== 0 &&
+          Math.sign(delta) !== 0 &&
+          Math.sign(lastDelta) !== Math.sign(delta) &&
+          Math.abs(delta) > ALIGN_EPS;
+
+        if (settled) {
+          finishReveal(
+            scrollY,
+            true,
+            {
+              cardTop: Math.round(cardTop),
+              delta: Math.round(delta),
+              desiredTop: Math.round(desiredTop),
+              gap: Math.round(REVEAL_GAP),
+              passes: pass + 1,
+              settled: true,
+            },
+            shared,
+          );
+          return;
+        }
+
+        if (pass >= MAX_ALIGN_PASSES) {
+          const pinY = Math.max(0, scrollY + delta);
+          listRef.current?.scrollToOffset({ offset: pinY, animated: false });
+          feedScrollOffsetRef.current = pinY;
+          /** Dernière correction : re-mesurer après un frame pour le spring. */
+          scheduleAfterLayout(() => {
+            measureFeedImmersiveHost(hostKey, finalShared => {
+              finishReveal(
+                feedScrollOffsetRef.current,
+                true,
+                {
+                  cardTop: Math.round(cardTop),
+                  delta: Math.round(delta),
+                  desiredTop: Math.round(desiredTop),
+                  gap: Math.round(REVEAL_GAP),
+                  passes: pass + 1,
+                  settled: false,
+                },
+                finalShared,
+              );
+            });
+          });
+          return;
+        }
+
+        const nextOsc = oscillating ? oscCount + 1 : 0;
+        const apply = nextOsc >= 2 ? delta * 0.55 : delta;
+        const pinY = Math.max(0, scrollY + apply);
+        pendingPinOffsetRef.current = pinY;
+        listRef.current?.scrollToOffset({ offset: pinY, animated: false });
+        feedScrollOffsetRef.current = pinY;
+        logImmersiveSnap('align', {
+          snapKey: scrollKey.slice(0, 36),
+          pass: pass + 1,
+          cardTop: Math.round(cardTop),
+          delta: Math.round(delta),
+          pinY: Math.round(pinY),
+          scrollYBefore: Math.round(scrollY),
+          desiredTop: Math.round(desiredTop),
+          oscillating: !!oscillating,
+          oscCount: nextOsc,
+        });
+        const next = () => alignPass(pass + 1, delta, nextOsc);
+        if (oscillating) {
+          immersiveRevealTimerRef.current = setTimeout(next, 48);
+        } else {
+          scheduleAfterLayout(next);
+        }
       });
-    });
+    };
+
+    const waitHostThenAlign = () => {
+      hostWait += 1;
+      if (!scrollKey) {
+        finishReveal(feedScrollOffsetRef.current, true);
+        return;
+      }
+      const hostReady =
+        hasFeedImmersiveHost(measureKey || scrollKey) ||
+        hasFeedImmersiveHost(scrollKey);
+
+      if (hostReady || hostWait >= MAX_HOST_WAIT) {
+        scheduleAfterLayout(() => alignPass(0, null, 0));
+        return;
+      }
+      immersiveRevealTimerRef.current = setTimeout(waitHostThenAlign, 40);
+    };
+
+    scheduleAfterLayout(waitHostThenAlign);
   }, [applyPendingFeedScrollIntent]);
 
   const onFeedContentSizeChange = useCallback(() => {
@@ -477,9 +678,13 @@ function FilScreen() {
       });
       return;
     }
+    /**
+     * Pendant snap immersif : intent déjà consommé ; ne jamais rejouer le
+     * scroll théorique (logs : targetY écrasait pinY → flash / mauvais calage).
+     */
+    if (immersiveSnapInFlightRef.current) return;
     if (pendingScrollIntentRef.current) {
-      /** Jamais `reveal: true` ici pendant un snap immersif (sinon flash ouverture). */
-      applyPendingFeedScrollIntent({ reveal: !immersiveSnapInFlightRef.current });
+      applyPendingFeedScrollIntent({ reveal: true });
     }
   }, [applyPendingFeedScrollIntent]);
 
@@ -562,8 +767,8 @@ function FilScreen() {
    * Immersif = transparentModal : le fil reste focused → pas de re-entrée useFocusEffect.
    * On applique l’intent dès qu’il est armé (retour viewer / import).
    *
-   * Retour immersif (`snapToKey` non animé) : masquer + scroll + révéler après layout —
-   * sinon le fil réapparaît sur le souvenir d’ouverture avant de sauter.
+   * Retour immersif (`snapToKey` non animé) : scroll + align sous le modal (fil opaque),
+   * puis callback viewer pour le spring dézoom.
    */
   useEffect(() => {
     const sub = DeviceEventEmitter.addListener(PETITMO_FIL_APPLY_SCROLL_INTENT, () => {
@@ -625,17 +830,8 @@ function FilScreen() {
   /** Import / replace vers le fil déjà actif : le focus ne repasse pas, on consomme l’intent au changement de données. */
   useEffect(() => {
     if (pendingPinOffsetRef.current != null) return;
-    /**
-     * Pendant un snap immersif : jamais reveal/clear ici (même bug que
-     * onContentSizeChange) — un soft merge souvenirs pendant le retour
-     * vidait l’intent et montrait le mauvais item.
-     */
-    if (immersiveSnapInFlightRef.current) {
-      if (pendingScrollIntentRef.current) {
-        applyPendingFeedScrollIntent({ reveal: false });
-      }
-      return;
-    }
+    /** Snap immersif en cours : ne pas rejouer le scroll théorique. */
+    if (immersiveSnapInFlightRef.current) return;
     if (pendingScrollIntentRef.current) {
       applyPendingFeedScrollIntent();
       return;
@@ -734,7 +930,7 @@ function FilScreen() {
                     index: info.index,
                     animated: false,
                     viewPosition: 0,
-                    viewOffset: feedHeaderHeightRef.current,
+                    viewOffset: 0,
                   });
                 } catch {
                   /* ignore */

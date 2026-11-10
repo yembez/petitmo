@@ -268,7 +268,29 @@ export type AuthAccountResult =
       /** Compte déjà existant reconduit via signup → traiter comme login. */
       reconnectedExisting?: boolean;
     }
-  | { ok: false; error: string; alreadyRegistered?: boolean };
+  | {
+      ok: false;
+      error: string;
+      alreadyRegistered?: boolean;
+      /** Feuille système fermée (croix) — pas une erreur, pas de reprise hors-ligne. */
+      cancelled?: boolean;
+    };
+
+/** Codes / messages d’annulation OAuth (Apple / Google). */
+export function isAuthCancelError(e: unknown): boolean {
+  if (!e || typeof e !== 'object') return false;
+  const code = 'code' in e ? String((e as { code: unknown }).code) : '';
+  if (
+    code === 'ERR_REQUEST_CANCELED' ||
+    code === 'ERR_CANCELED' ||
+    code === 'SIGN_IN_CANCELLED' ||
+    code === '1001'
+  ) {
+    return true;
+  }
+  const msg = e instanceof Error ? e.message : 'message' in e ? String((e as { message: unknown }).message) : '';
+  return /cancel|annul/i.test(msg);
+}
 
 export function isDeviceUserEmail(email: string | null | undefined): boolean {
   if (!email) return false;
@@ -422,6 +444,9 @@ export function ensureCloudSyncAfterRealAuth(user: User): Promise<void> {
   rememberRealAuthUser(user);
   recordAction('auth.login', user.app_metadata?.provider ?? 'email');
   setPetitmoSentryUser({ id: user.id });
+  void import('@/services/accountLocalReset').then(({ normalizeLastAuthProvider, setLastAuthProvider }) =>
+    setLastAuthProvider(normalizeLastAuthProvider(user.app_metadata?.provider)),
+  );
 
   const uid = user.id.trim();
   if (cloudSyncAfterAuthInFlight?.userId === uid) {
@@ -676,9 +701,9 @@ export async function signUpWithEmailPassword(
   }
 
   // Keychain même si OTP encore à valider — reconnect low-friction après.
-  await import('@/lib/lastEmailPasswordSecure').then(({ saveLastEmailPassword }) =>
-    saveLastEmailPassword(trimmed, password)
-  );
+  await import('@/lib/lastEmailPasswordSecure')
+    .then(({ saveLastEmailPassword }) => saveLastEmailPassword(trimmed, password))
+    .catch(() => {});
 
   return {
     ok: true,
@@ -778,9 +803,9 @@ export async function signInWithEmailPassword(
   }
 
   scheduleCloudSyncAfterRealAuth(data.user);
-  await import('@/lib/lastEmailPasswordSecure').then(({ saveLastEmailPassword }) =>
-    saveLastEmailPassword(trimmed, password)
-  );
+  await import('@/lib/lastEmailPasswordSecure')
+    .then(({ saveLastEmailPassword }) => saveLastEmailPassword(trimmed, password))
+    .catch(() => {});
   return { ok: true, user: data.user, session: data.session };
 }
 
@@ -970,9 +995,9 @@ export async function updatePasswordAfterRecovery(
   scheduleCloudSyncAfterRealAuth(data.user);
   const email = (data.user.email ?? '').trim().toLowerCase();
   if (email) {
-    await import('@/lib/lastEmailPasswordSecure').then(({ saveLastEmailPassword }) =>
-      saveLastEmailPassword(email, password)
-    );
+    await import('@/lib/lastEmailPasswordSecure')
+      .then(({ saveLastEmailPassword }) => saveLastEmailPassword(email, password))
+      .catch(() => {});
   }
   return { ok: true };
 }
@@ -1028,9 +1053,8 @@ export async function signInWithAppleNative(): Promise<AuthAccountResult> {
       ],
     });
   } catch (e: unknown) {
-    const code = typeof e === 'object' && e && 'code' in e ? String((e as { code: string }).code) : '';
-    if (code === 'ERR_REQUEST_CANCELED') {
-      return { ok: false, error: 'Connexion Apple annulée.' };
+    if (isAuthCancelError(e)) {
+      return { ok: false, cancelled: true, error: 'Connexion Apple annulée.' };
     }
     return {
       ok: false,
@@ -1135,7 +1159,7 @@ async function signInWithGoogleNative(): Promise<AuthAccountResult | null> {
 
     const response = await GoogleSignin.signIn();
     if (response.type === 'cancelled') {
-      return { ok: false, error: 'Connexion Google annulée.' };
+      return { ok: false, cancelled: true, error: 'Connexion Google annulée.' };
     }
 
     let idToken = response.data.idToken;
@@ -1162,10 +1186,8 @@ async function signInWithGoogleNative(): Promise<AuthAccountResult | null> {
     scheduleCloudSyncAfterRealAuth(data.user);
     return { ok: true, user: data.user, session: data.session };
   } catch (e: unknown) {
-    const code =
-      typeof e === 'object' && e && 'code' in e ? String((e as { code: string }).code) : '';
-    if (code === 'SIGN_IN_CANCELLED' || code === 'ERR_REQUEST_CANCELED') {
-      return { ok: false, error: 'Connexion Google annulée.' };
+    if (isAuthCancelError(e)) {
+      return { ok: false, cancelled: true, error: 'Connexion Google annulée.' };
     }
     // Module natif absent / pas encore rebuild → repli web
     const msg = e instanceof Error ? e.message : String(e);
@@ -1197,7 +1219,7 @@ async function signInWithGoogleWebOAuth(): Promise<AuthAccountResult> {
 
   const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
   if (result.type !== 'success' || !('url' in result) || !result.url) {
-    return { ok: false, error: 'Connexion Google annulée.' };
+    return { ok: false, cancelled: true, error: 'Connexion Google annulée.' };
   }
 
   const url = new URL(result.url);

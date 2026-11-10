@@ -99,6 +99,13 @@ function RootLayoutNav() {
     );
   }, []);
 
+  /** Cache disque images auth/onboarding (Expo DEV = Metro HTTP sinon KO hors ligne). */
+  useEffect(() => {
+    void import('@/utils/prefetchAuthOnboardingAssets').then(m =>
+      m.prefetchAuthOnboardingAssets(),
+    );
+  }, []);
+
   useEffect(() => {
     // TEMPORAIRE — retirer avant la mise en production
     // void resetUserTierForTesting();
@@ -112,10 +119,10 @@ function RootLayoutNav() {
     void processPendingGuestRawUploads();
 
     void warmSelectedChildIdFromStorage().then(async () => {
-      const { getLastRealAuthUserId, getLastRealAuthEmail } = await import(
+      const { getLastRealAuthUserId, getLastRealAuthEmail, getLastAuthProvider } = await import(
         '@/services/accountLocalReset'
       );
-      await Promise.all([getLastRealAuthUserId(), getLastRealAuthEmail()]);
+      await Promise.all([getLastRealAuthUserId(), getLastRealAuthEmail(), getLastAuthProvider()]);
       const { warmOfflineLocalResumeFromStorage } = await import('@/lib/authAccount');
       await warmOfflineLocalResumeFromStorage();
       hydrateTabScreensFromSqliteSync();
@@ -140,10 +147,10 @@ function RootLayoutNav() {
   useEffect(() => {
     const initAuth = async () => {
       try {
-        const { getLastRealAuthUserId, getLastRealAuthEmail } = await import(
+        const { getLastRealAuthUserId, getLastRealAuthEmail, getLastAuthProvider } = await import(
           '@/services/accountLocalReset'
         );
-        await Promise.all([getLastRealAuthUserId(), getLastRealAuthEmail()]);
+        await Promise.all([getLastRealAuthUserId(), getLastRealAuthEmail(), getLastAuthProvider()]);
         const { syncCloudAccountKindFromSession, warmOfflineLocalResumeFromStorage, warmIntentionalSignedOutFromStorage } =
           await import('@/lib/authAccount');
         // Verrou déconnexion volontaire avant toute session / reprise locale.
