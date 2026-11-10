@@ -17,9 +17,9 @@
       padding: 28px 16px 48px;
     }
     .label {
-      align-self: flex-start;
-      max-width: 560px;
+      align-self: stretch;
       width: 100%;
+      max-width: 420px;
       margin: 0 auto 14px;
       font-size: 12px;
       letter-spacing: 0.04em;
@@ -29,11 +29,20 @@
     }
     .phone {
       width: 100%;
-      max-width: 560px;
+      max-width: 420px;
       background: #FAFAF7;
       border-radius: 18px;
       box-shadow: 0 18px 50px rgba(28, 28, 30, 0.12);
       overflow: hidden;
+    }
+    @media (min-width: 700px) {
+      .label, .phone { max-width: 640px; }
+      .pad { padding-left: 44px; padding-right: 44px; }
+      .brand { padding-left: 40px; padding-right: 40px; }
+    }
+    @media (min-width: 1024px) {
+      .label, .phone { max-width: 720px; }
+      .pad { padding-left: 52px; padding-right: 52px; }
     }
     .mail-chrome {
       background: #fff;
@@ -51,7 +60,7 @@
     }
     .card {
       margin: 16px;
-      background: #FEFBF7;
+      background: #FFFFFF;
       border-radius: 16px;
       overflow: hidden;
       color: #1C1C1E;
@@ -65,21 +74,18 @@
       font-weight: 500;
       letter-spacing: -0.6px;
     }
-    .pad { padding: 0 36px 32px; }
+    .pad { padding: 0 22px 28px; }
     .hero {
       display: block;
       width: 100%;
-      max-width: 488px;
+      max-width: 100%;
       height: auto;
       border-radius: 12px;
       margin: 0 0 26px;
     }
-    h2 {
-      font-size: 25px;
-      line-height: 1.25;
-      letter-spacing: -0.6px;
-      font-weight: 600;
-      margin: 8px 0 21px;
+    @media (max-width: 699px) {
+      .brand { padding: 22px 22px 18px; font-size: 18px; }
+      .tip { padding: 22px; }
     }
     p { margin: 0 0 20px; }
     .italic { margin: 27px 0; font-style: italic; }
@@ -122,7 +128,7 @@
   </style>
 </head>
 <body>
-  <div class="label">Prod · sujet « Bienvenue » · CTA site « Plus d’infos » · fallback sans prénom</div>
+  <div class="label">Prod · account.welcome · template communication client · fond blanc · responsive</div>
   <div class="phone">
     <div class="mail-chrome">
       <div class="from">De <strong>Petit Cœur</strong> · contact@petitcoeur.app</div>
@@ -132,12 +138,13 @@
       <div class="brand">Petit Cœur</div>
       <div class="pad">
         <p>Bonjour,</p>
-        <p>Merci d’avoir rejoint Petit Cœur.</p>
-        <img class="hero" src="welcome-free-photo.jpg" alt="Un enfant embrasse sa maman au bord d’un lac" width="488" />
-        <h2>Comment Petit Cœur a vu le jour&nbsp;?</h2>
-        <p>En voyant ma petite de 2&nbsp;ans grandir, je repense avec nostalgie à tous ces moments de l’enfance de mon aînée (19&nbsp;ans) dont j’aurais aimé garder davantage de traces.</p>
+        <p>Merci d’utiliser Petit Cœur.</p>
+        <img class="hero" src="welcome-free-photo.jpg" alt="Un enfant embrasse sa maman au bord d’un lac" />
+        <p>Peut-être veux-tu savoir comment Petit Cœur a vu le jour&nbsp;?</p>
+        <p>Je vois tous les jours à quelle vitesse ma petite de 2&nbsp;ans grandit, et je repense avec nostalgie à tous ces moments de l’enfance de mon aînée (19&nbsp;ans) dont j’aurais aimé garder davantage de traces.</p>
         <p>Il y a bien des photos et des vidéos précieuses, mais beaucoup sont perdues dans mes anciens téléphones. Et elles ne racontent pas tout&nbsp;: ses petites phrases, ce que nous vivions ensemble, ce que je ressentais en la voyant grandir… J’aurais voulu aussi lui écrire tout ça, lui relire aujourd’hui et entendre à nouveau sa petite voix.</p>
-        <p>C’est de ce manque qu’est né Petit Cœur&nbsp;: je voulais créer un journal privé pour rassembler ces souvenirs et écrire, au fil des jours, cette histoire qui n’appartient qu’à nous.</p>
+        <p style="margin-bottom:8px;">C’est de ce manque qu’est né Petit Cœur&nbsp;: je voulais créer un journal privé pour rassembler ces souvenirs et écrire, au fil des jours, cette histoire qui n’appartient qu’à nous.</p>
+        <p>De façon simple.</p>
         <p class="italic">Parce qu’il y a des choses qu’on ne veut partager qu’avec eux/elles.</p>
         <p>Je te souhaite de belles émotions à garder, et à retrouver.</p>
         <p><strong>Tu peux maintenant écrire la belle histoire de cet amour inconditionnel.</strong></p>

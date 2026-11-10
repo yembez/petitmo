@@ -1,13 +1,16 @@
 /**
  * E-mails lifecycle Petit Cœur (Resend) + anti-doublon SQL.
- * Templates abo + inactivité + bienvenue compte (account.welcome).
+ * Templates abo + inactivité + bienvenue compte (account.welcome) / abo (sub.welcome).
  * Libellé abo : « abonnement Petit Cœur » (pas Petitmo+ / Petit Cœur+).
+ * Charte HTML bienvenue : `_shared/clientCommunicationEmail.ts`.
  */
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.58.0';
+import { buildSubWelcomeEmailContent } from './subWelcomeEmailContent.ts';
 import { buildWelcomeEmailContent } from './welcomeEmailContent.ts';
 
 export type LifecycleTemplateId =
   | 'account.welcome'
+  | 'sub.welcome'
   | 'sub.billing_issue'
   | 'sub.cancelled'
   | 'sub.downgraded'
@@ -53,6 +56,14 @@ function templates(templateId: LifecycleTemplateId, vars: TemplateVars = {}): Te
   switch (templateId) {
     case 'account.welcome':
       return buildWelcomeEmailContent({
+        firstName: vars.firstName,
+        siteUrl: vars.siteUrl,
+        photoUrl: vars.photoUrl,
+        privacyUrl: vars.privacyUrl,
+        supportEmail: vars.supportEmail,
+      });
+    case 'sub.welcome':
+      return buildSubWelcomeEmailContent({
         firstName: vars.firstName,
         siteUrl: vars.siteUrl,
         photoUrl: vars.photoUrl,

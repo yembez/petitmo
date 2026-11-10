@@ -4,7 +4,8 @@
  * BILLING_ISSUE → mail + flag app_metadata.billingIssue (pas de downgrade)
  * CANCELLATION → mail sub.cancelled uniquement (reste paid jusqu’à EXPIRATION)
  * EXPIRATION/REFUND → free + quotas gratuits (50) ; clear captureLocked ; restore archives legacy + mail
- * RENEWAL/… → paid + clear captureLocked/billingIssue + restore + mail sub.reactivated (si venait de free)
+ * INITIAL_PURCHASE → paid + mail sub.welcome (PRODUCTION)
+ * RENEWAL/UNCANCELLATION/… → paid + clear flags + restore + mail sub.reactivated (si venait de free)
  *
  * Sandbox (TestFlight / StoreKit test) : **même sync tier**, **aucun** mail lifecycle
  * (évite « abo terminé » trompeur pour review / QA).
@@ -13,6 +14,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.58.0';
 import { restoreDowngradeArchivedMemories } from '../_shared/memoryArchive.ts';
 import { formatAccessEndsOn, sendLifecycleEmail } from '../_shared/lifecycleEmail.ts';
+import { resolveWelcomeFirstName } from '../_shared/welcomeEmailContent.ts';
 
 type RcEvent = {
   type?: string;
@@ -285,13 +287,31 @@ Deno.serve(async (req: Request) => {
         });
         console.log('[revenuecat-webhook] mail downgraded', mail);
       } else if (tier === 'paid' && prevTier === 'free') {
+        const isInitial = type === 'INITIAL_PURCHASE';
+        const firstName = resolveWelcomeFirstName(
+          (existing.user.user_metadata ?? {}) as Record<string, unknown>,
+        );
+        const siteUrl = (Deno.env.get('WELCOME_EMAIL_SITE_URL') ?? '').trim() || null;
+        const photoUrl = (Deno.env.get('SUB_WELCOME_EMAIL_PHOTO_URL') ?? '').trim() || null;
         const mail = await sendLifecycleEmail({
           admin: supabase,
           userId,
           email: existing.user.email,
-          templateId: 'sub.reactivated',
+          templateId: isInitial ? 'sub.welcome' : 'sub.reactivated',
+          dedupeKey: isInitial ? 'once' : undefined,
+          vars: isInitial
+            ? {
+                firstName,
+                photoUrl,
+                siteUrl,
+              }
+            : undefined,
         });
-        console.log('[revenuecat-webhook] mail reactivated', mail);
+        console.log(
+          '[revenuecat-webhook] mail',
+          isInitial ? 'sub.welcome' : 'sub.reactivated',
+          mail,
+        );
       }
     } catch (e) {
       console.error('[revenuecat-webhook] restore/mail', userId, e);

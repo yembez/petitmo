@@ -72,10 +72,12 @@ Toute activité remet `last_active_at = now()` et annule le calendrier d’alert
 
 | Id | Déclencheur |
 |----|-------------|
+| `account.welcome` | Auth réelle (Edge `send-welcome-email`) — template communication client |
+| `sub.welcome` | `INITIAL_PURCHASE` RC (**PRODUCTION only**) — template communication client |
 | `sub.billing_issue` | `BILLING_ISSUE` RC (**PRODUCTION only**) |
 | `sub.cancelled` | `CANCELLATION` RC (**PRODUCTION only**) |
 | `sub.downgraded` | EXPIRATION/REFUND (retour gratuit 50) — **PRODUCTION only** |
-| `sub.reactivated` | Re-subscribe — **PRODUCTION only** |
+| `sub.reactivated` | Re-subscribe (hors INITIAL_PURCHASE) — **PRODUCTION only** |
 | `inactive.j90` / `j30` / `j7` / `deleted` | Cron inactivité |
 
 **Sandbox / TestFlight** (`event.environment === SANDBOX`) : le webhook met toujours à jour `subscriptionTier`, mais **n’envoie aucun** mail lifecycle (évite « abo terminé » pendant review / QA).
@@ -88,7 +90,8 @@ Toute activité remet `last_active_at = now()` et annule le calendrier d’alert
 
 | Event | Action |
 |-------|--------|
-| Purchase / Renewal / Uncancellation / … | `paid` + clear `captureLocked` + restore archives legacy + mail reactivated si venait de free |
+| `INITIAL_PURCHASE` | `paid` + clear flags + restore + mail `sub.welcome` si venait de free |
+| Renewal / Uncancellation / … | `paid` + clear `captureLocked` + restore + mail `sub.reactivated` si venait de free |
 | `CANCELLATION` | E-mail `sub.cancelled` (reste paid) |
 | `BILLING_ISSUE` | E-mail + flag |
 | `EXPIRATION` / `REFUND` | `free` + clear `captureLocked` + restore archives legacy + mail downgraded |
