@@ -825,7 +825,7 @@ app.post('/delete-memory-assets', async (req, res) => {
 /**
  * Audit : fiches memories avec media_path dont l’objet Storage manque.
  * Heal silencieux depuis R2 (même path) si healFromR2 !== false.
- * À appeler en cron (Edge media-integrity-audit).
+ * scanAll:true (défaut si heal) → page tout le stock, pas seulement les N récents.
  */
 app.post('/media-integrity-audit', async (req, res) => {
   if (!requireSecret(req, res)) return;
@@ -834,65 +834,83 @@ app.post('/media-integrity-audit', async (req, res) => {
     offset: z.number().int().min(0).optional(),
     types: z.array(z.enum(['video', 'voice', 'photo'])).optional(),
     healFromR2: z.boolean().optional(),
+    /** Si true, enchaîne les pages jusqu’à épuisement (cap maxPages). */
+    scanAll: z.boolean().optional(),
+    maxPages: z.number().int().min(1).max(200).optional(),
   });
   const parsed = schema.safeParse(req.body || {});
   if (!parsed.success) return res.status(400).json({ error: 'Invalid body' });
 
-  const limit = parsed.data.limit ?? 100;
-  const offset = parsed.data.offset ?? 0;
-  const types = parsed.data.types ?? ['video', 'voice'];
+  const pageSize = parsed.data.limit ?? 100;
+  const startOffset = parsed.data.offset ?? 0;
+  const types = parsed.data.types ?? ['video', 'voice', 'photo'];
   const healFromR2 = parsed.data.healFromR2 !== false && r2Configured();
+  const scanAll = parsed.data.scanAll !== false && healFromR2;
+  const maxPages = parsed.data.maxPages ?? 50;
 
   try {
-    const { data: rows, error } = await supabase
-      .from('memories')
-      .select('id,type,user_id,media_path,created_at,location,file_size')
-      .in('type', types)
-      .not('media_path', 'is', null)
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
-    if (error) throw error;
-
     const missing = [];
     const restored = [];
     const r2AlsoMissing = [];
+    let checked = 0;
+    let pages = 0;
+    let offset = startOffset;
 
-    for (const row of rows || []) {
-      const p = (row.media_path || '').trim();
-      if (!p) continue;
-      const ok = await storageObjectExists('media', p);
-      if (ok) continue;
+    while (pages < (scanAll ? maxPages : 1)) {
+      pages += 1;
+      const { data: rows, error } = await supabase
+        .from('memories')
+        .select('id,type,user_id,media_path,created_at,location,file_size')
+        .in('type', types)
+        .not('media_path', 'is', null)
+        .order('created_at', { ascending: false })
+        .range(offset, offset + pageSize - 1);
+      if (error) throw error;
 
-      const base = {
-        id: row.id,
-        type: row.type,
-        media_path: p,
-        created_at: row.created_at,
-        location: row.location,
-        file_size: row.file_size,
-      };
+      const batch = rows || [];
+      if (!batch.length) break;
+      checked += batch.length;
 
-      if (healFromR2) {
-        try {
-          const heal = await restoreMediaPathFromR2(p);
-          if (heal.restored) {
-            restored.push({ ...base, bytes: heal.bytes });
+      for (const row of batch) {
+        const p = (row.media_path || '').trim();
+        if (!p) continue;
+        const ok = await storageObjectExists('media', p);
+        if (ok) continue;
+
+        const base = {
+          id: row.id,
+          type: row.type,
+          media_path: p,
+          created_at: row.created_at,
+          location: row.location,
+          file_size: row.file_size,
+        };
+
+        if (healFromR2) {
+          try {
+            const heal = await restoreMediaPathFromR2(p);
+            if (heal.restored) {
+              restored.push({ ...base, bytes: heal.bytes });
+              continue;
+            }
+            if (heal.error === 'r2_also_missing') {
+              r2AlsoMissing.push(base);
+              missing.push({ ...base, heal: 'r2_also_missing' });
+              continue;
+            }
+            missing.push({ ...base, heal: heal.reason || heal.error || 'not_restored' });
+            continue;
+          } catch (e) {
+            missing.push({ ...base, heal: 'error', error: String(e?.message || e) });
             continue;
           }
-          if (heal.error === 'r2_also_missing') {
-            r2AlsoMissing.push(base);
-            missing.push({ ...base, heal: 'r2_also_missing' });
-            continue;
-          }
-          missing.push({ ...base, heal: heal.reason || heal.error || 'not_restored' });
-          continue;
-        } catch (e) {
-          missing.push({ ...base, heal: 'error', error: String(e?.message || e) });
-          continue;
         }
+
+        missing.push(base);
       }
 
-      missing.push(base);
+      if (!scanAll || batch.length < pageSize) break;
+      offset += pageSize;
     }
 
     if (missing.length) {
@@ -906,7 +924,9 @@ app.post('/media-integrity-audit', async (req, res) => {
 
     return res.json({
       ok: true,
-      checked: (rows || []).length,
+      checked,
+      pages,
+      scanAll,
       missingCount: missing.length,
       restoredCount: restored.length,
       r2AlsoMissingCount: r2AlsoMissing.length,

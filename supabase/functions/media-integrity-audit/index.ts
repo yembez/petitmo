@@ -73,6 +73,8 @@ Deno.serve(async (req: Request) => {
       offset: typeof body?.offset === 'number' ? body.offset : 0,
       types: body?.types,
       healFromR2,
+      scanAll: body?.scanAll !== false,
+      maxPages: typeof body?.maxPages === 'number' ? body.maxPages : 50,
     })) as Record<string, unknown>;
 
     const missingCount = Number(auditJson.missingCount ?? 0);
