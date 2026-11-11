@@ -577,8 +577,37 @@ app.post('/media-integrity-audit', async (req, res) => {
 });
 
 /**
- * Miroir externe (Cloudflare R2) : copie les media_path absents du miroir.
- * No-op si R2_* non configuré.
+ * Miroir immédiat d’un objet (après upload Supabase réussi).
+ * Body: { path: "userId/childId/..." }
+ */
+app.post('/backup-mirror-object', async (req, res) => {
+  if (!requireSecret(req, res)) return;
+  if (!r2Configured()) {
+    return res.status(200).json({ ok: true, skipped: true, reason: 'r2_not_configured' });
+  }
+
+  const schema = z.object({ path: z.string().min(3) });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid body' });
+
+  const objectPath = parsed.data.path.replace(/^\/+/, '').replace(/^media\//, '');
+  try {
+    const existsPrimary = await storageObjectExists('media', objectPath);
+    if (!existsPrimary) {
+      return res.status(404).json({ ok: false, error: 'primary_missing', path: objectPath });
+    }
+    const r = await mirrorPathToR2(objectPath);
+    return res.json({ ok: true, path: objectPath, ...r });
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[backup-mirror-object] failed', objectPath, e);
+    return res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+/**
+ * Miroir externe (Cloudflare R2) : filet / backfill (chemins absents du miroir).
+ * No-op si R2_* non configuré. Le chemin nominal = mirror immédiat via /backup-mirror-object.
  */
 app.post('/backup-mirror-sync', async (req, res) => {
   if (!requireSecret(req, res)) return;

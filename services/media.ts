@@ -234,6 +234,7 @@ async function uploadToMediaBucket(params: {
         }
         throw verifyErr;
       }
+      void triggerMirrorMediaPathToR2(params.filePath);
       return getSignedUrlAfterMediaUpload(params.filePath);
     }
     throw error;
@@ -255,7 +256,29 @@ async function uploadToMediaBucket(params: {
     }
     throw verifyErr;
   }
+
+  /** 2ᵉ copie R2 dès que le primaire Supabase est vérifié (fire-and-forget). */
+  void triggerMirrorMediaPathToR2(params.filePath);
+
   return getSignedUrlAfterMediaUpload(params.filePath);
+}
+
+/** Après upload Storage OK → Edge → worker → R2 (ne bloque pas l’UI). */
+function triggerMirrorMediaPathToR2(filePath: string): void {
+  const path = filePath.replace(/^\/+/, '').replace(/^media\//, '').trim();
+  if (!path) return;
+  void (async () => {
+    try {
+      const { error } = await supabase.functions.invoke('mirror-media-to-r2', {
+        body: { path },
+      });
+      if (error) {
+        console.warn('[media] mirror-media-to-r2', path, error.message);
+      }
+    } catch (e) {
+      console.warn('[media] mirror-media-to-r2', path, e);
+    }
+  })();
 }
 
 export async function uploadFileToSupabase(

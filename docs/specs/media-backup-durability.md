@@ -17,8 +17,8 @@ La promesse produit (« souvenirs sauvegardés ») exige donc **plusieurs couche
 flowchart LR
   app[App] --> primary[Supabase media]
   primary -->|soft-delete| trash[trash/ date]
-  primary -->|cron mirror| r2[Cloudflare R2]
-  cron[Cron Edge] --> audit[integrity-audit]
+  primary -->|immédiat après upload| r2[Cloudflare R2]
+  cron[Cron filet] --> audit[integrity-audit]
   audit --> primary
   cron --> mirror[backup-mirror-sync]
   mirror --> r2
@@ -31,6 +31,11 @@ flowchart LR
 - Simple à brancher sur le media-worker déjà sur Railway
 
 Alternatives OK : Backblaze B2, AWS S3 versionné. **Pas** : seul zip quotidien, recompresser les vidéos.
+
+## Copie immédiate (chemin nominal)
+
+Dès qu’un upload Storage est **vérifié** côté app → Edge `mirror-media-to-r2` → worker `/backup-mirror-object` → R2.  
+Le **cron quotidien** reste un **filet** (oublis / échecs réseau), pas le seul mécanisme.
 
 ## Activer le miroir R2 (aujourd’hui)
 
