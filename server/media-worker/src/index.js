@@ -155,6 +155,61 @@ async function mirrorPathToR2(objectPath) {
   return { ok: true, key, bytes: buf.length };
 }
 
+/** Colonnes durables (texte + refs Storage) — pas d’URLs signées éphémères. */
+const MEMORY_META_SELECT =
+  'id,user_id,child_id,type,content,text_title,location,is_favorite,created_at,inserted_at,updated_at,media_path,extra_photo_paths,thumbnail_path,voice_cover_path,duration,archived_at,archive_reason,upload_status';
+
+function memoryMetaR2Key(userId, memoryId) {
+  return `${String(userId).trim()}/_meta/memories/${String(memoryId).trim()}.json`;
+}
+
+async function putMemoryMetaToR2(row) {
+  const client = await getR2Client();
+  if (!client) return { skipped: true, reason: 'r2_not_configured' };
+  const userId = (row?.user_id || '').trim();
+  const memoryId = (row?.id || '').trim();
+  if (!userId || !memoryId) return { skipped: true, reason: 'missing_ids' };
+
+  const { PutObjectCommand } = require('@aws-sdk/client-s3');
+  const bucket = process.env.R2_BUCKET.trim();
+  const key = memoryMetaR2Key(userId, memoryId);
+  const payload = {
+    v: 1,
+    exported_at: new Date().toISOString(),
+    memory: {
+      id: row.id,
+      user_id: row.user_id,
+      child_id: row.child_id,
+      type: row.type,
+      content: row.content ?? null,
+      text_title: row.text_title ?? null,
+      location: row.location ?? null,
+      is_favorite: row.is_favorite === true,
+      created_at: row.created_at ?? null,
+      inserted_at: row.inserted_at ?? null,
+      updated_at: row.updated_at ?? null,
+      media_path: row.media_path ?? null,
+      extra_photo_paths: row.extra_photo_paths ?? [],
+      thumbnail_path: row.thumbnail_path ?? null,
+      voice_cover_path: row.voice_cover_path ?? null,
+      duration: row.duration ?? null,
+      archived_at: row.archived_at ?? null,
+      archive_reason: row.archive_reason ?? null,
+      upload_status: row.upload_status ?? null,
+    },
+  };
+  const body = Buffer.from(JSON.stringify(payload), 'utf8');
+  await client.send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: body,
+      ContentType: 'application/json; charset=utf-8',
+    }),
+  );
+  return { ok: true, key, bytes: body.length };
+}
+
 async function storageObjectExists(bucket, objectPath) {
   const parts = String(objectPath || '').split('/');
   const name = parts.pop();
@@ -664,8 +719,103 @@ app.post('/backup-mirror-sync', async (req, res) => {
   }
 });
 
+/**
+ * Snapshot JSON immédiat d’un souvenir (texte / méta) → R2.
+ * Body: { memoryId: "uuid" }
+ * Clé R2: `{userId}/_meta/memories/{memoryId}.json` (écrase toujours).
+ */
+app.post('/backup-memory-meta', async (req, res) => {
+  if (!requireSecret(req, res)) return;
+  if (!r2Configured()) {
+    return res.status(200).json({ ok: true, skipped: true, reason: 'r2_not_configured' });
+  }
+
+  const schema = z.object({ memoryId: z.string().uuid() });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid body' });
+
+  try {
+    const { data: row, error } = await supabase
+      .from('memories')
+      .select(MEMORY_META_SELECT)
+      .eq('id', parsed.data.memoryId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!row) return res.status(404).json({ ok: false, error: 'memory_not_found' });
+
+    const r = await putMemoryMetaToR2(row);
+    return res.json({ ok: true, memoryId: row.id, ...r });
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[backup-memory-meta] failed', parsed.data.memoryId, e);
+    return res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+/**
+ * Filet / backfill : exporte les méta souvenirs (textes + refs) vers R2.
+ * Body: { limit?, offset?, userId?, types? }
+ */
+app.post('/backup-memories-meta-sync', async (req, res) => {
+  if (!requireSecret(req, res)) return;
+  if (!r2Configured()) {
+    return res.status(200).json({ ok: true, skipped: true, reason: 'r2_not_configured' });
+  }
+
+  const schema = z.object({
+    limit: z.number().int().min(1).max(500).optional(),
+    offset: z.number().int().min(0).optional(),
+    userId: z.string().uuid().optional(),
+    types: z.array(z.enum(['text', 'photo', 'video', 'voice'])).optional(),
+  });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid body' });
+  const limit = parsed.data.limit ?? 100;
+  const offset = parsed.data.offset ?? 0;
+  const types = parsed.data.types?.length ? parsed.data.types : ['text', 'photo', 'video', 'voice'];
+
+  try {
+    let q = supabase
+      .from('memories')
+      .select(MEMORY_META_SELECT)
+      .in('type', types)
+      .order('updated_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+    if (parsed.data.userId) q = q.eq('user_id', parsed.data.userId);
+
+    const { data: rows, error } = await q;
+    if (error) throw error;
+
+    const results = [];
+    for (const row of rows || []) {
+      try {
+        const r = await putMemoryMetaToR2(row);
+        results.push({
+          id: row.id,
+          type: row.type,
+          status: r.ok ? 'exported' : r.reason || 'skipped',
+          key: r.key,
+        });
+      } catch (e) {
+        results.push({ id: row.id, type: row.type, status: 'error', error: String(e?.message || e) });
+      }
+    }
+
+    return res.json({
+      ok: true,
+      processed: results.length,
+      exported: results.filter((r) => r.status === 'exported').length,
+      results,
+    });
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[backup-memories-meta-sync] failed', e);
+    return res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
 app.get('/health', (_req, res) =>
-  res.json({ ok: true, softDelete: true, r2Configured: r2Configured() }),
+  res.json({ ok: true, softDelete: true, r2Configured: r2Configured(), memoryMetaBackup: true }),
 );
 
 app.listen(PORT, () => {

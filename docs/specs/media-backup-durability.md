@@ -37,6 +37,20 @@ Alternatives OK : Backblaze B2, AWS S3 versionné. **Pas** : seul zip quotidien,
 Dès qu’un upload Storage est **vérifié** côté app → Edge `mirror-media-to-r2` → worker `/backup-mirror-object` → R2.  
 Le **cron quotidien** reste un **filet** (oublis / échecs réseau), pas le seul mécanisme.
 
+## Textes / métadonnées (Postgres → R2)
+
+Les souvenirs `text` (et captions / titres / lieux / refs `*_path`) vivent en **Postgres**, pas dans le bucket `media`.  
+2ᵉ copie hors-site :
+
+| Moment | Mécanisme |
+|---|---|
+| Insert texte cloud OK | Edge `mirror-memory-meta-to-r2` → `/backup-memory-meta` |
+| Edit texte / titre cloud OK | idem (écrase le JSON) |
+| Cron filet | `/backup-memories-meta-sync` (via `media-integrity-audit` si `mirror` ou `meta`) |
+
+Clé R2 : `{userId}/_meta/memories/{memoryId}.json`  
+Payload `v:1` : `content`, `text_title`, `location`, dates, `media_path` / extras — **pas** d’URLs signées.
+
 ## Activer le miroir R2 (aujourd’hui)
 
 1. Cloudflare → R2 → Create bucket `petitmo-media-mirror`
@@ -74,10 +88,19 @@ select cron.schedule(
       'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'media_integrity_cron_secret' limit 1),
       'Content-Type', 'application/json'
     ),
-    body := '{"limit":100,"mirror":true,"mirrorLimit":40}'::jsonb
+    body := '{"limit":100,"mirror":true,"mirrorLimit":40,"meta":true,"metaLimit":100}'::jsonb
   );
   $$
 );
+```
+
+Smoke méta (backfill) :
+
+```bash
+curl -sS -X POST "$MEDIA_WORKER_URL/backup-memories-meta-sync" \
+  -H "Content-Type: application/json" \
+  -H "X-Worker-Secret: $MEDIA_WORKER_SECRET" \
+  -d '{"limit":50,"offset":0,"types":["text"]}'
 ```
 
 Secrets Edge à poser : `MEDIA_INTEGRITY_CRON_SECRET` (= ou dérivé de `MEDIA_WORKER_SECRET`), `MEDIA_WORKER_URL`, `MEDIA_WORKER_SECRET`.
@@ -102,9 +125,11 @@ Récupération manuelle possible depuis le dashboard Storage / S3.
 
 ## Déploiement checklist
 
-- [ ] Déployer media-worker (soft-delete + audit + mirror)
+- [ ] Déployer media-worker (soft-delete + audit + mirror + meta)
 - [ ] `supabase functions deploy media-integrity-audit`
+- [ ] `supabase functions deploy mirror-media-to-r2`
+- [ ] `supabase functions deploy mirror-memory-meta-to-r2`
 - [ ] Secrets R2 sur Railway
-- [ ] Cron quotidien audit (+ `mirror:true` une fois R2 OK)
-- [ ] OTA app (verify upload + repair) — déjà dans le code client
-- [ ] Smoke : 1 vidéo test → présente sur R2 ; delete → visible sous `trash/`
+- [ ] Cron quotidien audit (+ `mirror:true` / méta)
+- [ ] OTA app (verify upload + mirror média + meta texte)
+- [ ] Smoke : 1 vidéo → R2 ; 1 texte → `{user}/_meta/memories/….json` ; delete → `trash/`

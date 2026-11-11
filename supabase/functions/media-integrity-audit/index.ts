@@ -40,6 +40,7 @@ Deno.serve(async (req: Request) => {
 
   const body = await req.json().catch(() => ({}));
   const runMirror = body?.mirror === true;
+  const runMeta = body?.meta === true || runMirror;
 
   try {
     const auditResp = await fetch(`${workerUrl}/media-integrity-audit`, {
@@ -92,10 +93,28 @@ Deno.serve(async (req: Request) => {
       mirrorJson = await mirrorResp.json().catch(() => ({ ok: false }));
     }
 
+    let metaJson: unknown = null;
+    if (runMeta) {
+      const metaResp = await fetch(`${workerUrl}/backup-memories-meta-sync`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Worker-Secret': workerSecret,
+        },
+        body: JSON.stringify({
+          limit: typeof body?.metaLimit === 'number' ? body.metaLimit : 100,
+          offset: typeof body?.metaOffset === 'number' ? body.metaOffset : 0,
+          types: body?.metaTypes,
+        }),
+      });
+      metaJson = await metaResp.json().catch(() => ({ ok: false }));
+    }
+
     return json(200, {
       ok: true,
       audit: auditJson,
       mirror: mirrorJson,
+      meta: metaJson,
       critical: missingCount > 0,
     });
   } catch (e) {

@@ -2772,7 +2772,11 @@ function pushMemoryTextToCloudSilent(memoryId: string): void {
         patch.text_title = row.text_title?.trim() ? row.text_title.trim() : null;
       }
       const { error } = await supabase.from('memories').update(patch).eq('id', memoryId);
-      if (!error) return true;
+      if (!error) {
+        const { triggerMirrorMemoryMetaToR2 } = await import('@/services/memoryMetaBackup');
+        triggerMirrorMemoryMetaToR2(memoryId);
+        return true;
+      }
       console.warn('[media] pushMemoryTextToCloudSilent', memoryId, error.message);
       return false;
     };

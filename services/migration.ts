@@ -163,6 +163,8 @@ async function migrateText(memory: Memory, userId: string): Promise<void> {
   const merged = await insertOrMergeMemory(insert);
   if (merged) {
     upsertLocalMemory({ ...merged, sync_status: 'synced' });
+    const { triggerMirrorMemoryMetaToR2 } = await import('@/services/memoryMetaBackup');
+    triggerMirrorMemoryMetaToR2(merged.id);
   }
 }
 

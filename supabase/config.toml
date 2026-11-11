@@ -63,3 +63,6 @@ verify_jwt = false
 
 [functions.mirror-media-to-r2]
 verify_jwt = false
+
+[functions.mirror-memory-meta-to-r2]
+verify_jwt = false
