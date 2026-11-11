@@ -62,9 +62,10 @@ export function videoPlaybackCandidateUrisFromMemory(
     out.push(t);
   };
   push(m.edited_media_url);
-  /** Sandbox canonique avant la copie fil (souvent absente si `petitmo_feed_local_videos` purgée). */
-  push(m.local_original_path);
+  /** Extrait (trim) avant le rush — le fil / immersif doivent lire la sélection. */
   push(m.local_media_path);
+  /** Rush sandbox : repli si l’extrait est absent / illisible. */
+  push(m.local_original_path);
   push(m.media_url);
   return out;
 }

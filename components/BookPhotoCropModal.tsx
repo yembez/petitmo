@@ -247,7 +247,11 @@ export function BookPhotoCropModal({
                 status === 'ok' ? styles.dpiOk : status === 'warn' ? styles.dpiWarn : styles.dpiBlock,
               ]}
             >
-              Impression : {dpi} DPI {status === 'ok' ? '(OK ≥ 240)' : status === 'warn' ? '(Warning < 240)' : '(Bloquant < 200)'}
+              {status === 'ok'
+                ? `OK · ${dpi} DPI`
+                : status === 'warn'
+                  ? `Moyen · ${dpi} DPI`
+                  : `Mauvais = ${dpi} DPI`}
             </Text>
             <View style={[styles.stageClip, { width: displayW, height: displayH }]}>
               <GestureDetector gesture={composed}>
@@ -328,9 +332,9 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     paddingHorizontal: 8,
   },
-  dpiOk: { color: 'rgba(255,255,255,0.72)' },
-  dpiWarn: { color: '#FFD166' },
-  dpiBlock: { color: '#FF6B6B' },
+  dpiOk: { color: '#1B7F4E' },
+  dpiWarn: { color: '#C48A00' },
+  dpiBlock: { color: '#E5484D' },
   stageClip: {
     overflow: 'hidden',
     borderRadius: 4,

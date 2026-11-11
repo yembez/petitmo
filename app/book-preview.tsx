@@ -70,6 +70,8 @@ import Reanimated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { buildBookPages, type BookPage, type PhotoFullVariant } from '@/src/book/BookEngine';
+import BookPhotoDpiBadge from '@/components/BookPhotoDpiBadge';
+import { defaultPhotoCrop, photoCropFit } from '@/src/book/photoCrop';
 import { useBookQrTokenUrls } from '@/hooks/useBookQrTokenUrls';
 import { qrPreviewUrlForMemory, resolveBookQrTokensForPreview } from '@/services/bookQrPreview';
 import MaquetteBookPages from '@/src/book/maquette/MaquetteBookPages';
@@ -326,6 +328,23 @@ function memoryForMaquette(
       return _e;
     }
   }
+}
+
+/** Clé de crop photo pour le CTA format (hors page, sous la maquette éditeur). */
+function photoFitStorageKeyForPage(
+  page: BookPage,
+  merge: (m: Memory) => Memory,
+): string | null {
+  if (page.type === 'cover') return 'cover';
+  if (
+    page.type === 'photo-full' ||
+    page.type === 'photo-note' ||
+    page.type === 'audio' ||
+    page.type === 'video'
+  ) {
+    return memoryForMaquette(page, merge)?.id ?? null;
+  }
+  return null;
 }
 
 /** URI image principale d’une page livre (prefetch avant ouverture de l’éditeur). */
@@ -2561,30 +2580,110 @@ export default function BookPreviewScreen() {
   }, [pickCover]);
 
   const renderPageItem: ListRenderItem<PageRow> = useCallback(
-    ({ item, index }) => (
-      <View
-        style={[
-          styles.pageSlide,
-          { width: screenWidth, height: availHPortrait },
-        ]}
-      >
-        <BookPreviewZoomWrap
-          width={screenWidth}
-          height={availHPortrait}
-          isPagerActive={index === editorPageIndex}
-          allowOverflow
+    ({ item, index }) => {
+      const fitKey = photoFitStorageKeyForPage(item.page, merge);
+      const hasFitPhoto = !!bookPageMainImageUri(
+        item,
+        merge,
+        coverPhotoEditorRenderUri,
+        bookSnapshot?.memoryPhotoRefs,
+      );
+      const showFitCta = !!fitKey && hasFitPhoto;
+      const fit = showFitCta ? photoCropFit(photoCrops[fitKey!]) : 'cover';
+      const fitLabel =
+        fit === 'contain' ? t('book.photoFit.fill') : t('book.photoFit.original');
+      const fitA11y =
+        fit === 'contain' ? t('book.photoFit.fillA11y') : t('book.photoFit.originalA11y');
+
+      const pageType = item.page.type;
+      const showDpiBadge =
+        !!fitKey &&
+        hasFitPhoto &&
+        (pageType === 'cover' ||
+          pageType === 'photo-full' ||
+          pageType === 'photo-note' ||
+          pageType === 'audio' ||
+          pageType === 'video');
+      const dpiMeta = showDpiBadge ? cropDpiMetaByKey[fitKey!] : undefined;
+      const dpiPxW = dpiMeta?.dpiPxW && dpiMeta.dpiPxW > 0 ? dpiMeta.dpiPxW : 0;
+      const dpiPxH = dpiMeta?.dpiPxH && dpiMeta.dpiPxH > 0 ? dpiMeta.dpiPxH : 0;
+      const printMm =
+        showDpiBadge &&
+        (pageType === 'cover' ||
+          pageType === 'photo-full' ||
+          pageType === 'photo-note' ||
+          pageType === 'audio' ||
+          pageType === 'video')
+          ? bookPrintFrameMmFor(
+              pageType,
+              pageType === 'photo-full' ? item.page.variant : undefined,
+            )
+          : null;
+      const cropScale = Math.max(1, photoCrops[fitKey ?? '']?.scale ?? 1);
+
+      return (
+        <View
+          style={[
+            styles.pageSlide,
+            { width: screenWidth, height: availHPortrait },
+          ]}
         >
-          <View style={[styles.editorZoomInner, { width: screenWidth, height: availHPortrait }]}>
-            <View style={[styles.editorPageShadow, { width: editorPage.w, height: editorPage.h }]}>
-              <View style={[styles.editorPageCard, { width: editorPage.w, height: editorPage.h }]}>
-                {renderMaquettePage(item)}
+          <BookPreviewZoomWrap
+            width={screenWidth}
+            height={availHPortrait}
+            isPagerActive={index === editorPageIndex}
+            allowOverflow
+          >
+            <View style={[styles.editorZoomInner, { width: screenWidth, height: availHPortrait }]}>
+              <View style={{ width: editorPage.w, alignItems: 'stretch' }}>
+                {showDpiBadge && printMm ? (
+                  <View style={styles.photoDpiAbovePage}>
+                    <BookPhotoDpiBadge
+                      imgPxW={dpiPxW}
+                      imgPxH={dpiPxH}
+                      printMmW={dpiMeta?.printMmW && dpiMeta.printMmW > 0 ? dpiMeta.printMmW : printMm.w}
+                      printMmH={dpiMeta?.printMmH && dpiMeta.printMmH > 0 ? dpiMeta.printMmH : printMm.h}
+                      scale={cropScale}
+                    />
+                  </View>
+                ) : null}
+                <View style={[styles.editorPageShadow, { width: editorPage.w, height: editorPage.h }]}>
+                  <View style={[styles.editorPageCard, { width: editorPage.w, height: editorPage.h }]}>
+                    {renderMaquettePage(item)}
+                  </View>
+                </View>
+                {showFitCta ? (
+                  <Pressable
+                    style={styles.photoFitBelowPageBtn}
+                    onPress={() => {
+                      const nextFit = fit === 'contain' ? 'cover' : 'contain';
+                      upsertPhotoCrop(fitKey!, defaultPhotoCrop(nextFit));
+                    }}
+                    accessibilityLabel={fitA11y}
+                  >
+                    <Text style={styles.photoFitBelowPageLabel}>{fitLabel}</Text>
+                  </Pressable>
+                ) : null}
               </View>
             </View>
-          </View>
-        </BookPreviewZoomWrap>
-      </View>
-    ),
-    [editorPageIndex, editorPage, renderMaquettePage, screenWidth, availHPortrait]
+          </BookPreviewZoomWrap>
+        </View>
+      );
+    },
+    [
+      availHPortrait,
+      bookSnapshot?.memoryPhotoRefs,
+      coverPhotoEditorRenderUri,
+      cropDpiMetaByKey,
+      editorPage,
+      editorPageIndex,
+      merge,
+      photoCrops,
+      renderMaquettePage,
+      screenWidth,
+      t,
+      upsertPhotoCrop,
+    ],
   );
 
   const getMemoryForPage = useCallback((page: BookPage): Memory | null => {
@@ -4420,6 +4519,29 @@ const styles = StyleSheet.create({
   editorPageCard: {
     overflow: 'hidden',
     backgroundColor: '#FFFFFF',
+  },
+  /** Badge DPI : au-dessus de la page, aligné à gauche (pas sur la maquette). */
+  photoDpiAbovePage: {
+    alignSelf: 'flex-start',
+    marginBottom: 10,
+  },
+  /** CTA format photo : sous la page, aligné à droite (pas sur la maquette). */
+  photoFitBelowPageBtn: {
+    alignSelf: 'flex-end',
+    marginTop: 10,
+    minHeight: 34,
+    paddingHorizontal: 12,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,0,0,0.12)',
+  },
+  photoFitBelowPageLabel: {
+    color: '#1C1C1E',
+    fontSize: 12,
+    fontWeight: '600',
   },
   /** Centre la page Gelato dans la slide avant zoom (parité spread `spreadZoomInner`). */
   editorZoomInner: {

@@ -15,30 +15,39 @@ type Props = {
   scale: number;
 };
 
-function statusColors(status: BookPhotoDpiStatus): { bg: string; text: string } {
+const COLOR_OK = '#1B7F4E';
+const COLOR_WARN = '#C48A00';
+const COLOR_BAD = '#E5484D';
+
+function statusColor(status: BookPhotoDpiStatus): string {
   switch (status) {
     case 'ok':
-      return { bg: 'rgba(28, 28, 30, 0.55)', text: '#FFFFFF' };
+      return COLOR_OK;
     case 'warn':
-      return { bg: 'rgba(255, 209, 102, 0.92)', text: '#3C3126' };
+      return COLOR_WARN;
     case 'block':
-      return { bg: 'rgba(255, 107, 107, 0.92)', text: '#FFFFFF' };
+      return COLOR_BAD;
     default:
-      return { bg: 'rgba(28, 28, 30, 0.45)', text: 'rgba(255,255,255,0.85)' };
+      return 'rgba(60,60,67,0.55)';
   }
 }
 
 function BookPhotoDpiBadge({ imgPxW, imgPxH, printMmW, printMmH, scale }: Props) {
   const dpi = effectiveBookPhotoPrintDpi({ imgPxW, imgPxH, printMmW, printMmH, scale });
-  const dpiStatus = bookPhotoDpiStatus(dpi);
-  const colors = statusColors(dpiStatus);
+  const dpiStatus: BookPhotoDpiStatus = bookPhotoDpiStatus(dpi);
+  const label = bookPhotoDpiStatusLabel(dpiStatus);
+  const color = statusColor(dpiStatus);
+
+  const line =
+    dpiStatus === 'unknown'
+      ? label
+      : dpiStatus === 'block'
+        ? `${label} = ${dpi} DPI`
+        : `${label} · ${dpi} DPI`;
 
   return (
-    <View style={[styles.wrap, { backgroundColor: colors.bg }]} pointerEvents="none">
-      <Text style={[styles.line, { color: colors.text }]}>
-        Impression : {dpi > 0 ? `${dpi} DPI` : '—'}
-      </Text>
-      <Text style={[styles.subline, { color: colors.text }]}>{bookPhotoDpiStatusLabel(dpiStatus)}</Text>
+    <View style={styles.wrap} pointerEvents="none">
+      <Text style={[styles.base, { color }]}>{line}</Text>
     </View>
   );
 }
@@ -49,16 +58,14 @@ const styles = StyleSheet.create({
   wrap: {
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderRadius: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,0,0,0.10)',
     alignItems: 'flex-start',
   },
-  line: {
+  base: {
     fontSize: 12,
     fontWeight: '600',
-  },
-  subline: {
-    fontSize: 11,
-    marginTop: 2,
-    opacity: 0.95,
   },
 });

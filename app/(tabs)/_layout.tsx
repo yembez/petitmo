@@ -134,7 +134,7 @@ function TabLayoutInner() {
         sceneStyle: { backgroundColor: THEME.bg },
       }}>
       <Tabs.Screen name="fil" options={{ title: 'Journal' }} />
-      <Tabs.Screen name="index" options={{ title: 'Capturer' }} />
+      <Tabs.Screen name="index" options={{ title: 'Ajouter' }} />
       <Tabs.Screen name="favoris" options={{ title: 'Favoris' }} />
       <Tabs.Screen name="livres" options={{ title: 'Livres' }} />
     </Tabs>

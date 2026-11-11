@@ -366,7 +366,7 @@
     }
   },
   "tabs": {
-    "capture": "Capturer",
+    "capture": "Ajouter",
     "journal": "Journal",
     "favorites": "Favoris",
     "books": "Livres",
@@ -400,10 +400,10 @@
     "toolbarWriteA11y": "Écrire le texte de la page",
     "listNoPages": "Aucune page",
     "photoFit": {
-      "original": "Original",
+      "original": "Format original",
       "originalA11y": "Afficher la photo en format original",
-      "fill": "Remplir",
-      "fillA11y": "Remplir le cadre avec la photo",
+      "fill": "Recadrer",
+      "fillA11y": "Recadrer la photo pour remplir le cadre",
       "rotateA11y": "Pivoter la photo",
       "dpiLoading": "Calcul qualité impression…"
     }

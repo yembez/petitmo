@@ -8,7 +8,7 @@ import {
   ActivityIndicator,
   InteractionManager,
 } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { ChevronLeft } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { scale, verticalScale } from '@/utils/responsive';
@@ -43,12 +43,10 @@ import {
   computeImportContentFingerprint,
   dedupePickerAssetsByLibraryId,
 } from '@/utils/importLibraryDedupe';
-import { VideoTrimModal } from '@/components/VideoTrimModal';
 import {
-  isVideoTrimNativeAvailable,
-  trimVideoClipToLocalFile,
+  openVideoTrimEditorOnUri,
   VideoTrimNativeMissingError,
-} from '@/services/videoTrimNative';
+} from '@/services/videoTrimEditor';
 import { takePendingSharedImport } from '@/lib/pendingShareMedia';
 
 type ImportStickerPreview = {
@@ -179,23 +177,10 @@ export default function ImportMediaScreen() {
     assets: ImagePicker.ImagePickerAsset[];
     preview: ImportStickerPreview;
   } | null>(null);
-  const [videoTrimRequest, setVideoTrimRequest] = useState<{
-    asset: ImagePicker.ImagePickerAsset;
-    maxDurationSec: number;
-    resolve: (
-      result: { asset: ImagePicker.ImagePickerAsset; originalUri: string } | null,
-    ) => void;
-  } | null>(null);
-  /** Trim FFmpeg hors modale (évite WatchdogTermination / Low memory). */
-  const [videoTrimExporting, setVideoTrimExporting] = useState(false);
   const autoGalleryLaunchedRef = useRef(false);
-  /** 0 = pas de plafond picker (gratuit : on gère le message 20 s après sélection). */
+  /** 0 = pas de plafond picker (gratuit : 1ʳᵉ sélection libre, puis éditeur natif si trop longue). */
   const videoMaxDurationRef = useRef(0);
   const isFreeTierRef = useRef(true);
-  const [isFreeTier, setIsFreeTier] = useState(true);
-  /** Cache la modale native le temps du paywall (sinon elle reste au-dessus). */
-  const [trimPaywallOpen, setTrimPaywallOpen] = useState(false);
-  const resumeTrimAfterPaywallRef = useRef(false);
 
   /**
    * Pas de `dismiss()` ici : l’écran n’est plus un modal, et `dismiss()` après
@@ -212,29 +197,10 @@ export default function ImportMediaScreen() {
   useEffect(() => {
     void resolveEffectiveUserTier().then(tier => {
       isFreeTierRef.current = tier === 'free';
-      setIsFreeTier(tier === 'free');
-      /** Payant : pas de plafond. Gratuit : 1ʳᵉ sélection libre, puis message + trim système si > 20 s. */
+      /** Payant : pas de plafond. Gratuit : 1ʳᵉ sélection libre, puis éditeur natif si > 20 s. */
       videoMaxDurationRef.current = 0;
     });
   }, []);
-
-  useFocusEffect(
-    useCallback(() => {
-      if (!resumeTrimAfterPaywallRef.current) return;
-      resumeTrimAfterPaywallRef.current = false;
-      setTrimPaywallOpen(false);
-      void resolveEffectiveUserTier().then(tier => {
-        const free = tier === 'free';
-        isFreeTierRef.current = free;
-        setIsFreeTier(free);
-        if (!free) {
-          setVideoTrimRequest(prev =>
-            prev ? { ...prev, maxDurationSec: PAID_TIER_VIDEO_MAX_DURATION } : null,
-          );
-        }
-      });
-    }, []),
-  );
 
   /**
    * Enregistre le pending + `replace` fil **sans aucun await** : tout le réseau / EXIF part dans `upload()`.
@@ -613,34 +579,33 @@ export default function ImportMediaScreen() {
             const durationSec = mediaDurationToSeconds(v.duration);
             /** +1 s de marge : métadonnées galerie souvent arrondies. */
             if (durationSec > maxVideoSec + 1) {
-              if (!isVideoTrimNativeAvailable()) {
-                Alert.alert(
-                  t('videoTrim.needsRebuildTitle'),
-                  t('videoTrim.needsRebuildBody'),
-                  [{ text: 'OK', onPress: () => router.replace('/(tabs)/fil') }],
-                );
+              let trimmed: Awaited<ReturnType<typeof openVideoTrimEditorOnUri>>;
+              try {
+                trimmed = await openVideoTrimEditorOnUri(v.uri, {
+                  maxDurationSec: maxVideoSec,
+                });
+              } catch (e) {
+                if (e instanceof VideoTrimNativeMissingError) {
+                  Alert.alert(
+                    t('videoTrim.needsRebuildTitle'),
+                    t('videoTrim.needsRebuildBody'),
+                    [{ text: 'OK', onPress: () => router.replace('/(tabs)/fil') }],
+                  );
+                } else {
+                  console.warn('[import-media] showEditor', e);
+                  Alert.alert(t('videoTrim.exportFailedTitle'), t('videoTrim.exportFailedBody'));
+                }
                 if (prepared.length === 0) return 'left';
                 break;
               }
-
-              const trimmed = await new Promise<{
-                asset: ImagePicker.ImagePickerAsset;
-                originalUri: string;
-              } | null>(resolve => {
-                setVideoTrimRequest({
-                  asset: v,
-                  maxDurationSec: maxVideoSec,
-                  resolve,
-                });
-              });
-              if (!trimmed) {
+              if (!trimmed?.uri) {
                 if (prepared.length === 0) {
                   router.replace('/(tabs)/fil');
                   return 'left';
                 }
                 break;
               }
-              const outSec = mediaDurationToSeconds(trimmed.asset.duration);
+              const outSec = trimmed.durationSec;
               if (outSec > maxVideoSec + 1) {
                 Alert.alert(
                   t('videoTrim.stillTooLongTitle'),
@@ -652,7 +617,17 @@ export default function ImportMediaScreen() {
                 }
                 break;
               }
-              prepared.push(trimmed);
+              prepared.push({
+                originalUri: v.uri,
+                asset: {
+                  ...v,
+                  uri: trimmed.uri,
+                  duration: outSec * 1000,
+                  type: 'video',
+                  fileName: v.fileName ?? `trim-${Date.now()}.mp4`,
+                  mimeType: v.mimeType ?? 'video/mp4',
+                },
+              });
             } else {
               prepared.push({ asset: v, originalUri: v.uri });
             }
@@ -823,86 +798,10 @@ export default function ImportMediaScreen() {
     />
   ) : null;
 
-  const videoTrimModalEl = (
-    <VideoTrimModal
-      visible={videoTrimRequest != null && !trimPaywallOpen}
-      videoUri={videoTrimRequest?.asset.uri ?? ''}
-      durationSec={
-        videoTrimRequest?.asset.duration != null
-          ? mediaDurationToSeconds(videoTrimRequest.asset.duration)
-          : 0
-      }
-      maxDurationSec={videoTrimRequest?.maxDurationSec ?? FREE_TIER_VIDEO_MAX_DURATION}
-      isFreeTier={isFreeTier}
-      onCancel={() => {
-        const req = videoTrimRequest;
-        setVideoTrimRequest(null);
-        req?.resolve(null);
-      }}
-      onConfirm={range => {
-        const req = videoTrimRequest;
-        if (!req) return;
-        setVideoTrimRequest(null);
-        void (async () => {
-          setVideoTrimExporting(true);
-          // Laisser la modale / player se démonter avant FFmpeg.
-          await new Promise<void>(resolve => setTimeout(resolve, 250));
-          try {
-            const result = await trimVideoClipToLocalFile({
-              inputUri: req.asset.uri,
-              startSec: range.startSec,
-              endSec: range.endSec,
-            });
-            req.resolve({
-              originalUri: req.asset.uri,
-              asset: {
-                ...req.asset,
-                uri: result.uri,
-                duration: result.durationSec * 1000,
-                type: 'video',
-                fileName: req.asset.fileName ?? `trim-${Date.now()}.mp4`,
-                mimeType: req.asset.mimeType ?? 'video/mp4',
-              },
-            });
-          } catch (e) {
-            if (e instanceof VideoTrimNativeMissingError) {
-              Alert.alert(t('videoTrim.needsRebuildTitle'), t('videoTrim.needsRebuildBody'));
-            } else {
-              const code = e instanceof Error ? e.message : String(e);
-              console.warn('[import-media] video trim export', code, e);
-              if (
-                code === 'VIDEO_TRIM_INPUT_UNREADABLE' ||
-                code === 'VIDEO_TRIM_EMPTY_INPUT'
-              ) {
-                Alert.alert(t('videoTrim.originalMissingTitle'), t('videoTrim.originalMissingBody'));
-              } else {
-                Alert.alert(t('videoTrim.exportFailedTitle'), t('videoTrim.exportFailedBody'));
-              }
-            }
-            req.resolve(null);
-          } finally {
-            setVideoTrimExporting(false);
-          }
-        })();
-      }}
-      onUpgrade={
-        isFreeTier
-          ? () => {
-              /** Ne pas resolve(null) : ça faisait replace(fil) et gagnait la course. */
-              resumeTrimAfterPaywallRef.current = true;
-              setTrimPaywallOpen(true);
-              router.push({ pathname: '/paywall', params: { context: 'GENERAL' } });
-            }
-          : undefined
-      }
-    />
-  );
-
   if (navigatingToFeed) {
     return (
       <>
         {batchLayoutModalEl}
-        {videoTrimModalEl}
         <View style={styles.container}>
           <FeedMediaPrepOverlay label={t('mediaPrep.addingToFeed')} />
         </View>
@@ -915,7 +814,6 @@ export default function ImportMediaScreen() {
     return (
       <>
         {batchLayoutModalEl}
-        {videoTrimModalEl}
         <View style={styles.container}>
           <View style={styles.galleryOpeningWrap}>
             <ActivityIndicator size="large" color={THEME.accent} />
@@ -925,32 +823,9 @@ export default function ImportMediaScreen() {
     );
   }
 
-  /** Pendant l’éditeur de coupe vidéo : modal plein écran uniquement. */
-  if (videoTrimExporting) {
-    return (
-      <>
-        {batchLayoutModalEl}
-        <View style={styles.container}>
-          <FeedMediaPrepOverlay label={t('videoTrim.exporting')} />
-        </View>
-      </>
-    );
-  }
-
-  if (videoTrimRequest != null) {
-    return (
-      <>
-        {batchLayoutModalEl}
-        {videoTrimModalEl}
-        <View style={styles.container} />
-      </>
-    );
-  }
-
   return (
     <>
       {batchLayoutModalEl}
-      {videoTrimModalEl}
       <View style={styles.container}>
       {pickAttemptFinished ? (
         <>

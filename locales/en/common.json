@@ -366,7 +366,7 @@
     }
   },
   "tabs": {
-    "capture": "Capture",
+    "capture": "Add",
     "journal": "Journal",
     "favorites": "Favorites",
     "books": "Books",
@@ -400,10 +400,10 @@
     "toolbarWriteA11y": "Write the page text",
     "listNoPages": "No pages",
     "photoFit": {
-      "original": "Original",
+      "original": "Original format",
       "originalA11y": "Show photo in original format",
-      "fill": "Fill",
-      "fillA11y": "Fill the frame with the photo",
+      "fill": "Crop",
+      "fillA11y": "Crop the photo to fill the frame",
       "rotateA11y": "Rotate photo",
       "dpiLoading": "Calculating print quality…"
     }

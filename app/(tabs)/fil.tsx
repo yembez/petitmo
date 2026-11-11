@@ -20,9 +20,7 @@ import { estimateFeedRowHeight } from '@/utils/estimateFeedRowHeight';
 import { getFeedRowMeasuredHeight, syncFeedRowHeightCacheAspect } from '@/lib/feedRowHeightCache';
 import { FEED_MEDIA_ASPECT_DEFAULT } from '@/utils/feedMediaAspect';
 import EditTextModal from '@/components/EditTextModal';
-import { VideoTrimModal } from '@/components/VideoTrimModal';
 import { FeedMediaPrepOverlay } from '@/components/FeedMediaPrepOverlay';
-import { FREE_TIER_VIDEO_MAX_DURATION } from '@/lib/limits';
 import { feedMemoryTextEditPreviewVariant } from '@/utils/memoryTextEditStyles';
 import { bookLineBudgetForMemoryType, bookCharsPerLineForMemoryType } from '@/utils/textLimits';
 import { useFeedVideoAutoplay } from '@/hooks/useFeedVideoAutoplay';
@@ -151,20 +149,12 @@ function FilScreen() {
     editLocationModalVisible,
     editingLocationMemory,
     uploadingVoiceCoverId,
-    videoTrimTarget,
-    videoTrimUri,
-    videoTrimDurationSec,
-    videoTrimMaxSec,
-    videoTrimFreeTier,
-    videoTrimInitialRange,
     videoTrimExporting,
     handleEditMemory,
     handleSaveEdit,
     handleEditLocation,
     handleSaveLocation,
     handleEditVideoTrim,
-    handleConfirmVideoTrim,
-    closeVideoTrimModal,
     handlePickVoiceCover,
     handleDeleteMemory,
     closeEditModal,
@@ -1063,24 +1053,6 @@ function FilScreen() {
         title="Modifier le lieu"
         onClose={closeEditLocationModal}
         onSave={handleSaveLocation}
-      />
-      <VideoTrimModal
-        visible={videoTrimTarget != null && !videoTrimExporting}
-        videoUri={videoTrimUri}
-        durationSec={videoTrimDurationSec}
-        maxDurationSec={videoTrimMaxSec || FREE_TIER_VIDEO_MAX_DURATION}
-        isFreeTier={videoTrimFreeTier}
-        initialTrim={videoTrimInitialRange}
-        onCancel={closeVideoTrimModal}
-        onConfirm={handleConfirmVideoTrim}
-        onUpgrade={
-          videoTrimFreeTier
-            ? () => {
-                closeVideoTrimModal();
-                router.push({ pathname: '/paywall', params: { context: 'GENERAL' } });
-              }
-            : undefined
-        }
       />
       {videoTrimExporting ? (
         <FeedMediaPrepOverlay label={t('videoTrim.exporting')} />

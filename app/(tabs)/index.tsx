@@ -132,7 +132,7 @@ import {
 /** Tailles maquette capture (px logiques). */
 const CAPTURE_TITLE_FONT_SIZE = 22;
 const CAPTURE_TITLE_LINE_HEIGHT = 28;
-const CAPTURE_TITLE_HEART_SIZE = scale(18);
+const CAPTURE_TITLE_HEART_SIZE = scale(24);
 /** Hauteur de la ligne date / paramètres (alignés sur le bouton). */
 const CAPTURE_HEADER_ROW_H = scale(40);
 /** Enfants visibles pour le compte **connecté** — jamais après déconnexion (SQLite peut rester). */

@@ -3,7 +3,7 @@ import { Image as RNImage, Pressable, StyleSheet, Text, View } from 'react-nativ
 import { Image as ExpoImage } from 'expo-image';
 import { BookInlinePhotoCrop } from '@/components/BookInlinePhotoCrop';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
-import { defaultPhotoCrop, photoCropFit, type PhotoCrop } from '@/src/book/photoCrop';
+import type { PhotoCrop } from '@/src/book/photoCrop';
 import { bookPhotoCropImageRect } from '@/utils/bookPhotoCropLayout';
 import { useSignedMediaUrl, extractMediaBucketPath } from '@/lib/mediaSignedUrl';
 
@@ -194,13 +194,6 @@ function BookPagePhotoFrame({
   const isLoadingMeta =
     !!inlineCrop && !isInteractive && !dimsLatchedRef.current && !hasCropDims;
   const useAspectCrop = coverMode || hasCropDims;
-  const fit = photoCropFit(crop);
-  const fitBtnSize = Math.max(28, Math.round(34 * typoScale));
-  const fitLabel =
-    fit === 'contain' ? t('book.photoFit.fill') : t('book.photoFit.original');
-  const fitA11y =
-    fit === 'contain' ? t('book.photoFit.fillA11y') : t('book.photoFit.originalA11y');
-
   return (
     <View style={styles.host}>
       <View style={[styles.rot, { transform: [{ rotate: `${rotation}deg` }] }]}>
@@ -234,30 +227,6 @@ function BookPagePhotoFrame({
           <View style={{ width: frameW, height: frameH, backgroundColor: '#FFFFFF' }} />
         )}
       </View>
-
-      {isInteractive && inlineCrop ? (
-        <Pressable
-          style={[
-            styles.fitOverlayBtn,
-            {
-              minHeight: fitBtnSize,
-              borderRadius: Math.max(14, Math.round(17 * typoScale)),
-              top: Math.round(10 * typoScale),
-              left: Math.round(10 * typoScale),
-              paddingHorizontal: Math.round(10 * typoScale),
-            },
-          ]}
-          onPress={() => {
-            const nextFit = fit === 'contain' ? 'cover' : 'contain';
-            inlineCrop.onChange(inlineCrop.storageKey, defaultPhotoCrop(nextFit));
-          }}
-          accessibilityLabel={fitA11y}
-        >
-          <Text style={[styles.fitOverlayLabel, { fontSize: Math.round(12 * typoScale) }]}>
-            {fitLabel}
-          </Text>
-        </Pressable>
-      ) : null}
 
       {showRotateButton && onRotate ? (
         <Pressable
@@ -296,19 +265,6 @@ const styles = StyleSheet.create({
   rot: {
     width: '100%',
     height: '100%',
-  },
-  fitOverlayBtn: {
-    position: 'absolute',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.92)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(0,0,0,0.12)',
-    zIndex: 3,
-  },
-  fitOverlayLabel: {
-    color: '#1C1C1E',
-    fontWeight: '600',
   },
   rotateOverlayBtn: {
     position: 'absolute',

@@ -9,7 +9,6 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 import { Image as ExpoImage } from 'expo-image';
-import BookPhotoDpiBadge from '@/components/BookPhotoDpiBadge';
 import { defaultPhotoCrop, photoCropFit, type PhotoCrop, type PhotoCropFit } from '@/src/book/photoCrop';
 import { bookPhotoBaseSize, clampBookPhotoCropPan } from '@/utils/bookPhotoCropLayout';
 
@@ -52,7 +51,7 @@ type Props = {
   /** Pixels du fichier affiché (recadrage). */
   imgPxW: number;
   imgPxH: number;
-  /** Pixels print pour le badge DPI (si absent = `imgPxW` / `imgPxH`). */
+  /** Conservés pour le parent (badge DPI hors page) — non utilisés ici. */
   dpiPxW?: number;
   dpiPxH?: number;
   printMmW: number;
@@ -118,18 +117,10 @@ export function BookInlinePhotoCrop({
   crop,
   imgPxW,
   imgPxH,
-  dpiPxW,
-  dpiPxH,
-  printMmW,
-  printMmH,
   onChange,
   coverMode = false,
   onZoomActiveChange,
 }: Props) {
-  // Badge DPI = pixels **print** uniquement. Jamais imgPx display/thumb (~480px → faux ~68 DPI).
-  const badgePxW = dpiPxW && dpiPxW > 0 ? dpiPxW : 0;
-  const badgePxH = dpiPxH && dpiPxH > 0 ? dpiPxH : 0;
-
   const fit = photoCropFit(crop);
   /**
    * Ratio réel dès que les dims sont connues (cover + pages souvenirs) :
@@ -317,16 +308,6 @@ export function BookInlinePhotoCrop({
           </Animated.View>
         </View>
       </GestureDetector>
-
-      <View style={styles.dpiDetailWrap} pointerEvents="none">
-        <BookPhotoDpiBadge
-          imgPxW={badgePxW}
-          imgPxH={badgePxH}
-          printMmW={printMmW}
-          printMmH={printMmH}
-          scale={liveScale}
-        />
-      </View>
     </View>
   );
 }
@@ -335,11 +316,5 @@ const styles = StyleSheet.create({
   frame: {
     overflow: 'hidden',
     backgroundColor: '#FFFFFF',
-  },
-  dpiDetailWrap: {
-    position: 'absolute',
-    bottom: 8,
-    left: 8,
-    alignItems: 'flex-start',
   },
 });

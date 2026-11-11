@@ -34,8 +34,8 @@ function seedUriForMemory(memory: Memory): string {
 }
 
 /**
- * URI de lecture vidéo dans le fil : copie fil si présente, sinon sandbox `original.*`.
- * Autoplay : ne retourne jamais une URL cloud — la résolution distante sert au viewer immersif.
+ * URI de lecture vidéo dans le fil : extrait (`local_media_path` / copie fil) en priorité,
+ * rush sandbox en repli. Autoplay : jamais d’URL cloud (viewer immersif gère le distant).
  */
 export function useFeedVideoPlaybackUri(
   memory: Memory,
@@ -60,20 +60,14 @@ export function useFeedVideoPlaybackUri(
       return;
     }
 
-    // Seed immédiat depuis le cache (dernière URI file:// résolue) → pas de fenêtre vide au remontage.
-    const cached = getCachedFeedVideoPlaybackUri(memory.id);
-    if (cached) setUri(prev => (prev ? prev : cached));
-
-    const optimistic = optimisticFeedLocalVideoPlaybackUri(memory);
-    if (optimistic) {
-      setCachedFeedVideoPlaybackUri(memory.id, optimistic);
-      setUri(prev => (prev ? prev : optimistic));
-    }
-
     const sync = syncFeedLocalVideoPlaybackUri(memory);
-    if (sync) {
-      setCachedFeedVideoPlaybackUri(memory.id, sync);
-      setUri(prev => (prev ? prev : sync));
+    const optimistic = optimisticFeedLocalVideoPlaybackUri(memory);
+    const cached = getCachedFeedVideoPlaybackUri(memory.id);
+    // Bootstrap / chemins SQLite courants avant le cache (sinon un trim reste collé au rush).
+    const preferred = sync || optimistic || cached || '';
+    if (preferred) {
+      setCachedFeedVideoPlaybackUri(memory.id, preferred);
+      setUri(preferred);
     }
 
     if (!resolveEnabled) return;
@@ -95,11 +89,11 @@ export function useFeedVideoPlaybackUri(
       const localOnly =
         chosen && isFeedLocalVideoPlaybackUri(chosen)
           ? normalizeVideoPlaybackUri(chosen)
-          : optimistic || sync;
+          : preferred;
       if (localOnly) {
         setCachedFeedVideoPlaybackUri(memory.id, localOnly);
-        // Idem : figer la 1ʳᵉ URI locale valide (résolution déjà vérifiée lisible sur disque).
-        setUri(prev => (prev ? prev : localOnly));
+        // URI vérifiée lisible : corrige un optimiste mort et applique l’extrait post-trim.
+        setUri(localOnly);
       }
 
       if (chosen && boot) takeFeedBootstrapVideoUri(memory.id);

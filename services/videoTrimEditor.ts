@@ -6,6 +6,9 @@ export type VideoTrimEditorResult = {
   uri: string;
   /** Durée de l’extrait en secondes. */
   durationSec: number;
+  /** Fenêtre choisie sur le rush (ms → s), si le natif la renvoie. */
+  startSec?: number;
+  endSec?: number;
 };
 
 export class VideoTrimNativeMissingError extends Error {
@@ -85,19 +88,29 @@ export function openVideoTrimEditorOnUri(
         return;
       }
       let durationSec = 0;
-      const rangeMs =
+      const hasRange =
         typeof payload.startTime === 'number' &&
         typeof payload.endTime === 'number' &&
-        payload.endTime > payload.startTime
-          ? payload.endTime - payload.startTime
-          : 0;
+        Number.isFinite(payload.startTime) &&
+        Number.isFinite(payload.endTime) &&
+        payload.endTime > payload.startTime;
+      const rangeMs = hasRange ? payload.endTime! - payload.startTime! : 0;
       /** Préférer la fenêtre sélectionnée : `duration` peut renvoyer la longueur source complète. */
       if (rangeMs > 0) {
         durationSec = mediaDurationToSeconds(rangeMs);
       } else if (typeof payload.duration === 'number' && payload.duration > 0) {
         durationSec = mediaDurationToSeconds(payload.duration);
       }
-      finish({ uri: out, durationSec });
+      finish({
+        uri: out,
+        durationSec,
+        ...(hasRange
+          ? {
+              startSec: payload.startTime! / 1000,
+              endSec: payload.endTime! / 1000,
+            }
+          : {}),
+      });
     };
 
     const onCancel = () => finish(null);
@@ -159,7 +172,7 @@ export function openVideoTrimEditorOnUri(
         enableHapticFeedback: true,
         enableCancelDialog: false,
         enableSaveDialog: false,
-        headerText: `Max ${maxSec} s`,
+        headerText: 'Choisis ta sélection.',
         saveButtonText: 'Utiliser',
         cancelButtonText: 'Annuler',
         theme: 'light',

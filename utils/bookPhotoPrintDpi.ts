@@ -77,12 +77,12 @@ export function bookPhotoDpiStatus(dpi: number): BookPhotoDpiStatus {
 export function bookPhotoDpiStatusLabel(status: BookPhotoDpiStatus): string {
   switch (status) {
     case 'ok':
-      return 'OK ≥ 240';
+      return 'OK';
     case 'warn':
-      return 'Faible < 240';
+      return 'Moyen';
     case 'block':
-      return 'Très faible < 200';
+      return 'Mauvais';
     default:
-      return 'En attente du fichier print…';
+      return '…';
   }
 }

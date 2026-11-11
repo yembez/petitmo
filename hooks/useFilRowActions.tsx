@@ -18,12 +18,14 @@ import {
   FREE_TIER_VIDEO_MAX_DURATION,
   PAID_TIER_VIDEO_MAX_DURATION,
 } from '@/lib/limits';
-import type { VideoTrimModalConfirmResult } from '@/components/VideoTrimModal';
 import {
   resolveVideoOriginalUriForRetrim,
-  retrimVideoMemoryFromOriginal,
-  VideoTrimNativeMissingError,
+  applyTrimmedClipToVideoMemory,
 } from '@/services/retrimVideoMemory';
+import {
+  openVideoTrimEditorOnUri,
+  VideoTrimNativeMissingError,
+} from '@/services/videoTrimEditor';
 import { pauseAllPooledVideoPlayersForOverlay } from '@/lib/videoPlayerPool';
 import { setFeedAutoplayActiveMemoryId } from '@/lib/feedAutoplayStore';
 
@@ -54,15 +56,6 @@ export function useFilRowActions(
   const [editLocationModalVisible, setEditLocationModalVisible] = useState(false);
   const [editingLocationMemory, setEditingLocationMemory] = useState<Memory | null>(null);
   const [uploadingVoiceCoverId, setUploadingVoiceCoverId] = useState<string | null>(null);
-  const [videoTrimTarget, setVideoTrimTarget] = useState<Memory | null>(null);
-  const [videoTrimUri, setVideoTrimUri] = useState('');
-  const [videoTrimDurationSec, setVideoTrimDurationSec] = useState(0);
-  const [videoTrimMaxSec, setVideoTrimMaxSec] = useState(FREE_TIER_VIDEO_MAX_DURATION);
-  const [videoTrimFreeTier, setVideoTrimFreeTier] = useState(true);
-  const [videoTrimInitialRange, setVideoTrimInitialRange] = useState<{
-    startSec: number;
-    endSec: number;
-  } | null>(null);
   const [videoTrimExporting, setVideoTrimExporting] = useState(false);
   const scrollBridgeRef = useRef(scrollBridge);
   scrollBridgeRef.current = scrollBridge;
@@ -100,94 +93,56 @@ export function useFilRowActions(
     async (memory: Memory) => {
       if (memory.id.startsWith('pending_') || memory.type !== 'video') return;
       try {
-        /** Couper l’autoplay fil AVANT d’ouvrir le 2ᵉ lecteur (sinon freeze iOS). */
+        /** Couper l’autoplay fil AVANT l’éditeur natif (sinon freeze iOS). */
         setFeedAutoplayActiveMemoryId(null, 'video-trim-open');
         pauseAllPooledVideoPlayersForOverlay();
 
         const tier = await resolveEffectiveUserTier();
-        const isFree = tier !== 'paid';
-        const maxSec = isFree ? FREE_TIER_VIDEO_MAX_DURATION : PAID_TIER_VIDEO_MAX_DURATION;
+        const maxSec =
+          tier === 'paid' ? PAID_TIER_VIDEO_MAX_DURATION : FREE_TIER_VIDEO_MAX_DURATION;
         const uri = await resolveVideoOriginalUriForRetrim(memory);
         if (!uri.trim()) {
           Alert.alert(t('videoTrim.originalMissingTitle'), t('videoTrim.originalMissingBody'));
           return;
         }
-        /**
-         * Ne pas inventer une durée (clip ≠ rush). Le modal lit la vraie durée via sourceLoad.
-         * Restaure la fenêtre de coupe si déjà éditée.
-         */
-        const savedStart = memory.video_playback_start_sec;
-        const savedEnd = memory.video_playback_end_sec;
-        const hasSaved =
-          typeof savedStart === 'number' &&
-          Number.isFinite(savedStart) &&
-          typeof savedEnd === 'number' &&
-          Number.isFinite(savedEnd) &&
-          savedEnd > savedStart;
-        setVideoTrimFreeTier(isFree);
-        setVideoTrimMaxSec(maxSec);
-        setVideoTrimDurationSec(0);
-        setVideoTrimInitialRange(
-          hasSaved ? { startSec: Math.max(0, savedStart), endSec: savedEnd } : null,
-        );
-        setVideoTrimUri(uri);
-        setVideoTrimTarget(memory);
-      } catch (e) {
-        console.warn('[fil] handleEditVideoTrim', e);
-        Alert.alert(t('videoTrim.originalMissingTitle'), t('videoTrim.originalMissingBody'));
-      }
-    },
-    [t],
-  );
 
-  const closeVideoTrimModal = useCallback(() => {
-    setVideoTrimExporting(false);
-    setVideoTrimTarget(null);
-    setVideoTrimUri('');
-    setVideoTrimDurationSec(0);
-    setVideoTrimInitialRange(null);
-  }, []);
+        const trimmed = await openVideoTrimEditorOnUri(uri, { maxDurationSec: maxSec });
+        if (!trimmed?.uri) return;
 
-  const handleConfirmVideoTrim = useCallback(
-    (range: VideoTrimModalConfirmResult) => {
-      const target = videoTrimTarget;
-      if (!target) return;
-      setVideoTrimTarget(null);
-      setVideoTrimUri('');
-      setVideoTrimDurationSec(0);
-      setVideoTrimInitialRange(null);
-      void (async () => {
         setVideoTrimExporting(true);
-        await new Promise<void>(r => setTimeout(r, 280));
         try {
-          const next = await retrimVideoMemoryFromOriginal({
-            memoryId: target.id,
-            startSec: range.startSec,
-            endSec: range.endSec,
+          const next = await applyTrimmedClipToVideoMemory({
+            memoryId: memory.id,
+            clipUri: trimmed.uri,
+            durationSec: trimmed.durationSec,
+            startSec: trimmed.startSec,
+            endSec: trimmed.endSec,
           });
           setMemories(prev => prev.map(m => (m.id === next.id ? next : m)));
-        } catch (e) {
-          if (e instanceof VideoTrimNativeMissingError) {
-            Alert.alert(t('videoTrim.needsRebuildTitle'), t('videoTrim.needsRebuildBody'));
-          } else {
-            const code = e instanceof Error ? e.message : String(e);
-            console.warn('[fil] retrim video', code, e);
-            if (
-              code === 'original_unreadable' ||
-              code === 'VIDEO_TRIM_INPUT_UNREADABLE' ||
-              code === 'VIDEO_TRIM_EMPTY_INPUT'
-            ) {
-              Alert.alert(t('videoTrim.originalMissingTitle'), t('videoTrim.originalMissingBody'));
-            } else {
-              Alert.alert(t('videoTrim.exportFailedTitle'), t('videoTrim.exportFailedBody'));
-            }
-          }
         } finally {
           setVideoTrimExporting(false);
         }
-      })();
+      } catch (e) {
+        setVideoTrimExporting(false);
+        if (e instanceof VideoTrimNativeMissingError) {
+          Alert.alert(t('videoTrim.needsRebuildTitle'), t('videoTrim.needsRebuildBody'));
+          return;
+        }
+        const code = e instanceof Error ? e.message : String(e);
+        console.warn('[fil] handleEditVideoTrim', code, e);
+        if (
+          code === 'original_unreadable' ||
+          code === 'VIDEO_TRIM_INPUT_UNREADABLE' ||
+          code === 'VIDEO_TRIM_EMPTY_INPUT' ||
+          code === 'VIDEO_TRIM_EMPTY_OUTPUT'
+        ) {
+          Alert.alert(t('videoTrim.originalMissingTitle'), t('videoTrim.originalMissingBody'));
+        } else {
+          Alert.alert(t('videoTrim.exportFailedTitle'), t('videoTrim.exportFailedBody'));
+        }
+      }
     },
-    [setMemories, t, videoTrimTarget],
+    [setMemories, t],
   );
 
   const handleSaveLocation = useCallback(
@@ -319,20 +274,12 @@ export function useFilRowActions(
     editLocationModalVisible,
     editingLocationMemory,
     uploadingVoiceCoverId,
-    videoTrimTarget,
-    videoTrimUri,
-    videoTrimDurationSec,
-    videoTrimMaxSec,
-    videoTrimFreeTier,
-    videoTrimInitialRange,
     videoTrimExporting,
     handleEditMemory,
     handleSaveEdit,
     handleEditLocation,
     handleSaveLocation,
     handleEditVideoTrim,
-    handleConfirmVideoTrim,
-    closeVideoTrimModal,
     handlePickVoiceCover,
     handleDeleteMemory,
     closeEditModal,
