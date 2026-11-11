@@ -1,135 +1,132 @@
 # Durabilité médias (backup) — Petitmo
 
 **Contexte** : Supabase Storage **ne versionne pas** les objets. Un `remove` est définitif.  
-La promesse produit (« souvenirs sauvegardés ») exige donc **plusieurs couches**.
+La promesse produit (« souvenirs sauvegardés ») exige donc **plusieurs couches** + **heal silencieux**.
+
+**Low Friction / local-first :** l’utilisatrice ne doit **jamais** écrire au support pour récupérer une copie. Restore R2 → Supabase = fond uniquement (zéro Alert).
 
 ## Architecture cible (3-2-1 adapté)
 
 | Couche | Quoi | Statut |
 |---|---|---|
-| **L0** | SQLite + sandbox téléphone | Déjà (UX local-first, pas une backup cloud) |
+| **L0** | SQLite + sandbox téléphone | Déjà (UX local-first) |
 | **L1** | Bucket Supabase `media` (primaire) | Prod |
-| **L1b** | Soft-delete → `trash/YYYY-MM-DD/…` (90 j avant purge) | **Code worker** |
-| **L2** | Vérif post-upload + audit intégrité cron | **Code app + Edge** |
-| **L3** | Miroir **Cloudflare R2** (2ᵉ copie externe) | **Code worker** — activer secrets |
+| **L1b** | Soft-delete → `trash/YYYY-MM-DD/…` (90 j avant purge) | Worker + cron purge |
+| **L2** | Vérif post-upload + audit + **heal R2** | App + Edge + worker |
+| **L3** | Miroir **Cloudflare R2** (médias + méta + QR) | Worker |
 
 ```mermaid
 flowchart LR
   app[App] --> primary[Supabase media]
   primary -->|soft-delete| trash[trash/ date]
-  primary -->|immédiat après upload| r2[Cloudflare R2]
+  primary -->|immédiat| r2[Cloudflare R2]
   cron[Cron filet] --> audit[integrity-audit]
-  audit --> primary
-  cron --> mirror[backup-mirror-sync]
-  mirror --> r2
+  audit -->|heal même path| primary
+  r2 -->|restore| primary
+  cron --> qrHeal[qr-media heal]
+  qrHeal --> qrBucket[qr-media ready]
 ```
-
-## Pourquoi Cloudflare R2 (choix produit)
-
-- S3-compatible, **pas de frais d’egress** typiques AWS (coût prévisible pour vidéos)
-- 2ᵉ fournisseur ≠ Supabase (vrai hors-site)
-- Simple à brancher sur le media-worker déjà sur Railway
-
-Alternatives OK : Backblaze B2, AWS S3 versionné. **Pas** : seul zip quotidien, recompresser les vidéos.
 
 ## Copie immédiate (chemin nominal)
 
 Dès qu’un upload Storage est **vérifié** côté app → Edge `mirror-media-to-r2` → worker `/backup-mirror-object` → R2.  
 Le **cron quotidien** reste un **filet** (oublis / échecs réseau), pas le seul mécanisme.
 
-## Textes / métadonnées (Postgres → R2)
+## Heal silencieux R2 → Supabase (médias)
 
-Les souvenirs `text` (et captions / titres / lieux / refs `*_path`) vivent en **Postgres**, pas dans le bucket `media`.  
-2ᵉ copie hors-site :
+Si `memories.media_path` pointe vers un objet **absent** du bucket `media` :
+
+1. Worker tente `GetObject` R2 sur **la même clé**
+2. Si présent → `upload` Supabase **même path** (pas de nouvel id / path)
+3. Si absent aussi en R2 → log CRITICAL `r2_also_missing`
+
+Endpoints :
+
+- `POST /backup-restore-object` `{ path }`
+- `POST /media-integrity-audit` `{ healFromR2: true }` (défaut si R2 configuré)
+
+### Smoke heal média (compte test)
+
+```bash
+# 1) Choisir un path déjà mirroiré (présent R2 + Supabase)
+# 2) Supprimer UNIQUEMENT l’objet dans Supabase Storage media (pas R2)
+# 3) Heal :
+curl -sS -X POST "$MEDIA_WORKER_URL/media-integrity-audit" \
+  -H "Content-Type: application/json" \
+  -H "X-Worker-Secret: $MEDIA_WORKER_SECRET" \
+  -d '{"limit":50,"types":["photo","video","voice"],"healFromR2":true}'
+# Attendu : restoredCount >= 1, objet réapparu au même path
+```
+
+## Textes / métadonnées (Postgres → R2)
 
 | Moment | Mécanisme |
 |---|---|
-| Insert texte cloud OK | Edge `mirror-memory-meta-to-r2` → `/backup-memory-meta` |
-| Edit texte / titre cloud OK | idem (écrase le JSON) |
-| Cron filet | `/backup-memories-meta-sync` (via `media-integrity-audit` si `mirror` ou `meta`) |
+| Insert / edit texte cloud OK | Edge `mirror-memory-meta-to-r2` → `/backup-memory-meta` |
+| Cron filet | `/backup-memories-meta-sync` |
+| Ligne Postgres **absente** | `/backup-restore-memory-meta` `{ memoryId, userId }` — **même id** |
 
-Clé R2 : `{userId}/_meta/memories/{memoryId}.json`  
-Payload `v:1` : `content`, `text_title`, `location`, dates, `media_path` / extras — **pas** d’URLs signées.
+Clé R2 : `{userId}/_meta/memories/{memoryId}.json`
 
-## Activer le miroir R2 (aujourd’hui)
+### Smoke heal texte
 
-1. Cloudflare → R2 → Create bucket `petitmo-media-mirror`
-2. Create API token (Object Read & Write) → `Access Key ID` + `Secret`
-3. Railway → `petitmo-media-worker` → variables :
+```bash
+# Après export meta OK, supprimer la ligne memories (compte test), puis :
+curl -sS -X POST "$MEDIA_WORKER_URL/backup-restore-memory-meta" \
+  -H "Content-Type: application/json" \
+  -H "X-Worker-Secret: $MEDIA_WORKER_SECRET" \
+  -d '{"memoryId":"<uuid>","userId":"<uuid>"}'
+# Attendu : restored:true, même content
+```
 
-| Variable | Exemple |
+## QR livre (`qr-media`) — stock distinct
+
+Tokens `public_media_tokens` : **token + ready_path immuables** (voir `qr-media-permanence.md`).
+
+| Action | Endpoint / hook |
 |---|---|
-| `R2_ACCOUNT_ID` | id compte Cloudflare |
-| `R2_ACCESS_KEY_ID` | … |
-| `R2_SECRET_ACCESS_KEY` | … |
-| `R2_BUCKET` | `petitmo-media-mirror` |
+| Miroir immédiat après `ready` | PDF server → `/backup-mirror-qr-object` (si `MEDIA_WORKER_*` sur Railway PDF) |
+| Filet + heal | `/backup-qr-sync` `{ healFromR2: true }` |
+| Restore un ready | `/backup-restore-qr-object` `{ path: "ready/{token}.ext" }` |
+| Scan `/m/{token}` | `tryHealReadyTokenFromStorage` : archive puis R2 |
 
-4. Redéployer le media-worker
-5. Smoke :
+Clés R2 : `qr-media/ready/…`, `qr-media/archive/…`, `_meta/public_media_tokens/{token}.json`  
+**Jamais** de nouveau token après heal.
 
-```bash
-curl -sS -X POST "$MEDIA_WORKER_URL/backup-mirror-sync" \
-  -H "Content-Type: application/json" \
-  -H "X-Worker-Secret: $MEDIA_WORKER_SECRET" \
-  -d '{"limit":20,"offset":0}'
-```
-
-6. Brancher le cron Supabase (quotidien) :
-
-```sql
--- Exemple pg_cron : audit + mirror
-select cron.schedule(
-  'petitmo-media-integrity',
-  '15 4 * * *',
-  $$
-  select net.http_post(
-    url := 'https://gswtsnhmwjwhwjdiijbs.supabase.co/functions/v1/media-integrity-audit',
-    headers := jsonb_build_object(
-      'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'media_integrity_cron_secret' limit 1),
-      'Content-Type', 'application/json'
-    ),
-    body := '{"limit":100,"mirror":true,"mirrorLimit":40,"meta":true,"metaLimit":100}'::jsonb
-  );
-  $$
-);
-```
-
-Smoke méta (backfill) :
+### Smoke QR
 
 ```bash
-curl -sS -X POST "$MEDIA_WORKER_URL/backup-memories-meta-sync" \
+curl -sS -X POST "$MEDIA_WORKER_URL/backup-qr-sync" \
   -H "Content-Type: application/json" \
   -H "X-Worker-Secret: $MEDIA_WORKER_SECRET" \
-  -d '{"limit":50,"offset":0,"types":["text"]}'
+  -d '{"limit":20,"healFromR2":true}'
 ```
 
-Secrets Edge à poser : `MEDIA_INTEGRITY_CRON_SECRET` (= ou dérivé de `MEDIA_WORKER_SECRET`), `MEDIA_WORKER_URL`, `MEDIA_WORKER_SECRET`.
+## Soft-delete + purge 90 j
 
-## Soft-delete
+`DELETE` souvenir → `trash/YYYY-MM-DD/…`  
+Purge : `POST /backup-purge-trash` `{ days: 90 }` (cron quotidien).
 
-`DELETE` souvenir → worker **déplace** vers `trash/YYYY-MM-DD/<ancien-chemin>` (plus de `remove` immédiat).  
-Récupération manuelle possible depuis le dashboard Storage / S3.  
-**TODO P1** : cron purge `trash/` > 90 jours.
+## Cron prod
 
-## Audit intégrité
+Migration : `supabase/migrations/20261111160000_schedule_media_integrity_heal_cron.sql`  
+Vault : `project_url` + `media_integrity_cron_secret`  
+Edge body : `heal`, `mirror`, `meta`, `qr`, `purgeTrash`.
 
-- Worker `POST /media-integrity-audit` : compare `memories.media_path` ↔ objet présent
-- Edge `media-integrity-audit` : wrapper cron + logs CRITICAL si manquant
-- App : verify post-upload + Sentry `media.cloud.integrity` + repair local→cloud si possible
+Secrets Edge : `MEDIA_INTEGRITY_CRON_SECRET`, `MEDIA_WORKER_URL`, `MEDIA_WORKER_SECRET`.  
+Railway **PDF** (heal scan QR) : optionnel `MEDIA_WORKER_URL` + `MEDIA_WORKER_SECRET`.
 
-## Coût (ordre de grandeur)
+## OTA app
 
-- R2 ≈ prix storage × **2** (primaire + miroir) + writes
-- Soft-delete : storage trash temporaire (~rétention 90 j)
-- Pas de recompression vidéo (déjà compressée ; qualité souvenir prioritaire)
+Publier une OTA `production` pour activer côté client : verify upload, mirror média immédiat, mirror méta texte.  
+Sans OTA : cron + worker couvrent déjà le filet heal.
 
 ## Déploiement checklist
 
-- [ ] Déployer media-worker (soft-delete + audit + mirror + meta)
-- [ ] `supabase functions deploy media-integrity-audit`
-- [ ] `supabase functions deploy mirror-media-to-r2`
-- [ ] `supabase functions deploy mirror-memory-meta-to-r2`
-- [ ] Secrets R2 sur Railway
-- [ ] Cron quotidien audit (+ `mirror:true` / méta)
-- [ ] OTA app (verify upload + mirror média + meta texte)
-- [ ] Smoke : 1 vidéo → R2 ; 1 texte → `{user}/_meta/memories/….json` ; delete → `trash/`
+- [x] Worker restore + audit heal + meta + QR + purge
+- [x] Edge `media-integrity-audit` (heal / qr / purge)
+- [x] Edges `mirror-media-to-r2` / `mirror-memory-meta-to-r2`
+- [ ] Appliquer migration cron + vault `media_integrity_cron_secret`
+- [ ] `MEDIA_WORKER_*` sur service Railway PDF (QR immédiat + heal scan)
+- [ ] OTA app
+- [ ] Smoke heal média + texte + QR

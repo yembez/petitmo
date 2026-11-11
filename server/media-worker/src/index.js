@@ -210,6 +210,261 @@ async function putMemoryMetaToR2(row) {
   return { ok: true, key, bytes: body.length };
 }
 
+function contentTypeForPath(objectPath) {
+  const lower = String(objectPath || '').toLowerCase();
+  if (lower.endsWith('.mp4')) return 'video/mp4';
+  if (lower.endsWith('.m4a') || lower.endsWith('.mp3')) return 'audio/mp4';
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  if (lower.endsWith('.json')) return 'application/json; charset=utf-8';
+  return 'application/octet-stream';
+}
+
+async function r2HeadExists(key) {
+  const client = await getR2Client();
+  if (!client) return false;
+  const { HeadObjectCommand } = require('@aws-sdk/client-s3');
+  try {
+    await client.send(new HeadObjectCommand({ Bucket: process.env.R2_BUCKET.trim(), Key: key }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function downloadFromR2(key) {
+  const client = await getR2Client();
+  if (!client) return null;
+  const { GetObjectCommand } = require('@aws-sdk/client-s3');
+  try {
+    const out = await client.send(
+      new GetObjectCommand({ Bucket: process.env.R2_BUCKET.trim(), Key: key }),
+    );
+    const bytes = await out.Body.transformToByteArray();
+    return Buffer.from(bytes);
+  } catch (e) {
+    const msg = String(e?.name || e?.Code || e?.message || e);
+    if (/NoSuchKey|NotFound|404|NoSuchBucket/i.test(msg)) return null;
+    throw e;
+  }
+}
+
+async function putBufferToR2(key, buf, contentType) {
+  const client = await getR2Client();
+  if (!client) return { skipped: true, reason: 'r2_not_configured' };
+  const { PutObjectCommand } = require('@aws-sdk/client-s3');
+  await client.send(
+    new PutObjectCommand({
+      Bucket: process.env.R2_BUCKET.trim(),
+      Key: key,
+      Body: buf,
+      ContentType: contentType || contentTypeForPath(key),
+    }),
+  );
+  return { ok: true, key, bytes: buf.length };
+}
+
+/**
+ * Restore silencieux : R2 → bucket Supabase, **même path**.
+ * N’écrase pas un objet déjà présent.
+ */
+async function restoreObjectFromR2ToBucket(supabaseBucket, objectPath, r2Key) {
+  if (!r2Configured()) return { skipped: true, reason: 'r2_not_configured' };
+  const path = String(objectPath || '').replace(/^\/+/, '');
+  const key = String(r2Key || path).replace(/^\/+/, '');
+  if (!path || path.includes('..')) return { skipped: true, reason: 'ignored_path' };
+
+  const existsPrimary = await storageObjectExists(supabaseBucket, path);
+  if (existsPrimary) return { skipped: true, reason: 'primary_present', path };
+
+  const buf = await downloadFromR2(key);
+  if (!buf) return { ok: false, error: 'r2_also_missing', path, key };
+
+  await uploadBuffer(supabaseBucket, path, buf, contentTypeForPath(path), true);
+  return { ok: true, restored: true, path, key, bytes: buf.length };
+}
+
+async function restoreMediaPathFromR2(objectPath) {
+  const path = String(objectPath || '').replace(/^\/+/, '').replace(/^media\//, '');
+  return restoreObjectFromR2ToBucket('media', path, path);
+}
+
+/**
+ * Restore ligne memories absente depuis JSON R2 `_meta`.
+ * Même id — jamais de nouvel UUID.
+ */
+async function restoreMemoryMetaFromR2(userId, memoryId) {
+  if (!r2Configured()) return { skipped: true, reason: 'r2_not_configured' };
+  const uid = String(userId || '').trim();
+  const mid = String(memoryId || '').trim();
+  if (!uid || !mid) return { skipped: true, reason: 'missing_ids' };
+
+  const { data: existing, error: exErr } = await supabase
+    .from('memories')
+    .select('id')
+    .eq('id', mid)
+    .maybeSingle();
+  if (exErr) throw exErr;
+  if (existing) return { skipped: true, reason: 'already_exists', memoryId: mid };
+
+  const key = memoryMetaR2Key(uid, mid);
+  const buf = await downloadFromR2(key);
+  if (!buf) return { ok: false, error: 'r2_meta_missing', key };
+
+  let parsed;
+  try {
+    parsed = JSON.parse(buf.toString('utf8'));
+  } catch {
+    return { ok: false, error: 'r2_meta_invalid_json', key };
+  }
+  const m = parsed?.memory;
+  if (!m?.id || m.id !== mid || m.user_id !== uid) {
+    return { ok: false, error: 'r2_meta_id_mismatch', key };
+  }
+
+  const row = {
+    id: m.id,
+    user_id: m.user_id,
+    child_id: m.child_id,
+    type: m.type || 'text',
+    content: m.content ?? null,
+    text_title: m.text_title ?? null,
+    location: m.location ?? null,
+    is_favorite: m.is_favorite === true,
+    created_at: m.created_at || new Date().toISOString(),
+    inserted_at: m.inserted_at || m.created_at || new Date().toISOString(),
+    updated_at: m.updated_at || new Date().toISOString(),
+    media_path: m.media_path ?? null,
+    extra_photo_paths: m.extra_photo_paths ?? [],
+    thumbnail_path: m.thumbnail_path ?? null,
+    voice_cover_path: m.voice_cover_path ?? null,
+    duration: m.duration ?? null,
+    archived_at: m.archived_at ?? null,
+    archive_reason: m.archive_reason ?? null,
+    upload_status: m.upload_status ?? null,
+  };
+
+  const { error: upErr } = await supabase.from('memories').insert(row);
+  if (upErr) throw upErr;
+  return { ok: true, restored: true, memoryId: mid, key };
+}
+
+/** Clé R2 pour objets bucket qr-media (préfixe dédié, collision-safe). */
+function qrMediaR2Key(objectPath) {
+  const p = String(objectPath || '').replace(/^\/+/, '').replace(/^qr-media\//, '');
+  return `qr-media/${p}`;
+}
+
+async function mirrorQrPathToR2(objectPath) {
+  const client = await getR2Client();
+  if (!client) return { skipped: true, reason: 'r2_not_configured' };
+  const path = String(objectPath || '').replace(/^\/+/, '').replace(/^qr-media\//, '');
+  if (!path || (!path.startsWith('ready/') && !path.startsWith('archive/'))) {
+    return { skipped: true, reason: 'ignored_path' };
+  }
+  const key = qrMediaR2Key(path);
+  if (await r2HeadExists(key)) return { skipped: true, reason: 'already_mirrored', key };
+
+  const buf = await downloadToBuffer('qr-media', path);
+  return putBufferToR2(key, buf, contentTypeForPath(path));
+}
+
+async function restoreQrPathFromR2(objectPath) {
+  const path = String(objectPath || '').replace(/^\/+/, '').replace(/^qr-media\//, '');
+  return restoreObjectFromR2ToBucket('qr-media', path, qrMediaR2Key(path));
+}
+
+function publicMediaTokenMetaR2Key(token) {
+  return `_meta/public_media_tokens/${String(token).trim()}.json`;
+}
+
+async function putPublicMediaTokenMetaToR2(row) {
+  if (!r2Configured()) return { skipped: true, reason: 'r2_not_configured' };
+  const token = (row?.token || '').trim();
+  if (!token) return { skipped: true, reason: 'missing_token' };
+  const payload = {
+    v: 1,
+    exported_at: new Date().toISOString(),
+    token: {
+      token,
+      media_id: row.media_id ?? null,
+      kind: row.kind ?? null,
+      status: row.status ?? null,
+      ready_bucket: row.ready_bucket ?? 'qr-media',
+      ready_path: row.ready_path ?? null,
+      updated_at: row.updated_at ?? null,
+    },
+  };
+  const body = Buffer.from(JSON.stringify(payload), 'utf8');
+  return putBufferToR2(publicMediaTokenMetaR2Key(token), body, 'application/json; charset=utf-8');
+}
+
+/**
+ * Purge soft-delete `trash/YYYY-MM-DD/…` plus vieux que `days` jours.
+ */
+async function purgeTrashOlderThan(bucket, days = 90) {
+  const cutoffMs = Date.now() - days * 24 * 60 * 60 * 1000;
+  const { data: dayFolders, error } = await supabase.storage.from(bucket).list('trash', {
+    limit: 1000,
+  });
+  if (error) throw error;
+
+  const purged = [];
+  const kept = [];
+  const errors = [];
+
+  for (const folder of dayFolders || []) {
+    const name = String(folder?.name || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(name)) continue;
+    const folderMs = Date.parse(`${name}T00:00:00.000Z`);
+    if (!Number.isFinite(folderMs) || folderMs > cutoffMs) {
+      kept.push(name);
+      continue;
+    }
+    const prefix = `trash/${name}`;
+    let safety = 0;
+    while (safety < 50) {
+      safety += 1;
+      const { data: objs, error: listErr } = await supabase.storage.from(bucket).list(prefix, {
+        limit: 100,
+      });
+      if (listErr) {
+        errors.push({ prefix, error: listErr.message });
+        break;
+      }
+      const files = (objs || []).filter((o) => o?.name && o.id != null);
+      const subdirs = (objs || []).filter((o) => o?.name && o.id == null);
+      if (!files.length && !subdirs.length) break;
+
+      if (files.length) {
+        const paths = files.map((f) => `${prefix}/${f.name}`);
+        const { error: rmErr } = await supabase.storage.from(bucket).remove(paths);
+        if (rmErr) errors.push({ prefix, error: rmErr.message });
+        else purged.push(...paths);
+      }
+
+      for (const sub of subdirs) {
+        const subPrefix = `${prefix}/${sub.name}`;
+        const { data: nested } = await supabase.storage.from(bucket).list(subPrefix, { limit: 100 });
+        const nestedFiles = (nested || []).filter((o) => o?.name);
+        if (nestedFiles.length) {
+          const nestedPaths = nestedFiles.map((f) => `${subPrefix}/${f.name}`);
+          const { error: rmErr } = await supabase.storage.from(bucket).remove(nestedPaths);
+          if (rmErr) errors.push({ prefix: subPrefix, error: rmErr.message });
+          else purged.push(...nestedPaths);
+        }
+      }
+      if (!files.length && !subdirs.length) break;
+      if (files.length === 0 && subdirs.length === 0) break;
+      // Évite boucle infinie si list ne se vide pas
+      if (files.length === 0) break;
+    }
+  }
+
+  return { purgedCount: purged.length, purgedSample: purged.slice(0, 20), keptDays: kept, errors };
+}
+
 async function storageObjectExists(bucket, objectPath) {
   const parts = String(objectPath || '').split('/');
   const name = parts.pop();
@@ -569,6 +824,7 @@ app.post('/delete-memory-assets', async (req, res) => {
 
 /**
  * Audit : fiches memories avec media_path dont l’objet Storage manque.
+ * Heal silencieux depuis R2 (même path) si healFromR2 !== false.
  * À appeler en cron (Edge media-integrity-audit).
  */
 app.post('/media-integrity-audit', async (req, res) => {
@@ -577,6 +833,7 @@ app.post('/media-integrity-audit', async (req, res) => {
     limit: z.number().int().min(1).max(500).optional(),
     offset: z.number().int().min(0).optional(),
     types: z.array(z.enum(['video', 'voice', 'photo'])).optional(),
+    healFromR2: z.boolean().optional(),
   });
   const parsed = schema.safeParse(req.body || {});
   if (!parsed.success) return res.status(400).json({ error: 'Invalid body' });
@@ -584,6 +841,7 @@ app.post('/media-integrity-audit', async (req, res) => {
   const limit = parsed.data.limit ?? 100;
   const offset = parsed.data.offset ?? 0;
   const types = parsed.data.types ?? ['video', 'voice'];
+  const healFromR2 = parsed.data.healFromR2 !== false && r2Configured();
 
   try {
     const { data: rows, error } = await supabase
@@ -596,32 +854,66 @@ app.post('/media-integrity-audit', async (req, res) => {
     if (error) throw error;
 
     const missing = [];
+    const restored = [];
+    const r2AlsoMissing = [];
+
     for (const row of rows || []) {
       const p = (row.media_path || '').trim();
       if (!p) continue;
       const ok = await storageObjectExists('media', p);
-      if (!ok) {
-        missing.push({
-          id: row.id,
-          type: row.type,
-          media_path: p,
-          created_at: row.created_at,
-          location: row.location,
-          file_size: row.file_size,
-        });
+      if (ok) continue;
+
+      const base = {
+        id: row.id,
+        type: row.type,
+        media_path: p,
+        created_at: row.created_at,
+        location: row.location,
+        file_size: row.file_size,
+      };
+
+      if (healFromR2) {
+        try {
+          const heal = await restoreMediaPathFromR2(p);
+          if (heal.restored) {
+            restored.push({ ...base, bytes: heal.bytes });
+            continue;
+          }
+          if (heal.error === 'r2_also_missing') {
+            r2AlsoMissing.push(base);
+            missing.push({ ...base, heal: 'r2_also_missing' });
+            continue;
+          }
+          missing.push({ ...base, heal: heal.reason || heal.error || 'not_restored' });
+          continue;
+        } catch (e) {
+          missing.push({ ...base, heal: 'error', error: String(e?.message || e) });
+          continue;
+        }
       }
+
+      missing.push(base);
     }
 
     if (missing.length) {
       // eslint-disable-next-line no-console
       console.error('[media-integrity-audit] MISSING', missing.length, missing.map((m) => m.id));
     }
+    if (restored.length) {
+      // eslint-disable-next-line no-console
+      console.log('[media-integrity-audit] restored_from_r2', restored.length);
+    }
 
     return res.json({
       ok: true,
       checked: (rows || []).length,
       missingCount: missing.length,
+      restoredCount: restored.length,
+      r2AlsoMissingCount: r2AlsoMissing.length,
       missing,
+      restored,
+      r2AlsoMissing,
+      healFromR2,
       r2Configured: r2Configured(),
     });
   } catch (e) {
@@ -814,8 +1106,236 @@ app.post('/backup-memories-meta-sync', async (req, res) => {
   }
 });
 
+/**
+ * Restore immédiat d’un objet media depuis R2 (même path).
+ * Body: { path }
+ */
+app.post('/backup-restore-object', async (req, res) => {
+  if (!requireSecret(req, res)) return;
+  if (!r2Configured()) {
+    return res.status(200).json({ ok: true, skipped: true, reason: 'r2_not_configured' });
+  }
+  const schema = z.object({ path: z.string().min(3) });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid body' });
+  const objectPath = parsed.data.path.replace(/^\/+/, '').replace(/^media\//, '');
+  try {
+    const r = await restoreMediaPathFromR2(objectPath);
+    const status = r.restored ? 200 : r.error === 'r2_also_missing' ? 404 : 200;
+    return res.status(status).json({ ok: !r.error, path: objectPath, ...r });
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[backup-restore-object] failed', objectPath, e);
+    return res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+/**
+ * Restore ligne memories absente depuis JSON R2.
+ * Body: { memoryId, userId }
+ */
+app.post('/backup-restore-memory-meta', async (req, res) => {
+  if (!requireSecret(req, res)) return;
+  if (!r2Configured()) {
+    return res.status(200).json({ ok: true, skipped: true, reason: 'r2_not_configured' });
+  }
+  const schema = z.object({
+    memoryId: z.string().uuid(),
+    userId: z.string().uuid(),
+  });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid body' });
+  try {
+    const r = await restoreMemoryMetaFromR2(parsed.data.userId, parsed.data.memoryId);
+    const status = r.restored ? 200 : r.error === 'r2_meta_missing' ? 404 : 200;
+    return res.status(status).json({ ok: !r.error, ...r });
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[backup-restore-memory-meta] failed', parsed.data.memoryId, e);
+    return res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+/**
+ * Restore immédiat d’un objet qr-media depuis R2 (même path).
+ * Body: { path: "ready/{token}.m4a" }
+ */
+app.post('/backup-restore-qr-object', async (req, res) => {
+  if (!requireSecret(req, res)) return;
+  if (!r2Configured()) {
+    return res.status(200).json({ ok: true, skipped: true, reason: 'r2_not_configured' });
+  }
+  const schema = z.object({ path: z.string().min(3) });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid body' });
+  const objectPath = parsed.data.path.replace(/^\/+/, '').replace(/^qr-media\//, '');
+  try {
+    const r = await restoreQrPathFromR2(objectPath);
+    const status = r.restored ? 200 : r.error === 'r2_also_missing' ? 404 : 200;
+    return res.status(status).json({ ok: !r.error, path: objectPath, ...r });
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[backup-restore-qr-object] failed', objectPath, e);
+    return res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+/**
+ * Miroir immédiat d’un objet qr-media (ready/ ou archive/) → R2.
+ * Body: { path: "ready/{token}.m4a" }
+ */
+app.post('/backup-mirror-qr-object', async (req, res) => {
+  if (!requireSecret(req, res)) return;
+  if (!r2Configured()) {
+    return res.status(200).json({ ok: true, skipped: true, reason: 'r2_not_configured' });
+  }
+  const schema = z.object({ path: z.string().min(3) });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid body' });
+  const objectPath = parsed.data.path.replace(/^\/+/, '').replace(/^qr-media\//, '');
+  try {
+    const existsPrimary = await storageObjectExists('qr-media', objectPath);
+    if (!existsPrimary) {
+      return res.status(404).json({ ok: false, error: 'primary_missing', path: objectPath });
+    }
+    const r = await mirrorQrPathToR2(objectPath);
+    return res.json({ ok: true, path: objectPath, ...r });
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[backup-mirror-qr-object] failed', objectPath, e);
+    return res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+/**
+ * Filet QR : miroir ready+archive + meta tokens ; heal ready manquant depuis archive puis R2.
+ * Body: { limit?, offset?, healFromR2? }
+ * Ne change jamais token / ready_path.
+ */
+app.post('/backup-qr-sync', async (req, res) => {
+  if (!requireSecret(req, res)) return;
+  if (!r2Configured()) {
+    return res.status(200).json({ ok: true, skipped: true, reason: 'r2_not_configured' });
+  }
+  const schema = z.object({
+    limit: z.number().int().min(1).max(200).optional(),
+    offset: z.number().int().min(0).optional(),
+    healFromR2: z.boolean().optional(),
+  });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid body' });
+  const limit = parsed.data.limit ?? 40;
+  const offset = parsed.data.offset ?? 0;
+  const healFromR2 = parsed.data.healFromR2 !== false;
+
+  try {
+    const { data: rows, error } = await supabase
+      .from('public_media_tokens')
+      .select('token,media_id,kind,status,ready_bucket,ready_path,updated_at')
+      .eq('status', 'ready')
+      .order('updated_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+    if (error) throw error;
+
+    const results = [];
+    for (const row of rows || []) {
+      const token = (row.token || '').trim();
+      const readyPath = (row.ready_path || '').trim().replace(/^qr-media\//, '');
+      if (!token || !readyPath) {
+        results.push({ token, status: 'skip_no_path' });
+        continue;
+      }
+
+      const entry = { token, media_id: row.media_id, kind: row.kind, ready_path: readyPath };
+      try {
+        await putPublicMediaTokenMetaToR2(row);
+
+        const readyOk = await storageObjectExists('qr-media', readyPath);
+        if (!readyOk && healFromR2) {
+          const kind = row.kind === 'video' ? 'video' : 'audio';
+          const archivePath = `archive/${token}.${kind === 'video' ? 'mp4' : 'm4a'}`;
+          const archiveOk = await storageObjectExists('qr-media', archivePath);
+          if (archiveOk) {
+            const buf = await downloadToBuffer('qr-media', archivePath);
+            await uploadBuffer('qr-media', readyPath, buf, contentTypeForPath(readyPath), true);
+            entry.healed = 'from_archive';
+          } else {
+            const fromR2 = await restoreQrPathFromR2(readyPath);
+            if (fromR2.restored) entry.healed = 'from_r2';
+            else entry.healed = fromR2.error || fromR2.reason || 'heal_failed';
+          }
+        }
+
+        const afterReady = await storageObjectExists('qr-media', readyPath);
+        if (afterReady) {
+          const mir = await mirrorQrPathToR2(readyPath);
+          entry.readyMirror = mir.ok ? 'mirrored' : mir.reason || 'skipped';
+          const kind = row.kind === 'video' ? 'video' : 'audio';
+          const archivePath = `archive/${token}.${kind === 'video' ? 'mp4' : 'm4a'}`;
+          if (await storageObjectExists('qr-media', archivePath)) {
+            const am = await mirrorQrPathToR2(archivePath);
+            entry.archiveMirror = am.ok ? 'mirrored' : am.reason || 'skipped';
+          }
+          entry.status = entry.healed ? 'healed_and_mirrored' : 'mirrored';
+        } else {
+          entry.status = 'ready_still_missing';
+          // eslint-disable-next-line no-console
+          console.error('[backup-qr-sync] CRITICAL ready missing', token, readyPath);
+        }
+        results.push(entry);
+      } catch (e) {
+        results.push({ ...entry, status: 'error', error: String(e?.message || e) });
+      }
+    }
+
+    return res.json({
+      ok: true,
+      processed: results.length,
+      healed: results.filter((r) => r.healed === 'from_archive' || r.healed === 'from_r2').length,
+      critical: results.filter((r) => r.status === 'ready_still_missing').length,
+      results,
+    });
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[backup-qr-sync] failed', e);
+    return res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+/**
+ * Purge soft-delete trash/ plus vieux que N jours (défaut 90).
+ * Body: { days?, bucket? }
+ */
+app.post('/backup-purge-trash', async (req, res) => {
+  if (!requireSecret(req, res)) return;
+  const schema = z.object({
+    days: z.number().int().min(1).max(3650).optional(),
+    bucket: z.enum(['media', 'qr-media']).optional(),
+  });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid body' });
+  const days = parsed.data.days ?? 90;
+  const bucket = parsed.data.bucket ?? 'media';
+  try {
+    const r = await purgeTrashOlderThan(bucket, days);
+    return res.json({ ok: true, bucket, days, ...r });
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[backup-purge-trash] failed', e);
+    return res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
 app.get('/health', (_req, res) =>
-  res.json({ ok: true, softDelete: true, r2Configured: r2Configured(), memoryMetaBackup: true }),
+  res.json({
+    ok: true,
+    softDelete: true,
+    r2Configured: r2Configured(),
+    memoryMetaBackup: true,
+    healFromR2: true,
+    qrMirror: true,
+    trashPurge: true,
+  }),
 );
 
 app.listen(PORT, () => {

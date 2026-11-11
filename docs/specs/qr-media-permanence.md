@@ -11,6 +11,7 @@
 4. **`ready_path` immuable** une fois `ready` — chemin canonique `qr-media/ready/{token}.{m4a|mp4}`.
 5. **Copie archive** — à la première mise en `ready`, copie vers `qr-media/archive/{token}.{ext}` (`upsert: false`, jamais écrasée).
 6. **Guérison** — au scan `/m/{token}`, si la DB est incohérente mais que `ready/` ou `archive/` existe, restaurer `status=ready` (auto-heal).
+7. **Miroir R2** — `ready/` + `archive/` copiés vers Cloudflare R2 (`qr-media/…`) ; si `ready/` manque et archive absente, heal depuis R2 **sans changer le token ni `ready_path`** (media-worker `/backup-restore-qr-object`, cron `/backup-qr-sync`).
 
 ## Stockage Supabase
 

@@ -1,7 +1,7 @@
 /**
- * Cron santé Storage : détecte les fiches memories dont media_path n’existe plus.
+ * Cron santé Storage : détecte + heal silencieux depuis R2.
  * Auth : Bearer MEDIA_INTEGRITY_CRON_SECRET (ou MEDIA_WORKER_SECRET).
- * Délègue au media-worker `/media-integrity-audit` (+ optionnel `/backup-mirror-sync`).
+ * Délègue au media-worker : audit/heal media, mirror, meta, QR, purge trash.
  */
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -23,6 +23,28 @@ function cronSecret(): string {
   );
 }
 
+async function postWorker(
+  workerUrl: string,
+  workerSecret: string,
+  path: string,
+  body: Record<string, unknown>,
+): Promise<unknown> {
+  const resp = await fetch(`${workerUrl}${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Worker-Secret': workerSecret,
+    },
+    body: JSON.stringify(body),
+  });
+  const text = await resp.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { ok: resp.ok, status: resp.status, raw: text.slice(0, 500) };
+  }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
   if (req.method !== 'POST') return json(405, { error: 'Method not allowed' });
@@ -41,73 +63,60 @@ Deno.serve(async (req: Request) => {
   const body = await req.json().catch(() => ({}));
   const runMirror = body?.mirror === true;
   const runMeta = body?.meta === true || runMirror;
+  const runQr = body?.qr === true || runMirror;
+  const runPurge = body?.purgeTrash === true;
+  const healFromR2 = body?.heal !== false;
 
   try {
-    const auditResp = await fetch(`${workerUrl}/media-integrity-audit`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Worker-Secret': workerSecret,
-      },
-      body: JSON.stringify({
-        limit: typeof body?.limit === 'number' ? body.limit : 100,
-        offset: typeof body?.offset === 'number' ? body.offset : 0,
-        types: body?.types,
-      }),
-    });
-    const auditText = await auditResp.text();
-    let auditJson: Record<string, unknown> = {};
-    try {
-      auditJson = JSON.parse(auditText) as Record<string, unknown>;
-    } catch {
-      auditJson = { raw: auditText };
-    }
-
-    if (!auditResp.ok) {
-      console.error('[media-integrity-audit] worker', auditResp.status, auditText.slice(0, 500));
-      return json(auditResp.status, auditJson);
-    }
+    const auditJson = (await postWorker(workerUrl, workerSecret, '/media-integrity-audit', {
+      limit: typeof body?.limit === 'number' ? body.limit : 100,
+      offset: typeof body?.offset === 'number' ? body.offset : 0,
+      types: body?.types,
+      healFromR2,
+    })) as Record<string, unknown>;
 
     const missingCount = Number(auditJson.missingCount ?? 0);
-    if (missingCount > 0) {
+    const r2AlsoMissing = Number(auditJson.r2AlsoMissingCount ?? 0);
+    if (missingCount > 0 || r2AlsoMissing > 0) {
       console.error(
-        '[media-integrity-audit] CRITICAL missing objects',
-        missingCount,
+        '[media-integrity-audit] CRITICAL',
+        { missingCount, r2AlsoMissing, restored: auditJson.restoredCount },
         JSON.stringify(auditJson.missing ?? []).slice(0, 2000),
       );
     }
 
     let mirrorJson: unknown = null;
     if (runMirror) {
-      const mirrorResp = await fetch(`${workerUrl}/backup-mirror-sync`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Worker-Secret': workerSecret,
-        },
-        body: JSON.stringify({
-          limit: typeof body?.mirrorLimit === 'number' ? body.mirrorLimit : 40,
-          offset: typeof body?.mirrorOffset === 'number' ? body.mirrorOffset : 0,
-        }),
+      mirrorJson = await postWorker(workerUrl, workerSecret, '/backup-mirror-sync', {
+        limit: typeof body?.mirrorLimit === 'number' ? body.mirrorLimit : 40,
+        offset: typeof body?.mirrorOffset === 'number' ? body.mirrorOffset : 0,
       });
-      mirrorJson = await mirrorResp.json().catch(() => ({ ok: false }));
     }
 
     let metaJson: unknown = null;
     if (runMeta) {
-      const metaResp = await fetch(`${workerUrl}/backup-memories-meta-sync`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Worker-Secret': workerSecret,
-        },
-        body: JSON.stringify({
-          limit: typeof body?.metaLimit === 'number' ? body.metaLimit : 100,
-          offset: typeof body?.metaOffset === 'number' ? body.metaOffset : 0,
-          types: body?.metaTypes,
-        }),
+      metaJson = await postWorker(workerUrl, workerSecret, '/backup-memories-meta-sync', {
+        limit: typeof body?.metaLimit === 'number' ? body.metaLimit : 100,
+        offset: typeof body?.metaOffset === 'number' ? body.metaOffset : 0,
+        types: body?.metaTypes,
       });
-      metaJson = await metaResp.json().catch(() => ({ ok: false }));
+    }
+
+    let qrJson: unknown = null;
+    if (runQr) {
+      qrJson = await postWorker(workerUrl, workerSecret, '/backup-qr-sync', {
+        limit: typeof body?.qrLimit === 'number' ? body.qrLimit : 40,
+        offset: typeof body?.qrOffset === 'number' ? body.qrOffset : 0,
+        healFromR2,
+      });
+    }
+
+    let purgeJson: unknown = null;
+    if (runPurge) {
+      purgeJson = await postWorker(workerUrl, workerSecret, '/backup-purge-trash', {
+        days: typeof body?.trashDays === 'number' ? body.trashDays : 90,
+        bucket: 'media',
+      });
     }
 
     return json(200, {
@@ -115,7 +124,9 @@ Deno.serve(async (req: Request) => {
       audit: auditJson,
       mirror: mirrorJson,
       meta: metaJson,
-      critical: missingCount > 0,
+      qr: qrJson,
+      purgeTrash: purgeJson,
+      critical: missingCount > 0 || r2AlsoMissing > 0,
     });
   } catch (e) {
     console.error('[media-integrity-audit]', e);

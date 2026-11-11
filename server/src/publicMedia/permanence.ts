@@ -82,15 +82,23 @@ export async function tryHealReadyTokenFromStorage(
   if (!blob) {
     const archivePath = archivePathForToken(trimmed, kind);
     blob = await downloadStorageObject(supabase, QR_MEDIA_BUCKET, archivePath);
-    if (!blob) return false;
-    fromPath = archivePath;
-    const buf = Buffer.from(await blob.arrayBuffer());
-    const { error: restoreErr } = await supabase.storage.from(QR_MEDIA_BUCKET).upload(readyPath, buf, {
-      contentType: kind === 'video' ? 'video/mp4' : 'audio/mp4',
-      upsert: true,
-    });
-    if (restoreErr) {
-      console.warn('[qr-permanence] restore ready from archive', trimmed, restoreErr.message);
+    if (!blob) {
+      // Filet R2 (même ready_path) via media-worker — silent premium heal.
+      const healedFromR2 = await restoreQrReadyFromR2BestEffort(readyPath);
+      if (!healedFromR2) return false;
+      blob = await downloadStorageObject(supabase, QR_MEDIA_BUCKET, readyPath);
+      if (!blob) return false;
+      fromPath = `r2:${readyPath}`;
+    } else {
+      fromPath = archivePath;
+      const buf = Buffer.from(await blob.arrayBuffer());
+      const { error: restoreErr } = await supabase.storage.from(QR_MEDIA_BUCKET).upload(readyPath, buf, {
+        contentType: kind === 'video' ? 'video/mp4' : 'audio/mp4',
+        upsert: true,
+      });
+      if (restoreErr) {
+        console.warn('[qr-permanence] restore ready from archive', trimmed, restoreErr.message);
+      }
     }
   }
 
@@ -173,4 +181,59 @@ export async function markPublicMediaTokenReady(
     event: 'marked_ready',
     detail: { readyPath, archivePath: archivePathForToken(params.token, params.kind) },
   });
+
+  // Miroir R2 immédiat (silencieux) — filet cron si MEDIA_WORKER_* absent sur ce service.
+  void mirrorQrPathsToR2BestEffort([readyPath, archivePathForToken(params.token, params.kind)]);
+}
+
+function mediaWorkerConfig(): { url: string; secret: string } | null {
+  const url = (process.env.MEDIA_WORKER_URL ?? '').replace(/\/+$/, '');
+  const secret = (process.env.MEDIA_WORKER_SECRET ?? '').trim();
+  if (!url || !secret) return null;
+  return { url, secret };
+}
+
+/** Fire-and-forget : copie ready/archive vers R2 via media-worker. */
+async function mirrorQrPathsToR2BestEffort(paths: string[]): Promise<void> {
+  const cfg = mediaWorkerConfig();
+  if (!cfg) return;
+
+  for (const raw of paths) {
+    const path = String(raw || '').replace(/^\/+/, '').replace(/^qr-media\//, '');
+    if (!path) continue;
+    try {
+      await fetch(`${cfg.url}/backup-mirror-qr-object`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Worker-Secret': cfg.secret,
+        },
+        body: JSON.stringify({ path }),
+      });
+    } catch (e) {
+      console.warn('[qr-permanence] mirror r2', path, e instanceof Error ? e.message : e);
+    }
+  }
+}
+
+/** Restore `ready/{token}.ext` depuis R2 (même path) — sans changer le token. */
+async function restoreQrReadyFromR2BestEffort(readyPath: string): Promise<boolean> {
+  const cfg = mediaWorkerConfig();
+  if (!cfg) return false;
+  const path = readyPath.replace(/^\/+/, '').replace(/^qr-media\//, '');
+  try {
+    const resp = await fetch(`${cfg.url}/backup-restore-qr-object`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Worker-Secret': cfg.secret,
+      },
+      body: JSON.stringify({ path }),
+    });
+    const json = (await resp.json().catch(() => ({}))) as { restored?: boolean };
+    return resp.ok && json.restored === true;
+  } catch (e) {
+    console.warn('[qr-permanence] restore r2', path, e instanceof Error ? e.message : e);
+    return false;
+  }
 }
