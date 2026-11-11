@@ -93,6 +93,34 @@ export async function downloadCloudOriginalToSandbox(
   const mediaPath = (row.media_path ?? '').trim();
   if (mediaPath) {
     httpsUrl = await getSignedMediaDisplayUrl(mediaPath);
+    if (!httpsUrl) {
+      try {
+        const { captureMediaCloudIntegrityGap } = await import('@/lib/sentry');
+        captureMediaCloudIntegrityGap({
+          memoryId: row.id,
+          path: mediaPath,
+          stage: 'materialize',
+          detail: `type=${type}`,
+        });
+      } catch {
+        /* */
+      }
+      if (type === 'video' || type === 'voice' || type === 'photo') {
+        try {
+          const { repairMissingCloudOriginalFromLocal } = await import('@/services/media');
+          const repaired = await repairMissingCloudOriginalFromLocal(row.id);
+          if (repaired) {
+            const fresh = getLocalMemoryById(row.id) ?? row;
+            const newPath = (fresh.media_path ?? '').trim();
+            if (newPath) {
+              httpsUrl = await getSignedMediaDisplayUrl(newPath);
+            }
+          }
+        } catch (e) {
+          console.warn('[materialize] repairMissingCloudOriginalFromLocal', row.id, e);
+        }
+      }
+    }
   } else {
     for (const u of [row.media_url, row.edited_media_url]) {
       const t = (u ?? '').trim();

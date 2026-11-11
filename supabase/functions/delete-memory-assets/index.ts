@@ -18,9 +18,15 @@ Deno.serve(async (req: Request) => {
 
   try {
     const authHeader = req.headers.get('Authorization') ?? '';
-    const { memoryId } = await req.json().catch(() => ({}));
+    const body = await req.json().catch(() => ({}));
+    const memoryId = typeof body?.memoryId === 'string' ? body.memoryId : '';
+    const paths = Array.isArray(body?.paths)
+      ? body.paths.filter((p: unknown) => typeof p === 'string' && p.trim())
+      : [];
+    const userId = typeof body?.userId === 'string' ? body.userId.trim() : '';
+    const childId = typeof body?.childId === 'string' ? body.childId.trim() : '';
 
-    if (!memoryId || typeof memoryId !== 'string') return json(400, { error: 'memoryId requis' });
+    if (!memoryId) return json(400, { error: 'memoryId requis' });
     if (!authHeader.toLowerCase().startsWith('bearer ')) return json(401, { error: 'Unauthorized' });
 
     const supabase = createClient(
@@ -32,16 +38,24 @@ Deno.serve(async (req: Request) => {
     const { data: auth, error: authErr } = await supabase.auth.getUser();
     if (authErr || !auth?.user) return json(401, { error: 'Unauthorized' });
 
-    // Memory is already deleted in DB when this is called from the app, so we can't verify ownership via DB.
-    // We still require a valid authenticated session, and delegate deletion to the worker by memoryId.
     const workerUrl = (Deno.env.get('MEDIA_WORKER_URL') ?? '').replace(/\/+$/, '');
     const workerSecret = Deno.env.get('MEDIA_WORKER_SECRET') ?? '';
     if (!workerUrl || !workerSecret) return json(500, { error: 'Worker not configured' });
 
+    /**
+     * Chemins snapshot côté app (après DELETE row) — ne jamais demander au worker
+     * d’effacer le Storage en se basant uniquement sur une row encore vivante.
+     */
     const resp = await fetch(`${workerUrl}/delete-memory-assets`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Worker-Secret': workerSecret },
-      body: JSON.stringify({ memoryId, requestedBy: auth.user.id }),
+      body: JSON.stringify({
+        memoryId,
+        paths,
+        userId: userId || undefined,
+        childId: childId || undefined,
+        requestedBy: auth.user.id,
+      }),
     });
 
     const text = await resp.text();
@@ -54,4 +68,3 @@ Deno.serve(async (req: Request) => {
     return json(500, { error: String(e) });
   }
 });
-

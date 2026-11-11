@@ -57,3 +57,6 @@ verify_jwt = false
 
 [functions.send-welcome-email]
 verify_jwt = false
+
+[functions.media-integrity-audit]
+verify_jwt = false

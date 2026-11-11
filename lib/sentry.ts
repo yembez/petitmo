@@ -262,4 +262,33 @@ export function captureSentrySmokeTest(): string | null {
   });
 }
 
+/**
+ * Fiche mémoire cloud OK mais objet Storage absent (ou upload non vérifié).
+ * Critique promesse sauvegarde — issue Sentry dédiée.
+ */
+export function captureMediaCloudIntegrityGap(params: {
+  memoryId?: string;
+  path: string;
+  stage: 'post_upload_verify' | 'playback' | 'materialize' | 'audit';
+  detail?: string;
+}): string | null {
+  if (!isSentryEnabled()) return null;
+  const path = (params.path || '').trim().slice(0, 200);
+  const stage = params.stage;
+  const memoryId = (params.memoryId ?? '').trim().slice(0, 40);
+  const detail = (params.detail ?? '').trim().slice(0, 200);
+  const err = new Error(
+    `media.cloud.integrity: ${stage}${memoryId ? ` ${memoryId}` : ''} — ${path}${detail ? ` — ${detail}` : ''}`,
+  );
+  return Sentry.captureException(err, {
+    level: 'fatal',
+    tags: {
+      'app.errorScope': 'media.cloud.integrity',
+      'app.mediaIntegrityStage': stage,
+    },
+    fingerprint: ['media', 'cloud-integrity', stage, path.slice(0, 80)],
+    extra: { path, memoryId: memoryId || undefined, detail: detail || undefined, stage },
+  });
+}
+
 export { Sentry };

@@ -41,6 +41,10 @@ Les Edge Functions `process-memory` et `delete-memory-assets` utilisent ces secr
 | `SUPABASE_SERVICE_ROLE_KEY` | oui | **service_role** (jamais dans l’app) |
 | `MEDIA_WORKER_SECRET` | oui | ≥ 32 caractères aléatoires |
 | `TRUST_PROXY` | recommandé | `1` derrière le proxy Railway |
+| `R2_ACCOUNT_ID` | backup L3 | Miroir Cloudflare R2 (voir `docs/specs/media-backup-durability.md`) |
+| `R2_ACCESS_KEY_ID` | backup L3 | |
+| `R2_SECRET_ACCESS_KEY` | backup L3 | |
+| `R2_BUCKET` | backup L3 | ex. `petitmo-media-mirror` |
 
 Générer `MEDIA_WORKER_SECRET` :
 

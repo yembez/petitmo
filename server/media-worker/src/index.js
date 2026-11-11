@@ -69,6 +69,105 @@ async function uploadBuffer(bucket, objectPath, buf, contentType, upsert = true)
   if (error) throw error;
 }
 
+/** Soft-delete : déplace vers trash/YYYY-MM-DD/… (récupérable) au lieu d’un remove définitif. */
+async function softDeleteStoragePaths(bucket, paths) {
+  const day = new Date().toISOString().slice(0, 10);
+  const uniq = [...new Set((paths || []).map((p) => String(p || '').trim()).filter(Boolean))];
+  const moved = [];
+  const missing = [];
+  const errors = [];
+
+  for (const p of uniq) {
+    if (p.startsWith('trash/')) continue;
+    const dest = `trash/${day}/${p}`;
+    const { error } = await supabase.storage.from(bucket).move(p, dest);
+    if (!error) {
+      moved.push(dest);
+      continue;
+    }
+    const msg = String(error.message || error);
+    if (/not found|NoSuchKey|404/i.test(msg)) {
+      missing.push(p);
+      continue;
+    }
+    // Repli : si move échoue (path deep), download→upload trash puis remove source.
+    try {
+      const buf = await downloadToBuffer(bucket, p);
+      await uploadBuffer(bucket, dest, buf, 'application/octet-stream', true);
+      const { error: rmErr } = await supabase.storage.from(bucket).remove([p]);
+      if (rmErr) throw rmErr;
+      moved.push(dest);
+    } catch (e2) {
+      errors.push({ path: p, error: String(e2?.message || e2) });
+    }
+  }
+
+  return { moved, missing, errors };
+}
+
+function r2Configured() {
+  return !!(
+    process.env.R2_ACCOUNT_ID &&
+    process.env.R2_ACCESS_KEY_ID &&
+    process.env.R2_SECRET_ACCESS_KEY &&
+    process.env.R2_BUCKET
+  );
+}
+
+async function getR2Client() {
+  if (!r2Configured()) return null;
+  const { S3Client } = require('@aws-sdk/client-s3');
+  const accountId = process.env.R2_ACCOUNT_ID.trim();
+  return new S3Client({
+    region: 'auto',
+    endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+    credentials: {
+      accessKeyId: process.env.R2_ACCESS_KEY_ID.trim(),
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY.trim(),
+    },
+  });
+}
+
+async function mirrorPathToR2(objectPath) {
+  const client = await getR2Client();
+  if (!client) return { skipped: true, reason: 'r2_not_configured' };
+  const { PutObjectCommand, HeadObjectCommand } = require('@aws-sdk/client-s3');
+  const bucket = process.env.R2_BUCKET.trim();
+  const key = String(objectPath || '').replace(/^\/+/, '');
+  if (!key || key.startsWith('trash/')) return { skipped: true, reason: 'ignored_path' };
+
+  try {
+    await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+    return { skipped: true, reason: 'already_mirrored' };
+  } catch {
+    /* absent → copy */
+  }
+
+  const buf = await downloadToBuffer('media', key);
+  await client.send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: buf,
+      ContentType: 'application/octet-stream',
+    }),
+  );
+  return { ok: true, key, bytes: buf.length };
+}
+
+async function storageObjectExists(bucket, objectPath) {
+  const parts = String(objectPath || '').split('/');
+  const name = parts.pop();
+  const dir = parts.join('/');
+  if (!name) return false;
+  const { data, error } = await supabase.storage.from(bucket).list(dir || undefined, {
+    limit: 100,
+    search: name,
+  });
+  if (error) throw error;
+  return (data || []).some((o) => o?.name === name);
+}
+
 async function makeJpegVariant(buf, maxSide, quality) {
   return sharp(buf)
     .rotate() // respecte EXIF orientation
@@ -344,35 +443,51 @@ app.post('/process-memory', async (req, res) => {
 app.post('/delete-memory-assets', async (req, res) => {
   if (!requireSecret(req, res)) return;
 
-  const schema = z.object({ memoryId: z.string().min(1) });
+  const schema = z.object({
+    memoryId: z.string().min(1),
+    paths: z.array(z.string()).optional(),
+    userId: z.string().optional(),
+    childId: z.string().optional(),
+    requestedBy: z.string().optional(),
+  });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'Invalid body' });
 
-  const { memoryId } = parsed.data;
+  const { memoryId, paths: bodyPaths, userId: bodyUserId, childId: bodyChildId } = parsed.data;
 
   try {
-    // Memory row can be missing (already deleted). We still try to delete derived folder if we can.
+    const bucket = 'media';
+    const toRemove = [];
+
     const { data: m } = await supabase
       .from('memories')
       .select('id,user_id,child_id,media_path,extra_photo_paths,voice_cover_path,thumbnail_path')
       .eq('id', memoryId)
       .maybeSingle();
 
-    const bucket = 'media';
-    const toRemove = [];
-
+    /**
+     * Garde-fou critique : si la fiche mémoire existe encore, on refuse d’effacer
+     * le Storage (évite un wipe d’un souvenir vivant). Le client doit DELETE la row
+     * puis passer un snapshot `paths`.
+     */
     if (m) {
-      if (m.media_path) toRemove.push(m.media_path);
-      if (m.voice_cover_path) toRemove.push(m.voice_cover_path);
-      if (m.thumbnail_path) toRemove.push(m.thumbnail_path);
-      if (Array.isArray(m.extra_photo_paths)) {
-        for (const p of m.extra_photo_paths) {
-          if (typeof p === 'string' && p.trim()) toRemove.push(p.trim());
-        }
-      }
+      return res.status(409).json({
+        ok: false,
+        error: 'memory_row_still_exists',
+        hint: 'Delete the memories row first, then call with paths snapshot',
+      });
+    }
 
-      // Remove derived files by listing the derived folder
-      const prefix = `${m.user_id}/${m.child_id}/derived/${memoryId}`;
+    if (Array.isArray(bodyPaths)) {
+      for (const p of bodyPaths) {
+        if (typeof p === 'string' && p.trim()) toRemove.push(p.trim());
+      }
+    }
+
+    const uid = (bodyUserId || '').trim();
+    const cid = (bodyChildId || '').trim();
+    if (uid && cid && memoryId) {
+      const prefix = `${uid}/${cid}/derived/${memoryId}`;
       const { data: listData } = await supabase.storage.from(bucket).list(prefix, { limit: 200 });
       if (Array.isArray(listData)) {
         for (const obj of listData) {
@@ -381,13 +496,15 @@ app.post('/delete-memory-assets', async (req, res) => {
       }
     }
 
-    if (toRemove.length) {
-      const uniq = [...new Set(toRemove)];
-      const { error: rmErr } = await supabase.storage.from(bucket).remove(uniq);
-      if (rmErr) throw rmErr;
-    }
+    const uniq = [...new Set(toRemove)];
+    const soft = uniq.length ? await softDeleteStoragePaths(bucket, uniq) : { moved: [], missing: [], errors: [] };
 
-    return res.json({ ok: true, removed: toRemove.length });
+    return res.json({
+      ok: true,
+      mode: 'soft_delete',
+      requested: uniq.length,
+      ...soft,
+    });
   } catch (e) {
     // eslint-disable-next-line no-console
     console.error('[delete-memory-assets] failed', e);
@@ -395,7 +512,132 @@ app.post('/delete-memory-assets', async (req, res) => {
   }
 });
 
-app.get('/health', (_req, res) => res.json({ ok: true }));
+/**
+ * Audit : fiches memories avec media_path dont l’objet Storage manque.
+ * À appeler en cron (Edge media-integrity-audit).
+ */
+app.post('/media-integrity-audit', async (req, res) => {
+  if (!requireSecret(req, res)) return;
+  const schema = z.object({
+    limit: z.number().int().min(1).max(500).optional(),
+    offset: z.number().int().min(0).optional(),
+    types: z.array(z.enum(['video', 'voice', 'photo'])).optional(),
+  });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid body' });
+
+  const limit = parsed.data.limit ?? 100;
+  const offset = parsed.data.offset ?? 0;
+  const types = parsed.data.types ?? ['video', 'voice'];
+
+  try {
+    const { data: rows, error } = await supabase
+      .from('memories')
+      .select('id,type,user_id,media_path,created_at,location,file_size')
+      .in('type', types)
+      .not('media_path', 'is', null)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+    if (error) throw error;
+
+    const missing = [];
+    for (const row of rows || []) {
+      const p = (row.media_path || '').trim();
+      if (!p) continue;
+      const ok = await storageObjectExists('media', p);
+      if (!ok) {
+        missing.push({
+          id: row.id,
+          type: row.type,
+          media_path: p,
+          created_at: row.created_at,
+          location: row.location,
+          file_size: row.file_size,
+        });
+      }
+    }
+
+    if (missing.length) {
+      // eslint-disable-next-line no-console
+      console.error('[media-integrity-audit] MISSING', missing.length, missing.map((m) => m.id));
+    }
+
+    return res.json({
+      ok: true,
+      checked: (rows || []).length,
+      missingCount: missing.length,
+      missing,
+      r2Configured: r2Configured(),
+    });
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[media-integrity-audit] failed', e);
+    return res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+/**
+ * Miroir externe (Cloudflare R2) : copie les media_path absents du miroir.
+ * No-op si R2_* non configuré.
+ */
+app.post('/backup-mirror-sync', async (req, res) => {
+  if (!requireSecret(req, res)) return;
+  if (!r2Configured()) {
+    return res.status(200).json({ ok: true, skipped: true, reason: 'r2_not_configured' });
+  }
+
+  const schema = z.object({
+    limit: z.number().int().min(1).max(200).optional(),
+    offset: z.number().int().min(0).optional(),
+  });
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid body' });
+  const limit = parsed.data.limit ?? 40;
+  const offset = parsed.data.offset ?? 0;
+
+  try {
+    const { data: rows, error } = await supabase
+      .from('memories')
+      .select('id,media_path,type')
+      .not('media_path', 'is', null)
+      .in('type', ['video', 'voice', 'photo'])
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+    if (error) throw error;
+
+    const results = [];
+    for (const row of rows || []) {
+      const p = (row.media_path || '').trim();
+      if (!p) continue;
+      const existsPrimary = await storageObjectExists('media', p);
+      if (!existsPrimary) {
+        results.push({ id: row.id, path: p, status: 'primary_missing' });
+        continue;
+      }
+      try {
+        const r = await mirrorPathToR2(p);
+        results.push({ id: row.id, path: p, status: r.ok ? 'mirrored' : r.reason || 'skipped' });
+      } catch (e) {
+        results.push({ id: row.id, path: p, status: 'error', error: String(e?.message || e) });
+      }
+    }
+
+    return res.json({
+      ok: true,
+      processed: results.length,
+      mirrored: results.filter((r) => r.status === 'mirrored').length,
+      results,
+    });
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[backup-mirror-sync] failed', e);
+    return res.status(500).json({ error: String(e?.message || e) });
+  }
+});
+
+app.get('/health', (_req, res) =>
+  res.json({ ok: true, softDelete: true, r2Configured: r2Configured() }),
+);
 
 app.listen(PORT, () => {
   // eslint-disable-next-line no-console

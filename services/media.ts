@@ -204,6 +204,13 @@ async function uploadToMediaBucket(params: {
   contentType: string;
   upsert?: boolean;
 }): Promise<string> {
+  const expectedBytes =
+    typeof Blob !== 'undefined' && params.bytes instanceof Blob
+      ? params.bytes.size
+      : (params.bytes as Uint8Array).byteLength;
+  /** Tolérance légère (métadonnées) mais refuse un fantôme / quasi-vide. */
+  const minBytes = Math.max(1, Math.min(expectedBytes, Math.floor(expectedBytes * 0.9)));
+
   const { error } = await supabase.storage.from('media').upload(params.filePath, params.bytes, {
     contentType: params.contentType,
     upsert: params.upsert ?? false,
@@ -211,9 +218,42 @@ async function uploadToMediaBucket(params: {
   if (error) {
     const msg = error.message ?? '';
     if (/already exists/i.test(msg)) {
+      try {
+        const { assertMediaObjectExists } = await import('@/lib/mediaStorageIntegrity');
+        await assertMediaObjectExists(params.filePath, { minBytes });
+      } catch (verifyErr) {
+        try {
+          const { captureMediaCloudIntegrityGap } = await import('@/lib/sentry');
+          captureMediaCloudIntegrityGap({
+            path: params.filePath,
+            stage: 'post_upload_verify',
+            detail: verifyErr instanceof Error ? verifyErr.message : String(verifyErr),
+          });
+        } catch {
+          /* */
+        }
+        throw verifyErr;
+      }
       return getSignedUrlAfterMediaUpload(params.filePath);
     }
     throw error;
+  }
+
+  try {
+    const { assertMediaObjectExists } = await import('@/lib/mediaStorageIntegrity');
+    await assertMediaObjectExists(params.filePath, { minBytes });
+  } catch (verifyErr) {
+    try {
+      const { captureMediaCloudIntegrityGap } = await import('@/lib/sentry');
+      captureMediaCloudIntegrityGap({
+        path: params.filePath,
+        stage: 'post_upload_verify',
+        detail: verifyErr instanceof Error ? verifyErr.message : String(verifyErr),
+      });
+    } catch {
+      /* */
+    }
+    throw verifyErr;
   }
   return getSignedUrlAfterMediaUpload(params.filePath);
 }
@@ -783,12 +823,49 @@ export async function requestMissingMediaDerivatives(
   }
 }
 
-async function triggerDeleteMemoryAssets(memoryId: string): Promise<void> {
+async function triggerDeleteMemoryAssets(
+  memoryId: string,
+  opts: {
+    paths: string[];
+    userId?: string | null;
+    childId?: string | null;
+  },
+): Promise<void> {
   try {
-    await supabase.functions.invoke('delete-memory-assets', { body: { memoryId } });
+    const uniq = [...new Set(opts.paths.map(p => p.trim()).filter(Boolean))];
+    await supabase.functions.invoke('delete-memory-assets', {
+      body: {
+        memoryId,
+        paths: uniq,
+        userId: (opts.userId ?? '').trim() || undefined,
+        childId: (opts.childId ?? '').trim() || undefined,
+      },
+    });
   } catch (e) {
     console.warn('[media] triggerDeleteMemoryAssets failed', e);
   }
+}
+
+function collectCloudStoragePathsFromMemoryRow(row: {
+  media_path?: string | null;
+  voice_cover_path?: string | null;
+  thumbnail_path?: string | null;
+  extra_photo_paths?: unknown;
+}): string[] {
+  const out: string[] = [];
+  const push = (p: string | null | undefined) => {
+    const t = (p ?? '').trim();
+    if (t) out.push(t);
+  };
+  push(row.media_path);
+  push(row.voice_cover_path);
+  push(row.thumbnail_path);
+  if (Array.isArray(row.extra_photo_paths)) {
+    for (const p of row.extra_photo_paths) {
+      if (typeof p === 'string') push(p);
+    }
+  }
+  return out;
 }
 
 function extensionFromUri(uri: string, fallback: string): string {
@@ -2790,13 +2867,139 @@ export async function deleteMemory(memoryId: string) {
       return true;
     }
 
+    /**
+     * Snapshot des chemins **avant** DELETE ligne : l’Edge/worker ne doit plus
+     * supprimer le Storage en se basant sur une row encore présente (risque d’effacer
+     * un souvenir vivant), ni après DELETE sans chemins (no-op → orphelins).
+     */
+    let pathSnapshot: string[] = [];
+    let snapUserId: string | undefined;
+    let snapChildId: string | undefined;
+    try {
+      const { data: cloudRow } = await supabase
+        .from('memories')
+        .select('id,user_id,child_id,media_path,voice_cover_path,thumbnail_path,extra_photo_paths')
+        .eq('id', id)
+        .maybeSingle();
+      if (cloudRow) {
+        pathSnapshot = collectCloudStoragePathsFromMemoryRow(cloudRow);
+        snapUserId = (cloudRow.user_id ?? '').trim() || undefined;
+        snapChildId = (cloudRow.child_id ?? '').trim() || undefined;
+      } else if (local) {
+        pathSnapshot = collectCloudStoragePathsFromMemoryRow({
+          media_path: local.media_path,
+          voice_cover_path: local.voice_cover_path,
+          thumbnail_path: local.thumbnail_path,
+          extra_photo_paths: local.extra_photo_paths,
+        });
+        snapUserId = (local.user_id ?? '').trim() || undefined;
+        snapChildId = (local.child_id ?? '').trim() || undefined;
+      }
+    } catch (e) {
+      console.warn('[media] deleteMemory path snapshot', id, e);
+    }
+
     const { error } = await supabase.from('memories').delete().eq('id', id);
 
     if (error) throw error;
-    void triggerDeleteMemoryAssets(id);
+    void triggerDeleteMemoryAssets(id, {
+      paths: pathSnapshot,
+      userId: snapUserId,
+      childId: snapChildId,
+    });
     return true;
   } catch (error) {
     console.error('Delete memory error:', error);
+    return false;
+  }
+}
+
+/**
+ * Si `media_path` pointe vers un objet Storage absent mais qu’un original local existe,
+ * re-upload + met à jour la fiche cloud. Retourne true si réparé.
+ */
+export async function repairMissingCloudOriginalFromLocal(memoryId: string): Promise<boolean> {
+  const id = memoryId.trim();
+  if (!id) return false;
+  if ((await getCachedUserMode()) === 'local') return false;
+
+  const row = getLocalMemoryById(id);
+  if (!row || row.type === 'text') return false;
+
+  const mediaPath = (row.media_path ?? '').trim();
+  if (mediaPath) {
+    try {
+      const { assertMediaObjectExists } = await import('@/lib/mediaStorageIntegrity');
+      await assertMediaObjectExists(mediaPath, { minBytes: 1 });
+      return false;
+    } catch {
+      /* objet absent → tenter repair */
+    }
+  }
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const email = (user?.email ?? '').trim().toLowerCase();
+  if (!user?.id || email.endsWith('@petitmo.local')) return false;
+
+  let localUri: string | null = null;
+  if (row.type === 'video') {
+    localUri = await pickFirstReadableLocalMediaUri(collectVideoCloudSyncUriCandidates(row));
+  } else if (row.type === 'photo') {
+    localUri = await pickFirstReadableLocalMediaUri(collectPhotoLocalUploadUriCandidates(row));
+  } else if (row.type === 'voice') {
+    localUri = await pickFirstReadableLocalMediaUri([
+      row.local_original_path,
+      row.local_media_path,
+      row.media_url,
+    ]);
+  }
+  if (!localUri || /^https?:\/\//i.test(localUri)) return false;
+
+  try {
+    const isPaid = (await getUserTier()) === 'paid';
+    const uploaded = await stratifiedUpload({
+      userId: user.id,
+      childId: row.child_id,
+      type: row.type,
+      uri: localUri,
+      isPaid,
+      durationSec: row.duration ?? undefined,
+    });
+
+    const patch: Record<string, unknown> = {
+      media_url: uploaded.media_url,
+      media_path: uploaded.media_path,
+      file_size: uploaded.file_size,
+      upload_status: uploaded.upload_status,
+      updated_at: new Date().toISOString(),
+    };
+    if (uploaded.thumbnail_url) patch.thumbnail_url = uploaded.thumbnail_url;
+    if (uploaded.thumb_url) patch.thumb_url = uploaded.thumb_url;
+    if (uploaded.print_url) patch.print_url = uploaded.print_url;
+    if (uploaded.display_url) patch.display_url = uploaded.display_url;
+
+    const { error } = await supabase.from('memories').update(patch).eq('id', id);
+    if (error) throw error;
+
+    const prev = getLocalMemoryById(id) ?? row;
+    upsertLocalMemory({
+      ...prev,
+      media_url: uploaded.media_url,
+      media_path: uploaded.media_path,
+      file_size: uploaded.file_size,
+      upload_status: uploaded.upload_status,
+      thumbnail_url: uploaded.thumbnail_url ?? prev.thumbnail_url,
+      thumb_url: uploaded.thumb_url ?? prev.thumb_url,
+      print_url: uploaded.print_url ?? prev.print_url,
+      display_url: uploaded.display_url ?? prev.display_url,
+      updated_at: new Date().toISOString(),
+    });
+    if (uploaded.media_path) void triggerProcessMemory(id);
+    return true;
+  } catch (e) {
+    console.warn('[media] repairMissingCloudOriginalFromLocal', id, e);
     return false;
   }
 }
