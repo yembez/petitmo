@@ -4,10 +4,11 @@ import { getCachedUserMode } from '@/lib/userMode';
 import { getLocalMemoryById, upsertLocalMemory } from '@/lib/localDb';
 import type { Memory } from '@/types/local';
 import {
-  awaitVideoPosterForBookMemory,
   ensureLocalPhotoDerivatives,
   persistOriginalToSandbox,
 } from '@/services/memoryLocalStore';
+import { ensureVideoFeedPosterForMemory } from '@/services/videoPosterLocal';
+import { isVideoDecoderBusy } from '@/lib/videoPlayerPool';
 import { healDeadLocalMediaPointersForMemory } from '@/services/memoryDisplayHeal';
 import {
   extractMediaBucketPath,
@@ -516,14 +517,20 @@ async function materializeVideoMemory(row: Memory): Promise<boolean> {
     memory = getLocalMemoryById(row.id) ?? memory;
   }
 
+  /**
+   * Poster fil léger seulement. Ne jamais générer le print livre 3200 px ici :
+   * après un multi-import vidéo foireux, ça gelait le JS / la tab bar au boot.
+   */
   if (!(await hasReadableVideoFeedPoster(memory))) {
-    const ok = await matLog('posterLocal', async () => {
-      const updated = await awaitVideoPosterForBookMemory(memory.id);
-      return !!updated;
-    });
-    if (ok) {
-      changed = true;
-      memory = getLocalMemoryById(row.id) ?? memory;
+    if (!isVideoDecoderBusy()) {
+      const ok = await matLog('posterLocal', async () => {
+        const updated = await ensureVideoFeedPosterForMemory(memory.id);
+        return !!(updated && (await hasReadableVideoFeedPoster(updated)));
+      });
+      if (ok) {
+        changed = true;
+        memory = getLocalMemoryById(row.id) ?? memory;
+      }
     }
   }
 

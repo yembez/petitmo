@@ -4,10 +4,9 @@ import {
   Text,
   StyleSheet,
   PanResponder,
-  Image,
   type LayoutChangeEvent,
-  type ImageSourcePropType,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { Scissors } from 'lucide-react-native';
 import { THEME } from '@/constants/theme';
 import { scale } from '@/utils/responsive';
@@ -44,20 +43,31 @@ function TrimHandleKnob({
   return (
     <View
       style={[
-        styles.knob,
+        styles.knobHit,
         {
-          width: knobR * 2,
-          height: knobR * 2,
-          borderRadius: knobR,
+          width: knobR * 2 + scale(18),
+          height: knobR * 2 + scale(18),
+          marginHorizontal: -scale(9),
         },
       ]}
       {...panHandlers}
       accessibilityRole="adjustable"
       accessibilityLabel={a11yLabel}
     >
-      <View style={styles.knobGrip} />
-      <View style={styles.knobGrip} />
-      <View style={styles.knobGrip} />
+      <View
+        style={[
+          styles.knob,
+          {
+            width: knobR * 2,
+            height: knobR * 2,
+            borderRadius: knobR,
+          },
+        ]}
+      >
+        <View style={styles.knobGrip} />
+        <View style={styles.knobGrip} />
+        <View style={styles.knobGrip} />
+      </View>
     </View>
   );
 }
@@ -67,7 +77,8 @@ export const VideoTrimEditor = memo(function VideoTrimEditor(props: {
   value: VideoTrimEditorValue;
   maxClipSec: number;
   onChange: (v: VideoTrimEditorValue) => void;
-  filmstripUris?: string[];
+  /** URI fichier ou SharedRef expo-video (`generateThumbnailsAsync`). */
+  filmstripUris?: Array<string | object | null | undefined>;
   title: string;
   subtitle: string;
   subscribeLabel?: string;
@@ -76,6 +87,8 @@ export const VideoTrimEditor = memo(function VideoTrimEditor(props: {
   handleEndA11y: string;
   handleRangeA11y: string;
   onDragActiveChange?: (active: boolean) => void;
+  /** Preview live (frame + temps) pendant le drag d’une poignée. */
+  onScrubPreview?: (sec: number | null, edge: 'start' | 'end' | null) => void;
 }) {
   const knobR = scale(15);
   const durationTotal = Math.max(0, props.durationSec);
@@ -88,11 +101,21 @@ export const VideoTrimEditor = memo(function VideoTrimEditor(props: {
   const dragActiveRef = useRef(false);
   const onDragActiveChangeRef = useRef(props.onDragActiveChange);
   onDragActiveChangeRef.current = props.onDragActiveChange;
+  const onScrubPreviewRef = useRef(props.onScrubPreview);
+  onScrubPreviewRef.current = props.onScrubPreview;
+  const [scrubEdge, setScrubEdge] = useState<'start' | 'end' | null>(null);
 
-  const setDragActive = useCallback((active: boolean) => {
-    if (dragActiveRef.current === active) return;
-    dragActiveRef.current = active;
-    onDragActiveChangeRef.current?.(active);
+  const setDragActive = useCallback((active: boolean, edge: 'start' | 'end' | null = null) => {
+    if (!active) {
+      dragActiveRef.current = false;
+      setScrubEdge(null);
+      onDragActiveChangeRef.current?.(false);
+      onScrubPreviewRef.current?.(null, null);
+      return;
+    }
+    dragActiveRef.current = true;
+    setScrubEdge(edge);
+    onDragActiveChangeRef.current?.(true);
   }, []);
 
   useEffect(() => {
@@ -185,47 +208,61 @@ export const VideoTrimEditor = memo(function VideoTrimEditor(props: {
   const setDragActiveRef = useRef(setDragActive);
   setDragActiveRef.current = setDragActive;
 
-  const rangeDragRef = useRef<{ initialStart: number; initialEnd: number; anchorSec: number } | null>(
-    null,
-  );
+  /** Drag relatif (dx) — plus stable aux extrémités que pageX absolu. */
+  const edgeDragRef = useRef<{
+    edge: 'start' | 'end';
+    initialStart: number;
+    initialEnd: number;
+    pageX0: number;
+  } | null>(null);
+  const rangeDragRef = useRef<{
+    initialStart: number;
+    initialEnd: number;
+    pageX0: number;
+  } | null>(null);
 
   const makeHandleResponder = (edge: 'start' | 'end') => {
     return PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onStartShouldSetPanResponderCapture: () => true,
-      onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 2 || Math.abs(g.dy) > 2,
-      onMoveShouldSetPanResponderCapture: (_e, g) => Math.abs(g.dx) > Math.abs(g.dy),
+      onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 1 || Math.abs(g.dy) > 1,
+      onMoveShouldSetPanResponderCapture: (_e, g) => Math.abs(g.dx) >= Math.abs(g.dy),
       onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: evt => {
-        setDragActiveRef.current(true);
-        const pageX = evt.nativeEvent.pageX;
-        const apply = () => {
-          syncTrackFromWindowRef.current();
-          const sec = pageXToSecRef.current(pageX);
-          const m = metricsRef.current;
-          if (sec != null && m.trackW > 0) {
-            if (edge === 'start') {
-              onChangeRef.current(clampRef.current(sec, m.endSec));
-            } else {
-              onChangeRef.current(clampRef.current(m.startSec, sec));
-            }
-          }
+        const m = metricsRef.current;
+        edgeDragRef.current = {
+          edge,
+          initialStart: m.startSec,
+          initialEnd: m.endSec,
+          pageX0: evt.nativeEvent.pageX,
         };
-        apply();
-        requestAnimationFrame(apply);
+        setDragActiveRef.current(true, edge);
+        const previewSec = edge === 'start' ? m.startSec : m.endSec;
+        onScrubPreviewRef.current?.(previewSec, edge);
       },
       onPanResponderMove: evt => {
+        const drag = edgeDragRef.current;
+        if (!drag || drag.edge !== edge) return;
         const m = metricsRef.current;
-        const nextSec = pageXToSecRef.current(evt.nativeEvent.pageX);
-        if (nextSec == null) return;
-        if (edge === 'start') {
-          onChangeRef.current(clampRef.current(nextSec, m.endSec));
-        } else {
-          onChangeRef.current(clampRef.current(m.startSec, nextSec));
-        }
+        const w = m.trackW > 0 ? m.trackW : trackWinRef.current.width;
+        const dur = durationTotalRef.current;
+        if (!(w > 0) || !(dur > 0)) return;
+        const dSec = ((evt.nativeEvent.pageX - drag.pageX0) / w) * dur;
+        const next =
+          edge === 'start'
+            ? clampRef.current(drag.initialStart + dSec, drag.initialEnd)
+            : clampRef.current(drag.initialStart, drag.initialEnd + dSec);
+        onChangeRef.current(next);
+        onScrubPreviewRef.current?.(edge === 'start' ? next.startSec : next.endSec, edge);
       },
-      onPanResponderRelease: () => setDragActiveRef.current(false),
-      onPanResponderTerminate: () => setDragActiveRef.current(false),
+      onPanResponderRelease: () => {
+        edgeDragRef.current = null;
+        setDragActiveRef.current(false);
+      },
+      onPanResponderTerminate: () => {
+        edgeDragRef.current = null;
+        setDragActiveRef.current(false);
+      },
     });
   };
 
@@ -244,35 +281,30 @@ export const VideoTrimEditor = memo(function VideoTrimEditor(props: {
     rangeResponderRef.current = PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onStartShouldSetPanResponderCapture: () => true,
-      onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 2 || Math.abs(g.dy) > 2,
-      onMoveShouldSetPanResponderCapture: (_e, g) => Math.abs(g.dx) > Math.abs(g.dy),
+      onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 1 || Math.abs(g.dy) > 1,
+      onMoveShouldSetPanResponderCapture: (_e, g) => Math.abs(g.dx) >= Math.abs(g.dy),
       onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: evt => {
-        setDragActiveRef.current(true);
-        const pageX = evt.nativeEvent.pageX;
-        const apply = () => {
-          syncTrackFromWindowRef.current();
-          const m = metricsRef.current;
-          const sec = pageXToSecRef.current(pageX);
-          rangeDragRef.current = {
-            initialStart: m.startSec,
-            initialEnd: m.endSec,
-            anchorSec: sec ?? m.startSec,
-          };
+        const m = metricsRef.current;
+        rangeDragRef.current = {
+          initialStart: m.startSec,
+          initialEnd: m.endSec,
+          pageX0: evt.nativeEvent.pageX,
         };
-        apply();
-        requestAnimationFrame(apply);
+        setDragActiveRef.current(true, 'start');
+        onScrubPreviewRef.current?.(m.startSec, 'start');
       },
       onPanResponderMove: evt => {
         const drag = rangeDragRef.current;
         if (!drag) return;
-        const sec = pageXToSecRef.current(evt.nativeEvent.pageX);
-        if (sec == null) return;
-        const len = drag.initialEnd - drag.initialStart;
-        const delta = sec - drag.anchorSec;
-        let newStart = drag.initialStart + delta;
-        let newEnd = newStart + len;
+        const m = metricsRef.current;
+        const w = m.trackW > 0 ? m.trackW : trackWinRef.current.width;
         const dur = durationTotalRef.current;
+        if (!(w > 0) || !(dur > 0)) return;
+        const len = drag.initialEnd - drag.initialStart;
+        const dSec = ((evt.nativeEvent.pageX - drag.pageX0) / w) * dur;
+        let newStart = drag.initialStart + dSec;
+        let newEnd = newStart + len;
         if (newStart < 0) {
           newStart = 0;
           newEnd = len;
@@ -281,7 +313,9 @@ export const VideoTrimEditor = memo(function VideoTrimEditor(props: {
           newEnd = dur;
           newStart = Math.max(0, dur - len);
         }
-        onChangeRef.current(clampRef.current(newStart, newEnd));
+        const next = clampRef.current(newStart, newEnd);
+        onChangeRef.current(next);
+        onScrubPreviewRef.current?.(next.startSec, 'start');
       },
       onPanResponderRelease: () => {
         rangeDragRef.current = null;
@@ -303,7 +337,7 @@ export const VideoTrimEditor = memo(function VideoTrimEditor(props: {
   const filmstrip = props.filmstripUris ?? [];
   const slots = useMemo(() => {
     const count = Math.max(FILMSTRIP_SLOTS, filmstrip.length || FILMSTRIP_SLOTS);
-    return Array.from({ length: count }, (_, i) => filmstrip[i] ?? '');
+    return Array.from({ length: count }, (_, i) => filmstrip[i] ?? null);
   }, [filmstrip]);
 
   return (
@@ -336,14 +370,19 @@ export const VideoTrimEditor = memo(function VideoTrimEditor(props: {
       <View ref={trackMeasureRef} style={styles.timelineBlock} onLayout={onLayoutTrack}>
         <View style={styles.filmstripShell}>
           <View style={styles.filmstripRow}>
-            {slots.map((uri, i) => {
+            {slots.map((frame, i) => {
               const tMid = ((i + 0.5) / slots.length) * durationTotal;
               const active = tMid >= normalized.startSec && tMid <= normalized.endSec;
-              const source: ImageSourcePropType | undefined = uri ? { uri } : undefined;
+              const source =
+                typeof frame === 'string' && frame.trim()
+                  ? { uri: frame.trim() }
+                  : frame && typeof frame === 'object'
+                    ? (frame as object)
+                    : null;
               return (
                 <View key={i} style={styles.filmstripCell}>
                   {source ? (
-                    <Image source={source} style={styles.filmstripThumb} resizeMode="cover" />
+                    <Image source={source as never} style={styles.filmstripThumb} contentFit="cover" />
                   ) : (
                     <View style={[styles.filmstripPlaceholder, active && styles.filmstripPlaceholderActive]} />
                   )}
@@ -376,6 +415,11 @@ export const VideoTrimEditor = memo(function VideoTrimEditor(props: {
         {trackW > 0 && durationTotal > 0 ? (
           <View style={styles.knobRow} pointerEvents="box-none">
             <View style={[styles.knobWrap, { left: startPx - knobR }]}>
+              {scrubEdge === 'start' ? (
+                <View style={styles.scrubBubble} pointerEvents="none">
+                  <Text style={styles.scrubBubbleText}>{fmt(normalized.startSec)}</Text>
+                </View>
+              ) : null}
               <TrimHandleKnob
                 knobR={knobR}
                 panHandlers={startResponderRef.current!.panHandlers}
@@ -383,6 +427,11 @@ export const VideoTrimEditor = memo(function VideoTrimEditor(props: {
               />
             </View>
             <View style={[styles.knobWrap, { left: endPx - knobR }]}>
+              {scrubEdge === 'end' ? (
+                <View style={styles.scrubBubble} pointerEvents="none">
+                  <Text style={styles.scrubBubbleText}>{fmt(normalized.endSec)}</Text>
+                </View>
+              ) : null}
               <TrimHandleKnob
                 knobR={knobR}
                 panHandlers={endResponderRef.current!.panHandlers}
@@ -509,11 +558,34 @@ const styles = StyleSheet.create({
     width: '100%',
     height: scale(36),
     marginTop: scale(8),
+    overflow: 'visible',
   },
   knobWrap: {
     position: 'absolute',
     top: 0,
     alignItems: 'center',
+    overflow: 'visible',
+  },
+  knobHit: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scrubBubble: {
+    position: 'absolute',
+    bottom: '100%',
+    marginBottom: scale(6),
+    paddingHorizontal: scale(8),
+    paddingVertical: scale(4),
+    borderRadius: scale(8),
+    backgroundColor: THEME.textPrimary,
+    minWidth: scale(44),
+    alignItems: 'center',
+  },
+  scrubBubbleText: {
+    color: '#FFFFFF',
+    fontSize: scale(12),
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
   },
   knob: {
     backgroundColor: THEME.accent,

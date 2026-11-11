@@ -121,6 +121,8 @@ export function initLocalDb(): void {
     add('print_px_h', 'INTEGER');
     add('sync_status', "TEXT DEFAULT 'synced'");
     add('voice_playback_start_sec', 'REAL');
+    add('video_playback_start_sec', 'REAL');
+    add('video_playback_end_sec', 'REAL');
     add('voice_wave_peaks', 'TEXT');
     add('voice_cover_path', 'TEXT');
     add('import_asset_id', 'TEXT');
@@ -451,6 +453,7 @@ function upsertLocalMemoryInner(memory: Memory, uploadStatus?: UploadStatus): vo
       media_url, media_path, thumb_url, display_url,
       print_url, poster_url, poster_print_url, thumbnail_url, thumbnail_path,
       voice_cover_url, voice_cover_path, voice_playback_start_sec, voice_wave_peaks,
+      video_playback_start_sec, video_playback_end_sec,
       edited_media_url, extra_photo_urls, extra_photo_paths, favorite_photo_urls,
       extra_thumb_urls, extra_display_urls,
       is_favorite, duration, file_size, location, captured_overlay_ink,
@@ -459,7 +462,7 @@ function upsertLocalMemoryInner(memory: Memory, uploadStatus?: UploadStatus): vo
       import_asset_id, import_source_fingerprint, public_media_token,
       archived_at, archive_reason
     ) VALUES (
-      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+      ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
     )`,
     [
       memory.id,
@@ -495,6 +498,14 @@ function upsertLocalMemoryInner(memory: Memory, uploadStatus?: UploadStatus): vo
         : Array.isArray(memory.voice_wave_peaks)
           ? JSON.stringify(memory.voice_wave_peaks)
           : null,
+      typeof memory.video_playback_start_sec === 'number' &&
+      Number.isFinite(memory.video_playback_start_sec)
+        ? memory.video_playback_start_sec
+        : null,
+      typeof memory.video_playback_end_sec === 'number' &&
+      Number.isFinite(memory.video_playback_end_sec)
+        ? memory.video_playback_end_sec
+        : null,
       memory.edited_media_url ?? null,
       JSON.stringify(memory.extra_photo_urls ?? []),
       JSON.stringify(memory.extra_photo_paths ?? []),
@@ -738,6 +749,14 @@ function deserializeMemory(row: Record<string, unknown>): Memory {
     voice_playback_start_sec:
       typeof row.voice_playback_start_sec === 'number' && Number.isFinite(row.voice_playback_start_sec)
         ? row.voice_playback_start_sec
+        : null,
+    video_playback_start_sec:
+      typeof row.video_playback_start_sec === 'number' && Number.isFinite(row.video_playback_start_sec)
+        ? row.video_playback_start_sec
+        : null,
+    video_playback_end_sec:
+      typeof row.video_playback_end_sec === 'number' && Number.isFinite(row.video_playback_end_sec)
+        ? row.video_playback_end_sec
         : null,
     voice_wave_peaks:
       typeof row.voice_wave_peaks === 'string' && row.voice_wave_peaks.trim()

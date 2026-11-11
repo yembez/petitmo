@@ -26,7 +26,7 @@ import { getOrSelectFirstChild } from '@/services/children';
 import { IMPORT_PHOTO_PICKER_OPTS } from '@/constants/importPicker';
 import { IMPORT_MULTI_PHOTO_ALBUM_ENABLED } from '@/constants/featureFlags';
 import { buildImportMetadataFromPickerAsset } from '@/utils/mediaExif';
-import { getUserTier } from '@/lib/userTier';
+import { getUserTier, resolveEffectiveUserTier } from '@/lib/userTier';
 import {
   checkMemoryLimit,
   checkVideoLimit,
@@ -182,7 +182,9 @@ export default function ImportMediaScreen() {
   const [videoTrimRequest, setVideoTrimRequest] = useState<{
     asset: ImagePicker.ImagePickerAsset;
     maxDurationSec: number;
-    resolve: (asset: ImagePicker.ImagePickerAsset | null) => void;
+    resolve: (
+      result: { asset: ImagePicker.ImagePickerAsset; originalUri: string } | null,
+    ) => void;
   } | null>(null);
   /** Trim FFmpeg hors modale (évite WatchdogTermination / Low memory). */
   const [videoTrimExporting, setVideoTrimExporting] = useState(false);
@@ -208,7 +210,7 @@ export default function ImportMediaScreen() {
   }, [router]);
 
   useEffect(() => {
-    void getUserTier().then(tier => {
+    void resolveEffectiveUserTier().then(tier => {
       isFreeTierRef.current = tier === 'free';
       setIsFreeTier(tier === 'free');
       /** Payant : pas de plafond. Gratuit : 1ʳᵉ sélection libre, puis message + trim système si > 20 s. */
@@ -221,7 +223,7 @@ export default function ImportMediaScreen() {
       if (!resumeTrimAfterPaywallRef.current) return;
       resumeTrimAfterPaywallRef.current = false;
       setTrimPaywallOpen(false);
-      void getUserTier().then(tier => {
+      void resolveEffectiveUserTier().then(tier => {
         const free = tier === 'free';
         isFreeTierRef.current = free;
         setIsFreeTier(free);
@@ -243,7 +245,8 @@ export default function ImportMediaScreen() {
       assets: ImagePicker.ImagePickerAsset[],
       kind: 'photo' | 'video',
       preview?: ImportStickerPreview | null,
-      photoBatchLayout: 'album' | 'separate' = 'separate'
+      photoBatchLayout: 'album' | 'separate' = 'separate',
+      opts?: { videoOriginalUris?: (string | null | undefined)[] },
     ) => {
       try {
         setNavigatingToFeed(true);
@@ -252,23 +255,31 @@ export default function ImportMediaScreen() {
 
         /** Vidéo : fil immédiat (quotas / EXIF dans upload) — pas d’attente Importer. */
         if (kind === 'video') {
-          const pickedAsset = assets[0];
-          if (!pickedAsset) {
+          const videoItems = assets
+            .map((asset, i) => ({
+              asset,
+              originalUri: (opts?.videoOriginalUris?.[i] ?? asset.uri).trim() || asset.uri,
+            }))
+            .filter(item => !!item.asset?.uri?.trim());
+          if (videoItems.length === 0) {
             setNavigatingToFeed(false);
             return;
           }
-          const durationSec =
-            pickedAsset.duration != null
-              ? mediaDurationToSeconds(pickedAsset.duration)
-              : undefined;
+
+          /** Une seule vidéo à la fois (multi trop lourd pour le fil local-first). */
+          const picked = videoItems[0];
           startBackgroundUploadNavigateToFeed({
             kind: 'video',
-            previewUris: [pickedAsset.uri],
+            previewUris: [picked.asset.uri],
             capturedAtPreviewIso: cap,
             locationPreview: loc,
             upload: async () => {
               const childIdForVideo = await getOrSelectFirstChild();
               if (!childIdForVideo) throw new Error('NO_CHILD');
+              const durationSec =
+                picked.asset.duration != null
+                  ? mediaDurationToSeconds(picked.asset.duration)
+                  : undefined;
               const memLimit = await checkMemoryLimit(childIdForVideo, { force: true });
               if (!memLimit.canCreate) {
                 throw new Error(memoryLimitErrorCode(memLimit));
@@ -281,22 +292,27 @@ export default function ImportMediaScreen() {
                     : 'VIDEO_LIMIT_REACHED',
                 );
               }
-              const meta = await buildImportMetadataFromPickerAsset(pickedAsset, { isVideo: true });
+              const meta = await buildImportMetadataFromPickerAsset(picked.asset, {
+                isVideo: true,
+              });
               const locationOverride =
                 meta.locationLabel && meta.locationLabel.trim()
                   ? meta.locationLabel.trim()
                   : loc?.trim() || undefined;
               const m = await uploadMedia({
-                uri: pickedAsset.uri,
+                uri: picked.asset.uri,
+                originalUri: picked.originalUri,
                 type: 'video',
                 childId: childIdForVideo,
                 duration: durationSec,
                 capturedAtIso: meta.capturedAtIso ?? cap ?? undefined,
                 locationOverride,
-                mimeType: pickedAsset.mimeType ?? null,
-                fileName: pickedAsset.fileName ?? null,
-                importAssetId: pickedAsset.assetId ?? null,
-                importSourceFingerprint: await computeImportContentFingerprint(pickedAsset.uri),
+                mimeType: picked.asset.mimeType ?? null,
+                fileName: picked.asset.fileName ?? null,
+                importAssetId: picked.asset.assetId ?? null,
+                importSourceFingerprint: await computeImportContentFingerprint(
+                  picked.originalUri,
+                ),
               });
               return m ? [m] : null;
             },
@@ -534,14 +550,18 @@ export default function ImportMediaScreen() {
           return 'not_committed';
         }
 
-        if (videoCount > 1) {
-          Alert.alert('Sélection', 'Tu ne peux importer qu’une vidéo à la fois.');
-          return 'not_committed';
-        }
+        if (videoCount > 0) {
+          const videos = assets.filter(a => assetIsVideo(a));
+          if (videos.length === 0) return 'not_committed';
 
-        if (videoCount === 1) {
-          const v = assets.find(a => assetIsVideo(a));
-          if (!v) return 'not_committed';
+          /**
+           * Une vidéo à la fois (tous plans).
+           * Impossible d’annoter le PHPicker iOS → message court *après* sélection.
+           */
+          if (videos.length > 1) {
+            Alert.alert(t('videoTrim.title'), t('videoTrim.multiOnlyOne'));
+            return 'not_committed';
+          }
 
           /**
            * Gratuit : d’abord le plafond **nombre** de vidéos (et souvenirs),
@@ -580,55 +600,82 @@ export default function ImportMediaScreen() {
             }
           }
 
-          const durationSec = mediaDurationToSeconds(v.duration);
           const maxVideoSec = isFreeTierRef.current
             ? FREE_TIER_VIDEO_MAX_DURATION
             : PAID_TIER_VIDEO_MAX_DURATION;
 
-          /** +1 s de marge : métadonnées galerie souvent arrondies. */
-          if (durationSec > maxVideoSec + 1) {
-            if (!isVideoTrimNativeAvailable()) {
-              Alert.alert(
-                t('videoTrim.needsRebuildTitle'),
-                t('videoTrim.needsRebuildBody'),
-                [{ text: 'OK', onPress: () => router.replace('/(tabs)/fil') }],
-              );
-              return 'left';
-            }
+          const prepared: {
+            asset: ImagePicker.ImagePickerAsset;
+            originalUri: string;
+          }[] = [];
 
-            const trimmedAsset = await new Promise<ImagePicker.ImagePickerAsset | null>(resolve => {
-              setVideoTrimRequest({
-                asset: v,
-                maxDurationSec: maxVideoSec,
-                resolve,
+          for (const v of videos) {
+            const durationSec = mediaDurationToSeconds(v.duration);
+            /** +1 s de marge : métadonnées galerie souvent arrondies. */
+            if (durationSec > maxVideoSec + 1) {
+              if (!isVideoTrimNativeAvailable()) {
+                Alert.alert(
+                  t('videoTrim.needsRebuildTitle'),
+                  t('videoTrim.needsRebuildBody'),
+                  [{ text: 'OK', onPress: () => router.replace('/(tabs)/fil') }],
+                );
+                if (prepared.length === 0) return 'left';
+                break;
+              }
+
+              const trimmed = await new Promise<{
+                asset: ImagePicker.ImagePickerAsset;
+                originalUri: string;
+              } | null>(resolve => {
+                setVideoTrimRequest({
+                  asset: v,
+                  maxDurationSec: maxVideoSec,
+                  resolve,
+                });
               });
-            });
-            if (!trimmedAsset) {
-              router.replace('/(tabs)/fil');
-              return 'left';
+              if (!trimmed) {
+                if (prepared.length === 0) {
+                  router.replace('/(tabs)/fil');
+                  return 'left';
+                }
+                break;
+              }
+              const outSec = mediaDurationToSeconds(trimmed.asset.duration);
+              if (outSec > maxVideoSec + 1) {
+                Alert.alert(
+                  t('videoTrim.stillTooLongTitle'),
+                  t('videoTrim.stillTooLongBody', { max: maxVideoSec }),
+                );
+                if (prepared.length === 0) {
+                  router.replace('/(tabs)/fil');
+                  return 'left';
+                }
+                break;
+              }
+              prepared.push(trimmed);
+            } else {
+              prepared.push({ asset: v, originalUri: v.uri });
             }
-            const outSec = mediaDurationToSeconds(trimmedAsset.duration);
-            if (outSec > maxVideoSec + 1) {
-              Alert.alert(
-                t('videoTrim.stillTooLongTitle'),
-                t('videoTrim.stillTooLongBody', { max: maxVideoSec }),
-                [{ text: 'OK', onPress: () => router.replace('/(tabs)/fil') }],
-              );
-              return 'left';
-            }
-            const metaTrim = await buildImportMetadataFromPickerAsset(trimmedAsset, { isVideo: true });
-            commitSelection([trimmedAsset], 'video', {
-              capturedAtIso: metaTrim.capturedAtIso ?? null,
-              locationLabel: metaTrim.locationLabel ?? null,
-            });
-            return 'committed';
           }
 
-          const meta = await buildImportMetadataFromPickerAsset(v, { isVideo: true });
-          commitSelection([v], 'video', {
-            capturedAtIso: meta.capturedAtIso ?? null,
-            locationLabel: meta.locationLabel ?? null,
+          if (prepared.length === 0) {
+            router.replace('/(tabs)/fil');
+            return 'left';
+          }
+
+          const meta = await buildImportMetadataFromPickerAsset(prepared[0].asset, {
+            isVideo: true,
           });
+          commitSelection(
+            prepared.map(p => p.asset),
+            'video',
+            {
+              capturedAtIso: meta.capturedAtIso ?? null,
+              locationLabel: meta.locationLabel ?? null,
+            },
+            'separate',
+            { videoOriginalUris: prepared.map(p => p.originalUri) },
+          );
           return 'committed';
         }
 
@@ -807,19 +854,30 @@ export default function ImportMediaScreen() {
               endSec: range.endSec,
             });
             req.resolve({
-              ...req.asset,
-              uri: result.uri,
-              duration: result.durationSec * 1000,
-              type: 'video',
-              fileName: req.asset.fileName ?? `trim-${Date.now()}.mp4`,
-              mimeType: req.asset.mimeType ?? 'video/mp4',
+              originalUri: req.asset.uri,
+              asset: {
+                ...req.asset,
+                uri: result.uri,
+                duration: result.durationSec * 1000,
+                type: 'video',
+                fileName: req.asset.fileName ?? `trim-${Date.now()}.mp4`,
+                mimeType: req.asset.mimeType ?? 'video/mp4',
+              },
             });
           } catch (e) {
             if (e instanceof VideoTrimNativeMissingError) {
               Alert.alert(t('videoTrim.needsRebuildTitle'), t('videoTrim.needsRebuildBody'));
             } else {
-              console.warn('[import-media] video trim export', e);
-              Alert.alert(t('videoTrim.exportFailedTitle'), t('videoTrim.exportFailedBody'));
+              const code = e instanceof Error ? e.message : String(e);
+              console.warn('[import-media] video trim export', code, e);
+              if (
+                code === 'VIDEO_TRIM_INPUT_UNREADABLE' ||
+                code === 'VIDEO_TRIM_EMPTY_INPUT'
+              ) {
+                Alert.alert(t('videoTrim.originalMissingTitle'), t('videoTrim.originalMissingBody'));
+              } else {
+                Alert.alert(t('videoTrim.exportFailedTitle'), t('videoTrim.exportFailedBody'));
+              }
             }
             req.resolve(null);
           } finally {

@@ -154,8 +154,9 @@ export function PendingMediaUploadsProvider({ children }: { children: React.Reac
         /**
          * Autoplay dès le pending : le fichier trimé (ex. 20 s gratuit) est déjà local.
          * Attendre la fin du sandbox/upload laissait 10–30 s de cover seule.
+         * Multi-vidéo : pas d’autoplay pending — évite un player + remount pendant le lot.
          */
-        if (kind === 'video' && previewUris[0]?.trim()) {
+        if (kind === 'video' && previewUris[0]?.trim() && !(initialBatchTotal && initialBatchTotal > 1)) {
           InteractionManager.runAfterInteractions(() => {
             setTimeout(() => setFeedAutoplayActiveMemoryId(tempId), 280);
           });

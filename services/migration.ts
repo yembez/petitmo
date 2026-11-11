@@ -452,15 +452,19 @@ export async function ensureMemoryUploadedForCloud(
     return;
   }
 
+  if (
+    memory.type === 'video' &&
+    (memory.sync_status === 'local' || memory.sync_status === 'pending')
+  ) {
+    await migrateVideo(memory, user.id);
+    return;
+  }
+
   const isStrictLocal = memory.sync_status === 'local';
 
   if (isStrictLocal) {
     if (memory.type === 'voice') {
       await migrateVoice(memory, user.id);
-      return;
-    }
-    if (memory.type === 'video') {
-      await migrateVideo(memory, user.id);
       return;
     }
     return;

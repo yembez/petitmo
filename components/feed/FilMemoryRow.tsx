@@ -16,6 +16,7 @@ import {
   ImagePlus,
   MapPin,
   Maximize2,
+  Scissors,
 } from 'lucide-react-native';
 import ShareForwardIcon from '@/components/ShareForwardIcon';
 import {
@@ -153,6 +154,7 @@ type FilMemoryRowProps = {
   setMemories: Dispatch<SetStateAction<Memory[]>>;
   toggleFavorite: (id: string) => void | Promise<void>;
   handleEditMemory: (m: Memory) => void;
+  handleEditVideoTrim?: (m: Memory) => void | Promise<void>;
   handleEditLocation: (m: Memory) => void;
   handlePickVoiceCover: (m: Memory) => void | Promise<void>;
   handleDeleteMemory: (m: Memory) => void;
@@ -273,7 +275,11 @@ const BatchFeedSlotCard = memo(function BatchFeedSlotCard({
         <View style={styles.postMain}>
           <View style={styles.postBody}>
             <View style={{ position: 'relative' }}>
-              <View style={[styles.mediaCard, styles.photoPlaceholder]} />
+              {/**
+               * Fond sombre (pas `#ECECEF` clair) : un lot mal typé ne doit plus
+               * peindre des « écrans blancs » en bas de fil.
+               */}
+              <View style={[styles.mediaCard, styles.videoBody, styles.videoMediaCard]} />
               <FeedMediaPrepOverlay compact prominent blockTouches label={label} />
             </View>
           </View>
@@ -296,6 +302,7 @@ function FilMemoryRow({
   setMemories,
   toggleFavorite,
   handleEditMemory,
+  handleEditVideoTrim,
   handleEditLocation,
   handlePickVoiceCover,
   handleDeleteMemory,
@@ -591,6 +598,12 @@ function FilMemoryRow({
   /** Masque immédiat — pas d’attente d’effet. */
   const hideFeedVideoPoster =
     viewerHoldsVideo || handoffKeepPlayer || suppressPosterAfterImmersive;
+  /**
+   * iOS `VideoView` est transparent avant la 1ʳᵉ frame. Sans sous-couche noire,
+   * le `postMain` blanc transparaît → « écran blanc » (surtout sans poster multi-import).
+   */
+  const allowTransparentVideoChrome =
+    hideFeedVideoPoster && feedInlineVideoDisplayReady;
 
   useLayoutEffect(() => {
     if (!viewerHoldsVideo) return;
@@ -1032,10 +1045,12 @@ function FilMemoryRow({
                           StyleSheet.absoluteFillObject,
                           {
                             /**
-                             * Retour immersif : pas de sous-couche noire (flash).
-                             * Autoplay froid : noir OK sous le poster / la 1ʳᵉ frame.
+                             * Retour immersif (frame déjà prête) : pas de sous-couche noire.
+                             * Sinon noir obligatoire — VideoView iOS transparent = blanc du post.
                              */
-                            backgroundColor: hideFeedVideoPoster ? 'transparent' : '#000000',
+                            backgroundColor: allowTransparentVideoChrome
+                              ? 'transparent'
+                              : '#000000',
                             zIndex: 0,
                           },
                         ]}
@@ -1045,9 +1060,15 @@ function FilMemoryRow({
                         style={[
                           StyleSheet.absoluteFillObject,
                           {
-                            opacity: hideFeedVideoPoster ? feedInlineVideoReveal : videoPosterUri.trim() ? 1 : feedInlineVideoReveal,
+                            opacity: hideFeedVideoPoster
+                              ? feedInlineVideoReveal
+                              : videoPosterUri.trim()
+                                ? 1
+                                : feedInlineVideoReveal,
                             zIndex: 1,
-                            backgroundColor: hideFeedVideoPoster ? 'transparent' : '#000000',
+                            backgroundColor: allowTransparentVideoChrome
+                              ? 'transparent'
+                              : '#000000',
                           },
                         ]}
                         pointerEvents="none"
@@ -1320,6 +1341,30 @@ function FilMemoryRow({
                 hitSlop={10}
               >
                 <Pencil
+                  size={FEED_POST_ACTION_ICON_PX}
+                  color={ACTION_ICON_INK}
+                  strokeWidth={FEED_POST_ACTION_STROKE}
+                />
+              </MotionPressable>
+            ) : null}
+
+            {memory.type === 'video' &&
+            handleEditVideoTrim &&
+            !isOptimisticFeedPending ? (
+              <MotionPressable
+                style={styles.feedPencilDiscCta}
+                onPress={() => void handleEditVideoTrim(memory)}
+                haptic="medium"
+                pressScale={MOTION_PRESS_SCALE_ANNOTATE}
+                pressOpacityDip={MOTION_PRESS_OPACITY_DIP_ANNOTATE}
+                pressInMs={MOTION_PRESS_IN_ANNOTATE_MS}
+                pressFillFrom={THEME.feedPencilDiscCtaBackground}
+                pressFill={MOTION_PRESS_FILL_ANNOTATE}
+                accessibilityRole="button"
+                accessibilityLabel={t('videoTrim.editFromFeedA11y')}
+                hitSlop={10}
+              >
+                <Scissors
                   size={FEED_POST_ACTION_ICON_PX}
                   color={ACTION_ICON_INK}
                   strokeWidth={FEED_POST_ACTION_STROKE}

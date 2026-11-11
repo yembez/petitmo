@@ -124,6 +124,7 @@
     "addingToFeed": "Adding to feed…",
     "videoReady": "Loading video…",
     "addingPhotos": "Adding photos… ({{done}}/{{total}})",
+    "addingVideos": "Adding videos… ({{done}}/{{total}})",
     "addingPhoto": "Adding photo…"
   },
   "permissions": {
@@ -552,7 +553,12 @@
     "stillTooLongBody": "Keep a clip of at most {{max}} seconds.",
     "exportFailedTitle": "Couldn’t shorten",
     "exportFailedBody": "Try again in a moment.",
-    "exporting": "Shortening video…"
+    "exporting": "Shortening video…",
+    "editFromFeedA11y": "Edit video duration",
+    "originalMissingTitle": "Video unavailable",
+    "originalMissingBody": "Couldn’t find the file to trim again.",
+    "multiFreeOnlyOne": "One video at a time.",
+    "multiOnlyOne": "One video at a time."
   },
   "paywall": {
     "premiumLabel": "Subscription",

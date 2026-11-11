@@ -8,7 +8,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import { useVideoPlayer, type VideoPlayer } from 'expo-video';
+import { createVideoPlayer, type VideoPlayer } from 'expo-video';
 import { PetitmoVideoView } from '@/components/PetitmoVideoView';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X, Play, Pause } from 'lucide-react-native';
@@ -20,10 +20,11 @@ import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { normalizeVideoPlaybackUri } from '@/utils/videoMediaUri';
 import { VideoTrimEditor, type VideoTrimEditorValue } from '@/components/VideoTrimEditor';
 import {
+  ensureVideoFileUri,
   isVideoTrimNativeAvailable,
-  loadVideoTrimFilmstripUris,
   VIDEO_TRIM_FILMSTRIP_COUNT,
 } from '@/services/videoTrimNative';
+import * as VideoThumbnails from 'expo-video-thumbnails';
 
 /** Plage choisie — le parent ferme la modale puis lance le trim natif (moins de RAM). */
 export type VideoTrimModalConfirmResult = {
@@ -34,18 +35,47 @@ export type VideoTrimModalConfirmResult = {
 type Props = {
   visible: boolean;
   videoUri: string;
+  /** Indice seulement ; la durée réelle vient du lecteur (`sourceLoad`). */
   durationSec: number;
   maxDurationSec: number;
   isFreeTier: boolean;
+  /** Fenêtre déjà choisie (réouverture) — sinon 0 → min(durée, max). */
+  initialTrim?: { startSec: number; endSec: number } | null;
   onCancel: () => void;
   onConfirm: (result: VideoTrimModalConfirmResult) => void;
   onUpgrade?: () => void;
 };
 
-function initialTrimRange(durationSec: number, maxDurationSec: number): VideoTrimEditorValue {
+function clampTrimRange(
+  startSec: number,
+  endSec: number,
+  durationSec: number,
+  maxDurationSec: number,
+): VideoTrimEditorValue {
   const total = Math.max(1, durationSec);
-  const clip = Math.min(total, Math.max(1, maxDurationSec));
-  return { startSec: 0, endSec: clip };
+  const maxClip = Math.max(1, maxDurationSec);
+  let s = Math.max(0, Math.min(total, startSec));
+  let e = Math.max(0, Math.min(total, endSec));
+  if (e <= s) {
+    e = Math.min(total, s + Math.min(maxClip, total));
+  }
+  if (e - s > maxClip) {
+    e = s + maxClip;
+    if (e > total) {
+      e = total;
+      s = Math.max(0, e - maxClip);
+    }
+  }
+  if (e - s < 1) {
+    e = Math.min(total, s + 1);
+  }
+  return { startSec: s, endSec: e };
+}
+
+/** Première ouverture : toute la vidéo (bornée par le plafond plan). */
+function defaultTrimRange(durationSec: number, maxDurationSec: number): VideoTrimEditorValue {
+  const total = Math.max(1, durationSec);
+  return clampTrimRange(0, Math.min(total, maxDurationSec), total, maxDurationSec);
 }
 
 export function VideoTrimModal({
@@ -54,6 +84,7 @@ export function VideoTrimModal({
   durationSec,
   maxDurationSec,
   isFreeTier,
+  initialTrim = null,
   onCancel,
   onConfirm,
   onUpgrade,
@@ -61,23 +92,27 @@ export function VideoTrimModal({
   const { t } = useAppTranslation('common');
   const insets = useSafeAreaInsets();
   const playerRef = useRef<VideoPlayer | null>(null);
-  const trimRef = useRef<VideoTrimEditorValue>(initialTrimRange(durationSec, maxDurationSec));
+  const trimRef = useRef<VideoTrimEditorValue>(defaultTrimRange(1, maxDurationSec));
   const isPlayingRef = useRef(false);
   const exportingRef = useRef(false);
+  const dragActiveRef = useRef(false);
+  const initialTrimRef = useRef(initialTrim);
+  initialTrimRef.current = initialTrim;
+  const appliedDurationForTrimRef = useRef(0);
 
   const [playbackUri, setPlaybackUri] = useState('');
-  const [effectiveDurationSec, setEffectiveDurationSec] = useState(durationSec);
+  const [effectiveDurationSec, setEffectiveDurationSec] = useState(0);
   const [trim, setTrim] = useState<VideoTrimEditorValue>(() =>
-    initialTrimRange(durationSec, maxDurationSec),
+    defaultTrimRange(1, maxDurationSec),
   );
   const [videoReady, setVideoReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
-  const [filmstripUris, setFilmstripUris] = useState<string[]>([]);
-  const filmstripLoadedForRef = useRef('');
+  const [filmstripUris, setFilmstripUris] = useState<Array<string | object | null>>([]);
+  const filmstripLoadedKeyRef = useRef('');
 
   trimRef.current = trim;
-  const sessionUriRef = useRef('');
+  const sessionKeyRef = useRef('');
 
   useEffect(() => {
     if (!visible) {
@@ -88,21 +123,36 @@ export function VideoTrimModal({
       }
       isPlayingRef.current = false;
       setIsPlaying(false);
-      return;
-    }
-
-    const sameSession = sessionUriRef.current === videoUri && videoUri.trim().length > 0;
-    if (sameSession) {
-      setPlaybackUri(normalizeVideoPlaybackUri(videoUri));
+      exportingRef.current = false;
+      setIsConfirming(false);
+      /** Force un rechargement filmstrip + trim à chaque réouverture. */
+      sessionKeyRef.current = '';
+      filmstripLoadedKeyRef.current = '';
+      appliedDurationForTrimRef.current = 0;
+      setFilmstripUris([]);
       setVideoReady(false);
+      setPlaybackUri('');
       return;
     }
 
-    sessionUriRef.current = videoUri;
-    const initial = initialTrimRange(durationSec, maxDurationSec);
+    const sessionKey = `${videoUri}|${initialTrim?.startSec ?? 'x'}|${initialTrim?.endSec ?? 'x'}`;
+    if (sessionKeyRef.current === sessionKey) return;
+    sessionKeyRef.current = sessionKey;
+
+    const seed = durationSec > 0 ? durationSec : 0;
+    const preferred = initialTrimRef.current;
+    const initial =
+      seed > 0
+        ? preferred
+          ? clampTrimRange(preferred.startSec, preferred.endSec, seed, maxDurationSec)
+          : defaultTrimRange(seed, maxDurationSec)
+        : preferred && preferred.endSec > preferred.startSec
+          ? preferred
+          : { startSec: 0, endSec: 1 };
     trimRef.current = initial;
     setTrim(initial);
-    setEffectiveDurationSec(durationSec);
+    setEffectiveDurationSec(seed);
+    appliedDurationForTrimRef.current = seed > 0 ? seed : 0;
     setPlaybackUri(normalizeVideoPlaybackUri(videoUri));
     setVideoReady(false);
     setIsPlaying(false);
@@ -110,48 +160,95 @@ export function VideoTrimModal({
     exportingRef.current = false;
     setIsConfirming(false);
     setFilmstripUris([]);
-    filmstripLoadedForRef.current = '';
-  }, [visible, videoUri, durationSec, maxDurationSec]);
+    filmstripLoadedKeyRef.current = '';
+  }, [visible, videoUri, durationSec, maxDurationSec, initialTrim]);
 
   useEffect(() => {
     if (!visible || effectiveDurationSec <= 0) return;
-    setTrim(prev => {
-      if (prev.endSec > 0 && prev.endSec <= effectiveDurationSec) return prev;
-      const next = initialTrimRange(effectiveDurationSec, maxDurationSec);
-      trimRef.current = next;
-      return next;
-    });
+    if (appliedDurationForTrimRef.current === effectiveDurationSec) return;
+    appliedDurationForTrimRef.current = effectiveDurationSec;
+    const preferred = initialTrimRef.current;
+    const next = preferred
+      ? clampTrimRange(preferred.startSec, preferred.endSec, effectiveDurationSec, maxDurationSec)
+      : defaultTrimRange(effectiveDurationSec, maxDurationSec);
+    trimRef.current = next;
+    setTrim(next);
   }, [visible, effectiveDurationSec, maxDurationSec]);
 
   /**
-   * Vignettes une fois le lecteur prêt : on évite de décoder les images en même temps
-   * que le chargement de la preview. Extraction interrompue si la modale se ferme.
+   * Vignettes fichier via expo-video-thumbnails (fiable à chaque ouverture).
+   * Pause le lecteur pendant l’extraction (conflit AVFoundation sinon).
    */
   useEffect(() => {
-    if (!visible || !videoReady || effectiveDurationSec <= 0) return;
-    if (filmstripLoadedForRef.current === videoUri) return;
-    filmstripLoadedForRef.current = videoUri;
+    if (!visible || !videoReady || effectiveDurationSec <= 0 || !videoUri.trim()) return;
+    const key = `${videoUri}|${Math.round(effectiveDurationSec)}`;
+    if (filmstripLoadedKeyRef.current === key) return;
 
     let alive = true;
-    setFilmstripUris(Array.from({ length: VIDEO_TRIM_FILMSTRIP_COUNT }, () => ''));
-    void loadVideoTrimFilmstripUris(videoUri, effectiveDurationSec, {
-      shouldContinue: () => alive && !exportingRef.current,
-      onFrame: (index, uri) => {
-        if (!alive) return;
-        setFilmstripUris(prev => {
-          const next = [...prev];
-          next[index] = uri;
-          return next;
-        });
-      },
-    });
+    setFilmstripUris(Array.from({ length: VIDEO_TRIM_FILMSTRIP_COUNT }, () => null));
+
+    const timer = setTimeout(() => {
+      void (async () => {
+        const input = ensureVideoFileUri(videoUri);
+        if (!alive || !input) return;
+        try {
+          playerRef.current?.pause();
+        } catch {
+          /* ignore */
+        }
+        const slots: Array<string | null> = Array.from(
+          { length: VIDEO_TRIM_FILMSTRIP_COUNT },
+          () => null,
+        );
+        let gotAny = false;
+        for (let i = 0; i < VIDEO_TRIM_FILMSTRIP_COUNT; i += 1) {
+          if (!alive || exportingRef.current) break;
+          const timeMs = Math.round(
+            ((i + 0.5) / VIDEO_TRIM_FILMSTRIP_COUNT) * effectiveDurationSec * 1000,
+          );
+          try {
+            const { uri } = await VideoThumbnails.getThumbnailAsync(input, {
+              time: Math.max(0, timeMs),
+              quality: 0.45,
+            });
+            const frame = uri?.trim() ? ensureVideoFileUri(uri.trim()) : '';
+            if (frame) {
+              slots[i] = frame;
+              gotAny = true;
+              if (!alive) break;
+              setFilmstripUris(prev => {
+                const next = [...prev];
+                next[i] = frame;
+                return next;
+              });
+            }
+          } catch {
+            /* case vide */
+          }
+        }
+        if (alive && gotAny) {
+          filmstripLoadedKeyRef.current = key;
+        } else if (alive) {
+          /** Échec : laisser réessayer à la prochaine ouverture. */
+          filmstripLoadedKeyRef.current = '';
+        }
+        try {
+          if (playerRef.current) {
+            playerRef.current.currentTime = trimRef.current.startSec;
+          }
+        } catch {
+          /* ignore */
+        }
+      })();
+    }, 160);
 
     return () => {
       alive = false;
+      clearTimeout(timer);
     };
   }, [visible, videoReady, effectiveDurationSec, videoUri]);
 
-  const seekToTrimStart = useCallback(async () => {
+  const seekToTrimStart = useCallback(() => {
     try {
       if (playerRef.current) playerRef.current.currentTime = trimRef.current.startSec;
     } catch {
@@ -159,7 +256,7 @@ export function VideoTrimModal({
     }
   }, []);
 
-  const stopPlayback = useCallback(async () => {
+  const stopPlayback = useCallback(() => {
     isPlayingRef.current = false;
     setIsPlaying(false);
     try {
@@ -169,7 +266,7 @@ export function VideoTrimModal({
     }
   }, []);
 
-  const startPlayback = useCallback(async () => {
+  const startPlayback = useCallback(() => {
     if (!videoReady) return;
     const startSec = trimRef.current.startSec;
     const endSec = trimRef.current.endSec;
@@ -188,32 +285,70 @@ export function VideoTrimModal({
 
   const togglePlayback = useCallback(() => {
     if (isPlayingRef.current) {
-      void stopPlayback();
+      stopPlayback();
     } else {
-      void startPlayback();
+      startPlayback();
     }
   }, [startPlayback, stopPlayback]);
 
-  const handleTrimChange = useCallback(
-    (next: VideoTrimEditorValue) => {
-      trimRef.current = next;
-      setTrim(next);
+  const scrubRafRef = useRef<number | null>(null);
+  const pendingScrubSecRef = useRef<number | null>(null);
+
+  const handleTrimChange = useCallback((next: VideoTrimEditorValue) => {
+    trimRef.current = next;
+    setTrim(next);
+  }, []);
+
+  const handleScrubPreview = useCallback((sec: number | null, _edge: 'start' | 'end' | null) => {
+    if (sec == null) {
+      pendingScrubSecRef.current = null;
+      if (scrubRafRef.current != null) {
+        cancelAnimationFrame(scrubRafRef.current);
+        scrubRafRef.current = null;
+      }
+      return;
+    }
+    pendingScrubSecRef.current = sec;
+    if (scrubRafRef.current != null) return;
+    scrubRafRef.current = requestAnimationFrame(() => {
+      scrubRafRef.current = null;
+      const t = pendingScrubSecRef.current;
+      if (t == null || !playerRef.current) return;
       try {
-        const pos = playerRef.current?.currentTime ?? 0;
-        if (pos < next.startSec || pos > next.endSec) {
-          if (playerRef.current) playerRef.current.currentTime = next.startSec;
-        }
+        playerRef.current.currentTime = t;
       } catch {
         /* ignore */
       }
-    },
-    [],
-  );
+    });
+  }, []);
+
+  const handleDragActiveChange = useCallback((active: boolean) => {
+    dragActiveRef.current = active;
+    if (!active) {
+      try {
+        if (playerRef.current) playerRef.current.currentTime = trimRef.current.startSec;
+      } catch {
+        /* ignore */
+      }
+    } else {
+      stopPlayback();
+    }
+  }, [stopPlayback]);
+
+  const handleCancel = useCallback(() => {
+    exportingRef.current = false;
+    setIsConfirming(false);
+    stopPlayback();
+    onCancel();
+  }, [onCancel, stopPlayback]);
 
   const handleConfirm = useCallback(async () => {
     if (exportingRef.current) return;
     if (!isVideoTrimNativeAvailable()) {
       Alert.alert(t('videoTrim.needsRebuildTitle'), t('videoTrim.needsRebuildBody'));
+      return;
+    }
+    if (!videoReady || effectiveDurationSec <= 0) {
       return;
     }
     const range = trimRef.current;
@@ -229,7 +364,7 @@ export function VideoTrimModal({
 
     exportingRef.current = true;
     setIsConfirming(true);
-    await stopPlayback();
+    stopPlayback();
     try {
       playerRef.current?.pause();
     } catch {
@@ -238,28 +373,33 @@ export function VideoTrimModal({
     setPlaybackUri('');
     setVideoReady(false);
     setFilmstripUris([]);
-    // Remonter la plage : le parent démonte la modale puis lance FFmpeg.
     onConfirm({ startSec: range.startSec, endSec: range.endSec });
-  }, [maxDurationSec, onConfirm, stopPlayback, t]);
+  }, [effectiveDurationSec, maxDurationSec, onConfirm, stopPlayback, t, videoReady]);
+
+  const editorReady = videoReady && effectiveDurationSec > 0;
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onCancel}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="fullScreen"
+      onRequestClose={handleCancel}
+    >
       <View style={[styles.screen, { paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, scale(12)) }]}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>{t('videoTrim.title')}</Text>
           <TouchableOpacity
-            onPress={onCancel}
+            onPress={handleCancel}
             style={styles.closeBtn}
             accessibilityRole="button"
             accessibilityLabel={t('videoTrim.cancel')}
-            disabled={isConfirming}
           >
             <X size={scale(22)} color={THEME.textPrimary} strokeWidth={2.2} />
           </TouchableOpacity>
         </View>
 
         <View style={styles.previewWrap}>
-          {playbackUri ? (
+          {playbackUri && visible && !isConfirming ? (
             <TrimVideoPreview
               uri={playbackUri}
               playerRef={playerRef}
@@ -267,13 +407,14 @@ export function VideoTrimModal({
               getTrim={() => trimRef.current}
               onReady={() => {
                 setVideoReady(true);
-                void seekToTrimStart();
+                seekToTrimStart();
               }}
               onDurationSec={sec => {
+                if (!(sec > 0)) return;
                 setEffectiveDurationSec(prev => (prev > 0 ? Math.max(prev, sec) : sec));
               }}
               onPlayToEnd={() => {
-                void seekToTrimStart();
+                seekToTrimStart();
                 isPlayingRef.current = false;
                 setIsPlaying(false);
               }}
@@ -281,7 +422,7 @@ export function VideoTrimModal({
           ) : (
             <View style={styles.previewPlaceholder} />
           )}
-          {!videoReady ? (
+          {!editorReady ? (
             <View style={styles.previewLoading}>
               <ActivityIndicator color="#FFFFFF" />
               <Text style={styles.previewLoadingText}>{t('mediaPrep.videoReady')}</Text>
@@ -292,7 +433,7 @@ export function VideoTrimModal({
             onPress={togglePlayback}
             accessibilityRole="button"
             accessibilityLabel={isPlaying ? t('videoTrim.pauseA11y') : t('videoTrim.playA11y')}
-            disabled={!videoReady || isConfirming}
+            disabled={!editorReady || isConfirming}
           >
             {isPlaying ? (
               <Pause size={scale(26)} color="#FFFFFF" fill="#FFFFFF" />
@@ -302,15 +443,21 @@ export function VideoTrimModal({
           </TouchableOpacity>
         </View>
 
-        <View style={styles.editorBlock}>
+        <View style={styles.editorBlock} pointerEvents={editorReady && !isConfirming ? 'auto' : 'none'}>
           <VideoTrimEditor
-            durationSec={effectiveDurationSec}
+            durationSec={Math.max(1, effectiveDurationSec)}
             value={trim}
             maxClipSec={maxDurationSec}
             onChange={handleTrimChange}
+            onDragActiveChange={handleDragActiveChange}
+            onScrubPreview={handleScrubPreview}
             filmstripUris={filmstripUris}
             title={t('videoTrim.editorTitle')}
-            subtitle={t('videoTrim.subtitle')}
+            subtitle={
+              isFreeTier
+                ? t('videoTrim.subtitleFree', { max: maxDurationSec })
+                : t('videoTrim.subtitlePaid', { max: maxDurationSec })
+            }
             subscribeLabel={isFreeTier && onUpgrade ? t('videoTrim.subscribe') : undefined}
             onSubscribe={isFreeTier && onUpgrade && !isConfirming ? onUpgrade : undefined}
             handleStartA11y={t('videoTrim.handleStartA11y')}
@@ -321,16 +468,15 @@ export function VideoTrimModal({
 
         <View style={styles.actions}>
           <TouchableOpacity
-            style={[styles.secondaryBtn, isConfirming && styles.btnDisabled]}
-            onPress={onCancel}
-            disabled={isConfirming}
+            style={styles.secondaryBtn}
+            onPress={handleCancel}
           >
             <Text style={styles.secondaryBtnText}>{t('videoTrim.cancel')}</Text>
           </TouchableOpacity>
           <PetitmoPrimaryPressable
             style={styles.primaryBtn}
             onPress={() => void handleConfirm()}
-            disabled={isConfirming}
+            disabled={!editorReady || isConfirming}
           >
             {isConfirming ? (
               <ActivityIndicator color={PETITMO_CTA_SPINNER_COLOR} />
@@ -361,23 +507,73 @@ function TrimVideoPreview({
   onDurationSec: (sec: number) => void;
   onPlayToEnd: () => void;
 }) {
-  const player = useVideoPlayer(uri, instance => {
-    instance.loop = false;
-    instance.timeUpdateEventInterval = 0.05;
-  });
-  playerRef.current = player;
+  const [player, setPlayer] = useState<VideoPlayer | null>(null);
+  const readyOnceRef = useRef(false);
 
   useEffect(() => {
+    readyOnceRef.current = false;
+    const instance = createVideoPlayer(null);
+    instance.loop = false;
+    instance.timeUpdateEventInterval = 0.05;
+    playerRef.current = instance;
+    setPlayer(instance);
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        await instance.replaceAsync(uri);
+      } catch (e) {
+        console.warn('[VideoTrimModal] replaceAsync', e);
+        if (!cancelled) {
+          try {
+            instance.replace(uri, true);
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      playerRef.current = null;
+      try {
+        instance.pause();
+      } catch {
+        /* ignore */
+      }
+      try {
+        instance.release();
+      } catch {
+        /* ignore */
+      }
+      setPlayer(null);
+    };
+  }, [uri, playerRef]);
+
+  useEffect(() => {
+    if (!player) return;
     const loadSub = player.addListener('sourceLoad', ({ duration }) => {
       if (duration > 0) onDurationSec(Math.max(1, Math.round(duration)));
-      onReady();
-      player.currentTime = getTrim().startSec;
+      if (!readyOnceRef.current) {
+        readyOnceRef.current = true;
+        onReady();
+      }
+      try {
+        player.currentTime = getTrim().startSec;
+      } catch {
+        /* ignore */
+      }
     });
     const timeSub = player.addListener('timeUpdate', ({ currentTime }) => {
       const { startSec, endSec } = getTrim();
       if (currentTime >= endSec - 0.08) {
-        player.currentTime = startSec;
-        if (playingRef.current) player.play();
+        try {
+          player.currentTime = startSec;
+          if (playingRef.current) player.play();
+        } catch {
+          /* ignore */
+        }
       }
     });
     const endSub = player.addListener('playToEnd', () => {
@@ -389,6 +585,10 @@ function TrimVideoPreview({
       endSub.remove();
     };
   }, [player, getTrim, onDurationSec, onPlayToEnd, onReady, playingRef]);
+
+  if (!player) {
+    return <View style={styles.previewPlaceholder} />;
+  }
 
   return (
     <PetitmoVideoView
@@ -488,8 +688,5 @@ const styles = StyleSheet.create({
   primaryBtn: {
     flex: 1.4,
     paddingVertical: verticalScale(15),
-  },
-  btnDisabled: {
-    opacity: 0.5,
   },
 });

@@ -317,50 +317,54 @@ function ImmersiveVideoSeekBar({
   const thumbRadius = thumbSize / 2;
 
   return (
-    <View
+    <ImmersiveChromeReveal
       style={[styles.immersiveVideoScrubberHost, { bottom: bottomInset }]}
-      pointerEvents="box-none"
+      from="bottom"
+      withScale={false}
+      order={0}
     >
-      <View style={styles.immersiveVideoScrubberTimeRow} pointerEvents="none">
-        <Text style={styles.immersiveVideoScrubberTime}>{formatDuration(posSec)}</Text>
-        <Text style={styles.immersiveVideoScrubberTime}>{formatDuration(durSec)}</Text>
-      </View>
-      <View
-        style={styles.immersiveVideoScrubberTrackHit}
-        onLayout={e => {
-          trackWidthRef.current = e.nativeEvent.layout.width;
-        }}
-        accessibilityRole="adjustable"
-        accessibilityLabel="Position dans la vidéo"
-        accessibilityValue={{
-          min: 0,
-          max: durSec,
-          now: posSec,
-          text: `${formatDuration(posSec)} sur ${formatDuration(durSec)}`,
-        }}
-        {...pan.panHandlers}
-      >
-        <View style={styles.immersiveVideoScrubberTrack} pointerEvents="none">
-          <View
-            style={[styles.immersiveVideoScrubberFill, { width: `${progress * 100}%` }]}
-          />
+      <View pointerEvents="box-none">
+        <View style={styles.immersiveVideoScrubberTimeRow} pointerEvents="none">
+          <Text style={styles.immersiveVideoScrubberTime}>{formatDuration(posSec)}</Text>
+          <Text style={styles.immersiveVideoScrubberTime}>{formatDuration(durSec)}</Text>
         </View>
         <View
-          style={[
-            styles.immersiveVideoScrubberThumb,
-            {
-              width: thumbSize,
-              height: thumbSize,
-              borderRadius: thumbRadius,
-              left: `${progress * 100}%`,
-              marginLeft: -thumbRadius,
-              marginTop: -thumbRadius,
-            },
-          ]}
-          pointerEvents="none"
-        />
+          style={styles.immersiveVideoScrubberTrackHit}
+          onLayout={e => {
+            trackWidthRef.current = e.nativeEvent.layout.width;
+          }}
+          accessibilityRole="adjustable"
+          accessibilityLabel="Position dans la vidéo"
+          accessibilityValue={{
+            min: 0,
+            max: durSec,
+            now: posSec,
+            text: `${formatDuration(posSec)} sur ${formatDuration(durSec)}`,
+          }}
+          {...pan.panHandlers}
+        >
+          <View style={styles.immersiveVideoScrubberTrack} pointerEvents="none">
+            <View
+              style={[styles.immersiveVideoScrubberFill, { width: `${progress * 100}%` }]}
+            />
+          </View>
+          <View
+            style={[
+              styles.immersiveVideoScrubberThumb,
+              {
+                width: thumbSize,
+                height: thumbSize,
+                borderRadius: thumbRadius,
+                left: `${progress * 100}%`,
+                marginLeft: -thumbRadius,
+                marginTop: -thumbRadius,
+              },
+            ]}
+            pointerEvents="none"
+          />
+        </View>
       </View>
-    </View>
+    </ImmersiveChromeReveal>
   );
 }
 

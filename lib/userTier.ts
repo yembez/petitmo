@@ -30,6 +30,52 @@ export function peekUserTier(): UserTier {
   return tierMemory ?? 'free'
 }
 
+/**
+ * Tier effectif pour quotas / trim : paid si **n’importe quelle** source dit paid
+ * (cache, `app_metadata`, RevenueCat) — évite le plafond 20 s alors que l’abo est actif.
+ */
+export async function resolveEffectiveUserTier(): Promise<UserTier> {
+  let paid = peekUserTier() === 'paid'
+
+  if (!paid) {
+    try {
+      const cached = await getUserTier()
+      if (cached === 'paid') paid = true
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (!paid) {
+    try {
+      const { supabase } = await import('@/lib/supabase')
+      const { tierFromUserAppMetadata } = await import('@/lib/authAccount')
+      const { data } = await supabase.auth.getSession()
+      if (tierFromUserAppMetadata(data.session?.user) === 'paid') paid = true
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (!paid) {
+    try {
+      const { refreshRevenueCatCustomerInfo, hasPetitmoPlusEntitlement } = await import(
+        '@/lib/revenueCat'
+      )
+      const info = await refreshRevenueCatCustomerInfo()
+      if (info && hasPetitmoPlusEntitlement(info)) paid = true
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const tier: UserTier = paid ? 'paid' : 'free'
+  if (tierMemory !== tier) {
+    await setUserTier(tier)
+  }
+  return tier
+}
+
 /** TEMPORAIRE — tests : supprime le tier stocké (redevient `free` via getUserTier). Retirer l’appel en prod. */
 export async function resetUserTierForTesting(): Promise<void> {
   tierMemory = null

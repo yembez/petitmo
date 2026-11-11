@@ -124,6 +124,7 @@
     "addingToFeed": "Ajout au fil…",
     "videoReady": "Chargement de la vidéo…",
     "addingPhotos": "Ajout des photos… ({{done}}/{{total}})",
+    "addingVideos": "Ajout des vidéos… ({{done}}/{{total}})",
     "addingPhoto": "Ajout de la photo…"
   },
   "permissions": {
@@ -552,7 +553,12 @@
     "stillTooLongBody": "Garde un extrait d’au plus {{max}} secondes.",
     "exportFailedTitle": "Impossible de raccourcir",
     "exportFailedBody": "Réessaie dans un instant.",
-    "exporting": "Raccourcissement de la vidéo…"
+    "exporting": "Raccourcissement de la vidéo…",
+    "editFromFeedA11y": "Modifier la durée de la vidéo",
+    "originalMissingTitle": "Vidéo indisponible",
+    "originalMissingBody": "Impossible de retrouver le fichier pour le recouper.",
+    "multiFreeOnlyOne": "Une seule vidéo à la fois.",
+    "multiOnlyOne": "Une seule vidéo à la fois."
   },
   "paywall": {
     "premiumLabel": "Abonnement",

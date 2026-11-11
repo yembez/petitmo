@@ -2,9 +2,9 @@ import type { Memory } from '@/types/local';
 
 /**
  * Repli fil — `width / height` de la carte photo / vidéo.
- * Historique 4/5 (plus haut) ; 1 = carré (moins de hauteur à l’écran).
+ * 4/5 = portrait légèrement vertical (défaut produit) ; 1 = carré.
  */
-export const FEED_MEDIA_ASPECT_DEFAULT = 1;
+export const FEED_MEDIA_ASPECT_DEFAULT = 4 / 5;
 
 /**
  * Bornes pour éviter cartes absurdes (pano ultra-large / story ultra-haute)

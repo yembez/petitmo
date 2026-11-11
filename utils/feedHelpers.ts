@@ -209,6 +209,8 @@ export function buildOptimisticMemoryForPending(p: PendingUpload, child: Child |
     voice_cover_url: null,
     voice_cover_path: null,
     voice_playback_start_sec: null,
+    video_playback_start_sec: null,
+    video_playback_end_sec: null,
     voice_wave_peaks: null,
     edited_media_url: null,
     media_path: null,

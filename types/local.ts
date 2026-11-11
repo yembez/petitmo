@@ -31,6 +31,9 @@ export type LocalFields = {
   import_source_fingerprint?: string | null
   /** Token QR stable (`public_media_tokens`) — cache local SQLite, définitif par souvenir. */
   public_media_token?: string | null
+  /** Fenêtre de coupe sur le rush (`local_original_path`) — pour réouvrir l’éditeur. */
+  video_playback_start_sec?: number | null
+  video_playback_end_sec?: number | null
 }
 
 export type Memory = SupabaseMemory & LocalFields

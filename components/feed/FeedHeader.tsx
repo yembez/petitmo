@@ -52,42 +52,48 @@ function FeedHeaderAvatarStack({
         accessibilityRole="button"
         accessibilityLabel={`Modifier le profil de ${givenName}`}
       >
-        <ChildAvatar
-          key={`${child.id}-${child.updated_at ?? ''}-${child.local_photo_path ?? ''}`}
-          child={child}
-          size={HEADER_AVATAR_PX}
-        />
+        <View style={headerAvatarStackStyles.avatarBorder}>
+          <ChildAvatar
+            key={`${child.id}-${child.updated_at ?? ''}-${child.local_photo_path ?? ''}`}
+            child={child}
+            size={HEADER_AVATAR_PX}
+          />
+        </View>
       </TouchableOpacity>
     );
   }
 
+  /**
+   * Plusieurs enfants : un seul ovale (capsule) autour du groupe,
+   * pas un anneau corail par avatar.
+   */
   return (
-    <View style={headerAvatarStackStyles.row}>
-      {familyChildren.map((child, index) => {
-        const givenName = childDisplayGivenName(child.name) || child.name.trim() || 'Enfant';
-        return (
-          <TouchableOpacity
-            key={child.id}
-            style={[
-              headerAvatarStackStyles.slot,
-              index > 0 && { marginLeft: -AVATAR_STACK_OVERLAP },
-              { zIndex: familyChildren.length - index },
-            ]}
-            onPress={() => onPressChild(child)}
-            activeOpacity={0.85}
-            accessibilityRole="button"
-            accessibilityLabel={`Modifier le profil de ${givenName}`}
-          >
-            <View style={headerAvatarStackStyles.avatarBorder}>
+    <View style={headerAvatarStackStyles.groupRing}>
+      <View style={headerAvatarStackStyles.row}>
+        {familyChildren.map((child, index) => {
+          const givenName = childDisplayGivenName(child.name) || child.name.trim() || 'Enfant';
+          return (
+            <TouchableOpacity
+              key={child.id}
+              style={[
+                headerAvatarStackStyles.slot,
+                index > 0 && { marginLeft: -AVATAR_STACK_OVERLAP },
+                { zIndex: familyChildren.length - index },
+              ]}
+              onPress={() => onPressChild(child)}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel={`Modifier le profil de ${givenName}`}
+            >
               <ChildAvatar
                 key={`${child.id}-${child.updated_at ?? ''}-${child.local_photo_path ?? ''}`}
                 child={child}
                 size={HEADER_AVATAR_PX}
               />
-            </View>
-          </TouchableOpacity>
-        );
-      })}
+            </TouchableOpacity>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -175,19 +181,32 @@ export const FeedHeader = memo(function FeedHeader({
   );
 });
 
+const GROUP_RING_PAD = 2;
+const GROUP_RING_BORDER = 2;
+
 const headerAvatarStackStyles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
   },
+  /** Capsule autour de toute la pile (multi). */
+  groupRing: {
+    padding: GROUP_RING_PAD,
+    borderWidth: GROUP_RING_BORDER,
+    borderColor: THEME.brandPrimary,
+    borderRadius: (HEADER_AVATAR_PX + 2 * GROUP_RING_PAD) / 2 + GROUP_RING_BORDER,
+    overflow: 'hidden',
+  },
   slot: {
     backgroundColor: THEME.familyFlowScreenBg,
-    borderRadius: HEADER_AVATAR_PX / 2 + 2,
+    borderRadius: HEADER_AVATAR_PX / 2,
+    overflow: 'hidden',
   },
+  /** Solo : cercle corail autour de l’unique avatar. */
   avatarBorder: {
     borderRadius: HEADER_AVATAR_PX / 2 + 1,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-    borderColor: THEME.familyFlowScreenBg,
+    borderWidth: 2,
+    borderColor: THEME.brandPrimary,
     overflow: 'hidden',
   },
 });

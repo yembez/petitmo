@@ -1,3 +1,4 @@
+import { cacheDirectory, copyAsync, getInfoAsync } from 'expo-file-system/legacy';
 import { mediaDurationToSeconds } from '@/utils/mediaDuration';
 
 export type VideoTrimClipResult = {
@@ -21,37 +22,46 @@ export function ensureVideoFileUri(path: string): string {
   return t;
 }
 
+type TrimFn = (
+  url: string,
+  options: {
+    startTime: number;
+    endTime: number;
+    outputExt?: string;
+    enablePreciseTrimming?: boolean;
+  },
+) => Promise<{ outputPath?: string; duration?: number; startTime?: number; endTime?: number }>;
+
+type GetFrameAtFn = (
+  url: string,
+  options: {
+    time: number;
+    format?: string;
+    quality?: number;
+    maxWidth?: number;
+  },
+) => Promise<{ outputPath?: string }>;
+
 type VideoTrimModule = {
-  trim?: (
-    url: string,
-    options: {
-      startTime: number;
-      endTime: number;
-      outputExt?: string;
-      enablePreciseTrimming?: boolean;
-    },
-  ) => Promise<{ outputPath?: string; duration?: number; startTime?: number; endTime?: number }>;
-  getFrameAt?: (
-    url: string,
-    options: {
-      time: number;
-      format?: string;
-      quality?: number;
-      maxWidth?: number;
-    },
-  ) => Promise<{ outputPath?: string }>;
+  trim?: TrimFn;
+  getFrameAt?: GetFrameAtFn;
 };
 
 /**
- * Toujours les **fonctions nommées** du package, jamais son `default`.
- * `default` est la spec TurboModule brute : elle attend un objet d’options complet
- * (`saveToPhoto`, `type`, `speed`, `removeAudio`…) que seuls les wrappers JS remplissent.
- * Appeler le natif avec des champs manquants fait planter l’app à l’export.
+ * Toujours les **fonctions nommées** du package, jamais le TurboModule brut.
+ * Le wrapper JS remplit `saveToPhoto` / `type` / `speed`… — sinon l’export plante.
  */
 function loadVideoTrimModule(): VideoTrimModule | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    return require('react-native-video-trim') as VideoTrimModule;
+    const mod = require('react-native-video-trim') as VideoTrimModule & {
+      default?: VideoTrimModule;
+    };
+    const trim = typeof mod?.trim === 'function' ? mod.trim : mod?.default?.trim;
+    const getFrameAt =
+      typeof mod?.getFrameAt === 'function' ? mod.getFrameAt : mod?.default?.getFrameAt;
+    if (typeof trim !== 'function') return null;
+    return { trim, getFrameAt };
   } catch {
     return null;
   }
@@ -60,6 +70,73 @@ function loadVideoTrimModule(): VideoTrimModule | null {
 export function isVideoTrimNativeAvailable(): boolean {
   const mod = loadVideoTrimModule();
   return typeof mod?.trim === 'function';
+}
+
+/**
+ * FFmpeg iOS veut un vrai fichier local. `ph://` / chemins morts → copie cache.
+ */
+async function materializeLocalFileForTrim(rawUri: string): Promise<string> {
+  const input = ensureVideoFileUri(rawUri);
+  if (!input) throw new Error('VIDEO_TRIM_EMPTY_INPUT');
+
+  const probe = async (uri: string): Promise<boolean> => {
+    try {
+      const info = await getInfoAsync(uri);
+      return !!(info.exists && !info.isDirectory);
+    } catch {
+      return false;
+    }
+  };
+
+  if (
+    input.startsWith('file:') ||
+    (input.startsWith('/') && !input.startsWith('ph://'))
+  ) {
+    const asFile = input.startsWith('file:') ? input : `file://${input}`;
+    if (await probe(asFile)) return asFile;
+  }
+
+  if (!cacheDirectory) {
+    if (await probe(input)) return input;
+    throw new Error('VIDEO_TRIM_INPUT_UNREADABLE');
+  }
+
+  const dest = `${cacheDirectory}petitmo_trim_src_${Date.now()}.mp4`;
+  try {
+    await copyAsync({ from: input, to: dest });
+  } catch (e) {
+    console.warn('[videoTrimNative] copy for trim failed', e);
+    throw new Error('VIDEO_TRIM_INPUT_UNREADABLE');
+  }
+  if (!(await probe(dest))) throw new Error('VIDEO_TRIM_INPUT_UNREADABLE');
+  return dest.startsWith('file:') ? dest : `file://${dest}`;
+}
+
+function clipResultFromNative(
+  result: { outputPath?: string; duration?: number; startTime?: number; endTime?: number },
+  startMs: number,
+  endMs: number,
+  startSec: number,
+  endSec: number,
+): VideoTrimClipResult {
+  const out = ensureVideoFileUri((result.outputPath ?? '').trim());
+  if (!out) throw new Error('VIDEO_TRIM_EMPTY_OUTPUT');
+
+  const rangeMs =
+    typeof result.startTime === 'number' &&
+    typeof result.endTime === 'number' &&
+    result.endTime > result.startTime
+      ? result.endTime - result.startTime
+      : endMs - startMs;
+
+  let durationSec = mediaDurationToSeconds(rangeMs);
+  if (durationSec <= 0 && typeof result.duration === 'number' && result.duration > 0) {
+    durationSec = mediaDurationToSeconds(result.duration);
+  }
+  if (durationSec <= 0) {
+    durationSec = Math.max(1, Math.round(endSec - startSec));
+  }
+  return { uri: out, durationSec };
 }
 
 /**
@@ -77,37 +154,30 @@ export async function trimVideoClipToLocalFile(params: {
 
   const startMs = Math.max(0, Math.round(params.startSec * 1000));
   const endMs = Math.max(startMs + 1000, Math.round(params.endSec * 1000));
-  const input = ensureVideoFileUri(params.inputUri);
-  if (!input) throw new Error('VIDEO_TRIM_EMPTY_INPUT');
+  const input = await materializeLocalFileForTrim(params.inputUri);
 
-  // Precise = ré-encode FFmpeg (RAM élevée → WatchdogTermination sur iPhone).
-  // Stream-copy (false) : coupe aux keyframes, bien plus léger pour la sauvegarde fil.
-  const result = await mod.trim(input, {
-    startTime: startMs,
-    endTime: endMs,
-    outputExt: 'mp4',
-    enablePreciseTrimming: false,
-  });
+  const run = (precise: boolean) =>
+    mod.trim!(input, {
+      startTime: startMs,
+      endTime: endMs,
+      outputExt: 'mp4',
+      enablePreciseTrimming: precise,
+    });
 
-  const out = ensureVideoFileUri((result.outputPath ?? '').trim());
-  if (!out) throw new Error('VIDEO_TRIM_EMPTY_OUTPUT');
-
-  const rangeMs =
-    typeof result.startTime === 'number' &&
-    typeof result.endTime === 'number' &&
-    result.endTime > result.startTime
-      ? result.endTime - result.startTime
-      : endMs - startMs;
-
-  let durationSec = mediaDurationToSeconds(rangeMs);
-  if (durationSec <= 0 && typeof result.duration === 'number' && result.duration > 0) {
-    durationSec = mediaDurationToSeconds(result.duration);
+  // Stream-copy d’abord (léger) ; si le codec refuse, ré-encode une fois.
+  try {
+    const result = await run(false);
+    return clipResultFromNative(result, startMs, endMs, params.startSec, params.endSec);
+  } catch (e1) {
+    console.warn('[videoTrimNative] stream-copy failed, retry precise', e1);
+    try {
+      const result = await run(true);
+      return clipResultFromNative(result, startMs, endMs, params.startSec, params.endSec);
+    } catch (e2) {
+      console.warn('[videoTrimNative] precise trim failed', e2);
+      throw e2 instanceof Error ? e2 : new Error('VIDEO_TRIM_FAILED');
+    }
   }
-  if (durationSec <= 0) {
-    durationSec = Math.max(1, Math.round(params.endSec - params.startSec));
-  }
-
-  return { uri: out, durationSec };
 }
 
 /** Nombre de vignettes de la piste de coupe (aligné sur `FILMSTRIP_SLOTS` de l’éditeur). */

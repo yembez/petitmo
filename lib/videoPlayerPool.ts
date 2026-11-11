@@ -187,6 +187,50 @@ function evictIdlePlayers(): void {
   scheduleIdleTtlEvict();
 }
 
+/**
+ * Pause tous les lecteurs du pool + détruit les idle.
+ * À appeler avant un éditeur trim plein écran (sinon iOS gèle sur un 2ᵉ AVPlayer).
+ */
+export function pauseAllPooledVideoPlayersForOverlay(): void {
+  for (const [key, entry] of Array.from(pool.entries())) {
+    try {
+      entry.player.pause();
+    } catch {
+      /* ignore */
+    }
+    if (entry.refs === 0 && !keepAliveKeys.has(key)) {
+      destroyPoolEntry(key, entry);
+    }
+  }
+  clearIdleTtlTimer();
+}
+
+/**
+ * Après un re-trim : pointe le lecteur fil vers la **coupe** (sinon buffer de l’ancien extrait).
+ */
+export function replacePooledVideoUri(key: string, uri: string): void {
+  const k = key.trim();
+  const nextUri = uri.trim();
+  if (!k || !nextUri) return;
+  const entry = pool.get(k);
+  if (!entry) return;
+  entry.uri = nextUri;
+  try {
+    void entry.player.replaceAsync(nextUri);
+  } catch {
+    try {
+      entry.player.replace(nextUri, true);
+    } catch {
+      /* ignore */
+    }
+  }
+  try {
+    entry.player.currentTime = 0;
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Le lecteur du souvenir `key`, créé si besoin. Toujours relâcher après usage. */
 export function acquireVideoPlayer(key: string, uri: string): VideoPlayer {
   const existing = pool.get(key);

@@ -24,6 +24,8 @@ export function PetitmoVideoView({
       style={style}
       contentFit={contentFit}
       nativeControls={nativeControls}
+      /** iOS Live Text (icône scan + « Tout copier ») — inutile / parasite dans Petitmo. */
+      allowsVideoFrameAnalysis={false}
       surfaceType={Platform.OS === 'android' ? 'textureView' : undefined}
       onFirstFrameRender={onFirstFrameRender}
     />

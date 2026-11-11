@@ -313,7 +313,7 @@ function sandboxVideoFileCandidatesForMemoryId(memoryId: string): string[] {
   return [`${base}original.mp4`, `${base}original.mov`, `${base}original.m4v`, `${base}poster.jpg`, `${base}poster_print.jpg`];
 }
 
-/** Candidats vidéo pour sync cloud : sandbox + cache fil. */
+/** Candidats vidéo pour sync cloud : **coupe courante** d’abord (pas le rush). */
 export function collectVideoCloudSyncUriCandidates(
   memory: Pick<Memory, 'id' | 'edited_media_url' | 'media_url' | 'local_media_path' | 'local_original_path'>,
 ): string[] {
@@ -325,11 +325,11 @@ export function collectVideoCloudSyncUriCandidates(
     seen.add(t);
     out.push(t);
   };
-  for (const u of feedLocalVideoPathCandidates(memory.id)) add(u);
-  for (const u of sandboxVideoFileCandidatesForMemoryId(memory.id)) add(u);
-  add(memory.edited_media_url);
-  add(memory.local_original_path);
   add(memory.local_media_path);
+  add(memory.edited_media_url);
+  for (const u of feedLocalVideoPathCandidates(memory.id)) add(u);
+  add(memory.local_original_path);
+  for (const u of sandboxVideoFileCandidatesForMemoryId(memory.id)) add(u);
   add(memory.media_url);
   const legacyIds = new Set<string>();
   const scanSandboxId = (p: string | null | undefined) => {

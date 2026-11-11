@@ -29,6 +29,11 @@ function pendingPrepLabelFor(
   t: (key: string, opts?: Record<string, unknown>) => string,
 ): string {
   if (p.kind === 'video') {
+    const total = p.batchTotal ?? 0;
+    if (total > 1) {
+      const done = Math.min(Math.max(0, p.batchDone ?? 0), total);
+      return t('mediaPrep.addingVideos', { done, total });
+    }
     return t('mediaPrep.videoReady');
   }
   const total = p.batchTotal ?? 0;
@@ -39,8 +44,12 @@ function pendingPrepLabelFor(
   return t('mediaPrep.addingPhoto');
 }
 
-/** Emplacements encore à peindre : total − déjà faits − la carte `pending` (1ʳᵉ / en cours). */
+/**
+ * Emplacements encore à peindre : total − déjà faits − la carte `pending` (1ʳᵉ / en cours).
+ * **Vidéo multi : jamais de slots** — placeholders photo → écrans blancs + FlatList foireux.
+ */
 function batchSlotCount(p: PendingUpload): number {
+  if (p.kind === 'video') return 0;
   const total = p.batchTotal ?? 0;
   if (total <= 1 || p.status === 'error') return 0;
   const done = Math.min(Math.max(0, p.batchDone ?? 0), total);
@@ -60,6 +69,7 @@ export function useFilFeedList(
   uploadingVoiceCoverId: string | null,
   toggleFavorite: (id: string) => void | Promise<void>,
   handleEditMemory: (m: Memory) => void,
+  handleEditVideoTrim: (m: Memory) => void | Promise<void>,
   handleEditLocation: (m: Memory) => void,
   handlePickVoiceCover: (m: Memory) => void | Promise<void>,
   handleDeleteMemory: (m: Memory) => void,
@@ -147,6 +157,7 @@ export function useFilFeedList(
         setMemories={setMemories}
         toggleFavorite={toggleFavorite}
         handleEditMemory={handleEditMemory}
+        handleEditVideoTrim={handleEditVideoTrim}
         handleEditLocation={handleEditLocation}
         handlePickVoiceCover={handlePickVoiceCover}
         handleDeleteMemory={handleDeleteMemory}
@@ -167,6 +178,7 @@ export function useFilFeedList(
       setMemories,
       toggleFavorite,
       handleEditMemory,
+      handleEditVideoTrim,
       handleEditLocation,
       handlePickVoiceCover,
       handleDeleteMemory,

@@ -924,18 +924,28 @@ function CapturerScreen() {
                   <View style={styles.captureV9Overlay} pointerEvents="box-none">
                     <View style={styles.captureV9TitleRow} pointerEvents="none">
                       {/* 2 lignes stables : un prénom long ne doit jamais manger « aujourd’hui ». */}
-                      <Text
-                        style={[
-                          styles.captureV9Title,
-                          loadedFontStyle(captureTitleFont) ?? { fontWeight: '500' },
-                        ]}
-                        numberOfLines={1}
-                        adjustsFontSizeToFit
-                        minimumFontScale={0.78}
-                      >
-                        Quel souvenir pour {childGivenName || "l'enfant"}{' '}
-                        <Text style={styles.captureV9TitleHeart}>❤️</Text>
-                      </Text>
+                      <View style={styles.captureV9TitleLine}>
+                        <Text
+                          style={[
+                            styles.captureV9Title,
+                            styles.captureV9TitleFlex,
+                            loadedFontStyle(captureTitleFont) ?? { fontWeight: '500' },
+                          ]}
+                          numberOfLines={1}
+                          adjustsFontSizeToFit
+                          minimumFontScale={0.78}
+                        >
+                          Quel souvenir pour {childGivenName || "l'enfant"}{' '}
+                        </Text>
+                        {/** Aplat corail charte — pas d’emoji relief. */}
+                        <Heart
+                          size={CAPTURE_TITLE_HEART_SIZE}
+                          color={CAPTURE_TITLE_HEART}
+                          fill={CAPTURE_TITLE_HEART}
+                          strokeWidth={0}
+                          style={styles.captureV9TitleHeart}
+                        />
+                      </View>
                       <Text
                         style={[
                           styles.captureV9Title,
@@ -1695,8 +1705,17 @@ const styles = StyleSheet.create({
     textShadowRadius: 12,
     ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
   },
+  captureV9TitleLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'stretch',
+  },
+  captureV9TitleFlex: {
+    flexShrink: 1,
+  },
   captureV9TitleHeart: {
-    fontSize: scale(18),
+    marginLeft: scale(2),
+    marginBottom: scale(1),
   },
   capturePhotoTagline: {
     position: 'absolute',

@@ -134,6 +134,11 @@ interface UploadMediaParams {
    * Distinct des empreintes album (`album:…`).
    */
   importSourceFingerprint?: string | null;
+  /**
+   * Rush vidéo avant coupe (réédition trim). Si absent, `uri` est aussi l’original.
+   * `uri` = fichier de lecture / sync cloud (coupe courante).
+   */
+  originalUri?: string | null;
 }
 
 function throwIfImportDuplicate(
@@ -1720,6 +1725,7 @@ export async function uploadMedia({
   suppressFeedEmit = false,
   importAssetId,
   importSourceFingerprint,
+  originalUri,
 }: UploadMediaParams): Promise<MemoryRow | null> {
   console.log('[uploadMedia] called', { type, childId });
   try {
@@ -1878,23 +1884,29 @@ export async function uploadMedia({
       const insertedAt = new Date().toISOString();
       const createdAt = capturedAtIso?.trim() || insertedAt;
       const memoryId = newCloudSyncMemoryId();
+      const rushUri = (originalUri ?? uri).trim() || uri;
+      const playbackUri = uri.trim() || rushUri;
 
       const { localOriginalUri } = await persistOriginalToSandbox({
         memoryId,
         type: 'video',
-        sourceUri: uri,
+        sourceUri: rushUri,
       });
-      const src = (localOriginalUri ?? uri).trim();
+      const src = (localOriginalUri ?? rushUri).trim();
 
       let fileSize = 0;
       try {
-        fileSize = (await readBytes(src)).size;
+        fileSize = (await readBytes(playbackUri)).size;
       } catch {
-        fileSize = 0;
+        try {
+          fileSize = (await readBytes(src)).size;
+        } catch {
+          fileSize = 0;
+        }
       }
 
-      const feedPath = await persistFeedLocalVideo(memoryId, uri);
-      const mediaPathLocal = feedPath ?? src;
+      const feedPath = await persistFeedLocalVideo(memoryId, playbackUri);
+      const mediaPathLocal = feedPath ?? playbackUri;
 
       /**
        * Emit immédiat : le fil a déjà une frame preview (pending).
@@ -2011,11 +2023,12 @@ export async function uploadMedia({
         })();
       });
 
+      /** Cloud = coupe de lecture (`mediaPathLocal`), pas le rush (`src`). */
       void syncCloudVideoMemoryInBackground({
         memoryId,
         childId,
         userId: user.id,
-        localOriginalUri: src,
+        localOriginalUri: mediaPathLocal,
         isPaid: paid,
         durationSec: duration,
         mimeType,
