@@ -398,7 +398,15 @@
     },
     "toolbarWrite": "Write",
     "toolbarWriteA11y": "Write the page text",
-    "listNoPages": "No pages"
+    "listNoPages": "No pages",
+    "photoFit": {
+      "original": "Original",
+      "originalA11y": "Show photo in original format",
+      "fill": "Fill",
+      "fillA11y": "Fill the frame with the photo",
+      "rotateA11y": "Rotate photo",
+      "dpiLoading": "Calculating print quality…"
+    }
   },
   "bookOrder": {
     "title": "Order my book",

@@ -1,19 +1,16 @@
-import { defaultPhotoCrop, type PhotoCrop } from '@/src/book/photoCrop';
+import { defaultPhotoCrop, photoCropFit, type PhotoCrop, type PhotoCropFit } from '@/src/book/photoCrop';
 
 /**
- * Recadrage photo couverture au **ratio réel de la photo** (et non `contentFit="cover"`).
+ * Recadrage photo livre au **ratio réel de la photo**.
  *
- * Avec `cover`, la photo est rognée AVANT tout zoom/déplacement : les zones coupées
- * (haut/bas d'un portrait dans le bandeau paysage) sont perdues et inatteignables.
- * Ici on calcule la taille « cover » de l'image (elle déborde le cadre sur un axe), puis
- * on la déplace dans le cadre : en zoomant / glissant on peut atteindre **toute** la photo,
- * même si le cadrage couverture impose un crop centré au départ.
+ * - `cover` : taille « cover » (déborde sur un axe) — `{0,0,1}` = cadre rempli, centré.
+ * - `contain` : taille « contain » (tient dans le cadre) — `{0,0,1}` = photo entière
+ *   (bandes blanches possibles) ; zoom/pan pour recentrer.
  *
- * Convention de `PhotoCrop` (identique à l'existant) : `xPct`/`yPct` = décalage de pan en %
- * de la largeur/hauteur du cadre ; `scale` = zoom (≥ 1). `{0,0,1}` = cover centré.
+ * Convention : `xPct`/`yPct` = décalage de pan en % du cadre ; `scale` = zoom (≥ 1).
  */
 
-/** Taille « cover » de l'image dans le cadre, au ratio réel de la photo (déborde sur un axe). */
+/** Taille « cover » — remplit le cadre, déborde sur un axe. */
 export function bookPhotoCoverBaseSize(
   frameW: number,
   frameH: number,
@@ -32,7 +29,39 @@ export function bookPhotoCoverBaseSize(
   return { baseW: frameW, baseH: frameW / imgAspect };
 }
 
-/** Bornes de pan (px du cadre) pour que le cadre reste entièrement couvert (centré). */
+/** Taille « contain » — photo entière dans le cadre (letterbox / pillarbox). */
+export function bookPhotoContainBaseSize(
+  frameW: number,
+  frameH: number,
+  imgPxW: number,
+  imgPxH: number,
+): { baseW: number; baseH: number } {
+  'worklet';
+  if (!imgPxW || !imgPxH || !frameW || !frameH) {
+    return { baseW: frameW, baseH: frameH };
+  }
+  const imgAspect = imgPxW / imgPxH;
+  const frameAspect = frameW / frameH;
+  if (imgAspect > frameAspect) {
+    return { baseW: frameW, baseH: frameW / imgAspect };
+  }
+  return { baseW: frameH * imgAspect, baseH: frameH };
+}
+
+export function bookPhotoBaseSize(
+  frameW: number,
+  frameH: number,
+  imgPxW: number,
+  imgPxH: number,
+  fit: PhotoCropFit = 'cover',
+): { baseW: number; baseH: number } {
+  'worklet';
+  return fit === 'contain'
+    ? bookPhotoContainBaseSize(frameW, frameH, imgPxW, imgPxH)
+    : bookPhotoCoverBaseSize(frameW, frameH, imgPxW, imgPxH);
+}
+
+/** Bornes de pan (px du cadre) — cadre rempli (cover) ou image ≤ cadre (contain). */
 export function clampBookPhotoCropPan(
   frameW: number,
   frameH: number,
@@ -41,10 +70,11 @@ export function clampBookPhotoCropPan(
   scale: number,
   tx: number,
   ty: number,
+  fit: PhotoCropFit = 'cover',
 ): { tx: number; ty: number } {
   'worklet';
   const s = Math.max(1, scale);
-  const { baseW, baseH } = bookPhotoCoverBaseSize(frameW, frameH, imgPxW, imgPxH);
+  const { baseW, baseH } = bookPhotoBaseSize(frameW, frameH, imgPxW, imgPxH, fit);
   const maxTx = Math.max(0, (baseW * s - frameW) / 2);
   const maxTy = Math.max(0, (baseH * s - frameH) / 2);
   return {
@@ -53,7 +83,7 @@ export function clampBookPhotoCropPan(
   };
 }
 
-/** Position / taille de l'image dans le cadre (parité éditeur ↔ aperçu). */
+/** Position / taille de l'image dans le cadre (parité éditeur ↔ aperçu ↔ PDF). */
 export function bookPhotoCropImageRect(
   frameW: number,
   frameH: number,
@@ -62,13 +92,23 @@ export function bookPhotoCropImageRect(
   crop?: PhotoCrop,
 ): { width: number; height: number; left: number; top: number } {
   const ic = crop ?? defaultPhotoCrop();
+  const fit = photoCropFit(ic);
   const s = Math.max(1, ic.scale);
-  const { baseW, baseH } = bookPhotoCoverBaseSize(frameW, frameH, imgPxW, imgPxH);
+  const { baseW, baseH } = bookPhotoBaseSize(frameW, frameH, imgPxW, imgPxH, fit);
   const width = baseW * s;
   const height = baseH * s;
   const rawTx = (ic.xPct / 100) * frameW;
   const rawTy = (ic.yPct / 100) * frameH;
-  const { tx, ty } = clampBookPhotoCropPan(frameW, frameH, imgPxW, imgPxH, s, rawTx, rawTy);
+  const { tx, ty } = clampBookPhotoCropPan(
+    frameW,
+    frameH,
+    imgPxW,
+    imgPxH,
+    s,
+    rawTx,
+    rawTy,
+    fit,
+  );
   return {
     width,
     height,

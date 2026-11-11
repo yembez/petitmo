@@ -7,14 +7,25 @@
  * → `<img>` invisible → page avec date/filet seuls (photo-full FP, vidéo, etc.).
  *
  * Contrat unique : cadre + image en **mm absolus** (frameRefW/H = mm du bandeau réel).
- * - crop défaut / sans dims px → object-fit:cover dans le cadre mm
- * - crop custom + dims px → left/top/width/height en mm sur l’`<img>`
+ * - crop défaut cover / sans dims px → object-fit:cover dans le cadre mm
+ * - fit contain OU crop custom + dims px → left/top/width/height en mm sur l’`<img>`
  */
 
-export type PhotoCrop = { xPct: number; yPct: number; scale: number };
+export type PhotoCropFit = 'cover' | 'contain';
 
-export function defaultPhotoCrop(): PhotoCrop {
-  return { xPct: 0, yPct: 0, scale: 1 };
+export type PhotoCrop = {
+  xPct: number;
+  yPct: number;
+  scale: number;
+  fit?: PhotoCropFit;
+};
+
+export function defaultPhotoCrop(fit: PhotoCropFit = 'cover'): PhotoCrop {
+  return { xPct: 0, yPct: 0, scale: 1, ...(fit === 'contain' ? { fit: 'contain' } : {}) };
+}
+
+export function photoCropFit(crop?: PhotoCrop | null): PhotoCropFit {
+  return crop?.fit === 'contain' ? 'contain' : 'cover';
 }
 
 export function bookPhotoCoverBaseSize(
@@ -34,6 +45,35 @@ export function bookPhotoCoverBaseSize(
   return { baseW: frameW, baseH: frameW / imgAspect };
 }
 
+export function bookPhotoContainBaseSize(
+  frameW: number,
+  frameH: number,
+  imgPxW: number,
+  imgPxH: number,
+): { baseW: number; baseH: number } {
+  if (!imgPxW || !imgPxH || !frameW || !frameH) {
+    return { baseW: frameW, baseH: frameH };
+  }
+  const imgAspect = imgPxW / imgPxH;
+  const frameAspect = frameW / frameH;
+  if (imgAspect > frameAspect) {
+    return { baseW: frameW, baseH: frameW / imgAspect };
+  }
+  return { baseW: frameH * imgAspect, baseH: frameH };
+}
+
+export function bookPhotoBaseSize(
+  frameW: number,
+  frameH: number,
+  imgPxW: number,
+  imgPxH: number,
+  fit: PhotoCropFit = 'cover',
+): { baseW: number; baseH: number } {
+  return fit === 'contain'
+    ? bookPhotoContainBaseSize(frameW, frameH, imgPxW, imgPxH)
+    : bookPhotoCoverBaseSize(frameW, frameH, imgPxW, imgPxH);
+}
+
 export function clampBookPhotoCropPan(
   frameW: number,
   frameH: number,
@@ -42,9 +82,10 @@ export function clampBookPhotoCropPan(
   scale: number,
   tx: number,
   ty: number,
+  fit: PhotoCropFit = 'cover',
 ): { tx: number; ty: number } {
   const s = Math.max(1, scale);
-  const { baseW, baseH } = bookPhotoCoverBaseSize(frameW, frameH, imgPxW, imgPxH);
+  const { baseW, baseH } = bookPhotoBaseSize(frameW, frameH, imgPxW, imgPxH, fit);
   const maxTx = Math.max(0, (baseW * s - frameW) / 2);
   const maxTy = Math.max(0, (baseH * s - frameH) / 2);
   return {
@@ -61,13 +102,23 @@ export function bookPhotoCropImageRect(
   crop?: PhotoCrop,
 ): { width: number; height: number; left: number; top: number } {
   const ic = crop ?? defaultPhotoCrop();
+  const fit = photoCropFit(ic);
   const s = Math.max(1, ic.scale);
-  const { baseW, baseH } = bookPhotoCoverBaseSize(frameW, frameH, imgPxW, imgPxH);
+  const { baseW, baseH } = bookPhotoBaseSize(frameW, frameH, imgPxW, imgPxH, fit);
   const width = baseW * s;
   const height = baseH * s;
   const rawTx = (ic.xPct / 100) * frameW;
   const rawTy = (ic.yPct / 100) * frameH;
-  const { tx, ty } = clampBookPhotoCropPan(frameW, frameH, imgPxW, imgPxH, s, rawTx, rawTy);
+  const { tx, ty } = clampBookPhotoCropPan(
+    frameW,
+    frameH,
+    imgPxW,
+    imgPxH,
+    s,
+    rawTx,
+    rawTy,
+    fit,
+  );
   return {
     width,
     height,
@@ -76,9 +127,13 @@ export function bookPhotoCropImageRect(
   };
 }
 
-/** Crop identité (cover centré, pas de pan/zoom utilisateur). */
+/**
+ * Crop identité **cover** (cadre rempli, pas de pan/zoom).
+ * `fit: 'contain'` n’est jamais « défaut » : il faut le chemin rect mm explicite.
+ */
 export function isDefaultPhotoCrop(crop: PhotoCrop | undefined | null): boolean {
   if (!crop) return true;
+  if (photoCropFit(crop) === 'contain') return false;
   const s = typeof crop.scale === 'number' && Number.isFinite(crop.scale) ? crop.scale : 1;
   const x = typeof crop.xPct === 'number' && Number.isFinite(crop.xPct) ? crop.xPct : 0;
   const y = typeof crop.yPct === 'number' && Number.isFinite(crop.yPct) ? crop.yPct : 0;
@@ -119,6 +174,15 @@ const PDF_FIT_BLEED_STYLE =
 const PDF_FIT_STRICT_STYLE =
   'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;';
 
+/**
+ * Repli `fit:contain` sans dims px : object-fit CSS contain (bandes possibles).
+ * Moins précis que le rect mm, mais évite de retomber en cover.
+ */
+const PDF_FIT_CONTAIN_BLEED_STYLE =
+  'position:absolute;inset:-1px;width:calc(100% + 2px);height:calc(100% + 2px);object-fit:contain;display:block;';
+const PDF_FIT_CONTAIN_STRICT_STYLE =
+  'position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block;';
+
 export type CoverCropFitMode = 'bleed' | 'strict';
 
 /**
@@ -153,13 +217,22 @@ export function coverCropFrameHtml(params: {
     typeof params.imgPxH === 'number' &&
     params.imgPxW > 0 &&
     params.imgPxH > 0;
+  const containFit = photoCropFit(params.crop) === 'contain';
   const custom = hasDims && !isDefaultPhotoCrop(params.crop);
   const fitMode: CoverCropFitMode = params.fitMode === 'bleed' ? 'bleed' : 'strict';
   const clip = 'clip-path:inset(0);-webkit-clip-path:inset(0);';
-  const frameBox = `width:${fw.toFixed(3)}mm;height:${fh.toFixed(3)}mm;position:relative;overflow:hidden;${clip}`;
+  // Fond blanc = bandes letterbox (parité maquette), y compris couverture.
+  const frameBg = containFit || custom ? 'background:#FFFFFF;' : '';
+  const frameBox = `width:${fw.toFixed(3)}mm;height:${fh.toFixed(3)}mm;position:relative;overflow:hidden;${clip}${frameBg}`;
 
   if (!custom) {
-    const base = fitMode === 'bleed' ? PDF_FIT_BLEED_STYLE : PDF_FIT_STRICT_STYLE;
+    const base = containFit
+      ? fitMode === 'bleed'
+        ? PDF_FIT_CONTAIN_BLEED_STYLE
+        : PDF_FIT_CONTAIN_STRICT_STYLE
+      : fitMode === 'bleed'
+        ? PDF_FIT_BLEED_STYLE
+        : PDF_FIT_STRICT_STYLE;
     const style = extra ? `${base}${extra}` : base;
     return `<div class="crop-frame" style="${frameBox}"><img class="crop-img" src="${src}" alt="" style="${style}" /></div>`;
   }

@@ -97,6 +97,37 @@ describe('coverCropFrameHtml — Chromium-safe', () => {
     assert.doesNotMatch(style, /%/);
     assert.equal(isDefaultPhotoCrop({ xPct: 0, yPct: 0, scale: 1 }), true);
     assert.equal(isDefaultPhotoCrop({ xPct: 1, yPct: 0, scale: 1 }), false);
+    assert.equal(isDefaultPhotoCrop({ xPct: 0, yPct: 0, scale: 1, fit: 'contain' }), false);
+  });
+
+  it('fit contain → chemin rect mm (pas object-fit cover)', () => {
+    const html = coverCropFrameHtml({
+      srcAttr: 'https://example.com/a.jpg',
+      crop: { xPct: 0, yPct: 0, scale: 1, fit: 'contain' },
+      imgPxW: IMG_W,
+      imgPxH: IMG_H,
+      frameRefW: FRAME_W,
+      frameRefH: FRAME_H,
+      fitMode: 'strict',
+    });
+    assert.match(html, /left:-?[\d.]+mm/);
+    assert.match(html, /object-fit:fill/);
+    assert.doesNotMatch(html, /object-fit:cover/);
+    assert.match(html, /background:#FFFFFF/);
+    assert.equal(cropMarkupUsesFragilePercentPositioning(html), false);
+  });
+
+  it('fit contain sans dims → object-fit contain (pas cover)', () => {
+    const html = coverCropFrameHtml({
+      srcAttr: 'https://example.com/a.jpg',
+      crop: { xPct: 0, yPct: 0, scale: 1, fit: 'contain' },
+      frameRefW: FRAME_W,
+      frameRefH: FRAME_H,
+      fitMode: 'strict',
+    });
+    assert.match(html, /object-fit:contain/);
+    assert.doesNotMatch(html, /object-fit:cover/);
+    assert.equal(cropMarkupUsesFragilePercentPositioning(html), false);
   });
 
   it('src vide → markup vide', () => {

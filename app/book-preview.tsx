@@ -428,7 +428,7 @@ export default function BookPreviewScreen() {
     localSnapshot?.book.rotations ?? {},
   );
   const [photoCrops, setPhotoCrops] = useState<
-    Record<string, { xPct: number; yPct: number; scale: number }>
+    Record<string, { xPct: number; yPct: number; scale: number; fit?: 'cover' | 'contain' }>
   >(localSnapshot?.book.photoCrops ?? {});
   const [imagePxCache, setImagePxCache] = useState<Record<string, { w: number; h: number }>>({});
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
@@ -2105,7 +2105,7 @@ export default function BookPreviewScreen() {
         coverPhotoBrowseUri ?? '',
         coverPhotoUrl ?? '',
         photoCrops.cover
-          ? `${photoCrops.cover.xPct},${photoCrops.cover.yPct},${photoCrops.cover.scale}`
+          ? `${photoCrops.cover.xPct},${photoCrops.cover.yPct},${photoCrops.cover.scale},${photoCrops.cover.fit ?? 'cover'}`
           : '',
       ].join('|'),
     [

@@ -398,7 +398,15 @@
     },
     "toolbarWrite": "Écrire",
     "toolbarWriteA11y": "Écrire le texte de la page",
-    "listNoPages": "Aucune page"
+    "listNoPages": "Aucune page",
+    "photoFit": {
+      "original": "Original",
+      "originalA11y": "Afficher la photo en format original",
+      "fill": "Remplir",
+      "fillA11y": "Remplir le cadre avec la photo",
+      "rotateA11y": "Pivoter la photo",
+      "dpiLoading": "Calcul qualité impression…"
+    }
   },
   "bookOrder": {
     "title": "Commander mon livre",

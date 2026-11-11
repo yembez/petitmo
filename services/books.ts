@@ -268,7 +268,7 @@ export type Book = {
    *
    * Clé spéciale `cover` pour la couverture, sinon `memoryId`.
    */
-  photoCrops?: Record<string, { xPct: number; yPct: number; scale: number }>;
+  photoCrops?: Record<string, { xPct: number; yPct: number; scale: number; fit?: 'cover' | 'contain' }>;
   /** Modifications de contenu textuel (memoryId → champs modifiés). */
   textEdits?: Record<string, { content?: string | null }>;
   /** Titre personnalisé des pages chapitre (null = « Notre histoire »). */
@@ -477,7 +477,10 @@ function normalizeBook(raw: unknown): Book | null {
     }
   }
 
-  const photoCrops: Record<string, { xPct: number; yPct: number; scale: number }> = {};
+  const photoCrops: Record<
+    string,
+    { xPct: number; yPct: number; scale: number; fit?: 'cover' | 'contain' }
+  > = {};
   // Nouveau format
   if (r.photoCrops && typeof r.photoCrops === 'object') {
     for (const [k, v] of Object.entries(r.photoCrops as Record<string, unknown>)) {
@@ -487,7 +490,13 @@ function normalizeBook(raw: unknown): Book | null {
       const yPct = typeof entry.yPct === 'number' ? entry.yPct : 0;
       const scale = typeof entry.scale === 'number' ? entry.scale : 1;
       if (!Number.isFinite(xPct) || !Number.isFinite(yPct) || !Number.isFinite(scale)) continue;
-      photoCrops[k] = { xPct, yPct, scale: Math.max(1, scale) };
+      const fit = entry.fit === 'contain' ? 'contain' : undefined;
+      photoCrops[k] = {
+        xPct,
+        yPct,
+        scale: Math.max(1, scale),
+        ...(fit ? { fit } : {}),
+      };
     }
   }
   // Migration depuis l'ancien format simple (top/center/bottom)
@@ -2133,9 +2142,12 @@ function safeRecordNumber(x: unknown): Record<string, number> | null {
 
 function safePhotoCrops(
   x: unknown
-): Record<string, { xPct: number; yPct: number; scale: number }> | null {
+): Record<string, { xPct: number; yPct: number; scale: number; fit?: 'cover' | 'contain' }> | null {
   if (!x || typeof x !== 'object') return null;
-  const out: Record<string, { xPct: number; yPct: number; scale: number }> = {};
+  const out: Record<
+    string,
+    { xPct: number; yPct: number; scale: number; fit?: 'cover' | 'contain' }
+  > = {};
   for (const [k, v] of Object.entries(x as Record<string, unknown>)) {
     if (!v || typeof v !== 'object') continue;
     const e = v as Record<string, unknown>;
@@ -2143,7 +2155,13 @@ function safePhotoCrops(
     const yPct = typeof e.yPct === 'number' ? e.yPct : 0;
     const scale = typeof e.scale === 'number' ? e.scale : 1;
     if (!Number.isFinite(xPct) || !Number.isFinite(yPct) || !Number.isFinite(scale)) continue;
-    out[k] = { xPct, yPct, scale: Math.max(1, scale) };
+    const fit = e.fit === 'contain' ? 'contain' : undefined;
+    out[k] = {
+      xPct,
+      yPct,
+      scale: Math.max(1, scale),
+      ...(fit ? { fit } : {}),
+    };
   }
   return Object.keys(out).length ? out : null;
 }

@@ -98,7 +98,12 @@ function coverCropsEqual(
   const cb = b?.cover;
   if (!ca && !cb) return true;
   if (!ca || !cb) return false;
-  return ca.xPct === cb.xPct && ca.yPct === cb.yPct && ca.scale === cb.scale;
+  return (
+    ca.xPct === cb.xPct &&
+    ca.yPct === cb.yPct &&
+    ca.scale === cb.scale &&
+    (ca.fit ?? 'cover') === (cb.fit ?? 'cover')
+  );
 }
 
 function bookListRowPropsEqual(prev: BookListRowProps, next: BookListRowProps): boolean {

@@ -19,7 +19,7 @@ export type BookPageServer = {
   month?: string;
   chapterNum?: number;
   rotation?: number;
-  crop?: { xPct: number; yPct: number; scale: number };
+  crop?: { xPct: number; yPct: number; scale: number; fit?: 'cover' | 'contain' };
   /** Pixels source pour crop aspect (parité cover / éditeur). */
   cropImgPxW?: number;
   cropImgPxH?: number;

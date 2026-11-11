@@ -234,7 +234,7 @@ export type LocalBookRow = {
   /** Couleur fond couverture (`white` | `cream` | …). */
   coverColorId?: string | null
   rotations?: Record<string, number>
-  photoCrops?: Record<string, { xPct: number; yPct: number; scale: number }>
+  photoCrops?: Record<string, { xPct: number; yPct: number; scale: number; fit?: 'cover' | 'contain' }>
   textEdits?: Record<string, { content?: string | null }>
   chapterTitle?: string | null
   backCoverTagline?: string | null

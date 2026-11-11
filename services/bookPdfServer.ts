@@ -1281,11 +1281,24 @@ async function callInitExportPdf(body: Record<string, unknown>): Promise<InitExp
   return { exportRequestId, crmContactId, pdfTicket, expiresInSeconds, flow };
 }
 
+/** Normalise un crop pour le payload PDF (conserve `fit: 'contain'`). */
+function serverCropPayload(
+  crop: { xPct: number; yPct: number; scale: number; fit?: 'cover' | 'contain' } | undefined,
+): { xPct: number; yPct: number; scale: number; fit?: 'contain' } | undefined {
+  if (!crop) return undefined;
+  return {
+    xPct: crop.xPct,
+    yPct: crop.yPct,
+    scale: Math.max(1, crop.scale),
+    ...(crop.fit === 'contain' ? { fit: 'contain' as const } : {}),
+  };
+}
+
 /** Mappe les pages livre → payload serveur (champs stabilisés). */
 export function mapBookPagesToServerPayload(
   pages: BookPage[],
   rotations: Record<string, number>,
-  photoCrops: Record<string, { xPct: number; yPct: number; scale: number }>,
+  photoCrops: Record<string, { xPct: number; yPct: number; scale: number; fit?: 'cover' | 'contain' }>,
   localEdits: Record<string, Partial<Memory>>,
   memoryPhotoRefs?: Record<string, string>,
   /** Dims fichier pour crop aspect PDF (posters vidéo, print photo…). */
@@ -1294,8 +1307,8 @@ export function mapBookPagesToServerPayload(
   return pages.map(p => {
     switch (p.type) {
       case 'cover': {
-        const c = photoCrops.cover;
-        return { type: 'cover' as const, ...(c ? { crop: c } : {}) };
+        const crop = serverCropPayload(photoCrops.cover);
+        return { type: 'cover' as const, ...(crop ? { crop } : {}) };
       }
       case 'chapter':
         return { type: 'chapter', month: p.month, chapterNum: p.chapterNum };
@@ -1306,7 +1319,7 @@ export function mapBookPagesToServerPayload(
         const ed = localEdits[m.id];
         const textOverride = typeof ed?.content === 'string' ? ed.content : undefined;
         const rot = rotations[m.id] ?? 0;
-        const crop = photoCrops[m.id];
+        const crop = serverCropPayload(photoCrops[m.id]);
         const photoRef = p.photoRef?.trim() || memoryPhotoRefs?.[m.id]?.trim();
         const fromMeta = cropImgPxByMemoryId?.[m.id];
         const px = fromMeta ?? getBookPhotoPrintPixelSize(m, photoRef);
@@ -1329,7 +1342,7 @@ export function mapBookPagesToServerPayload(
         const ed = localEdits[m.id];
         const textOverride = typeof ed?.content === 'string' ? ed.content : undefined;
         const rot = rotations[m.id] ?? 0;
-        const crop = photoCrops[m.id];
+        const crop = serverCropPayload(photoCrops[m.id]);
         const photoRef =
           p.type === 'photo-note'
             ? p.photoRef?.trim() || memoryPhotoRefs?.[m.id]?.trim()
@@ -1337,7 +1350,7 @@ export function mapBookPagesToServerPayload(
         const fromMeta = cropImgPxByMemoryId?.[m.id];
         const px =
           fromMeta ??
-          (p.type === 'photo-note' || p.type === 'audio'
+          (p.type === 'photo-note' || p.type === 'audio' || p.type === 'video'
             ? getBookPhotoPrintPixelSize(m, photoRef)
             : null);
         return {
@@ -1394,7 +1407,7 @@ export type GenerateBookPdfServerInput = {
   backCoverTagline?: string | null;
   pages: BookPage[];
   rotations: Record<string, number>;
-  photoCrops: Record<string, { xPct: number; yPct: number; scale: number }>;
+  photoCrops: Record<string, { xPct: number; yPct: number; scale: number; fit?: 'cover' | 'contain' }>;
   localEdits: Record<string, Partial<Memory>>;
   /** Slot photo album par souvenir — parité aperçu livre / SQLite `memoryPhotoRefs`. */
   memoryPhotoRefs?: Record<string, string>;

@@ -2,7 +2,8 @@ import { memo, useEffect, useRef, useState } from 'react';
 import { Image as RNImage, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { BookInlinePhotoCrop } from '@/components/BookInlinePhotoCrop';
-import type { PhotoCrop } from '@/src/book/photoCrop';
+import { useAppTranslation } from '@/hooks/useAppTranslation';
+import { defaultPhotoCrop, photoCropFit, type PhotoCrop } from '@/src/book/photoCrop';
 import { bookPhotoCropImageRect } from '@/utils/bookPhotoCropLayout';
 import { useSignedMediaUrl, extractMediaBucketPath } from '@/lib/mediaSignedUrl';
 
@@ -69,7 +70,7 @@ function CroppedPhotoStatic({
           transition={0}
           priority="high"
           style={{ position: 'absolute', width: rect.width, height: rect.height, left: rect.left, top: rect.top }}
-          contentFit="cover"
+          contentFit="fill"
         />
       </View>
     );
@@ -110,6 +111,7 @@ function BookPagePhotoFrame({
   imgPxW,
   imgPxH,
 }: Props) {
+  const { t } = useAppTranslation('common');
   const rawUri = uri.trim();
   // Bundle leak / chemin Storage nu : toujours passer par signature (jamais Image local).
   const leakedBucket = extractMediaBucketPath(rawUri);
@@ -192,6 +194,12 @@ function BookPagePhotoFrame({
   const isLoadingMeta =
     !!inlineCrop && !isInteractive && !dimsLatchedRef.current && !hasCropDims;
   const useAspectCrop = coverMode || hasCropDims;
+  const fit = photoCropFit(crop);
+  const fitBtnSize = Math.max(28, Math.round(34 * typoScale));
+  const fitLabel =
+    fit === 'contain' ? t('book.photoFit.fill') : t('book.photoFit.original');
+  const fitA11y =
+    fit === 'contain' ? t('book.photoFit.fillA11y') : t('book.photoFit.originalA11y');
 
   return (
     <View style={styles.host}>
@@ -227,6 +235,30 @@ function BookPagePhotoFrame({
         )}
       </View>
 
+      {isInteractive && inlineCrop ? (
+        <Pressable
+          style={[
+            styles.fitOverlayBtn,
+            {
+              minHeight: fitBtnSize,
+              borderRadius: Math.max(14, Math.round(17 * typoScale)),
+              top: Math.round(10 * typoScale),
+              left: Math.round(10 * typoScale),
+              paddingHorizontal: Math.round(10 * typoScale),
+            },
+          ]}
+          onPress={() => {
+            const nextFit = fit === 'contain' ? 'cover' : 'contain';
+            inlineCrop.onChange(inlineCrop.storageKey, defaultPhotoCrop(nextFit));
+          }}
+          accessibilityLabel={fitA11y}
+        >
+          <Text style={[styles.fitOverlayLabel, { fontSize: Math.round(12 * typoScale) }]}>
+            {fitLabel}
+          </Text>
+        </Pressable>
+      ) : null}
+
       {showRotateButton && onRotate ? (
         <Pressable
           style={[
@@ -240,7 +272,7 @@ function BookPagePhotoFrame({
             },
           ]}
           onPress={onRotate}
-          accessibilityLabel="Pivoter la photo"
+          accessibilityLabel={t('book.photoFit.rotateA11y')}
         >
           <Text style={[styles.rotateOverlayIcon, { fontSize: Math.round(20 * typoScale) }]}>↻</Text>
         </Pressable>
@@ -248,7 +280,7 @@ function BookPagePhotoFrame({
 
       {isLoadingMeta ? (
         <View style={styles.hintPill} pointerEvents="none">
-          <Text style={styles.hintPillText}>Calcul qualité impression…</Text>
+          <Text style={styles.hintPillText}>{t('book.photoFit.dpiLoading')}</Text>
         </View>
       ) : null}
     </View>
@@ -264,6 +296,19 @@ const styles = StyleSheet.create({
   rot: {
     width: '100%',
     height: '100%',
+  },
+  fitOverlayBtn: {
+    position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(0,0,0,0.12)',
+    zIndex: 3,
+  },
+  fitOverlayLabel: {
+    color: '#1C1C1E',
+    fontWeight: '600',
   },
   rotateOverlayBtn: {
     position: 'absolute',

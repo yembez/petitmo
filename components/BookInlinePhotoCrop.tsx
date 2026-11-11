@@ -10,8 +10,8 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Image as ExpoImage } from 'expo-image';
 import BookPhotoDpiBadge from '@/components/BookPhotoDpiBadge';
-import { defaultPhotoCrop, type PhotoCrop } from '@/src/book/photoCrop';
-import { bookPhotoCoverBaseSize, clampBookPhotoCropPan } from '@/utils/bookPhotoCropLayout';
+import { defaultPhotoCrop, photoCropFit, type PhotoCrop, type PhotoCropFit } from '@/src/book/photoCrop';
+import { bookPhotoBaseSize, clampBookPhotoCropPan } from '@/utils/bookPhotoCropLayout';
 
 const SPRING = { damping: 22, stiffness: 220, mass: 0.7 } as const;
 const ZOOM_PAN_EPS = 1.02;
@@ -68,11 +68,19 @@ type Props = {
   onZoomActiveChange?: (active: boolean) => void;
 };
 
-function cropFromShared(tx: number, ty: number, scale: number, frameW: number, frameH: number): PhotoCrop {
+function cropFromShared(
+  tx: number,
+  ty: number,
+  scale: number,
+  frameW: number,
+  frameH: number,
+  fit: PhotoCropFit,
+): PhotoCrop {
   return {
     xPct: (tx / frameW) * 100,
     yPct: (ty / frameH) * 100,
     scale,
+    ...(fit === 'contain' ? { fit: 'contain' as const } : {}),
   };
 }
 
@@ -122,17 +130,18 @@ export function BookInlinePhotoCrop({
   const badgePxW = dpiPxW && dpiPxW > 0 ? dpiPxW : 0;
   const badgePxH = dpiPxH && dpiPxH > 0 ? dpiPxH : 0;
 
+  const fit = photoCropFit(crop);
   /**
    * Ratio réel dès que les dims sont connues (cover + pages souvenirs) :
-   * l’image déborde sur un axe → pan utile même à scale 1.
+   * cover → déborde sur un axe ; contain → tient dans le cadre (bandes possibles).
    */
   const useAspect = (coverMode || (imgPxW > 0 && imgPxH > 0)) && imgPxW > 0 && imgPxH > 0;
   const { baseW, baseH } = useMemo(
     () =>
       useAspect
-        ? bookPhotoCoverBaseSize(frameW, frameH, imgPxW, imgPxH)
+        ? bookPhotoBaseSize(frameW, frameH, imgPxW, imgPxH, fit)
         : { baseW: frameW, baseH: frameH },
-    [useAspect, frameW, frameH, imgPxW, imgPxH],
+    [useAspect, frameW, frameH, imgPxW, imgPxH, fit],
   );
 
   // Seed immédiat = crop persisté (évite 1 frame à scale 1 → flash « ancien » cadrage).
@@ -145,8 +154,8 @@ export function BookInlinePhotoCrop({
   const pinchStartScale = useSharedValue(1);
 
   const commitCrop = useCallback(() => {
-    onChange(cropFromShared(tx.value, ty.value, scale.value, frameW, frameH));
-  }, [frameH, frameW, onChange, scale, tx, ty]);
+    onChange(cropFromShared(tx.value, ty.value, scale.value, frameW, frameH, fit));
+  }, [fit, frameH, frameW, onChange, scale, tx, ty]);
 
   useEffect(() => {
     const next = seedCropSharedValues({ crop, useAspect, baseW, baseH, frameW, frameH });
@@ -176,8 +185,9 @@ export function BookInlinePhotoCrop({
   /**
    * - Zoomé : pan libre (plus de `failOffsetX` qui tuait le déplacement horizontal
    *   au profit du FlatList pages).
-   * - Scale 1 + aspect : `failOffsetX` pour laisser le swipe changer de page ;
+   * - Scale 1 + aspect cover : `failOffsetX` pour laisser le swipe changer de page ;
    *   le pan vertical (débord fréquent) reste possible.
+   * - Scale 1 contain : pas de marge de pan → désactivé (swipe pages).
    * - Scale 1 sans aspect : pan désactivé (aucune marge).
    */
   const panGesture = useMemo(() => {
@@ -201,13 +211,14 @@ export function BookInlinePhotoCrop({
     if (isZoomed) {
       return core;
     }
-    if (useAspect) {
+    if (useAspect && fit === 'cover') {
       return core.failOffsetX([-18, 18]);
     }
     return core.enabled(false);
   }, [
     commitCrop,
     useAspect,
+    fit,
     isZoomed,
     baseW,
     baseH,
@@ -270,6 +281,7 @@ export function BookInlinePhotoCrop({
       s,
       tx.value,
       ty.value,
+      fit,
     );
     return {
       position: 'absolute' as const,
@@ -278,7 +290,7 @@ export function BookInlinePhotoCrop({
       left: (frameW - width) / 2 + clampedTx,
       top: (frameH - height) / 2 + clampedTy,
     };
-  }, [baseW, baseH, frameH, frameW, imgPxH, imgPxW]);
+  }, [baseW, baseH, fit, frameH, frameW, imgPxH, imgPxW]);
 
   const transformStyle = useAnimatedStyle(
     () => ({
@@ -297,7 +309,7 @@ export function BookInlinePhotoCrop({
             <ExpoImage
               source={{ uri }}
               style={StyleSheet.absoluteFillObject}
-              contentFit="cover"
+              contentFit="fill"
               cachePolicy="memory-disk"
               recyclingKey={uri}
               transition={0}
@@ -322,7 +334,7 @@ export function BookInlinePhotoCrop({
 const styles = StyleSheet.create({
   frame: {
     overflow: 'hidden',
-    backgroundColor: '#F2F2F7',
+    backgroundColor: '#FFFFFF',
   },
   dpiDetailWrap: {
     position: 'absolute',

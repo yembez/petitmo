@@ -92,7 +92,7 @@ function mergedMemory(m: MemoryRow, textOverride?: string): MemoryRow {
   return { ...m, content: textOverride };
 }
 
-type PhotoCrop = { xPct: number; yPct: number; scale: number };
+type PhotoCrop = { xPct: number; yPct: number; scale: number; fit?: 'cover' | 'contain' };
 
 /** Markup image cadre (cover / photo / A-V) — toujours mm absolus (Chromium-safe). */
 function croppedFrameHtml(
