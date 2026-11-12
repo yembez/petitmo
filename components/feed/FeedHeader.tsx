@@ -134,17 +134,21 @@ export const FeedHeader = memo(function FeedHeader({
             style={styles.headerNameBlock}
             activeOpacity={1}
             delayLongPress={1200}
-            onLongPress={() => {
-              const next = !isFeedFlashDebugEnabled();
-              void setFeedFlashDebugEnabled(next).then(() => {
-                Alert.alert(
-                  'Debug fil / flash',
-                  next
-                    ? 'Activé. Repro (import multi / scroll rapide / blanc) → à chaque blanc « J’ai vu le flash » → Exporter → colle le dump dans Cursor.'
-                    : 'Désactivé.',
-                );
-              });
-            }}
+            onLongPress={
+              __DEV__
+                ? () => {
+                    const next = !isFeedFlashDebugEnabled();
+                    void setFeedFlashDebugEnabled(next).then(() => {
+                      Alert.alert(
+                        'Debug fil / flash',
+                        next
+                          ? 'Activé. Repro (import multi / scroll rapide / blanc) → à chaque blanc « J’ai vu le flash » → Exporter → colle le dump dans Cursor.'
+                          : 'Désactivé.',
+                      );
+                    });
+                  }
+                : undefined
+            }
             accessibilityRole="text"
             accessibilityLabel={familyTitle}
           >

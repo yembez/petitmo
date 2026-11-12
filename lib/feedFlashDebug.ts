@@ -68,7 +68,24 @@ export function subscribeFeedFlashDebug(onChange: () => void): () => void {
   return () => listeners.delete(onChange);
 }
 
+/** Release / TestFlight / OTA : jamais de ring buffer ni jsStall (coût UI). */
+async function forceOffForProduction(): Promise<void> {
+  enabled = false;
+  stopJsStallMonitor();
+  clearFeedFlashDebugEvents();
+  try {
+    await AsyncStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+  emit();
+}
+
 export async function hydrateFeedFlashDebug(): Promise<void> {
+  if (!__DEV__) {
+    await forceOffForProduction();
+    return;
+  }
   try {
     const v = await AsyncStorage.getItem(STORAGE_KEY);
     enabled = v === '1';
@@ -81,6 +98,10 @@ export async function hydrateFeedFlashDebug(): Promise<void> {
 }
 
 export async function setFeedFlashDebugEnabled(next: boolean): Promise<void> {
+  if (!__DEV__) {
+    await forceOffForProduction();
+    return;
+  }
   enabled = next;
   try {
     if (next) await AsyncStorage.setItem(STORAGE_KEY, '1');
