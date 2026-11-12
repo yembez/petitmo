@@ -1395,8 +1395,10 @@ export default function BookPreviewScreen() {
     return () => sub.remove();
   }, []);
 
-  // Auto-save customizations to AsyncStorage when they change
+  // Auto-save customizations → SQLite (+ backup cloud via upsertBook).
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const photoCropsRef = useRef(photoCrops);
+  photoCropsRef.current = photoCrops;
   useEffect(() => {
     if (!bookId || loading) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -1404,20 +1406,21 @@ export default function BookPreviewScreen() {
       void (async () => {
         const b = await getBook(bookId);
         if (!b) return;
+        const crops = photoCropsRef.current;
         const hasRotations = Object.keys(rotations).some(k => rotations[k] !== 0);
-        const hasCrops = Object.keys(photoCrops).length > 0;
+        const hasCrops = Object.keys(crops).length > 0;
         const coverFromSnap = bookSnapshotRef.current?.coverPhotoUrl;
         await upsertBook({
           ...b,
           coverPhotoUrl: coverFromSnap !== undefined ? coverFromSnap : b.coverPhotoUrl,
+          // undefined = ne pas toucher SQLite (préserve pan/zoom déjà sauvés).
           rotations: hasRotations ? rotations : undefined,
-          photoCrops: hasCrops ? photoCrops : undefined,
-          textEdits: undefined,
+          photoCrops: hasCrops ? crops : undefined,
           chapterTitle: chapterTitleLine ?? undefined,
           backCoverTagline: backCoverTaglineLine ?? undefined,
         });
       })();
-    }, 800);
+    }, 400);
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
@@ -1425,17 +1428,27 @@ export default function BookPreviewScreen() {
 
   const upsertPhotoCrop = useCallback(
     (key: string, next: { xPct: number; yPct: number; scale: number; fit?: 'cover' | 'contain' }) => {
-      setPhotoCrops(prev => ({
-        ...prev,
-        [key]: {
-          xPct: next.xPct,
-          yPct: next.yPct,
-          scale: next.scale,
-          ...(next.fit === 'contain' ? { fit: 'contain' as const } : {}),
-        },
-      }));
+      const crop = {
+        xPct: next.xPct,
+        yPct: next.yPct,
+        scale: next.scale,
+        ...(next.fit === 'contain' ? { fit: 'contain' as const } : {}),
+      };
+      setPhotoCrops(prev => {
+        const merged = { ...prev, [key]: crop };
+        photoCropsRef.current = merged;
+        return merged;
+      });
+      // Persistance SQLite rapide (pan/zoom vidéo) — ne pas attendre seulement l’effet 400 ms.
+      if (!bookId) return;
+      void (async () => {
+        const b = await getBook(bookId);
+        if (!b) return;
+        await upsertBook({ ...b, photoCrops: { ...photoCropsRef.current, [key]: crop } });
+        flushBooksCloudBackupNow();
+      })();
     },
-    []
+    [bookId],
   );
 
   const getImagePx = useCallback(

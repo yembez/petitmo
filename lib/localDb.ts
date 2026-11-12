@@ -362,6 +362,12 @@ export function upsertLocalBook(book: Omit<LocalBookRow, 'updatedAt'>): void {
     book.pageOrderMode !== undefined ? book.pageOrderMode : existing?.pageOrderMode ?? null
   const backCoverTagline =
     book.backCoverTagline !== undefined ? book.backCoverTagline : existing?.backCoverTagline ?? null
+  /** Sinon un `upsertBook({ ...b, title })` / autosave sans crops efface pan/zoom vidéo. */
+  const rotations = book.rotations !== undefined ? book.rotations : existing?.rotations
+  const photoCrops = book.photoCrops !== undefined ? book.photoCrops : existing?.photoCrops
+  const textEdits = book.textEdits !== undefined ? book.textEdits : existing?.textEdits
+  const chapterTitle =
+    book.chapterTitle !== undefined ? book.chapterTitle : existing?.chapterTitle ?? null
 
   db.runSync(
     `INSERT OR REPLACE INTO books (
@@ -382,10 +388,10 @@ export function upsertLocalBook(book: Omit<LocalBookRow, 'updatedAt'>): void {
       pageOrderMode ?? null,
       book.coverPhotoUrl ?? null,
       coverColorId ?? null,
-      book.rotations ? JSON.stringify(book.rotations) : null,
-      book.photoCrops ? JSON.stringify(book.photoCrops) : null,
-      book.textEdits ? JSON.stringify(book.textEdits) : null,
-      book.chapterTitle ?? null,
+      rotations && Object.keys(rotations).length ? JSON.stringify(rotations) : null,
+      photoCrops && Object.keys(photoCrops).length ? JSON.stringify(photoCrops) : null,
+      textEdits && Object.keys(textEdits).length ? JSON.stringify(textEdits) : null,
+      chapterTitle ?? null,
       backCoverTagline ?? null,
       now,
     ]
