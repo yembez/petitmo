@@ -82,7 +82,7 @@ Règle spread : si page N est [FP] et que N+1 serait aussi [FP] (après calcul d
 
 ## Page « Petits mots » (souvenir texte seul)
 
-Police corps souvenir livre (Petits mots **et** annotations photo/A/V) : **Manrope 300**, **12 pt**, interligne **17 pt**, `letter-spacing: 0.04em`. Pas sur couvertures. Les retours à la ligne saisis sont conservés (`normalizeQuoteBodyLikeMaquette`). Méta (date, folio, pastille) : **DM Sans** 7 pt.
+Police : **Manrope 300**, `letter-spacing: 0.04em`. Petits mots : **12 pt / 17 pt**. Légendes photo/A/V : **10 pt / 14 pt**. Pas sur couvertures. Retours à la ligne saisis conservés. Filet titre Petits mots : maquette `3 mm` au-dessus ; PDF Chromium `1.5 mm` + padding-bottom un peu plus généreux. Méta : **DM Sans** 7 pt.
 
 Champ optionnel `text_title` → variante **titled** (toute longueur). Sans titre : **guillemet** (≤ 8 lignes) ou **dropcap** (9+ lignes).
 

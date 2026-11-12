@@ -110,9 +110,11 @@ export const PDF_MEDIA_QR_CARD_LABEL_PT = 7;
 export const PDF_MEDIA_QR_CARD_BORDER_COLOR = '#D8D8DD';
 export const PDF_MEDIA_QR_MUTED_COLOR = '#AEAEB2';
 
-/** Légende audio / vidéo — même corps souvenir livre (Manrope 12/17). */
-export const PDF_MEDIA_CAPTION_PT = 12;
-export const PDF_MEDIA_CAPTION_LH = 17 / 12;
+/** Légende audio / vidéo — Manrope 300, un cran sous les Petits mots (10/14). */
+export const PDF_MEDIA_CAPTION_SIZE_PT = 10;
+export const PDF_MEDIA_CAPTION_LINE_PT = 14;
+export const PDF_MEDIA_CAPTION_PT = PDF_MEDIA_CAPTION_SIZE_PT;
+export const PDF_MEDIA_CAPTION_LH = PDF_MEDIA_CAPTION_LINE_PT / PDF_MEDIA_CAPTION_SIZE_PT;
 
 /** Remontée du bandeau bas (méta+légende) dans la marge blanche du visuel, pour coller la méta à la photo. */
 export const PDF_MEDIA_QR_PULL_UP_MM = 7;
@@ -127,10 +129,10 @@ export const PDF_MEDIA_TEXT_PAD_X_MM = 22;
 
 /** Corps souvenir Roboto — 12 pt historique → 11.25 pt. */
 export const PDF_MEMORY_BODY_PT = memorySouvenirPt(12);
-/** Légende sous photo pleine page — même corps souvenir livre (Manrope 12/17). */
-export const PDF_PHOTO_CAPTION_PT = 12;
-/** Texte long sous photo (photo-note) — même corps souvenir livre (Manrope 12/17). */
-export const PDF_PHOTO_NOTE_BODY_PT = 12;
+/** Légende sous photo pleine page — Manrope 300, 10/14 (pas 12/17 Petits mots). */
+export const PDF_PHOTO_CAPTION_PT = PDF_MEDIA_CAPTION_SIZE_PT;
+/** Texte long sous photo (photo-note) — même taille que légende photo/A/V. */
+export const PDF_PHOTO_NOTE_BODY_PT = PDF_MEDIA_CAPTION_SIZE_PT;
 /** Description vidéo (corps souvenir) — 10.5 pt historique → ~9.85 pt. */
 export const PDF_VIDEO_SUB_PT = memorySouvenirPt(10.5);
 
@@ -146,8 +148,8 @@ export const PDF_GUILLEMET_BODY_LH = 17 / 12;
 export const PDF_GUILLEMET_RULE_MM = 28;
 
 /**
- * Corps souvenir livre (Petits mots + annotations photo/A/V) — spread + PDF :
- * Manrope 300 / 12 pt / interligne 17 pt / letter-spacing 0.04em.
+ * Corps Petits mots — Manrope 300 / 12 pt / interligne 17 pt / letter-spacing 0.04em.
+ * Légendes photo/A/V : voir `PDF_MEDIA_CAPTION_*` (10/14, même tracking).
  */
 export const PDF_TEXT_MEMORY_BODY_SIZE_PT = 12;
 export const PDF_TEXT_MEMORY_BODY_LINE_PT = 17;
@@ -256,8 +258,13 @@ export const PDF_TEXT_MEMORY_TITLE_BLOCK_MARGIN_MM: Record<TextMemorySizeTier, n
   sm: 4,
 };
 
-/** Espace titre → filet (maquette + PDF). */
+/**
+ * Espace titre → filet (maquette).
+ * PDF Chromium : utiliser `PDF_TEXT_MEMORY_TITLE_RULE_MARGIN_TOP_PDF_MM` (filet sinon trop bas).
+ */
 export const PDF_TEXT_MEMORY_TITLE_RULE_MARGIN_TOP_MM = 3;
+/** Correction print Chromium — remonte le filet vers le milieu titre/corps. */
+export const PDF_TEXT_MEMORY_TITLE_RULE_MARGIN_TOP_PDF_MM = 1.5;
 
 /** Largeur filet sous le titre souvenir. */
 export const PDF_TEXT_MEMORY_TITLE_RULE_MM: Record<TextMemorySizeTier, number> = {
@@ -341,24 +348,35 @@ export function pdfBodyStyle(pageWidthPx: number): { fontSize: number; lineHeigh
   return { fontSize: fs, lineHeight: pdfPtToPreviewPx(11 * 1.65, pageWidthPx) };
 }
 
-/** Interligne légendes photo — aligné sur corps souvenir (17/12). */
+/** Interligne légendes photo/A/V (10 → 14 pt). */
 export const PDF_PHOTO_CAPTION_LINE_HEIGHT =
-  PDF_TEXT_MEMORY_BODY_LINE_PT / PDF_TEXT_MEMORY_BODY_SIZE_PT;
-export const PDF_PHOTO_NOTE_LINE_HEIGHT =
-  PDF_TEXT_MEMORY_BODY_LINE_PT / PDF_TEXT_MEMORY_BODY_SIZE_PT;
+  PDF_MEDIA_CAPTION_LINE_PT / PDF_MEDIA_CAPTION_SIZE_PT;
+export const PDF_PHOTO_NOTE_LINE_HEIGHT = PDF_PHOTO_CAPTION_LINE_HEIGHT;
 
-/** `.pf-caption` — même Manrope 12/17 / tracking que Petits mots. */
+/** Style commun légendes photo / photo-note / A/V — Manrope 10/14 / 0.04em. */
+export function pdfMediaAnnotationStyle(
+  pageWidthPx: number,
+): { fontSize: number; lineHeight: number; letterSpacing: number } {
+  const fs = Math.max(MIN_FS, pdfPtToPreviewPx(PDF_MEDIA_CAPTION_SIZE_PT, pageWidthPx));
+  return {
+    fontSize: fs,
+    lineHeight: pdfPtToPreviewPx(PDF_MEDIA_CAPTION_LINE_PT, pageWidthPx),
+    letterSpacing: fs * PDF_TEXT_MEMORY_LETTER_SPACING_EM,
+  };
+}
+
+/** `.pf-caption` */
 export function pdfPhotoCaptionStyle(
   pageWidthPx: number,
 ): { fontSize: number; lineHeight: number; letterSpacing: number } {
-  return pdfTextMemoryBodyStyle('lg', pageWidthPx);
+  return pdfMediaAnnotationStyle(pageWidthPx);
 }
 
-/** `.photo-note .pn-text` — même corps souvenir livre. */
+/** `.photo-note .pn-text` */
 export function pdfPhotoNoteBodyStyle(
   pageWidthPx: number,
 ): { fontSize: number; lineHeight: number; letterSpacing: number } {
-  return pdfTextMemoryBodyStyle('lg', pageWidthPx);
+  return pdfMediaAnnotationStyle(pageWidthPx);
 }
 
 export type QuotePdfFitLevel = 0 | 1 | 2;
@@ -369,11 +387,11 @@ export function pdfMemoryTextBodyStyle(pageWidthPx: number): { fontSize: number;
   return { fontSize: fs, lineHeight: pdfPtToPreviewPx(PDF_MEMORY_BODY_PT * 1.588, pageWidthPx) };
 }
 
-/** Légende audio / vidéo — même corps souvenir livre. */
+/** Légende audio / vidéo — Manrope 10/14. */
 export function pdfMediaCaptionStyle(
   pageWidthPx: number,
 ): { fontSize: number; lineHeight: number; letterSpacing: number } {
-  return pdfTextMemoryBodyStyle('lg', pageWidthPx);
+  return pdfMediaAnnotationStyle(pageWidthPx);
 }
 
 /** Corps souvenir livre — Manrope 12/17 / tracking 0.04em (maquette + PDF). */

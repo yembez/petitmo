@@ -1005,8 +1005,8 @@ body.print-bleed .pf-footer {
   color:#AEAEB2; letter-spacing:.15pt; text-transform:none; text-align:right;
   flex:1; min-width:0;
 }
-.pf-caption { margin-top:0; font-size:12pt; line-height:17pt; letter-spacing:0.04em; }
-.pf-caption.text-memory-editorial { font-size:12pt; line-height:17pt; letter-spacing:0.04em; text-align:justify; }
+.pf-caption { margin-top:0; font-size:10pt; line-height:14pt; letter-spacing:0.04em; }
+.pf-caption.text-memory-editorial { font-size:10pt; line-height:14pt; letter-spacing:0.04em; text-align:justify; }
 .placeholder { background:#F2F2F7; }
 
 .photo-note { flex-direction:column; }
@@ -1055,7 +1055,7 @@ body.print-bleed .pn-text {
   text-align:right; flex:1; min-width:0;
 }
 .photo-note .pn-text .body.text-memory-editorial {
-  font-size:12pt; line-height:17pt; letter-spacing:0.04em; text-align:justify;
+  font-size:10pt; line-height:14pt; letter-spacing:0.04em; text-align:justify;
 }
 
 body.print-bleed .bleed-x {
@@ -1091,10 +1091,7 @@ body.print-bleed .bleed-x {
 }
 .quote-mid-dropcap { justify-content:center; }
 .quote-mid-titled { justify-content:center; }
-/*
- * Contenu souvenir livre (Petits mots + annotations photo/A/V) :
- * Manrope 300 / 12 pt / lh 17 pt / tracking 0.04em — pas couvertures.
- */
+/* Famille + tracking partagés — tailles : Petits mots 12/17, légendes 10/14. */
 .text-memory-editorial,
 .body.text-memory-editorial,
 .quote .quote-body,
@@ -1130,8 +1127,8 @@ body.print-bleed .bleed-x {
   display:block;
   height:.3pt;
   background:rgba(0,0,0,.12);
-  /* PDF_TEXT_MEMORY_TITLE_RULE_MARGIN_TOP_MM */
-  margin:3mm auto 0;
+  /* PDF_TEXT_MEMORY_TITLE_RULE_MARGIN_TOP_PDF_MM — remonte vs maquette (Chromium). */
+  margin:1.5mm auto 0;
 }
 .text-tier-lg.text-memory-title-rule { width:24mm; }
 .text-tier-md.text-memory-title-rule { width:30mm; }
@@ -1148,10 +1145,13 @@ body.print-bleed .bleed-x {
 .quote-variant-guillemet.quote-tier-lg .text-memory-column { max-width:112mm; }
 .quote-variant-dropcap.quote-tier-md .text-memory-column { max-width:136mm; }
 .quote-variant-dropcap.quote-tier-sm .text-memory-column { max-width:130mm; }
-/* Espacements Petits mots — valeurs = pdfPreviewTypo.ts (PDF_TEXT_MEMORY_*_MM, PDF_GUILLEMET_*) */
-.quote-variant-titled.quote-tier-lg .text-memory-title-block { padding-bottom:5mm; }
-.quote-variant-titled.quote-tier-md .text-memory-title-block { padding-bottom:4.5mm; }
-.quote-variant-titled.quote-tier-sm .text-memory-title-block { padding-bottom:4mm; }
+/*
+ * Filet → corps : un peu plus d’air que la maquette pour compenser le margin-top PDF
+ * réduit (filet au milieu titre/texte).
+ */
+.quote-variant-titled.quote-tier-lg .text-memory-title-block { padding-bottom:6.5mm; }
+.quote-variant-titled.quote-tier-md .text-memory-title-block { padding-bottom:6mm; }
+.quote-variant-titled.quote-tier-sm .text-memory-title-block { padding-bottom:5.5mm; }
 .quote-footer-block {
   flex-shrink:0;
   margin-top:auto;
@@ -1275,8 +1275,8 @@ body.print-bleed .bleed-x {
   font-family:'Manrope',sans-serif;
   font-style:normal;
   font-weight:300;
-  font-size:12pt;
-  line-height:17pt;
+  font-size:10pt;
+  line-height:14pt;
   letter-spacing:0.04em;
   color:#1C1C1E;
   text-align:left;
