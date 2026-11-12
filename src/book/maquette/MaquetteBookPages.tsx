@@ -49,6 +49,7 @@ import {
   pdfLabelStyle,
   PDF_MEDIA_QR_GAP_MM,
   PDF_MEDIA_QR_PULL_UP_MM,
+  PDF_MEDIA_CAPTION_BELOW_DATE_MM,
   PDF_MEDIA_QR_CARD_BORDER_COLOR,
   PDF_MEDIA_QR_MUTED_COLOR,
   PDF_MEDIA_TEXT_PAD_X_MM,
@@ -1367,7 +1368,12 @@ function MaquettePhotoSimple({
             </Text>
           ) : null}
         </View>
-        <View style={styles.mediaQrBodyWrap}>
+        <View
+          style={[
+            styles.mediaQrBodyWrap,
+            { paddingTop: pdfMmToPreviewPxH(PDF_MEDIA_CAPTION_BELOW_DATE_MM, height) },
+          ]}
+        >
           {caption.length > 0 ? (
             <Text
               style={[
@@ -1471,7 +1477,7 @@ function MaquettePhotoNote({
           <View
             style={[
               styles.page4MetaRow,
-              { marginBottom: pdfMmToPreviewPxH(2, height), gap: pdfMmToPreviewPxW(3, width) },
+              { marginBottom: 0, gap: pdfMmToPreviewPxW(3, width) },
             ]}
           >
             <Text style={[styles.page4Meta, pdfLabelStyle(width), dm400 && { fontFamily: dm400 }]}>
@@ -1486,7 +1492,12 @@ function MaquettePhotoNote({
               </Text>
             ) : null}
           </View>
-          <View style={styles.mediaQrBodyWrap}>
+          <View
+            style={[
+              styles.mediaQrBodyWrap,
+              { paddingTop: pdfMmToPreviewPxH(PDF_MEDIA_CAPTION_BELOW_DATE_MM, height) },
+            ]}
+          >
             {legend.length > 0 ? (
               <Text
                 style={[
@@ -2021,13 +2032,19 @@ function MaquetteMediaQr({
           </View>
         </View>
         <View style={[styles.mediaQrSep, { marginHorizontal: mediaPad }]} />
-        <View style={styles.mediaQrBodyWrap}>
+        <View
+          style={[
+            styles.mediaQrBodyWrap,
+            { paddingTop: pdfMmToPreviewPxH(PDF_MEDIA_CAPTION_BELOW_DATE_MM, height) },
+          ]}
+        >
           <View
             style={[
               styles.mediaQrBodyRow,
               {
                 paddingHorizontal: mediaPad,
                 gap: bodyGap,
+                alignItems: 'flex-start',
               },
             ]}
           >
@@ -2454,7 +2471,7 @@ const styles = StyleSheet.create({
   mediaQrBodyWrap: {
     flex: 1,
     minHeight: 0,
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
   },
   audioLower: {
     flex: 1,

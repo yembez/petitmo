@@ -120,6 +120,12 @@ export const PDF_MEDIA_CAPTION_LH = PDF_MEDIA_CAPTION_LINE_PT / PDF_MEDIA_CAPTIO
 export const PDF_MEDIA_QR_PULL_UP_MM = 7;
 
 /**
+ * Espace date → légende (photo / photo-note / A/V) — ~1 cm sous la date,
+ * pas de centrage vertical dans le bas de page. Miroir `htmlBook.ts`.
+ */
+export const PDF_MEDIA_CAPTION_BELOW_DATE_MM = 10;
+
+/**
  * Marge horizontale dédiée aux **textes sous les médias** (photo pleine page, photo-note,
  * audio/vidéo QR) — plus large que `--pad-x` (15 mm) des pages texte/chapitre/citation,
  * pour aérer la colonne et laisser plus de blanc des deux côtés.

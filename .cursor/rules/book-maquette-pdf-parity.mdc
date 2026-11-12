@@ -138,7 +138,7 @@ Toutes dans `src/book/pdfPreviewTypo.ts` — **reporter les mêmes valeurs** dan
 
 ### Audio / vidéo (gabarit unifié `MaquetteMediaQr`)
 
-Audio **et** vidéo partagent strictement la même mise en page : **visuel** (couverture optionnelle) → date/lieu (collés sous la photo) → **trait de séparation** → bloc `[ légende | carte QR ]` **centré verticalement** entre le trait et le bas de page. Pas de lecteur audio (waveform / play / durée supprimés), pas de pastille type, pas de titre.
+Audio **et** vidéo partagent strictement la même mise en page : **visuel** (couverture optionnelle) → date/lieu (collés sous la photo) → **trait de séparation** → bloc `[ légende | carte QR ]` **collé sous la date** (`PDF_MEDIA_CAPTION_BELOW_DATE_MM` = **10 mm**, pas de centrage bas de page). Pas de lecteur audio (waveform / play / durée supprimés), pas de pastille type, pas de titre.
 
 | Élément | Spec |
 |---------|------|
@@ -147,7 +147,7 @@ Audio **et** vidéo partagent strictement la même mise en page : **visuel** (co
 | Méta | Date·âge à gauche, **lieu à droite** — collés sous la photo (`.media-qr-meta-row`, padding-top page 2,5 mm) |
 | Trait | Filet `.media-qr-sep` juste sous la méta (`mediaQrSep`) |
 | Légende | **EB Garamond droit 11 pt**, interligne 1,5, **aligné à gauche**, alinéa par paragraphe — **6 lignes max** (`MAX_MEDIA_CAPTION_LINES`), ~55 car/ligne (`MEDIA_CAPTION_CHARS_PER_LINE`) |
-| Centrage | Bloc texte + carte **centré verticalement** (`.media-qr-body-wrap` / `mediaQrBodyWrap`) |
+| Position légende | **10 mm** sous la date (photo-full / photo-note / A/V) — `justify-content:flex-start` + `padding-top` |
 | Carte QR | Bloc à droite, **bordure grise `#D8D8DD`**, **angles carrés (radius 0)**, largeur **38 mm**, padding 4 mm (`PDF_MEDIA_QR_CARD_*`) |
 | Contenu carte | Libellé haut (gris `#AEAEB2`) → **QR 18 mm** (`PDF_MEDIA_QR_QR_MM`) → ligne basse : mot + pictogramme |
 | Libellé | Audio « **Scanner pour écouter** » · Vidéo « **Scanner pour visionner** » |

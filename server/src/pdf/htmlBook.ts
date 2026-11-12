@@ -978,7 +978,9 @@ body.print-bleed .chapter-inner {
 }
 .pf-body-wrap {
   flex:1; min-height:0;
-  display:flex; flex-direction:column; justify-content:center;
+  display:flex; flex-direction:column; justify-content:flex-start;
+  /* PDF_MEDIA_CAPTION_BELOW_DATE_MM — colle la legende sous la date (~1 cm). */
+  padding-top:10mm;
 }
 .pf-variant-fp .pf-footer {
   flex:0 0 var(--pf-fp-footer-h);
@@ -1038,7 +1040,9 @@ body.print-bleed .pf-footer {
 }
 .pn-body-wrap {
   flex:1; min-height:0;
-  display:flex; flex-direction:column; justify-content:center;
+  display:flex; flex-direction:column; justify-content:flex-start;
+  /* PDF_MEDIA_CAPTION_BELOW_DATE_MM */
+  padding-top:10mm;
 }
 body.print-bleed .pn-text {
   padding-left:var(--media-pad-x-safe);
@@ -1046,7 +1050,7 @@ body.print-bleed .pn-text {
 }
 .pn-meta-row {
   display:flex; justify-content:space-between; align-items:flex-start;
-  gap:3mm; flex-shrink:0; margin-bottom:2mm;
+  gap:3mm; flex-shrink:0; margin-bottom:0;
 }
 .pn-meta-loc {
   font-weight:600; color:#AEAEB2; letter-spacing:.15pt; text-transform:none;
@@ -1259,12 +1263,14 @@ body.print-bleed .bleed-x {
   flex:1;
   min-height:0;
   display:flex;
-  align-items:center;
+  align-items:flex-start;
+  /* PDF_MEDIA_CAPTION_BELOW_DATE_MM — sous date + filet, pas centre bas de page. */
+  padding-top:10mm;
 }
 .media-qr-body-row {
   display:flex;
   flex-direction:row;
-  align-items:center;
+  align-items:flex-start;
   gap:6mm;
   width:100%;
 }
