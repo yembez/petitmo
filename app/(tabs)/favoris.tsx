@@ -1,4 +1,12 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MutableRefObject,
+} from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   View,
@@ -21,6 +29,7 @@ import Reanimated, {
   Easing,
   SlideInDown,
   SlideOutDown,
+  useAnimatedReaction,
   useAnimatedScrollHandler,
   useAnimatedStyle,
   useSharedValue,
@@ -300,11 +309,18 @@ function SlideshowSlideImage({
 function FavorisSlideshow({
   items,
   height,
-  isActive,
+  isTabFocused,
+  playingRef,
+  playingSv,
 }: {
   items: FavListItem[];
   height: number;
-  isActive: boolean;
+  /** Focus onglet seulement — pas le pause scroll (évite remount header). */
+  isTabFocused: boolean;
+  /** Pause scroll sans setState parent (ref lue dans l’interval). */
+  playingRef: MutableRefObject<boolean>;
+  /** 1 = play, 0 = pause — annule le zoom Ken Burns sur UI thread. */
+  playingSv: SharedValue<number>;
 }) {
   const n = items.length;
   const itemsKey = useMemo(() => items.map(i => i.key).join('\0'), [items]);
@@ -344,14 +360,17 @@ function FavorisSlideshow({
     }
   }, [itemsKey, n]);
 
+  const isPlaying = () => isTabFocused && playingRef.current;
+
   useEffect(() => {
-    if (!isActive || n === 0) {
+    if (!isTabFocused || n === 0) {
       cancelAnimation(scale0);
       cancelAnimation(scale1);
       scale0.value = withTiming(SLIDESHOW_ZOOM_END, { duration: 220, easing: Easing.out(Easing.cubic) });
       scale1.value = withTiming(SLIDESHOW_ZOOM_END, { duration: 220, easing: Easing.out(Easing.cubic) });
       return;
     }
+    if (!playingRef.current) return;
     if (n === 1) {
       cancelAnimation(scale0);
       scale0.value = SLIDESHOW_ZOOM_START;
@@ -374,10 +393,29 @@ function FavorisSlideshow({
     });
     cancelAnimation(sBack);
     sBack.value = SLIDESHOW_ZOOM_START;
-  }, [isActive, n, topLayer, visibleIdx, itemsKey, scale0, scale1]);
+  }, [isTabFocused, n, topLayer, visibleIdx, itemsKey, scale0, scale1, playingRef]);
+
+  /** Pause scroll : gèle le Ken Burns sans setState / remount du header FlatList. */
+  useAnimatedReaction(
+    () => playingSv.value,
+    (playing, prev) => {
+      if (playing !== 0 || prev === 0) return;
+      cancelAnimation(scale0);
+      cancelAnimation(scale1);
+      scale0.value = withTiming(SLIDESHOW_ZOOM_END, {
+        duration: 180,
+        easing: Easing.out(Easing.cubic),
+      });
+      scale1.value = withTiming(SLIDESHOW_ZOOM_END, {
+        duration: 180,
+        easing: Easing.out(Easing.cubic),
+      });
+    },
+    [scale0, scale1],
+  );
 
   const tryAdvance = useCallback(() => {
-    if (n <= 1) return;
+    if (n <= 1 || !playingRef.current) return;
     const t = topLayerRef.current;
     const hidden = (1 - t) as 0 | 1;
     if (!readyRef.current[hidden]) {
@@ -387,33 +425,36 @@ function FavorisSlideshow({
     pendingAdvanceRef.current = false;
     setTopLayer(t === 0 ? 1 : 0);
     setVisibleIdx(i => (i + 1) % n);
-  }, [n]);
+  }, [n, playingRef]);
 
   const onLayer0Load = useCallback(() => {
     readyRef.current[0] = true;
-    if (pendingAdvanceRef.current) tryAdvance();
-  }, [tryAdvance]);
+    if (pendingAdvanceRef.current && playingRef.current) tryAdvance();
+  }, [tryAdvance, playingRef]);
 
   const onLayer1Load = useCallback(() => {
     readyRef.current[1] = true;
-    if (pendingAdvanceRef.current) tryAdvance();
-  }, [tryAdvance]);
+    if (pendingAdvanceRef.current && playingRef.current) tryAdvance();
+  }, [tryAdvance, playingRef]);
 
   useEffect(() => {
-    if (!isActive || n <= 1) return;
-    const id = setInterval(() => tryAdvance(), SLIDESHOW_SLIDE_TOTAL_MS);
+    if (!isTabFocused || n <= 1) return;
+    const id = setInterval(() => {
+      if (!playingRef.current) return;
+      tryAdvance();
+    }, SLIDESHOW_SLIDE_TOTAL_MS);
     return () => clearInterval(id);
-  }, [isActive, n, tryAdvance]);
+  }, [isTabFocused, n, tryAdvance, playingRef]);
 
   const onSingleImageLoad = useCallback(() => {
-    if (!isActive || n !== 1) return;
+    if (!isPlaying() || n !== 1) return;
     cancelAnimation(scale0);
     scale0.value = SLIDESHOW_ZOOM_START;
     scale0.value = withTiming(SLIDESHOW_ZOOM_END, {
       duration: SLIDESHOW_ZOOM_MS,
       easing: Easing.linear,
     });
-  }, [isActive, n, scale0]);
+  }, [isTabFocused, n, scale0, playingRef]);
 
   const layer0Style = useAnimatedStyle(() => ({
     transform: [{ scale: scale0.value }],
@@ -471,6 +512,8 @@ type HeroSlideshowListHeaderProps = {
   slideshowItems: FavListItem[];
   heroHeight: number;
   isTabFocused: boolean;
+  playingRef: MutableRefObject<boolean>;
+  playingSv: SharedValue<number>;
 };
 
 /** Diaporama seul dans l’en-tête de liste (titre + CTAs : barre fixe au-dessus de la FlatList). */
@@ -479,6 +522,8 @@ function HeroSlideshowListHeader({
   slideshowItems,
   heroHeight,
   isTabFocused,
+  playingRef,
+  playingSv,
 }: HeroSlideshowListHeaderProps) {
   const imageMotionStyle = useAnimatedStyle(() => {
     const y = scrollY.value;
@@ -498,7 +543,9 @@ function HeroSlideshowListHeader({
           <FavorisSlideshow
             items={slideshowItems}
             height={heroHeight}
-            isActive={isTabFocused && heroHeight > 8}
+            isTabFocused={isTabFocused && heroHeight > 8}
+            playingRef={playingRef}
+            playingSv={playingSv}
           />
         </Reanimated.View>
       </View>
@@ -1322,10 +1369,11 @@ export const FavorisScreen = memo(function FavorisScreen({
   /** Offset de scroll (UI thread) : zoom léger au pull sur le héros */
   const galleryScrollY = useSharedValue(0);
   /**
-   * Pause le diaporama pendant / après le scroll grille :
-   * sinon zoom Reanimated + setInterval + remount header = scroll saccadé.
+   * Pause diaporama pendant le scroll **sans** setState :
+   * un setState recréait ListHeaderComponent → remount héros = saccades.
    */
-  const [heroSlideshowPlaying, setHeroSlideshowPlaying] = useState(true);
+  const heroSlideshowPlayingRef = useRef(true);
+  const heroSlideshowPlayingSv = useSharedValue(1);
   const heroResumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [bookModalVisible, setBookModalVisible] = useState(false);
   const [createBookFlowTitle, setCreateBookFlowTitle] = useState<string | null>(null);
@@ -1915,13 +1963,15 @@ export const FavorisScreen = memo(function FavorisScreen({
         scrollY={galleryScrollY}
         slideshowItems={slideshowItems}
         heroHeight={heroHeight}
-        isTabFocused={isTabFocused && heroSlideshowPlaying}
+        isTabFocused={isTabFocused}
+        playingRef={heroSlideshowPlayingRef}
+        playingSv={heroSlideshowPlayingSv}
       />
     );
   }, [
     galleryScrollY,
     heroHeight,
-    heroSlideshowPlaying,
+    heroSlideshowPlayingSv,
     isBookAddFromSpreadFlow,
     isTabFocused,
     slideshowItems,
@@ -1949,8 +1999,9 @@ export const FavorisScreen = memo(function FavorisScreen({
       clearTimeout(heroResumeTimerRef.current);
       heroResumeTimerRef.current = null;
     }
-    setHeroSlideshowPlaying(false);
-  }, []);
+    heroSlideshowPlayingRef.current = false;
+    heroSlideshowPlayingSv.value = 0;
+  }, [heroSlideshowPlayingSv]);
 
   const scheduleHeroSlideshowResume = useCallback(
     (offsetY: number) => {
@@ -1958,10 +2009,12 @@ export const FavorisScreen = memo(function FavorisScreen({
       heroResumeTimerRef.current = setTimeout(() => {
         heroResumeTimerRef.current = null;
         /** Reprend seulement près du haut — sinon le diapo tourne pour rien sous la grille. */
-        setHeroSlideshowPlaying(offsetY < Math.max(48, heroHeight * 0.28));
+        const play = offsetY < Math.max(48, heroHeight * 0.28);
+        heroSlideshowPlayingRef.current = play;
+        heroSlideshowPlayingSv.value = play ? 1 : 0;
       }, 220);
     },
-    [heroHeight],
+    [heroHeight, heroSlideshowPlayingSv],
   );
 
   useEffect(() => {
@@ -1983,15 +2036,6 @@ export const FavorisScreen = memo(function FavorisScreen({
       galleryScrollY.value = e.contentOffset.y;
     },
   });
-
-  const galleryGetItemLayout = useCallback(
-    (_: ArrayLike<FavListItem> | null | undefined, index: number) => {
-      const row = Math.floor(index / columns);
-      const rowStride = tileSize + gridGap;
-      return { length: tileSize, offset: row * rowStride, index };
-    },
-    [columns, gridGap, tileSize],
-  );
 
   useTabBlankWatchdog('favoris', {
     blank: loading || (!hasChild && !peekHasRealAuthAccount()),
@@ -2074,7 +2118,7 @@ export const FavorisScreen = memo(function FavorisScreen({
                 updateCellsBatchingPeriod={isBookAddFromSpreadFlow ? 50 : 64}
                 initialNumToRender={isBookAddFromSpreadFlow ? 15 : 9}
                 removeClippedSubviews={Platform.OS === 'android'}
-                getItemLayout={galleryGetItemLayout}
+                /** Pas de getItemLayout : incompatible avec numColumns (offsets faux → saccades). */
                 ListHeaderComponent={favoritesListHeader}
                 extraData={galleryExtraData}
                 onScroll={isBookAddFromSpreadFlow ? undefined : onGalleryScroll}

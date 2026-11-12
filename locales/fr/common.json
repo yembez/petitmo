@@ -399,6 +399,14 @@
     "toolbarWrite": "Écrire",
     "toolbarWriteA11y": "Écrire le texte de la page",
     "listNoPages": "Aucune page",
+    "rename": {
+      "title": "Modifier le titre",
+      "sub": "Le titre apparaît sur la couverture et dans ta liste de livres.",
+      "placeholder": "Titre du livre",
+      "save": "Enregistrer",
+      "cancel": "Annuler",
+      "a11y": "Modifier le titre du livre {{title}}"
+    },
     "photoFit": {
       "original": "Format original",
       "originalA11y": "Afficher la photo en format original",

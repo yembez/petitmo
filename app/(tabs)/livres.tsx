@@ -19,7 +19,7 @@ import Animated from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { Plus } from 'lucide-react-native';
+import { Pencil, Plus } from 'lucide-react-native';
 import { Inter_500Medium, Inter_700Bold } from '@expo-google-fonts/inter';
 import { useFonts } from '@expo-google-fonts/dm-sans';
 import {
@@ -86,6 +86,7 @@ type BookListRowProps = {
   listTitleFontFamily?: string;
   listMetaFontFamily?: string;
   onOpen: (book: Book) => void;
+  onRename: (book: Book) => void;
   onDelete: (book: Book) => void;
   onCoverColorChange: (book: Book, colorId: BookCoverColorId) => void;
 };
@@ -113,6 +114,7 @@ function bookListRowPropsEqual(prev: BookListRowProps, next: BookListRowProps): 
   if (prev.listMetaFontFamily !== next.listMetaFontFamily) return false;
   if (
     prev.onOpen !== next.onOpen ||
+    prev.onRename !== next.onRename ||
     prev.onDelete !== next.onDelete ||
     prev.onCoverColorChange !== next.onCoverColorChange
   ) {
@@ -139,6 +141,7 @@ const BookListRow = memo(function BookListRow({
   listTitleFontFamily,
   listMetaFontFamily,
   onOpen,
+  onRename,
   onDelete,
   onCoverColorChange,
 }: BookListRowProps) {
@@ -212,17 +215,35 @@ const BookListRow = memo(function BookListRow({
             periodFontFamily={coverPeriodFontFamily}
           />
           <View style={styles.rowText}>
-            <Text
-              style={[
-                styles.rowTitle,
-                listTitleFontFamily
-                  ? { fontFamily: listTitleFontFamily }
-                  : { fontWeight: '700' },
-              ]}
-              numberOfLines={2}
-            >
-              {book.title}
-            </Text>
+            <View style={styles.rowTitleRow}>
+              <Text
+                style={[
+                  styles.rowTitle,
+                  listTitleFontFamily
+                    ? { fontFamily: listTitleFontFamily }
+                    : { fontWeight: '700' },
+                ]}
+                numberOfLines={2}
+              >
+                {book.title}
+              </Text>
+              <GestureTouchableOpacity
+                onPress={() => {
+                  /** Évite d’ouvrir le livre si le parent reçoit aussi le press. */
+                  suppressRowPressRef.current = true;
+                  onRename(book);
+                  setTimeout(() => {
+                    suppressRowPressRef.current = false;
+                  }, 120);
+                }}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                accessibilityRole="button"
+                accessibilityLabel={t('book.rename.a11y', { title: book.title })}
+                style={styles.rowRenameBtn}
+              >
+                <Pencil size={scale(15)} color={THEME.textMuted} strokeWidth={2} />
+              </GestureTouchableOpacity>
+            </View>
             <Text
               style={[
                 styles.rowMeta,
@@ -307,12 +328,17 @@ function CreateBookListTile({
   );
 }
 
+type TitleModalState =
+  | { mode: 'create' }
+  | { mode: 'rename'; book: Book };
+
 function LivresScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { t } = useAppTranslation('common');
   const [books, setBooks] = useState<Book[]>(() => [...feedBooksHydrationSnapshot]);
   const [refreshing, setRefreshing] = useState(false);
-  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [titleModal, setTitleModal] = useState<TitleModalState | null>(null);
   const [draftTitle, setDraftTitle] = useState('');
   const booksRef = useRef(books);
   const booksSigRef = useRef(booksListVisualSignature(books));
@@ -468,7 +494,16 @@ function LivresScreen() {
 
   const openCreateFlow = useCallback(() => {
     setDraftTitle('');
-    setCreateModalOpen(true);
+    setTitleModal({ mode: 'create' });
+  }, []);
+
+  const openRenameFlow = useCallback((book: Book) => {
+    setDraftTitle(book.title);
+    setTitleModal({ mode: 'rename', book });
+  }, []);
+
+  const closeTitleModal = useCallback(() => {
+    setTitleModal(null);
   }, []);
 
   const renderBookRow = useCallback(
@@ -480,6 +515,7 @@ function LivresScreen() {
         listTitleFontFamily={listTitleFontFamily}
         listMetaFontFamily={listMetaFontFamily}
         onOpen={openBook}
+        onRename={openRenameFlow}
         onDelete={confirmDelete}
         onCoverColorChange={handleCoverColorChange}
       />
@@ -490,6 +526,7 @@ function LivresScreen() {
       listTitleFontFamily,
       listMetaFontFamily,
       openBook,
+      openRenameFlow,
       confirmDelete,
       handleCoverColorChange,
     ]
@@ -497,7 +534,7 @@ function LivresScreen() {
 
   const startCreateFlowToFavoris = useCallback(() => {
     const title = draftTitle.trim();
-    setCreateModalOpen(false);
+    setTitleModal(null);
     // On ne crée PAS le livre ici. On passe par Favoris pour sélectionner,
     // puis Favoris créera le livre + injectera la sélection.
     router.push({
@@ -505,6 +542,30 @@ function LivresScreen() {
       params: { createBookTitle: title || 'Nouveau livre' },
     });
   }, [draftTitle, router]);
+
+  const saveRenameTitle = useCallback(() => {
+    if (!titleModal || titleModal.mode !== 'rename') return;
+    const book = titleModal.book;
+    const title = draftTitle.trim() || book.title;
+    const nextBook = { ...book, title };
+    setTitleModal(null);
+    setBooks(prev => {
+      const next = prev.map(x => (x.id === book.id ? nextBook : x));
+      booksSigRef.current = booksListVisualSignature(next);
+      setFeedBooksHydrationSnapshot(next);
+      return next;
+    });
+    void upsertBook(nextBook).catch(() => {});
+  }, [titleModal, draftTitle]);
+
+  const submitTitleModal = useCallback(() => {
+    if (!titleModal) return;
+    if (titleModal.mode === 'create') {
+      startCreateFlowToFavoris();
+      return;
+    }
+    saveRenameTitle();
+  }, [titleModal, startCreateFlowToFavoris, saveRenameTitle]);
 
   useTabBlankWatchdog('livres', {
     blank: false,
@@ -551,40 +612,62 @@ function LivresScreen() {
         renderItem={renderBookRow}
       />
 
-      <Modal visible={createModalOpen} transparent animationType="fade" onRequestClose={() => setCreateModalOpen(false)}>
+      <Modal
+        visible={titleModal != null}
+        transparent
+        animationType="fade"
+        onRequestClose={closeTitleModal}
+      >
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={[styles.modalBackdrop, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 }]}
         >
-          <Pressable style={{ flex: 1 }} onPress={() => setCreateModalOpen(false)}>
+          <Pressable style={{ flex: 1 }} onPress={closeTitleModal}>
             <Pressable style={styles.modalCard} onPress={e => e.stopPropagation()}>
-              <Text style={styles.modalTitle}>Créer un nouveau livre</Text>
+              <Text style={styles.modalTitle}>
+                {titleModal?.mode === 'rename'
+                  ? t('book.rename.title')
+                  : 'Créer un nouveau livre'}
+              </Text>
               <Text style={styles.modalSub}>
-                Donne un titre, puis tu seras redirigé vers Favoris pour sélectionner les souvenirs à ajouter.
+                {titleModal?.mode === 'rename'
+                  ? t('book.rename.sub')
+                  : 'Donne un titre, puis tu seras redirigé vers Favoris pour sélectionner les souvenirs à ajouter.'}
               </Text>
               <TextInput
                 value={draftTitle}
                 onChangeText={setDraftTitle}
-                placeholder="Titre du livre (optionnel)"
+                placeholder={
+                  titleModal?.mode === 'rename'
+                    ? t('book.rename.placeholder')
+                    : 'Titre du livre (optionnel)'
+                }
                 placeholderTextColor={THEME.textMuted}
                 style={styles.modalInput}
                 returnKeyType="done"
-                onSubmitEditing={startCreateFlowToFavoris}
+                onSubmitEditing={submitTitleModal}
+                autoFocus={titleModal?.mode === 'rename'}
               />
               <View style={styles.modalBtns}>
                 <TouchableOpacity
                   style={styles.modalBtnGhost}
-                  onPress={() => setCreateModalOpen(false)}
+                  onPress={closeTitleModal}
                   activeOpacity={0.9}
                 >
-                  <Text style={styles.modalBtnGhostText}>Annuler</Text>
+                  <Text style={styles.modalBtnGhostText}>
+                    {titleModal?.mode === 'rename' ? t('book.rename.cancel') : 'Annuler'}
+                  </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.modalBtnCta}
-                  onPress={startCreateFlowToFavoris}
+                  onPress={submitTitleModal}
                   activeOpacity={0.9}
                 >
-                  <Text style={styles.modalBtnCtaText}>Choisir des favoris →</Text>
+                  <Text style={styles.modalBtnCtaText}>
+                    {titleModal?.mode === 'rename'
+                      ? t('book.rename.save')
+                      : 'Choisir des favoris →'}
+                  </Text>
                 </TouchableOpacity>
               </View>
             </Pressable>
@@ -750,9 +833,20 @@ const styles = StyleSheet.create({
     minWidth: 0,
     justifyContent: 'center',
   },
+  rowTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: scale(6),
+  },
   rowTitle: {
+    flex: 1,
+    minWidth: 0,
     fontSize: scale(16),
     color: THEME.textPrimary,
+  },
+  rowRenameBtn: {
+    marginTop: verticalScale(2),
+    padding: scale(2),
   },
   rowMeta: {
     marginTop: verticalScale(4),

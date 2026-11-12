@@ -399,6 +399,14 @@
     "toolbarWrite": "Write",
     "toolbarWriteA11y": "Write the page text",
     "listNoPages": "No pages",
+    "rename": {
+      "title": "Edit title",
+      "sub": "The title appears on the cover and in your book list.",
+      "placeholder": "Book title",
+      "save": "Save",
+      "cancel": "Cancel",
+      "a11y": "Edit title of book {{title}}"
+    },
     "photoFit": {
       "original": "Original format",
       "originalA11y": "Show photo in original format",

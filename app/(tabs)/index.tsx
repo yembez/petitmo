@@ -129,7 +129,10 @@ import {
   CHILD_PROFILE_PHOTO_ASPECT_COMPACT,
 } from '@/utils/captureHeroMetrics';
 
-/** Tailles maquette capture (px logiques). */
+/**
+ * Titre Capturer : taille figée (`allowFontScaling={false}` = curseur iOS off, pas la famille).
+ * Police système = aucun `fontFamily` (comme les CTA) — surtout pas `'System'` sous Expo.
+ */
 const CAPTURE_TITLE_FONT_SIZE = 22;
 const CAPTURE_TITLE_LINE_HEIGHT = 28;
 const CAPTURE_TITLE_HEART_SIZE = scale(24);
@@ -291,9 +294,6 @@ function CapturerScreen() {
   /** Date un peu plus épaisse ; marque en Regular. */
   const captureHeaderDateFont = nimbusReady ? 'NimbusSans_700Bold' : undefined;
   const captureHeaderBrandFont = nimbusReady ? 'NimbusSans_400Regular' : undefined;
-  /** Titre hero — police système (SF Pro sur iOS). */
-  const captureTitleFont = undefined;
-  const captureTitleBoldFont = undefined;
   const captureSubtitleFont = captureFontsReady ? 'Manrope_400Regular' : undefined;
   const capturePhotoPillNameFont = captureFontsReady ? 'Manrope_700Bold' : undefined;
   /** Libellés CTA — police système (SF Pro sur iOS). */
@@ -926,14 +926,11 @@ function CapturerScreen() {
                       {/* 2 lignes stables : un prénom long ne doit jamais manger « aujourd’hui ». */}
                       <View style={styles.captureV9TitleLine}>
                         <Text
-                          style={[
-                            styles.captureV9Title,
-                            styles.captureV9TitleFlex,
-                            loadedFontStyle(captureTitleFont) ?? { fontWeight: '500' },
-                          ]}
+                          style={[styles.captureV9Title, styles.captureV9TitleFlex]}
                           numberOfLines={1}
                           adjustsFontSizeToFit
                           minimumFontScale={0.78}
+                          allowFontScaling={false}
                         >
                           Quel souvenir pour {childGivenName || "l'enfant"}{' '}
                         </Text>
@@ -947,11 +944,9 @@ function CapturerScreen() {
                         />
                       </View>
                       <Text
-                        style={[
-                          styles.captureV9Title,
-                          loadedFontStyle(captureTitleFont) ?? { fontWeight: '500' },
-                        ]}
+                        style={[styles.captureV9Title, styles.captureTitleBold]}
                         numberOfLines={1}
+                        allowFontScaling={false}
                       >
                         aujourd&apos;hui ?
                       </Text>
@@ -1024,13 +1019,11 @@ function CapturerScreen() {
               {isFamilyMosaic ? (
                 <View style={styles.captureTitleStack}>
                   <Text
-                    style={[
-                      styles.captureTitle,
-                      loadedFontStyle(captureTitleFont) ?? { fontWeight: '400' },
-                    ]}
+                    style={styles.captureTitle}
                     numberOfLines={1}
                     adjustsFontSizeToFit
                     minimumFontScale={0.88}
+                    allowFontScaling={false}
                   >
                     Quel souvenir pour vos petits cœurs
                   </Text>
@@ -1042,11 +1035,8 @@ function CapturerScreen() {
                       style={styles.captureTitleHeartLeading}
                     />
                     <Text
-                      style={[
-                        styles.captureTitle,
-                        styles.captureTitleBold,
-                        loadedFontStyle(captureTitleBoldFont) ?? { fontWeight: '600' },
-                      ]}
+                      style={[styles.captureTitle, styles.captureTitleBold]}
+                      allowFontScaling={false}
                     >
                       aujourd&apos;hui ?
                     </Text>
@@ -1055,10 +1045,8 @@ function CapturerScreen() {
               ) : (
                 <View style={styles.captureTitleRow}>
                   <Text
-                    style={[
-                      styles.captureTitle,
-                      loadedFontStyle(captureTitleFont) ?? { fontWeight: '400' },
-                    ]}
+                    style={styles.captureTitle}
+                    allowFontScaling={false}
                   >
                     Quel souvenir pour {childGivenName || "l'enfant"}{' '}
                   </Text>
@@ -1069,11 +1057,8 @@ function CapturerScreen() {
                     style={styles.captureTitleHeart}
                   />
                   <Text
-                    style={[
-                      styles.captureTitle,
-                      styles.captureTitleBold,
-                      loadedFontStyle(captureTitleBoldFont) ?? { fontWeight: '600' },
-                    ]}
+                    style={[styles.captureTitle, styles.captureTitleBold]}
+                    allowFontScaling={false}
                   >
                     aujourd&apos;hui ?
                   </Text>
@@ -1533,15 +1518,15 @@ const styles = StyleSheet.create({
   },
   /** Date du jour — Nimbus Sans Bold (un peu plus épaisse). */
   captureHeaderDate: {
-    fontSize: scale(15),
-    lineHeight: scale(19),
+    fontSize: scale(17),
+    lineHeight: scale(21),
     color: THEME.textPrimary,
     letterSpacing: -0.15,
   },
-  /** Marque à droite de la date — Nimbus Sans Regular, petit. */
+  /** Marque à droite de la date — Nimbus Sans Regular. */
   captureHeaderBrand: {
-    fontSize: scale(13),
-    lineHeight: scale(16),
+    fontSize: scale(15),
+    lineHeight: scale(18),
     color: THEME.textPrimary,
     opacity: 0.55,
     letterSpacing: -0.1,
@@ -1695,10 +1680,15 @@ const styles = StyleSheet.create({
     gap: verticalScale(2),
   },
   captureV9Title: {
-    fontSize: scale(22),
-    lineHeight: scale(28),
+    fontSize: scale(CAPTURE_TITLE_FONT_SIZE),
+    lineHeight: scale(CAPTURE_TITLE_LINE_HEIGHT),
     color: '#FFFFFF',
     letterSpacing: -0.3,
+    /**
+     * Police système = **ne pas** poser `fontFamily`.
+     * `fontFamily: 'System'` est mal résolu sous Expo et peut retomber sur Manrope chargée.
+     */
+    fontWeight: '400',
     /** Halo diffus (pas d’ombre dure directionnelle). */
     textShadowColor: 'rgba(0, 0, 0, 0.28)',
     textShadowOffset: { width: 0, height: 0 },
@@ -1756,14 +1746,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   captureTitle: {
-    fontSize: CAPTURE_TITLE_FONT_SIZE,
-    lineHeight: CAPTURE_TITLE_LINE_HEIGHT,
+    /** Même base que mono V9 (`captureV9Title`) — multi inclus. */
+    fontSize: scale(CAPTURE_TITLE_FONT_SIZE),
+    lineHeight: scale(CAPTURE_TITLE_LINE_HEIGHT),
     color: THEME.textPrimary,
     textAlign: 'left',
     letterSpacing: -0.2,
+    fontWeight: '400',
     ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
   },
-  captureTitleBold: {},
+  captureTitleBold: {
+    fontWeight: '600',
+  },
   captureTitleStack: {
     alignSelf: 'stretch',
     alignItems: 'flex-start',
