@@ -92,8 +92,8 @@ import {
   COVER_TEXT_GAP_MM,
 } from '@/constants/bookCoverColors';
 
-/** Alinéa (cadratin) en début de paragraphe — typographie roman. */
-const EM_QUAD = '\u2003';
+/** Alinéa livre — double cadratin (plus marqué que le fil). */
+const EM_QUAD = '\u2003\u2003';
 
 /** Style corps souvenir — DM Sans, pas d’italique hérité (parité fil). */
 function memoryTextStyle(fontFamily: string) {
@@ -105,27 +105,26 @@ function memoryTextStyle(fontFamily: string) {
 }
 
 /**
- * Découpe un texte en paragraphes (double saut de ligne = nouveau paragraphe)
- * et ajoute un alinéa en début de chaque paragraphe.
+ * Livre : chaque retour à la ligne = nouveau paragraphe (+ ligne vide)
+ * et alinéa en tête.
  */
 function romanParagraphs(text: string): string {
   if (!text.trim()) return text;
   return text
-    .split(/\n{2,}/)
+    .split(/\n+/)
     .map(p => p.trim())
     .filter(Boolean)
-    .map(p => `${EM_QUAD}${p.replace(/\n/g, `\n${EM_QUAD}`)}`)
-    .join('\n');
+    .map(p => `${EM_QUAD}${p}`)
+    .join('\n\n');
 }
 
-/** Paragraphes centrés sans alinéa (maquette titre + corps centré). */
+/** Paragraphes centrés sans alinéa — même rythme ligne vide sur `\n`. */
 function centeredBookParagraphs(text: string): string {
   if (!text.trim()) return text;
   return text
-    .split(/\n{2,}/)
+    .split(/\n+/)
     .map(p => p.trim())
     .filter(Boolean)
-    .map(p => p.replace(/\n/g, '\n'))
     .join('\n\n');
 }
 
@@ -155,7 +154,7 @@ function textMemoryTitleBlockMargin(tier: TextMemorySizeTier, pageHeightPx: numb
 
 function splitBookParagraphs(text: string): string[] {
   return text
-    .split(/\n{2,}/)
+    .split(/\n+/)
     .map(p => p.trim())
     .filter(Boolean);
 }

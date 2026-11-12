@@ -40,7 +40,10 @@ import {
   type FamilyChildForAge,
 } from './maquetteAlign';
 
+/** Alinéa légendes média (un cadratin). */
 const EM = '\u2003';
+/** Alinéa Petits mots livre — double cadratin. */
+const BOOK_ALINEA = '\u2003\u2003';
 
 export type BuildBookHtmlInput = {
   coverTitle: string;
@@ -124,6 +127,7 @@ function sanitizeText(s: string): string {
   );
 }
 
+/** Légendes photo/A/V — conserve `\n` soft + `\n\n` paragraphe (un cadratin). */
 function romanHtml(text: string): string {
   const clean = sanitizeText(text);
   if (!clean.trim()) return '';
@@ -139,65 +143,48 @@ function romanHtml(text: string): string {
     .join('\n');
 }
 
-/** Paragraphes centrés sans alinéa (titre + corps centré, paliers lg/md). */
-function romanHtmlCentered(text: string): string {
+/** Petits mots : chaque `\n` = paragraphe (+ ligne vide via margin). */
+function splitTextMemoryParas(text: string): string[] {
   const clean = sanitizeText(text);
-  if (!clean.trim()) return '';
+  if (!clean.trim()) return [];
   return clean
-    .split(/\n{2,}/)
+    .split(/\n+/)
     .map(p => p.trim())
-    .filter(Boolean)
-    .map(p => {
-      const lines = p.split(/\n/).map(l => l.trim()).filter(Boolean);
-      const inner = lines.map(l => esc(l)).join('<br/>\n');
-      return `<p>${inner}</p>`;
-    })
+    .filter(Boolean);
+}
+
+function romanHtmlCentered(text: string): string {
+  return splitTextMemoryParas(text)
+    .map(p => `<p>${esc(p)}</p>`)
     .join('\n');
 }
 
-/** Corps titre long (sm) : 1ʳᵉ ligne sans alinéa, paragraphes suivants avec cadratin. */
 function romanHtmlTitledSm(text: string): string {
-  const clean = sanitizeText(text);
-  if (!clean.trim()) return '';
-  const paragraphs = clean
-    .split(/\n{2,}/)
-    .map(p => p.trim())
-    .filter(Boolean);
-  return paragraphs
-    .map(p => {
-      const lines = p.split(/\n/).map(l => l.trim()).filter(Boolean);
-      const inner = lines.map(l => esc(EM + l)).join('<br/>\n');
-      return `<p>${inner}</p>`;
-    })
+  return splitTextMemoryParas(text)
+    .map(p => `<p>${esc(BOOK_ALINEA + p)}</p>`)
     .join('\n');
 }
 
-/** Lettrine : 1ʳᵉ lettre hors alinéa, reste comme `romanHtml` sans cadratin sur le 1er paragraphe. */
+/** Lettrine : 1ʳᵉ lettre hors alinéa ; chaque `\n` = paragraphe suivant. */
 function romanHtmlDropCap(text: string): string {
-  const clean = sanitizeText(text);
-  if (!clean.trim()) return '';
-  const paragraphs = clean
-    .split(/\n{2,}/)
-    .map(p => p.trim())
-    .filter(Boolean);
+  const paragraphs = splitTextMemoryParas(text);
   if (paragraphs.length === 0) return '';
 
   const firstPara = paragraphs[0]!;
   const capMatch = firstPara.match(/^(\p{L}|\p{N})/u);
   const cap = capMatch?.[0] ?? firstPara.charAt(0);
   const afterCap = capMatch ? firstPara.slice(capMatch.index! + cap.length) : firstPara.slice(1);
-  const firstLines = afterCap.split(/\n/).map(l => l.trim()).filter(Boolean);
-  const firstInner = firstLines
-    .map((l, i) => (i === 0 ? esc(l) : esc(EM + l)))
-    .join('<br/>\n');
-  const firstP = `<p class="dropcap-p"><span class="text-dropcap">${esc(cap)}</span>${firstInner}</p>`;
+  const firstP = `<p class="dropcap-p"><span class="text-dropcap">${esc(cap)}</span>${esc(afterCap.trim())}</p>`;
 
-  const rest = paragraphs.slice(1).map(p => {
-    const lines = p.split(/\n/).map(l => l.trim()).filter(Boolean);
-    const inner = lines.map(l => esc(EM + l)).join('<br/>\n');
-    return `<p>${inner}</p>`;
-  });
+  const rest = paragraphs.slice(1).map(p => `<p>${esc(BOOK_ALINEA + p)}</p>`);
   return [firstP, ...rest].join('\n');
+}
+
+/** Corps Petits mots aligné à gauche avec alinéa (titled non-centré). */
+function romanHtmlTextMemory(text: string): string {
+  return splitTextMemoryParas(text)
+    .map(p => `<p>${esc(BOOK_ALINEA + p)}</p>`)
+    .join('\n');
 }
 
 function monthCaps(label: string): string {
@@ -400,7 +387,7 @@ function pageQuote(
   const centerBody = textMemoryBodyAlignCenter(tier, variant);
   const bodyTextAlign = textMemoryBodyTextAlign(tier, variant);
   const locLabel = bookPdfLocationLabel(m.location);
-  const bodyHtml = centerBody ? romanHtmlCentered(body) : romanHtml(body);
+  const bodyHtml = centerBody ? romanHtmlCentered(body) : romanHtmlTextMemory(body);
   const titledSmBodyHtml = romanHtmlTitledSm(body);
 
   /**
@@ -1153,17 +1140,17 @@ body.print-bleed .bleed-x {
 }
 .text-memory-column {
   width:100%;
-  max-width:140mm;
+  max-width:128mm;
   margin-left:auto;
   margin-right:auto;
 }
-/* variant sur page.quote, tier sur text-memory-* — pas de selecteur compose meme noeud */
-.quote-variant-titled .text-memory-column.text-tier-lg { max-width:128mm; }
-.quote-variant-titled .text-memory-column.text-tier-md { max-width:140mm; }
-.quote-variant-titled .text-memory-column.text-tier-sm { max-width:132mm; }
-.quote-variant-guillemet .text-memory-column.text-tier-lg { max-width:112mm; }
-.quote-variant-dropcap .text-memory-column.text-tier-md { max-width:136mm; }
-.quote-variant-dropcap .text-memory-column.text-tier-sm { max-width:130mm; }
+/* PDF_TEXT_MEMORY_COLUMN_* — colonnes un peu plus etroites */
+.quote-variant-titled .text-memory-column.text-tier-lg { max-width:118mm; }
+.quote-variant-titled .text-memory-column.text-tier-md { max-width:128mm; }
+.quote-variant-titled .text-memory-column.text-tier-sm { max-width:120mm; }
+.quote-variant-guillemet .text-memory-column.text-tier-lg { max-width:100mm; }
+.quote-variant-dropcap .text-memory-column.text-tier-md { max-width:124mm; }
+.quote-variant-dropcap .text-memory-column.text-tier-sm { max-width:118mm; }
 .quote-footer-block {
   flex-shrink:0;
   margin-top:auto;
@@ -1205,18 +1192,18 @@ body.print-bleed .bleed-x {
   line-height:17pt;
   letter-spacing:0.04em;
 }
-/* PDF_TEXT_MEMORY_PARA_GAP_MM — même rythme que maquette (\n\n) / dropcap / titled-sm */
+/* PDF_TEXT_MEMORY_PARA_GAP_MM = 7 — ligne vide entre paragraphes (chaque \\n) */
 .quote-tier-lg .quote-body p,
 .quote-tier-md .quote-body p,
-.quote-tier-sm .quote-body p { margin:0 0 5.5mm; }
+.quote-tier-sm .quote-body p { margin:0 0 7mm; }
 .quote-body p:last-child { margin-bottom:0; }
 .quote-variant-guillemet .quote-mark { display:block; }
 .quote-dropcap-body { text-align:left; }
 .quote-titled-sm-body { text-align:left; }
-.quote-titled-sm-body p { margin:0 0 5.5mm; text-align:left; }
+.quote-titled-sm-body p { margin:0 0 7mm; text-align:left; }
 .quote-titled-sm-body p:last-child { margin-bottom:0; }
-.quote-dropcap-body .dropcap-p { margin:0 0 5.5mm; text-align:left; }
-.quote-dropcap-body p { margin:0 0 5.5mm; text-align:left; }
+.quote-dropcap-body .dropcap-p { margin:0 0 7mm; text-align:left; }
+.quote-dropcap-body p { margin:0 0 7mm; text-align:left; }
 .quote-dropcap-body p:last-child,
 .quote-dropcap-body .dropcap-p:last-child { margin-bottom:0; }
 .text-dropcap {

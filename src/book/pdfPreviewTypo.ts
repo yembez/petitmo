@@ -180,19 +180,19 @@ export const PDF_TEXT_MEMORY_TITLE_PT: Record<TextMemorySizeTier, number> = {
 export const PDF_QUOTE_PAD_X_MM = 18;
 
 /**
- * Largeur colonne titre + corps (maquette : marges latérales généreuses).
- * Sur trim 210 mm : lg 128 mm, md 140 mm → ~34–41 mm de marge visuelle par côté.
+ * Largeur colonne titre + corps (maquette + PDF) — un peu plus étroite que le trim.
+ * Sur 210 mm : lg 118 / md 128 → ~46–46 mm de marge visuelle par côté.
  */
 export const PDF_TEXT_MEMORY_COLUMN_MM: Record<TextMemorySizeTier, number> = {
-  lg: 128,
-  md: 140,
-  sm: 152,
+  lg: 118,
+  md: 128,
+  sm: 140,
 };
 
-export const PDF_TEXT_MEMORY_COLUMN_GUILLEMET_LG_MM = 112;
+export const PDF_TEXT_MEMORY_COLUMN_GUILLEMET_LG_MM = 100;
 
 /** Colonne titre + corps long (16–28 lignes, avec `text_title`). */
-export const PDF_TEXT_MEMORY_COLUMN_TITLED_SM_MM = 132;
+export const PDF_TEXT_MEMORY_COLUMN_TITLED_SM_MM = 120;
 
 export function pdfTextMemoryColumnMaxWidthPx(
   tier: TextMemorySizeTier,
@@ -229,10 +229,10 @@ export const PDF_DROPCAP_BODY_PT: Record<'md' | 'sm', number> = {
 
 export const PDF_DROPCAP_BODY_LH = PDF_TEXT_MEMORY_BODY_LINE_PT / PDF_TEXT_MEMORY_BODY_SIZE_PT;
 
-/** Colonne texte lettrine — ~66 % du trim (marges latérales généreuses). */
+/** Colonne texte lettrine — un peu plus étroite. */
 export const PDF_TEXT_MEMORY_COLUMN_DROPCAP_MM: Record<'md' | 'sm', number> = {
-  md: 136,
-  sm: 130,
+  md: 124,
+  sm: 118,
 };
 
 /** Lettrine — hauteur ~3 lignes de corps. */
@@ -241,8 +241,14 @@ export const PDF_TEXT_MEMORY_DROPCAP_PT: Record<'md' | 'sm', number> = {
   sm: 46,
 };
 
-/** Espace entre paragraphes (lettrine + titled sm). Source de vérité — miroir `htmlBook.ts`. */
-export const PDF_TEXT_MEMORY_PARA_GAP_MM = 5.5;
+/**
+ * Espace entre paragraphes Petits mots (= « ligne vide » après un retour à la ligne).
+ * Livre : chaque `\n` = nouveau paragraphe. Miroir `htmlBook.ts`.
+ */
+export const PDF_TEXT_MEMORY_PARA_GAP_MM = 7;
+
+/** Alinéa livre — deux cadratins (plus marqué qu’un seul sur le fil). */
+export const PDF_TEXT_MEMORY_ALINEA = '\u2003\u2003';
 
 /** @deprecated Préférer `PDF_TEXT_MEMORY_PARA_GAP_MM` */
 export const PDF_DROPCAP_PARA_GAP_MM = PDF_TEXT_MEMORY_PARA_GAP_MM;

@@ -100,10 +100,12 @@ Logique : `src/book/quoteFitLevel.ts` ↔ `server/src/pdf/maquetteAlign.ts` (`re
 
 | Variante | Condition | Corps | Colonne max | Alignement corps | Centrage vertical |
 |----------|-----------|-------|-------------|------------------|-------------------|
-| **guillemet** | sans `text_title`, ≤ 8 lignes | Manrope 300 · 12/17 pt · 0.015em | 112 mm | centré | oui |
-| **titled** lg/md | avec `text_title`, ≤ 15 lignes | idem | 128 / 140 mm | centré | oui |
-| **titled** sm | avec `text_title`, 16–28 lignes | idem | 132 mm | gauche, multi-paragraphes | oui |
-| **dropcap** md/sm | sans `text_title`, 9+ lignes | idem | 136 / 130 mm | gauche, lettrine | oui |
+| **guillemet** | sans `text_title`, ≤ 8 lignes | Manrope 300 · 12/17 pt · 0.04em | 100 mm | centré | oui |
+| **titled** lg/md | avec `text_title`, ≤ 15 lignes | idem | 118 / 128 mm | centré | oui |
+| **titled** sm | avec `text_title`, 16–28 lignes | idem | 120 mm | gauche, multi-paragraphes | oui |
+| **dropcap** md/sm | sans `text_title`, 9+ lignes | idem | 124 / 118 mm | gauche, lettrine | oui |
+
+Livre Petits mots : chaque `\n` = nouveau paragraphe (ligne vide `7 mm`) ; alinéa = **2 cadratins** (`\u2003\u2003`). Légendes média inchangées.
 
 Guillemet : `"` **52 pt** italique Manrope, couleur **#6B8F7E**, filet **28 mm** sous le bloc.
 
@@ -111,7 +113,7 @@ Titled : titre **28 / 26 / 24 pt** Manrope 300 (lg/md/sm), filet **24 / 30 / 30 
 
 **PDF CSS :** `quote-variant-*` sur `.page`, tier sur mid / `text-tier-*` — sélecteur descendant, jamais composé même nœud.
 
-Dropcap : lettrine **52 / 46 pt** Manrope 300 (md/sm), espace entre paragraphes **5,5 mm**.
+Dropcap : lettrine **52 / 46 pt** Manrope 300 (md/sm), espace entre paragraphes **7 mm**.
 
 Marges page citation : **18 mm** latérales ; padding vertical palier **13 / 12 / 11 mm**.
 
