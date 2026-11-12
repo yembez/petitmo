@@ -45,7 +45,7 @@ import {
   hydrateTabScreensFromLocal,
   hydrateTabScreensFromSqliteSync,
 } from '@/services/tabScreensHydrate';
-import { flushPendingCloudUploadsOnce } from '@/services/pendingCloudFlush';
+import { scheduleDeferredPendingCloudFlush } from '@/services/pendingCloudFlush';
 import { APP_BOOT_FONT_SOURCES, areAppBootFontsLoaded } from '@/constants/appBootFonts';
 import { enrichSentryUserContext, initPetitmoSentry, Sentry } from '@/lib/sentry';
 
@@ -257,12 +257,9 @@ function RootLayoutNav() {
         void warmSelectedChildIdFromStorage()
           .then(() => {
             hydrateTabScreensFromSqliteSync();
-            // Flush upload = fond uniquement (pas d’invalidate UI).
-            return flushPendingCloudUploadsOnce();
-          })
-          .then(() => {
-            // Local d’abord ; pull cloud en fond → `memories-updated` soft si merge.
+            // Local d’abord ; flush cloud reporté (ne pas concurrencer le paint).
             void hydrateTabScreensFromLocal();
+            scheduleDeferredPendingCloudFlush(5000);
             void import('@/services/registerPushToken').then(m => m.registerPushTokenInBackground());
             // Tier / captureLocked / billingIssue depuis Auth (fond, sans bloquer l’UI).
             void import('@/lib/authAccount').then(async ({ getRealAuthUser, syncUserTierFromSessionUser }) => {
@@ -296,9 +293,9 @@ function RootLayoutNav() {
       await backupBooksToSupabaseIfPremium();
       await warmSelectedChildIdFromStorage();
       hydrateTabScreensFromSqliteSync();
-      // Sync-only : pas d’invalidate (favoris/fil ne doivent pas recharger « pour le cloud »).
-      await flushPendingCloudUploadsOnce();
+      // Local d’abord ; flush cloud différé (silencieux, hors paint boot).
       void hydrateTabScreensFromLocal();
+      scheduleDeferredPendingCloudFlush(4500);
     })();
   }, [isAuthReady]);
 

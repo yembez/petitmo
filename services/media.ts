@@ -578,12 +578,24 @@ async function stratifiedUpload(params: {
   const thumbPath = `${userId}/${childId}/photo/thumb_${ts}.jpg`;
   const printPath = `${userId}/${childId}/photo/print_${ts}.jpg`;
 
-  const [{ bytes: thumbBytes, size: thumbSize }, { bytes: printBytes, size: printSize }] =
-    await Promise.all([readBytes(thumbLocal), readBytes(printLocal)]);
-
+  /** Streaming natif — pas de readBytes/base64 JS (freeze import×N sur le thread UI). */
+  const [thumbSize, printSize] = await Promise.all([
+    readLocalFileSize(thumbLocal),
+    readLocalFileSize(printLocal),
+  ]);
   const [thumbUrl, printUrl] = await Promise.all([
-    uploadToMediaBucket({ filePath: thumbPath, bytes: thumbBytes, contentType: 'image/jpeg' }),
-    uploadToMediaBucket({ filePath: printPath, bytes: printBytes, contentType: 'image/jpeg' }),
+    uploadLocalUriToMediaBucket({
+      filePath: thumbPath,
+      localUri: thumbLocal,
+      contentType: 'image/jpeg',
+      expectedSize: thumbSize,
+    }),
+    uploadLocalUriToMediaBucket({
+      filePath: printPath,
+      localUri: printLocal,
+      contentType: 'image/jpeg',
+      expectedSize: printSize,
+    }),
   ]);
 
   if (!isPaid) {
@@ -1463,6 +1475,8 @@ export async function pushPhotoAlbumMemoryToCloud(
 const CLOUD_PHOTO_SYNC_CONCURRENCY = 1;
 let cloudPhotoSyncActive = 0;
 const cloudPhotoSyncWaitQueue: Array<() => void> = [];
+/** Empêche import + flush boot de doubler le même memoryId. */
+const cloudPhotoSyncIdsInFlight = new Set<string>();
 
 function acquireCloudPhotoSyncSlot(): Promise<void> {
   if (cloudPhotoSyncActive < CLOUD_PHOTO_SYNC_CONCURRENCY) {
@@ -1493,8 +1507,19 @@ async function syncCloudPhotoMemoryInBackground(params: {
   locationLabel: string | null;
 }): Promise<void> {
   const { memoryId, childId, userId, localOriginalUri, isPaid, capturedAtIso, locationLabel } = params;
+  if (cloudPhotoSyncIdsInFlight.has(memoryId)) return;
+  const already = getLocalMemoryById(memoryId);
+  if (already && already.sync_status === 'synced' && (already.thumb_url ?? '').trim()) {
+    return;
+  }
+  cloudPhotoSyncIdsInFlight.add(memoryId);
   await acquireCloudPhotoSyncSlot();
   try {
+    const fresh = getLocalMemoryById(memoryId);
+    if (fresh && fresh.sync_status === 'synced' && (fresh.thumb_url ?? '').trim()) {
+      return;
+    }
+
     await new Promise<void>(resolve => {
       InteractionManager.runAfterInteractions(() => resolve());
     });
@@ -1578,6 +1603,7 @@ async function syncCloudPhotoMemoryInBackground(params: {
   } catch (e) {
     console.warn('[media] syncCloudPhotoMemoryInBackground', params.memoryId, e);
   } finally {
+    cloudPhotoSyncIdsInFlight.delete(memoryId);
     releaseCloudPhotoSyncSlot();
   }
 }

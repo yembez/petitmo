@@ -14,6 +14,8 @@ import {
   setFeedVideoPosterStableCache,
 } from '@/hooks/feedVideoPosterStableCache';
 import { promptFreeTierLimitFromError } from '@/utils/freeTierLimitGate';
+import { beginMediaImportBusy, endMediaImportBusy } from '@/services/mediaImportBusy';
+import { scheduleDeferredPendingCloudFlush } from '@/services/pendingCloudFlush';
 
 export type PendingMediaKind = 'photo' | 'video';
 
@@ -96,6 +98,8 @@ export function PendingMediaUploadsProvider({ children }: { children: React.Reac
       upload: (helpers: PendingUploadHelpers) => Promise<MemoryRow[] | null>;
     }) => {
       void (async () => {
+        beginMediaImportBusy();
+        try {
         armSilentInitialFilLoadAfterMediaImport();
         const tempId = `pending_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
         /** Scroll vers la carte où qu’elle soit chronologiquement (pas forcément le haut). */
@@ -365,6 +369,11 @@ export function PendingMediaUploadsProvider({ children }: { children: React.Reac
               },
             ];
           });
+        }
+        } finally {
+          endMediaImportBusy();
+          // Reprend le backlog cloud en silence, après le paint local.
+          scheduleDeferredPendingCloudFlush(2500);
         }
       })();
     },

@@ -1,6 +1,6 @@
 import { resolveEffectiveUserTier } from '@/lib/userTier'
 import { getCachedUserMode } from '@/lib/userMode'
-import { getAllLocalMemories } from '@/lib/localDb'
+import { countLocalMemories } from '@/lib/localDb'
 import { pullFamilyMemoriesFromRemoteToLocal } from '@/services/memoriesLocalSync'
 
 /** Prod : 50. Valeur de test éventuelle à documenter ici si on baisse temporairement. */
@@ -138,7 +138,7 @@ export async function checkMemoryLimit(
     }
   }
 
-  const current = getAllLocalMemories().length
+  const current = countLocalMemories()
   const limit = tier === 'paid' ? PAID_TIER_LIMIT : FREE_TIER_LIMIT
   const isAtLimit = current >= limit
 

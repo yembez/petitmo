@@ -198,6 +198,17 @@ export function getAllLocalMemories(): Memory[] {
   return rows.map(deserializeMemory)
 }
 
+/** Compte SQLite O(1) — quotas / import, sans désérialiser toute la table. */
+export function countLocalMemories(): number {
+  const row = db.getFirstSync(
+    `SELECT COUNT(*) AS n FROM memories
+     WHERE (archived_at IS NULL OR archived_at = '')`,
+    [],
+  ) as { n?: number } | null
+  const n = typeof row?.n === 'number' ? row.n : Number(row?.n ?? 0)
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0
+}
+
 /** Inclut les archivés (purge compte, debug). */
 export function getAllLocalMemoriesIncludingArchived(): Memory[] {
   const rows = db.getAllSync(
