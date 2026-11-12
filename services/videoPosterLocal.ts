@@ -13,6 +13,8 @@ import { isLikelyRasterImageUri, isLikelyVideoFileUri, resolveReadableVideoPlayb
 import {
   collectVideoFeedPosterLocalUriCandidates,
   getBookVideoPosterDisplayUri,
+  hasCustomVideoPrintPoster,
+  isDeviceLocalMediaUri,
 } from '@/utils/memoryPhotos';
 import {
   isLocalMediaUriReadable,
@@ -381,6 +383,7 @@ export async function ensureVideoFeedPosterForMemory(
  * Garantit un `poster_print.jpg` à largeur livre (3200 px).
  * - Print absent → extrait frame + upscale
  * - Print trop petit (ex. 1080p / 147 DPI) → upscale sur place (conserve la frame choisie)
+ * - **Jamais** régénérer t≈0 si un `poster_print_url` HTTPS custom existe (restore compte).
  */
 export async function ensureVideoPosterPrintForBookMemory(
   memoryId: string,
@@ -390,14 +393,17 @@ export async function ensureVideoPosterPrintForBookMemory(
   if (!cur || cur.type !== 'video') return cur;
   if (Platform.OS === 'web') return cur;
 
-  const existingPrint =
-    (cur.local_poster_print_path ?? '').trim() ||
-    ((cur.poster_print_url ?? '').trim().includes('poster_print')
-      ? (cur.poster_print_url ?? '').trim()
-      : '');
+  const localPrint = (cur.local_poster_print_path ?? '').trim();
+  const remotePrintRaw = (cur.poster_print_url ?? '').trim();
+  const remotePrintHttps =
+    remotePrintRaw &&
+    /^https?:\/\//i.test(remotePrintRaw) &&
+    !isDeviceLocalMediaUri(remotePrintRaw)
+      ? remotePrintRaw
+      : '';
 
-  if (existingPrint && (await isLocalMediaUriReadable(existingPrint))) {
-    const meets = await printPosterMeetsBookTarget(existingPrint);
+  if (localPrint && (await isLocalMediaUriReadable(localPrint))) {
+    const meets = await printPosterMeetsBookTarget(localPrint);
     const hasPx =
       typeof cur.print_px_w === 'number' &&
       typeof cur.print_px_h === 'number' &&
@@ -406,28 +412,68 @@ export async function ensureVideoPosterPrintForBookMemory(
       Math.max(cur.print_px_w, cur.print_px_h) >= PRINT_TARGET_MIN_LONG_SIDE;
     if (meets && hasPx) return cur;
     if (meets && !hasPx) {
-      const px = await getJpegPxReliable(existingPrint);
+      const px = await getJpegPxReliable(localPrint);
       if (px) {
-        return commitPosterMemory(applyPosterFields(cur, { printPath: existingPrint, printPx: px }));
+        const next = {
+          ...cur,
+          local_poster_print_path: localPrint,
+          print_px_w: px.w,
+          print_px_h: px.h,
+          // Garder l’HTTPS cloud s’il existe — ne pas l’écraser par un file://.
+          poster_print_url: remotePrintHttps || cur.poster_print_url,
+          updated_at: new Date().toISOString(),
+        };
+        return commitPosterMemory(next);
       }
       return cur;
     }
 
     const dir = await ensureMemoryDir(id);
-    const dest = dir ? `${dir}poster_print.jpg` : existingPrint;
-    const written = await writePrintPosterAtBookWidth(existingPrint, dest);
+    const dest = dir ? `${dir}poster_print.jpg` : localPrint;
+    const written = await writePrintPosterAtBookWidth(localPrint, dest);
     if (!written) return cur;
-    return commitPosterMemory(
-      applyPosterFields(cur, { printPath: written.path, printPx: { w: written.w, h: written.h } }),
-    );
+    const next = {
+      ...cur,
+      local_poster_print_path: written.path,
+      print_px_w: written.w,
+      print_px_h: written.h,
+      poster_print_url: remotePrintHttps || cur.poster_print_url,
+      updated_at: new Date().toISOString(),
+    };
+    return commitPosterMemory(next);
   }
 
-  if (
-    existingPrint &&
-    /^https?:\/\//i.test(existingPrint) &&
-    !existingPrint.includes('file:')
-  ) {
-    return cur;
+  /**
+   * Restore : local mort / absent mais print cloud custom présent.
+   * Matérialiser ce JPEG — **interdit** d’extraire la frame t≈0 (spread flash mauvaise image).
+   */
+  if (remotePrintHttps) {
+    const preserveRemote =
+      remotePrintHttps.includes('poster_print') ||
+      remotePrintHttps.includes('video_poster_print') ||
+      hasCustomVideoPrintPoster({ ...cur, local_poster_print_path: null });
+    if (preserveRemote) {
+      try {
+        const { downloadCloudFileToSandbox } = await import('@/services/memoryCloudMaterialize');
+        const local = await downloadCloudFileToSandbox(id, remotePrintHttps, 'poster_print.jpg');
+        if (local?.trim()) {
+          const px = await getJpegPxReliable(local);
+          const next: Memory = {
+            ...cur,
+            local_poster_print_path: local,
+            poster_print_url: remotePrintHttps,
+            ...(px && px.w > 0 && px.h > 0
+              ? { print_px_w: px.w, print_px_h: px.h }
+              : {}),
+            updated_at: new Date().toISOString(),
+          };
+          return commitPosterMemory(next);
+        }
+      } catch (e) {
+        console.warn('[videoPosterLocal] materialize remote print', id, e);
+      }
+      return cur;
+    }
   }
 
   const videoUri = await resolveReadableVideoPlaybackUri(cur);

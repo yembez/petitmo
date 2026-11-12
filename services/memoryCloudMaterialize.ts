@@ -547,7 +547,8 @@ async function materializeVideoMemory(row: Memory): Promise<boolean> {
         upsertLocalMemory({
           ...(getLocalMemoryById(row.id) ?? memory),
           local_poster_print_path: localPrint,
-          poster_print_url: localPrint,
+          // Garder l’URL cloud : un file:// ici faisait régénérer t≈0 au prochain ensure.
+          poster_print_url: remotePrint,
           updated_at: new Date().toISOString(),
         });
         return true;
