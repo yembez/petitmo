@@ -833,7 +833,7 @@ function buildHtmlDocument(
 <title>${esc(title)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;1,400&amp;family=EB+Garamond:ital,wght@0,400;1,400&amp;display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;1,400&amp;family=EB+Garamond:ital,wght@0,400;1,400&amp;family=Manrope:wght@300;400;600&amp;display=swap" rel="stylesheet" />
 <style>
 
 * { margin:0; padding:0; box-sizing:border-box;
@@ -1091,13 +1091,24 @@ body.print-bleed .bleed-x {
 }
 .quote-mid-dropcap { justify-content:center; }
 .quote-mid-titled { justify-content:center; }
-/* Petits mots + légendes livre : EB Garamond (parité maquette / pdfPreviewTypo). */
+/* Légendes photo / média : EB Garamond. Petits mots : Manrope ci-dessous. */
 .text-memory-editorial,
-.quote-body.text-memory-editorial,
 .body.text-memory-editorial {
   font-family:'EB Garamond',serif;
   font-style:normal;
   font-weight:400;
+  color:#1C1C1E;
+}
+/* Petits mots — Manrope 300 / 12 pt / lh 17 pt / tracking 0.015em (pdfPreviewTypo). */
+.quote .text-memory-editorial,
+.quote .quote-body,
+.quote .text-memory-title,
+.quote .text-dropcap,
+.quote .quote-mark {
+  font-family:'Manrope',sans-serif;
+  font-weight:300;
+  font-style:normal;
+  letter-spacing:0.015em;
   color:#1C1C1E;
 }
 .text-memory-title-block {
@@ -1107,9 +1118,10 @@ body.print-bleed .bleed-x {
   margin-bottom:0;
 }
 .text-memory-title {
-  font-family:'EB Garamond',serif;
+  font-family:'Manrope',sans-serif;
   font-style:normal;
-  font-weight:400;
+  font-weight:300;
+  letter-spacing:0.015em;
   color:#1C1C1E;
 }
 .text-tier-lg.text-memory-title { font-size:28pt; line-height:1.15; }
@@ -1155,12 +1167,12 @@ body.print-bleed .bleed-x {
   text-align:right; flex:1; min-width:0;
 }
 .quote-mark {
-  font-family:'EB Garamond',serif; font-style:italic; font-weight:400;
+  font-family:'Manrope',sans-serif; font-style:italic; font-weight:300;
   font-size:52pt; color:#6B8F7E; line-height:1; margin-bottom:4mm;
-  text-align:center; align-self:center;
+  text-align:center; align-self:center; letter-spacing:0.015em;
 }
 .quote-guillemet-body {
-  font-size:22pt; line-height:1.48;
+  font-size:12pt; line-height:17pt; letter-spacing:0.015em;
   margin-bottom:5mm;
 }
 .quote-guillemet-body p { margin:0; }
@@ -1172,10 +1184,16 @@ body.print-bleed .bleed-x {
   display:flex; align-items:center; gap:4pt; margin:4mm auto 0; width:42%;
 }
 .quote-body { overflow:hidden; }
-/* PDF_TEXT_MEMORY_BODY_PT / LH */
-.quote-tier-lg .quote-body { font-size:20pt; line-height:1.52; }
-.quote-tier-md .quote-body { font-size:16pt; line-height:1.5; }
-.quote-tier-sm .quote-body { font-size:14pt; line-height:1.52; }
+/* Corps Petits mots unique — PDF_TEXT_MEMORY_BODY_SIZE_PT / LINE_PT */
+.quote-tier-lg .quote-body,
+.quote-tier-md .quote-body,
+.quote-tier-sm .quote-body,
+.quote-variant-dropcap .quote-dropcap-body,
+.quote-variant-titled.quote-tier-sm .quote-titled-sm-body {
+  font-size:12pt;
+  line-height:17pt;
+  letter-spacing:0.015em;
+}
 /* PDF_TEXT_MEMORY_PARA_GAP_MM — même rythme que maquette (\n\n) / dropcap / titled-sm */
 .quote-tier-lg .quote-body p,
 .quote-tier-md .quote-body p,
@@ -1183,16 +1201,7 @@ body.print-bleed .bleed-x {
 .quote-body p:last-child { margin-bottom:0; }
 .quote-variant-guillemet .quote-mark { display:block; }
 .quote-dropcap-body { text-align:left; }
-.quote-variant-dropcap.quote-tier-md .quote-dropcap-body {
-  font-size:16pt; line-height:1.52;
-}
-.quote-variant-dropcap.quote-tier-sm .quote-dropcap-body {
-  font-size:14pt; line-height:1.52;
-}
 .quote-titled-sm-body { text-align:left; }
-.quote-variant-titled.quote-tier-sm .quote-titled-sm-body {
-  font-size:14pt; line-height:1.52;
-}
 .quote-titled-sm-body p { margin:0 0 5.5mm; text-align:left; }
 .quote-titled-sm-body p:last-child { margin-bottom:0; }
 .quote-dropcap-body .dropcap-p { margin:0 0 5.5mm; text-align:left; }
@@ -1201,8 +1210,9 @@ body.print-bleed .bleed-x {
 .quote-dropcap-body .dropcap-p:last-child { margin-bottom:0; }
 .text-dropcap {
   float:left;
-  font-family:'EB Garamond',serif;
-  font-weight:400;
+  font-family:'Manrope',sans-serif;
+  font-weight:300;
+  letter-spacing:0.015em;
   line-height:.82;
   margin-right:3pt;
 }

@@ -138,27 +138,36 @@ export const PDF_VIDEO_SUB_PT = memorySouvenirPt(10.5);
 export const PDF_QUOTE_MARK_PT = 52;
 export const PDF_QUOTE_MARK_COLOR = '#6B8F7E';
 
-/** Corps citation guillemet (1–8 lignes, sans `text_title`). */
-export const PDF_GUILLEMET_BODY_PT = 22;
-export const PDF_GUILLEMET_BODY_LH = 1.48;
+/** Corps citation guillemet — même corps Manrope que les autres Petits mots. */
+export const PDF_GUILLEMET_BODY_PT = 12;
+export const PDF_GUILLEMET_BODY_LH = 17 / 12;
 
 /** Filet court sous le bloc citation. */
 export const PDF_GUILLEMET_RULE_MM = 28;
 
-/** Corps citation « Petits mots » — EB Garamond droit (pas Roboto). */
+/**
+ * Corps « Petits mots » (spread + PDF) — Manrope 300 / 12 pt / interligne 17 pt /
+ * letter-spacing 0.015em. Tous paliers lg/md/sm partagent la même taille.
+ */
+export const PDF_TEXT_MEMORY_BODY_SIZE_PT = 12;
+export const PDF_TEXT_MEMORY_BODY_LINE_PT = 17;
+export const PDF_TEXT_MEMORY_LETTER_SPACING_EM = 0.015;
+
+/** @deprecated Utiliser `PDF_TEXT_MEMORY_BODY_SIZE_PT` (taille unique). */
 export const PDF_TEXT_MEMORY_BODY_PT: Record<TextMemorySizeTier, number> = {
-  lg: 20,
-  md: 16,
-  sm: 14,
+  lg: PDF_TEXT_MEMORY_BODY_SIZE_PT,
+  md: PDF_TEXT_MEMORY_BODY_SIZE_PT,
+  sm: PDF_TEXT_MEMORY_BODY_SIZE_PT,
 };
 
+/** @deprecated Interligne absolu = `PDF_TEXT_MEMORY_BODY_LINE_PT`. */
 export const PDF_TEXT_MEMORY_BODY_LH: Record<TextMemorySizeTier, number> = {
-  lg: 1.52,
-  md: 1.5,
-  sm: 1.52,
+  lg: PDF_TEXT_MEMORY_BODY_LINE_PT / PDF_TEXT_MEMORY_BODY_SIZE_PT,
+  md: PDF_TEXT_MEMORY_BODY_LINE_PT / PDF_TEXT_MEMORY_BODY_SIZE_PT,
+  sm: PDF_TEXT_MEMORY_BODY_LINE_PT / PDF_TEXT_MEMORY_BODY_SIZE_PT,
 };
 
-/** Titre souvenir texte (EB Garamond) — palier lignes. */
+/** Titre souvenir texte (Manrope 300) — palier lignes, hiérarchie au-dessus du corps 12 pt. */
 export const PDF_TEXT_MEMORY_TITLE_PT: Record<TextMemorySizeTier, number> = {
   lg: 28,
   md: 26,
@@ -210,13 +219,13 @@ export function pdfQuotePagePadY(tier: TextMemorySizeTier, pageHeightPx: number)
   return pdfMmToPreviewPxH(mm, pageHeightPx);
 }
 
-/** Lettrine sans titre (9+ lignes) — corps aligné à gauche, centré verticalement dans la page. */
+/** Lettrine sans titre (9+ lignes) — même corps Manrope 12/17 que titled. */
 export const PDF_DROPCAP_BODY_PT: Record<'md' | 'sm', number> = {
-  md: 16,
-  sm: 14,
+  md: PDF_TEXT_MEMORY_BODY_SIZE_PT,
+  sm: PDF_TEXT_MEMORY_BODY_SIZE_PT,
 };
 
-export const PDF_DROPCAP_BODY_LH = 1.52;
+export const PDF_DROPCAP_BODY_LH = PDF_TEXT_MEMORY_BODY_LINE_PT / PDF_TEXT_MEMORY_BODY_SIZE_PT;
 
 /** Colonne texte lettrine — ~66 % du trim (marges latérales généreuses). */
 export const PDF_TEXT_MEMORY_COLUMN_DROPCAP_MM: Record<'md' | 'sm', number> = {
@@ -369,16 +378,17 @@ export function pdfMediaCaptionStyle(pageWidthPx: number): { fontSize: number; l
   return { fontSize: fs, lineHeight: pdfPtToPreviewPx(PDF_MEDIA_CAPTION_PT * PDF_MEDIA_CAPTION_LH, pageWidthPx) };
 }
 
-/** `.quote-body` — palier typo lignes livre. */
+/** Corps Petits mots — Manrope 12/17 / tracking 0.015em (maquette). */
 export function pdfTextMemoryBodyStyle(
   tier: TextMemorySizeTier,
   pageWidthPx: number,
-): { fontSize: number; lineHeight: number } {
-  const pt = PDF_TEXT_MEMORY_BODY_PT[tier];
-  const lh = PDF_TEXT_MEMORY_BODY_LH[tier];
+): { fontSize: number; lineHeight: number; letterSpacing: number } {
+  void tier;
+  const fs = Math.max(MIN_FS, pdfPtToPreviewPx(PDF_TEXT_MEMORY_BODY_SIZE_PT, pageWidthPx));
   return {
-    fontSize: Math.max(MIN_FS, pdfPtToPreviewPx(pt, pageWidthPx)),
-    lineHeight: pdfPtToPreviewPx(pt * lh, pageWidthPx),
+    fontSize: fs,
+    lineHeight: pdfPtToPreviewPx(PDF_TEXT_MEMORY_BODY_LINE_PT, pageWidthPx),
+    letterSpacing: fs * PDF_TEXT_MEMORY_LETTER_SPACING_EM,
   };
 }
 
@@ -386,11 +396,13 @@ export function pdfTextMemoryBodyStyle(
 export function pdfTextMemoryTitleStyle(
   tier: TextMemorySizeTier,
   pageWidthPx: number,
-): { fontSize: number; lineHeight: number } {
+): { fontSize: number; lineHeight: number; letterSpacing: number } {
   const pt = PDF_TEXT_MEMORY_TITLE_PT[tier];
+  const fs = Math.max(MIN_FS, pdfPtToPreviewPx(pt, pageWidthPx));
   return {
-    fontSize: Math.max(MIN_FS, pdfPtToPreviewPx(pt, pageWidthPx)),
+    fontSize: fs,
     lineHeight: pdfPtToPreviewPx(pt * 1.2, pageWidthPx),
+    letterSpacing: fs * PDF_TEXT_MEMORY_LETTER_SPACING_EM,
   };
 }
 
@@ -407,17 +419,12 @@ export function pdfTextMemoryDropCapStyle(
   };
 }
 
-/** Corps page lettrine (texte long sans titre). */
+/** Corps page lettrine (texte long sans titre) — même Manrope 12/17. */
 export function pdfTextMemoryDropcapBodyStyle(
   tier: TextMemorySizeTier,
   pageWidthPx: number,
-): { fontSize: number; lineHeight: number } {
-  const key: 'md' | 'sm' = tier === 'sm' ? 'sm' : 'md';
-  const pt = PDF_DROPCAP_BODY_PT[key];
-  return {
-    fontSize: Math.max(MIN_FS, pdfPtToPreviewPx(pt, pageWidthPx)),
-    lineHeight: pdfPtToPreviewPx(pt * PDF_DROPCAP_BODY_LH, pageWidthPx),
-  };
+): { fontSize: number; lineHeight: number; letterSpacing: number } {
+  return pdfTextMemoryBodyStyle(tier, pageWidthPx);
 }
 
 /** Guillemet `.quote-mark` — vert sauge, grande taille. */
@@ -426,15 +433,11 @@ export function pdfQuoteMarkStyle(pageWidthPx: number): { fontSize: number; line
   return { fontSize: fs, lineHeight: fs };
 }
 
-/** Corps page citation courte (guillemet). */
+/** Corps page citation courte (guillemet) — même Manrope 12/17. */
 export function pdfTextMemoryGuillemetBodyStyle(
   pageWidthPx: number,
-): { fontSize: number; lineHeight: number } {
-  const pt = PDF_GUILLEMET_BODY_PT;
-  return {
-    fontSize: Math.max(MIN_FS, pdfPtToPreviewPx(pt, pageWidthPx)),
-    lineHeight: pdfPtToPreviewPx(pt * PDF_GUILLEMET_BODY_LH, pageWidthPx),
-  };
+): { fontSize: number; lineHeight: number; letterSpacing: number } {
+  return pdfTextMemoryBodyStyle('lg', pageWidthPx);
 }
 
 /** @deprecated — utiliser `pdfTextMemoryBodyStyle` */

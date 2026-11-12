@@ -28,6 +28,7 @@ import {
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { useFonts, DMSans_400Regular, DMSans_400Regular_Italic, DMSans_500Medium, DMSans_600SemiBold, DMSans_700Bold } from '@expo-google-fonts/dm-sans';
+import { Manrope_300Light } from '@expo-google-fonts/manrope';
 import { buildBookMaquetteTypography } from '@/constants/bookMaquetteTypography';
 import { BOOK_SERIF_FONT_SOURCES } from '@/constants/bookSerifFont';
 import { BookSpreadSlide } from '@/components/BookSpreadSlide';
@@ -418,6 +419,7 @@ export default function BookPreviewScreen() {
     DMSans_500Medium,
     DMSans_600SemiBold,
     DMSans_700Bold,
+    Manrope_300Light,
     ...BOOK_SERIF_FONT_SOURCES,
   });
   const maquetteTypography = useMemo(

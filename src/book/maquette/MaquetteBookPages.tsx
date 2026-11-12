@@ -136,6 +136,14 @@ function editorialTextStyle(garamond?: string, memoryTextFont?: string) {
   return memoryTextStyle(memoryTextFont ?? MEMORY_TEXT_FONT_FALLBACK);
 }
 
+/** Petits mots — Manrope 300 (face déjà light, weight normalisé). */
+function bookTextMemoryFontStyle(bookTextMemoryFont?: string, fallback?: string) {
+  if (bookTextMemoryFont) {
+    return { fontFamily: bookTextMemoryFont, fontStyle: 'normal' as const, fontWeight: '400' as const };
+  }
+  return memoryTextStyle(fallback ?? MEMORY_TEXT_FONT_FALLBACK);
+}
+
 function firstGrapheme(s: string): string {
   const m = s.match(/^\s*(\p{L}|\p{N})/u);
   return m?.[0] ?? s.charAt(0);
@@ -255,7 +263,7 @@ function TextMemoryBodyContent({
   width,
   height,
   memoryTextFont,
-  garamond,
+  bookTextMemoryFont,
   garamondIt,
   centerBody,
   bodyTextAlign,
@@ -267,7 +275,7 @@ function TextMemoryBodyContent({
   width: number;
   height: number;
   memoryTextFont: string;
-  garamond?: string;
+  bookTextMemoryFont?: string;
   garamondIt?: string;
   centerBody: boolean;
   bodyTextAlign: 'center' | 'left' | 'justify';
@@ -275,7 +283,7 @@ function TextMemoryBodyContent({
 }) {
   const bodyScaled =
     variant === 'guillemet' ? pdfTextMemoryGuillemetBodyStyle(width) : pdfTextMemoryBodyStyle(tier, width);
-  const bodyFont = editorialTextStyle(garamond, memoryTextFont);
+  const bodyFont = bookTextMemoryFontStyle(bookTextMemoryFont, memoryTextFont);
   const bodyText = centerBody ? centeredBookParagraphs(body) : romanParagraphs(body);
   const bodyWrapStyle = columnMaxW
     ? { maxWidth: columnMaxW, alignSelf: 'center' as const, width: '100%' as const }
@@ -302,7 +310,7 @@ function TextMemoryBodyContent({
             style={[
               styles.textMemoryDropCap,
               capStyle,
-              garamond ? { fontFamily: garamond } : { fontFamily: memoryTextFont },
+              bookTextMemoryFontStyle(bookTextMemoryFont, memoryTextFont),
               { marginRight: pdfPtToPreviewPx(3, width) },
             ]}
             {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
@@ -342,11 +350,11 @@ function TextMemoryBodyContent({
   if (variant === 'guillemet') {
     const markScaled = pdfQuoteMarkStyle(width);
     const ruleW = pdfMmToPreviewPxW(PDF_GUILLEMET_RULE_MM, width);
-    const markFont = garamondIt
-      ? { fontFamily: garamondIt, fontStyle: 'normal' as const }
-      : garamond
-        ? { fontFamily: garamond, fontStyle: 'italic' as const }
-        : { fontFamily: memoryTextFont, fontStyle: 'normal' as const };
+    const markFont = bookTextMemoryFont
+      ? { fontFamily: bookTextMemoryFont, fontStyle: 'italic' as const, fontWeight: '400' as const }
+      : garamondIt
+        ? { fontFamily: garamondIt, fontStyle: 'normal' as const }
+        : { fontFamily: memoryTextFont, fontStyle: 'italic' as const };
     return (
       <View style={bodyWrapStyle}>
         <Text
@@ -834,6 +842,7 @@ function MaquetteBookPages(props: Props) {
   const serif = typography.serif;
   const serifItalic = typography.serifItalic;
   const memoryTextFont = typography.memoryTextFont;
+  const bookTextMemoryFont = typography.bookTextMemoryFont;
 
   const pad = Math.min(28, width * 0.06);
   const typoScale = typographyScaleForMaquette(page.type, height);
@@ -956,7 +965,7 @@ function MaquetteBookPages(props: Props) {
           onRequestTextEdit={onRequestTextEdit}
           dm400={dm400}
           dm600={dm600}
-          garamond={garamond}
+          bookTextMemoryFont={bookTextMemoryFont}
           garamondIt={garamondIt}
           memoryTextFont={memoryTextFont}
         />
@@ -1513,7 +1522,7 @@ function MaquetteQuote({
   onRequestTextEdit,
   dm400,
   dm600,
-  garamond,
+  bookTextMemoryFont,
   garamondIt,
   memoryTextFont,
 }: {
@@ -1528,7 +1537,7 @@ function MaquetteQuote({
   onRequestTextEdit: () => void;
   dm400?: string;
   dm600?: string;
-  garamond?: string;
+  bookTextMemoryFont?: string;
   garamondIt?: string;
   memoryTextFont: string;
 }) {
@@ -1579,7 +1588,7 @@ function MaquetteQuote({
                       style={[
                         styles.textMemoryTitle,
                         titleScaled,
-                        garamond ? { fontFamily: garamond } : memoryTextStyle(memoryTextFont),
+                        bookTextMemoryFontStyle(bookTextMemoryFont, memoryTextFont),
                         { textAlign: 'center' as const },
                       ]}
                       {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
@@ -1607,7 +1616,7 @@ function MaquetteQuote({
                   width={width}
                   height={height}
                   memoryTextFont={memoryTextFont}
-                  garamond={garamond}
+                  bookTextMemoryFont={bookTextMemoryFont}
                   garamondIt={garamondIt}
                   centerBody={centerBody}
                   bodyTextAlign={bodyTextAlign}
