@@ -1005,8 +1005,8 @@ body.print-bleed .pf-footer {
   color:#AEAEB2; letter-spacing:.15pt; text-transform:none; text-align:right;
   flex:1; min-width:0;
 }
-.pf-caption { margin-top:0; font-size:14pt; line-height:1.3; }
-.pf-caption.text-memory-editorial { font-size:14pt; line-height:1.3; text-align:justify; }
+.pf-caption { margin-top:0; font-size:12pt; line-height:17pt; letter-spacing:0.04em; }
+.pf-caption.text-memory-editorial { font-size:12pt; line-height:17pt; letter-spacing:0.04em; text-align:justify; }
 .placeholder { background:#F2F2F7; }
 
 .photo-note { flex-direction:column; }
@@ -1055,7 +1055,7 @@ body.print-bleed .pn-text {
   text-align:right; flex:1; min-width:0;
 }
 .photo-note .pn-text .body.text-memory-editorial {
-  font-size:14pt; line-height:1.35; text-align:justify;
+  font-size:12pt; line-height:17pt; letter-spacing:0.04em; text-align:justify;
 }
 
 body.print-bleed .bleed-x {
@@ -1091,24 +1091,23 @@ body.print-bleed .bleed-x {
 }
 .quote-mid-dropcap { justify-content:center; }
 .quote-mid-titled { justify-content:center; }
-/* Légendes photo / média : EB Garamond. Petits mots : Manrope ci-dessous. */
+/*
+ * Contenu souvenir livre (Petits mots + annotations photo/A/V) :
+ * Manrope 300 / 12 pt / lh 17 pt / tracking 0.04em — pas couvertures.
+ */
 .text-memory-editorial,
-.body.text-memory-editorial {
-  font-family:'EB Garamond',serif;
-  font-style:normal;
-  font-weight:400;
-  color:#1C1C1E;
-}
-/* Petits mots — Manrope 300 / 12 pt / lh 17 pt / tracking 0.015em (pdfPreviewTypo). */
-.quote .text-memory-editorial,
+.body.text-memory-editorial,
 .quote .quote-body,
 .quote .text-memory-title,
 .quote .text-dropcap,
-.quote .quote-mark {
+.quote .quote-mark,
+.pf-caption.text-memory-editorial,
+.photo-note .pn-text .body.text-memory-editorial,
+.media-qr-caption.text-memory-editorial {
   font-family:'Manrope',sans-serif;
   font-weight:300;
   font-style:normal;
-  letter-spacing:0.015em;
+  letter-spacing:0.04em;
   color:#1C1C1E;
 }
 .text-memory-title-block {
@@ -1121,7 +1120,7 @@ body.print-bleed .bleed-x {
   font-family:'Manrope',sans-serif;
   font-style:normal;
   font-weight:300;
-  letter-spacing:0.015em;
+  letter-spacing:0.04em;
   color:#1C1C1E;
 }
 .text-tier-lg.text-memory-title { font-size:28pt; line-height:1.15; }
@@ -1169,10 +1168,10 @@ body.print-bleed .bleed-x {
 .quote-mark {
   font-family:'Manrope',sans-serif; font-style:italic; font-weight:300;
   font-size:52pt; color:#6B8F7E; line-height:1; margin-bottom:4mm;
-  text-align:center; align-self:center; letter-spacing:0.015em;
+  text-align:center; align-self:center; letter-spacing:0.04em;
 }
 .quote-guillemet-body {
-  font-size:12pt; line-height:17pt; letter-spacing:0.015em;
+  font-size:12pt; line-height:17pt; letter-spacing:0.04em;
   margin-bottom:5mm;
 }
 .quote-guillemet-body p { margin:0; }
@@ -1192,7 +1191,7 @@ body.print-bleed .bleed-x {
 .quote-variant-titled.quote-tier-sm .quote-titled-sm-body {
   font-size:12pt;
   line-height:17pt;
-  letter-spacing:0.015em;
+  letter-spacing:0.04em;
 }
 /* PDF_TEXT_MEMORY_PARA_GAP_MM — même rythme que maquette (\n\n) / dropcap / titled-sm */
 .quote-tier-lg .quote-body p,
@@ -1212,7 +1211,7 @@ body.print-bleed .bleed-x {
   float:left;
   font-family:'Manrope',sans-serif;
   font-weight:300;
-  letter-spacing:0.015em;
+  letter-spacing:0.04em;
   line-height:.82;
   margin-right:3pt;
 }
@@ -1273,11 +1272,12 @@ body.print-bleed .bleed-x {
 .media-qr-caption {
   flex:1;
   min-width:0;
-  font-family:'DM Sans',sans-serif;
+  font-family:'Manrope',sans-serif;
   font-style:normal;
-  font-weight:400;
-  font-size:14pt;
-  line-height:1.5;
+  font-weight:300;
+  font-size:12pt;
+  line-height:17pt;
+  letter-spacing:0.04em;
   color:#1C1C1E;
   text-align:left;
 }

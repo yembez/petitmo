@@ -923,7 +923,7 @@ function MaquetteBookPages(props: Props) {
           onRequestTextEdit={onRequestTextEdit}
           dm400={dm400}
           memoryTextFont={memoryTextFont}
-          garamond={garamond}
+          bookTextMemoryFont={bookTextMemoryFont}
           variant={page.variant}
         />
       );
@@ -947,7 +947,7 @@ function MaquetteBookPages(props: Props) {
           dm400={dm400}
           dm600={dm600}
           memoryTextFont={memoryTextFont}
-          garamond={garamond}
+          bookTextMemoryFont={bookTextMemoryFont}
         />
       );
     case 'quote':
@@ -992,7 +992,7 @@ function MaquetteBookPages(props: Props) {
           inlineCropConfig={inlineCropConfig}
           onRequestTextEdit={onRequestTextEdit}
           dm400={dm400}
-          garamond={garamond}
+          bookTextMemoryFont={bookTextMemoryFont}
           memoryTextFont={memoryTextFont}
         />
       );
@@ -1252,7 +1252,7 @@ function MaquettePhotoSimple({
   onRequestTextEdit,
   dm400,
   memoryTextFont,
-  garamond,
+  bookTextMemoryFont,
   variant,
 }: {
   memory: Memory;
@@ -1270,7 +1270,7 @@ function MaquettePhotoSimple({
   onRequestTextEdit: () => void;
   dm400?: string;
   memoryTextFont: string;
-  garamond?: string;
+  bookTextMemoryFont?: string;
   variant: PhotoFullVariant;
 }) {
   const uri = useBookMaquettePhotoDisplayUri(memory, memoryPhotoRef);
@@ -1375,7 +1375,7 @@ function MaquettePhotoSimple({
                 styles.photoCaption,
                 pdfPhotoCaptionStyle(width),
                 { marginTop: 0 },
-                editorialTextStyle(garamond, memoryTextFont),
+                bookTextMemoryFontStyle(bookTextMemoryFont, memoryTextFont),
               ]}
             >
               {romanParagraphs(caption)}
@@ -1405,7 +1405,7 @@ function MaquettePhotoNote({
   dm400,
   dm600,
   memoryTextFont,
-  garamond,
+  bookTextMemoryFont,
 }: {
   memory: Memory;
   memoryPhotoRef?: string | null;
@@ -1423,7 +1423,7 @@ function MaquettePhotoNote({
   dm400?: string;
   dm600?: string;
   memoryTextFont: string;
-  garamond?: string;
+  bookTextMemoryFont?: string;
 }) {
   const uri = useBookMaquettePhotoDisplayUri(memory, memoryPhotoRef);
   const legend = stripEmojisForBook((memory.content ?? '').trim()).trim();
@@ -1494,7 +1494,7 @@ function MaquettePhotoNote({
                   styles.page4Body,
                   pdfPhotoNoteBodyStyle(width),
                   { marginTop: 0 },
-                  editorialTextStyle(garamond, memoryTextFont),
+                  bookTextMemoryFontStyle(bookTextMemoryFont, memoryTextFont),
                 ]}
                 {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
               >
@@ -1880,7 +1880,7 @@ function MaquetteMediaQr({
   inlineCropConfig,
   onRequestTextEdit,
   dm400,
-  garamond,
+  bookTextMemoryFont,
   memoryTextFont,
 }: {
   kind: MediaQrKind;
@@ -1900,7 +1900,7 @@ function MaquetteMediaQr({
   inlineCropConfig?: InlineCropConfig;
   onRequestTextEdit: () => void;
   dm400?: string;
-  garamond?: string;
+  bookTextMemoryFont?: string;
   memoryTextFont: string;
 }) {
   const captionRaw = clampMediaBookCaption(
@@ -2042,7 +2042,7 @@ function MaquetteMediaQr({
                   style={[
                     styles.mediaQrCaption,
                     pdfMediaCaptionStyle(width),
-                    editorialTextStyle(garamond, memoryTextFont),
+                    bookTextMemoryFontStyle(bookTextMemoryFont, memoryTextFont),
                   ]}
                   {...(Platform.OS === 'android' ? { includeFontPadding: false } : {})}
                 >

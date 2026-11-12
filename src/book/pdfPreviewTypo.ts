@@ -110,9 +110,9 @@ export const PDF_MEDIA_QR_CARD_LABEL_PT = 7;
 export const PDF_MEDIA_QR_CARD_BORDER_COLOR = '#D8D8DD';
 export const PDF_MEDIA_QR_MUTED_COLOR = '#AEAEB2';
 
-/** Légende audio / vidéo — EB Garamond droit, alignée sur le texte long (14 pt), ~50 car/ligne. */
-export const PDF_MEDIA_CAPTION_PT = 14;
-export const PDF_MEDIA_CAPTION_LH = 1.5;
+/** Légende audio / vidéo — même corps souvenir livre (Manrope 12/17). */
+export const PDF_MEDIA_CAPTION_PT = 12;
+export const PDF_MEDIA_CAPTION_LH = 17 / 12;
 
 /** Remontée du bandeau bas (méta+légende) dans la marge blanche du visuel, pour coller la méta à la photo. */
 export const PDF_MEDIA_QR_PULL_UP_MM = 7;
@@ -127,10 +127,10 @@ export const PDF_MEDIA_TEXT_PAD_X_MM = 22;
 
 /** Corps souvenir Roboto — 12 pt historique → 11.25 pt. */
 export const PDF_MEMORY_BODY_PT = memorySouvenirPt(12);
-/** Légende sous photo pleine page — EB Garamond, alignée sur le texte long (14 pt). */
-export const PDF_PHOTO_CAPTION_PT = 14;
-/** Texte long sous photo (photo-note) — EB Garamond, aligné sur le texte long (14 pt). */
-export const PDF_PHOTO_NOTE_BODY_PT = 14;
+/** Légende sous photo pleine page — même corps souvenir livre (Manrope 12/17). */
+export const PDF_PHOTO_CAPTION_PT = 12;
+/** Texte long sous photo (photo-note) — même corps souvenir livre (Manrope 12/17). */
+export const PDF_PHOTO_NOTE_BODY_PT = 12;
 /** Description vidéo (corps souvenir) — 10.5 pt historique → ~9.85 pt. */
 export const PDF_VIDEO_SUB_PT = memorySouvenirPt(10.5);
 
@@ -146,12 +146,12 @@ export const PDF_GUILLEMET_BODY_LH = 17 / 12;
 export const PDF_GUILLEMET_RULE_MM = 28;
 
 /**
- * Corps « Petits mots » (spread + PDF) — Manrope 300 / 12 pt / interligne 17 pt /
- * letter-spacing 0.015em. Tous paliers lg/md/sm partagent la même taille.
+ * Corps souvenir livre (Petits mots + annotations photo/A/V) — spread + PDF :
+ * Manrope 300 / 12 pt / interligne 17 pt / letter-spacing 0.04em.
  */
 export const PDF_TEXT_MEMORY_BODY_SIZE_PT = 12;
 export const PDF_TEXT_MEMORY_BODY_LINE_PT = 17;
-export const PDF_TEXT_MEMORY_LETTER_SPACING_EM = 0.015;
+export const PDF_TEXT_MEMORY_LETTER_SPACING_EM = 0.04;
 
 /** @deprecated Utiliser `PDF_TEXT_MEMORY_BODY_SIZE_PT` (taille unique). */
 export const PDF_TEXT_MEMORY_BODY_PT: Record<TextMemorySizeTier, number> = {
@@ -341,27 +341,24 @@ export function pdfBodyStyle(pageWidthPx: number): { fontSize: number; lineHeigh
   return { fontSize: fs, lineHeight: pdfPtToPreviewPx(11 * 1.65, pageWidthPx) };
 }
 
-/** Interligne légende photo pleine page — parité `.pf-caption` dans `htmlBook.ts`. */
-export const PDF_PHOTO_CAPTION_LINE_HEIGHT = 1.3;
-/** Interligne texte photo-note — parité `.photo-note .pn-text .memory-text`. */
-export const PDF_PHOTO_NOTE_LINE_HEIGHT = 1.35;
+/** Interligne légendes photo — aligné sur corps souvenir (17/12). */
+export const PDF_PHOTO_CAPTION_LINE_HEIGHT =
+  PDF_TEXT_MEMORY_BODY_LINE_PT / PDF_TEXT_MEMORY_BODY_SIZE_PT;
+export const PDF_PHOTO_NOTE_LINE_HEIGHT =
+  PDF_TEXT_MEMORY_BODY_LINE_PT / PDF_TEXT_MEMORY_BODY_SIZE_PT;
 
-/** `.pf-caption` */
-export function pdfPhotoCaptionStyle(pageWidthPx: number): { fontSize: number; lineHeight: number } {
-  const fs = Math.max(MIN_FS, pdfPtToPreviewPx(PDF_PHOTO_CAPTION_PT, pageWidthPx));
-  return {
-    fontSize: fs,
-    lineHeight: pdfPtToPreviewPx(PDF_PHOTO_CAPTION_PT * PDF_PHOTO_CAPTION_LINE_HEIGHT, pageWidthPx),
-  };
+/** `.pf-caption` — même Manrope 12/17 / tracking que Petits mots. */
+export function pdfPhotoCaptionStyle(
+  pageWidthPx: number,
+): { fontSize: number; lineHeight: number; letterSpacing: number } {
+  return pdfTextMemoryBodyStyle('lg', pageWidthPx);
 }
 
-/** `.photo-note .pn-text .memory-text` */
-export function pdfPhotoNoteBodyStyle(pageWidthPx: number): { fontSize: number; lineHeight: number } {
-  const fs = Math.max(MIN_FS, pdfPtToPreviewPx(PDF_PHOTO_NOTE_BODY_PT, pageWidthPx));
-  return {
-    fontSize: fs,
-    lineHeight: pdfPtToPreviewPx(PDF_PHOTO_NOTE_BODY_PT * PDF_PHOTO_NOTE_LINE_HEIGHT, pageWidthPx),
-  };
+/** `.photo-note .pn-text` — même corps souvenir livre. */
+export function pdfPhotoNoteBodyStyle(
+  pageWidthPx: number,
+): { fontSize: number; lineHeight: number; letterSpacing: number } {
+  return pdfTextMemoryBodyStyle('lg', pageWidthPx);
 }
 
 export type QuotePdfFitLevel = 0 | 1 | 2;
@@ -372,13 +369,14 @@ export function pdfMemoryTextBodyStyle(pageWidthPx: number): { fontSize: number;
   return { fontSize: fs, lineHeight: pdfPtToPreviewPx(PDF_MEMORY_BODY_PT * 1.588, pageWidthPx) };
 }
 
-/** Légende audio / vidéo (EB Garamond) — parité `.media-qr-caption`. */
-export function pdfMediaCaptionStyle(pageWidthPx: number): { fontSize: number; lineHeight: number } {
-  const fs = Math.max(MIN_FS, pdfPtToPreviewPx(PDF_MEDIA_CAPTION_PT, pageWidthPx));
-  return { fontSize: fs, lineHeight: pdfPtToPreviewPx(PDF_MEDIA_CAPTION_PT * PDF_MEDIA_CAPTION_LH, pageWidthPx) };
+/** Légende audio / vidéo — même corps souvenir livre. */
+export function pdfMediaCaptionStyle(
+  pageWidthPx: number,
+): { fontSize: number; lineHeight: number; letterSpacing: number } {
+  return pdfTextMemoryBodyStyle('lg', pageWidthPx);
 }
 
-/** Corps Petits mots — Manrope 12/17 / tracking 0.015em (maquette). */
+/** Corps souvenir livre — Manrope 12/17 / tracking 0.04em (maquette + PDF). */
 export function pdfTextMemoryBodyStyle(
   tier: TextMemorySizeTier,
   pageWidthPx: number,
