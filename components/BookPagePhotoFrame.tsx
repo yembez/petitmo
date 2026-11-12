@@ -3,7 +3,7 @@ import { Image as RNImage, Pressable, StyleSheet, Text, View } from 'react-nativ
 import { Image as ExpoImage } from 'expo-image';
 import { BookInlinePhotoCrop } from '@/components/BookInlinePhotoCrop';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
-import type { PhotoCrop } from '@/src/book/photoCrop';
+import { photoCropNeedsAspectLayout, type PhotoCrop } from '@/src/book/photoCrop';
 import { bookPhotoCropImageRect } from '@/utils/bookPhotoCropLayout';
 import { useSignedMediaUrl, extractMediaBucketPath } from '@/lib/mediaSignedUrl';
 
@@ -58,9 +58,30 @@ function CroppedPhotoStatic({
   imgPxW?: number;
   imgPxH?: number;
 }) {
-  // Recadrage précis uniquement si dims fichier connues (sinon transform pan/scale laisse un bandeau gris).
-  if ((coverMode || (imgPxW && imgPxH)) && imgPxW && imgPxH) {
-    const rect = bookPhotoCropImageRect(width, height, imgPxW, imgPxH, crop);
+  const cropPxW =
+    typeof crop?.imgPxW === 'number' && crop.imgPxW > 0 ? crop.imgPxW : 0;
+  const cropPxH =
+    typeof crop?.imgPxH === 'number' && crop.imgPxH > 0 ? crop.imgPxH : 0;
+  const propW = typeof imgPxW === 'number' && imgPxW > 0 ? imgPxW : 0;
+  const propH = typeof imgPxH === 'number' && imgPxH > 0 ? imgPxH : 0;
+  const seedW = propW || cropPxW;
+  const seedH = propH || cropPxH;
+
+  const stickyRef = useRef<{ w: number; h: number } | null>(
+    seedW > 0 && seedH > 0 ? { w: seedW, h: seedH } : null,
+  );
+  if (seedW > 0 && seedH > 0) {
+    stickyRef.current = { w: seedW, h: seedH };
+  }
+
+  const [measured, setMeasured] = useState<{ w: number; h: number } | null>(null);
+  const aw = stickyRef.current?.w || measured?.w || 0;
+  const ah = stickyRef.current?.h || measured?.h || 0;
+  const needsAspect = coverMode || photoCropNeedsAspectLayout(crop);
+
+  // Recadrage précis dès que dims connues (props, crop persisté, ou onLoad).
+  if ((coverMode || (aw > 0 && ah > 0)) && aw > 0 && ah > 0) {
+    const rect = bookPhotoCropImageRect(width, height, aw, ah, crop);
     return (
       <View style={{ width, height, overflow: 'hidden', backgroundColor: '#FFFFFF' }}>
         <ExpoImage
@@ -75,10 +96,35 @@ function CroppedPhotoStatic({
       </View>
     );
   }
-  // Sans dims : garder le crop via transform (ne pas ignorer pan/scale → flash « photo non recadrée »).
-  const x = ((crop?.xPct ?? 0) / 100) * width;
-  const y = ((crop?.yPct ?? 0) / 100) * height;
-  const s = Math.max(1, crop?.scale ?? 1);
+
+  /**
+   * Crop custom sans dims : fond blanc + mesure invisible —
+   * évite le flash transform→aspect (mauvais cadrage puis snap).
+   */
+  if (needsAspect) {
+    return (
+      <View style={{ width, height, overflow: 'hidden', backgroundColor: '#FFFFFF' }}>
+        <ExpoImage
+          source={{ uri }}
+          recyclingKey={`measure:${uri}`}
+          cachePolicy="memory-disk"
+          transition={0}
+          priority="high"
+          style={{ width: 1, height: 1, opacity: 0 }}
+          onLoad={e => {
+            const w = e.source?.width ?? 0;
+            const h = e.source?.height ?? 0;
+            if (w > 0 && h > 0) {
+              stickyRef.current = { w, h };
+              setMeasured({ w, h });
+            }
+          }}
+        />
+      </View>
+    );
+  }
+
+  // Crop défaut sans dims : cover plein cadre.
   return (
     <View style={{ width, height, overflow: 'hidden', backgroundColor: '#FFFFFF' }}>
       <ExpoImage
@@ -87,10 +133,7 @@ function CroppedPhotoStatic({
         cachePolicy="memory-disk"
         transition={0}
         priority="high"
-        style={[
-          StyleSheet.absoluteFillObject,
-          { transform: [{ translateX: x }, { translateY: y }, { scale: s }] },
-        ]}
+        style={StyleSheet.absoluteFillObject}
         contentFit="cover"
       />
     </View>

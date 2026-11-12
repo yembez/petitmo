@@ -1923,14 +1923,26 @@ function MaquetteMediaQr({
       ? buildInlineCropProps(inlineCropConfig, memory.id)
       : undefined;
   const voicePrintPx = kind === 'audio' ? getBookPhotoPrintPixelSize(memory) : null;
-  /** Vidéo : dims poster uniquement (dpiMeta / mesure), jamais `print_px` vidéo. */
+  /** Vidéo : dpiMeta / props, puis dims figées dans le crop, puis print_px SQLite. */
+  const cropPxW =
+    typeof photoCrop?.imgPxW === 'number' && photoCrop.imgPxW > 0 ? photoCrop.imgPxW : 0;
+  const cropPxH =
+    typeof photoCrop?.imgPxH === 'number' && photoCrop.imgPxH > 0 ? photoCrop.imgPxH : 0;
+  const memPrintW =
+    kind === 'video' && typeof memory.print_px_w === 'number' && memory.print_px_w > 0
+      ? memory.print_px_w
+      : 0;
+  const memPrintH =
+    kind === 'video' && typeof memory.print_px_h === 'number' && memory.print_px_h > 0
+      ? memory.print_px_h
+      : 0;
   const voiceImgPxW = positiveImgPx(
     photoInline?.dpiMeta?.imgPxW,
-    photoImgPxW ?? voicePrintPx?.w,
+    photoImgPxW ?? cropPxW ?? memPrintW ?? voicePrintPx?.w,
   );
   const voiceImgPxH = positiveImgPx(
     photoInline?.dpiMeta?.imgPxH,
-    photoImgPxH ?? voicePrintPx?.h,
+    photoImgPxH ?? cropPxH ?? memPrintH ?? voicePrintPx?.h,
   );
   const voiceVisualUri =
     kind === 'audio'

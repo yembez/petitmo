@@ -74,12 +74,17 @@ function cropFromShared(
   frameW: number,
   frameH: number,
   fit: PhotoCropFit,
+  imgPxW?: number,
+  imgPxH?: number,
 ): PhotoCrop {
   return {
     xPct: (tx / frameW) * 100,
     yPct: (ty / frameH) * 100,
     scale,
     ...(fit === 'contain' ? { fit: 'contain' as const } : {}),
+    ...(typeof imgPxW === 'number' && imgPxW > 0 && typeof imgPxH === 'number' && imgPxH > 0
+      ? { imgPxW: Math.round(imgPxW), imgPxH: Math.round(imgPxH) }
+      : {}),
   };
 }
 
@@ -145,8 +150,10 @@ export function BookInlinePhotoCrop({
   const pinchStartScale = useSharedValue(1);
 
   const commitCrop = useCallback(() => {
-    onChange(cropFromShared(tx.value, ty.value, scale.value, frameW, frameH, fit));
-  }, [fit, frameH, frameW, onChange, scale, tx, ty]);
+    onChange(
+      cropFromShared(tx.value, ty.value, scale.value, frameW, frameH, fit, imgPxW, imgPxH),
+    );
+  }, [fit, frameH, frameW, imgPxH, imgPxW, onChange, scale, tx, ty]);
 
   useEffect(() => {
     const next = seedCropSharedValues({ crop, useAspect, baseW, baseH, frameW, frameH });

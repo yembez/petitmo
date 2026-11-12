@@ -492,11 +492,20 @@ function normalizeBook(raw: unknown): Book | null {
       const scale = typeof entry.scale === 'number' ? entry.scale : 1;
       if (!Number.isFinite(xPct) || !Number.isFinite(yPct) || !Number.isFinite(scale)) continue;
       const fit = entry.fit === 'contain' ? 'contain' : undefined;
+      const imgPxW =
+        typeof entry.imgPxW === 'number' && Number.isFinite(entry.imgPxW) && entry.imgPxW > 0
+          ? Math.round(entry.imgPxW)
+          : undefined;
+      const imgPxH =
+        typeof entry.imgPxH === 'number' && Number.isFinite(entry.imgPxH) && entry.imgPxH > 0
+          ? Math.round(entry.imgPxH)
+          : undefined;
       photoCrops[k] = {
         xPct,
         yPct,
         scale: Math.max(1, scale),
         ...(fit ? { fit } : {}),
+        ...(imgPxW && imgPxH ? { imgPxW, imgPxH } : {}),
       };
     }
   }
@@ -2186,11 +2195,20 @@ function safePhotoCrops(
     const scale = typeof e.scale === 'number' ? e.scale : 1;
     if (!Number.isFinite(xPct) || !Number.isFinite(yPct) || !Number.isFinite(scale)) continue;
     const fit = e.fit === 'contain' ? 'contain' : undefined;
+    const imgPxW =
+      typeof e.imgPxW === 'number' && Number.isFinite(e.imgPxW) && e.imgPxW > 0
+        ? Math.round(e.imgPxW)
+        : undefined;
+    const imgPxH =
+      typeof e.imgPxH === 'number' && Number.isFinite(e.imgPxH) && e.imgPxH > 0
+        ? Math.round(e.imgPxH)
+        : undefined;
     out[k] = {
       xPct,
       yPct,
       scale: Math.max(1, scale),
       ...(fit ? { fit } : {}),
+      ...(imgPxW && imgPxH ? { imgPxW, imgPxH } : {}),
     };
   }
   return Object.keys(out).length ? out : null;

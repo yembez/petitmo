@@ -1427,12 +1427,26 @@ export default function BookPreviewScreen() {
   }, [bookId, loading, rotations, photoCrops, chapterTitleLine, backCoverTaglineLine]);
 
   const upsertPhotoCrop = useCallback(
-    (key: string, next: { xPct: number; yPct: number; scale: number; fit?: 'cover' | 'contain' }) => {
+    (key: string, next: { xPct: number; yPct: number; scale: number; fit?: 'cover' | 'contain'; imgPxW?: number; imgPxH?: number }) => {
+      const meta = cropDpiMetaByKey[key];
+      const imgPxW =
+        typeof next.imgPxW === 'number' && next.imgPxW > 0
+          ? Math.round(next.imgPxW)
+          : meta?.imgPxW > 0
+            ? Math.round(meta.imgPxW)
+            : undefined;
+      const imgPxH =
+        typeof next.imgPxH === 'number' && next.imgPxH > 0
+          ? Math.round(next.imgPxH)
+          : meta?.imgPxH > 0
+            ? Math.round(meta.imgPxH)
+            : undefined;
       const crop = {
         xPct: next.xPct,
         yPct: next.yPct,
         scale: next.scale,
         ...(next.fit === 'contain' ? { fit: 'contain' as const } : {}),
+        ...(imgPxW && imgPxH ? { imgPxW, imgPxH } : {}),
       };
       setPhotoCrops(prev => {
         const merged = { ...prev, [key]: crop };
@@ -1448,7 +1462,7 @@ export default function BookPreviewScreen() {
         flushBooksCloudBackupNow();
       })();
     },
-    [bookId],
+    [bookId, cropDpiMetaByKey],
   );
 
   const getImagePx = useCallback(
