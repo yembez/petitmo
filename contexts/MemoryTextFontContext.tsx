@@ -5,9 +5,12 @@ import {
   MEMORY_EDITORIAL_FONT_BOLD_FAMILY,
   MEMORY_EDITORIAL_FONT_FALLBACK,
   MEMORY_EDITORIAL_FONT_FAMILY,
+  MEMORY_MANROPE_BOLD_FAMILY,
+  MEMORY_MANROPE_REGULAR_FAMILY,
   MEMORY_TEXT_FONT_FALLBACK,
   MEMORY_TEXT_FONT_FAMILY,
   MEMORY_TEXT_FONT_SOURCES,
+  MEMORY_TEXT_FONT_TRIAL,
   USE_SYSTEM_MEMORY_TEXT_FONTS,
 } from '@/constants/memoryTextFont';
 
@@ -17,13 +20,20 @@ const MemoryEditorialBoldFontContext = createContext<string>(MEMORY_EDITORIAL_FO
 
 function memoryFontsReady(loadedFromHook: boolean): boolean {
   if (USE_SYSTEM_MEMORY_TEXT_FONTS) return true;
+  if (MEMORY_TEXT_FONT_TRIAL === 'manrope') {
+    return (
+      loadedFromHook ||
+      (Font.isLoaded(MEMORY_MANROPE_REGULAR_FAMILY) &&
+        Font.isLoaded(MEMORY_MANROPE_BOLD_FAMILY))
+    );
+  }
   return (
     loadedFromHook ||
     (Font.isLoaded('DMSans_400Regular') && Font.isLoaded('DMSans_600SemiBold'))
   );
 }
 
-/** Charge DM Sans une fois pour les onglets (souvent déjà au boot) — skip si essai système. */
+/** Charge la face essai une fois pour les onglets (souvent déjà au boot). */
 export function MemoryTextFontProvider({ children }: PropsWithChildren) {
   const [loaded] = useFonts(
     USE_SYSTEM_MEMORY_TEXT_FONTS ? {} : MEMORY_TEXT_FONT_SOURCES,
@@ -56,7 +66,7 @@ export function useMemoryTextFont(): string {
   return useContext(MemoryTextFontContext);
 }
 
-/** Typo éditoriale des souvenirs (corps + légendes) — DM Sans ou système selon flag. */
+/** Typo éditoriale des souvenirs (corps + légendes) — Manrope / système / DM Sans selon flag. */
 export function useMemoryEditorialFont(): string {
   return useContext(MemoryEditorialFontContext);
 }
