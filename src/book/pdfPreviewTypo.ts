@@ -260,12 +260,13 @@ export const PDF_TEXT_MEMORY_TITLE_BLOCK_MARGIN_MM: Record<TextMemorySizeTier, n
 };
 
 /**
- * Espace titre → filet (maquette).
- * PDF Chromium : `PDF_TEXT_MEMORY_TITLE_RULE_MARGIN_TOP_PDF_MM` (metrics Manrope plus larges).
+ * Espace titre → filet (maquette + PDF).
+ * PDF : aussi en inline sur `.text-memory-title-rule` ; gap filet→corps = spacer div
+ * (Chromium print ignore padding sous flex+overflow).
  */
 export const PDF_TEXT_MEMORY_TITLE_RULE_MARGIN_TOP_MM = 5;
-/** Correction print Chromium — un peu moins que la maquette pour le milieu optique. */
-export const PDF_TEXT_MEMORY_TITLE_RULE_MARGIN_TOP_PDF_MM = 2.5;
+/** @deprecated Même valeur que maquette — garder pour imports existants. */
+export const PDF_TEXT_MEMORY_TITLE_RULE_MARGIN_TOP_PDF_MM = 5;
 
 /** Largeur filet sous le titre souvenir. */
 export const PDF_TEXT_MEMORY_TITLE_RULE_MM: Record<TextMemorySizeTier, number> = {

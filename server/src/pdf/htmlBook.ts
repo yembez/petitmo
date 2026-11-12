@@ -403,12 +403,22 @@ function pageQuote(
   const bodyHtml = centerBody ? romanHtmlCentered(body) : romanHtml(body);
   const titledSmBodyHtml = romanHtmlTitledSm(body);
 
+  /**
+   * Espacement titre / filet / corps — inline + spacer réel.
+   * Chromium print ignore souvent padding/margin sous flex+overflow:hidden ;
+   * un div height:Nmm entre filet et corps est fiable.
+   * Valeurs = pdfPreviewTypo (TITLE_RULE_MARGIN_TOP_MM + TITLE_BLOCK_MARGIN_MM).
+   */
+  const titleRuleWmm = tier === 'lg' ? 24 : 30;
+  const titleRuleTopMm = 5;
+  const titleGapBelowMm = tier === 'lg' ? 9 : tier === 'md' ? 8.5 : 8;
   const titleBlock =
     variant === 'titled' && title
       ? `<div class="text-memory-title-block text-tier-${tier}">
       <div class="text-memory-title text-tier-${tier}">${esc(sanitizeText(title))}</div>
-      <div class="text-memory-title-rule text-tier-${tier}"></div>
-    </div>`
+      <div class="text-memory-title-rule text-tier-${tier}" style="width:${titleRuleWmm}mm;height:0.5pt;margin:${titleRuleTopMm}mm auto 0;background:rgba(0,0,0,.18);"></div>
+    </div>
+    <div class="text-memory-title-gap" style="display:block;height:${titleGapBelowMm}mm;width:100%;flex-shrink:0;overflow:hidden;" aria-hidden="true"></div>`
       : '';
 
   let midInner = '';
@@ -834,6 +844,7 @@ function buildHtmlDocument(
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;1,400&amp;family=EB+Garamond:ital,wght@0,400;1,400&amp;family=Manrope:wght@300;400;600&amp;display=swap" rel="stylesheet" />
+<meta name="petitmo-htmlbook" content="title-gap-spacer-v1" />
 <style>
 
 * { margin:0; padding:0; box-sizing:border-box;
@@ -1110,8 +1121,8 @@ body.print-bleed .bleed-x {
 .text-memory-title-block {
   text-align:center;
   flex-shrink:0;
-  /* padding-bottom = filet → corps (pas margin : Chromium print collapsait et collait le filet). */
-  margin-bottom:0;
+  margin:0;
+  padding:0;
 }
 .text-memory-title {
   font-family:'Manrope',sans-serif;
@@ -1123,33 +1134,36 @@ body.print-bleed .bleed-x {
 .text-tier-lg.text-memory-title { font-size:28pt; line-height:1.15; }
 .text-tier-md.text-memory-title { font-size:26pt; line-height:1.2; }
 .text-tier-sm.text-memory-title { font-size:24pt; line-height:1.2; }
+/* Filet : width/margin/height surtout en inline (pageQuote) — fallback CSS. */
 .text-memory-title-rule {
   display:block;
-  height:.3pt;
-  background:rgba(0,0,0,.12);
-  /* PDF_TEXT_MEMORY_TITLE_RULE_MARGIN_TOP_PDF_MM — milieu optique vs maquette 5 mm. */
-  margin:2.5mm auto 0;
+  height:.5pt;
+  background:rgba(0,0,0,.18);
+  margin:5mm auto 0;
 }
 .text-tier-lg.text-memory-title-rule { width:24mm; }
 .text-tier-md.text-memory-title-rule { width:30mm; }
 .text-tier-sm.text-memory-title-rule { width:30mm; }
+/* Spacer filet→corps : height en inline (pageQuote). */
+.text-memory-title-gap {
+  display:block;
+  width:100%;
+  flex-shrink:0;
+  overflow:hidden;
+}
 .text-memory-column {
   width:100%;
   max-width:140mm;
   margin-left:auto;
   margin-right:auto;
 }
-/* variant sur page.quote, tier sur inner/mid/text-memory — pas de selecteur compose meme noeud */
+/* variant sur page.quote, tier sur text-memory-* — pas de selecteur compose meme noeud */
 .quote-variant-titled .text-memory-column.text-tier-lg { max-width:128mm; }
 .quote-variant-titled .text-memory-column.text-tier-md { max-width:140mm; }
 .quote-variant-titled .text-memory-column.text-tier-sm { max-width:132mm; }
 .quote-variant-guillemet .text-memory-column.text-tier-lg { max-width:112mm; }
 .quote-variant-dropcap .text-memory-column.text-tier-md { max-width:136mm; }
 .quote-variant-dropcap .text-memory-column.text-tier-sm { max-width:130mm; }
-/* PDF_TEXT_MEMORY_TITLE_BLOCK_MARGIN_MM — air filet → corps (même que spread). */
-.text-memory-title-block.text-tier-lg { padding-bottom:9mm; }
-.text-memory-title-block.text-tier-md { padding-bottom:8.5mm; }
-.text-memory-title-block.text-tier-sm { padding-bottom:8mm; }
 .quote-footer-block {
   flex-shrink:0;
   margin-top:auto;

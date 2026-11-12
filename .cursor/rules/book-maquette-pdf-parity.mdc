@@ -82,7 +82,7 @@ Règle spread : si page N est [FP] et que N+1 serait aussi [FP] (après calcul d
 
 ## Page « Petits mots » (souvenir texte seul)
 
-Police : **Manrope 300**, `letter-spacing: 0.04em`. Petits mots : **12 pt / 17 pt**. Légendes photo/A/V : **10 pt / 14 pt**. Pas sur couvertures. Retours à la ligne saisis conservés. Filet titre : maquette `5 mm` au-dessus ; PDF `2,5 mm` ; filet→corps `9 / 8,5 / 8 mm` (spread + PDF). Méta : **DM Sans** 7 pt.
+Police : **Manrope 300**, `letter-spacing: 0.04em`. Petits mots : **12 pt / 17 pt**. Légendes photo/A/V : **10 pt / 14 pt**. Pas sur couvertures. Retours à la ligne saisis conservés. Filet titre : `5 mm` au-dessus ; filet→corps `9 / 8,5 / 8 mm`. PDF : spacer div `height` inline (pas padding — Chromium print + flex). Méta : **DM Sans** 7 pt.
 
 Champ optionnel `text_title` → variante **titled** (toute longueur). Sans titre : **guillemet** (≤ 8 lignes) ou **dropcap** (9+ lignes).
 
@@ -107,9 +107,9 @@ Logique : `src/book/quoteFitLevel.ts` ↔ `server/src/pdf/maquetteAlign.ts` (`re
 
 Guillemet : `"` **52 pt** italique Manrope, couleur **#6B8F7E**, filet **28 mm** sous le bloc.
 
-Titled : titre **28 / 26 / 24 pt** Manrope 300 (lg/md/sm), filet **24 / 30 / 30 mm**, espace titre→filet **5 mm** maquette / **2,5 mm** PDF, marge filet→corps **9 / 8,5 / 8 mm** (`padding-bottom` PDF sur `.text-memory-title-block.text-tier-*`, pas `margin`).
+Titled : titre **28 / 26 / 24 pt** Manrope 300 (lg/md/sm), filet **24 / 30 / 30 mm**, espace titre→filet **5 mm**, marge filet→corps **9 / 8,5 / 8 mm**. PDF : `.text-memory-title-gap` (div hauteur mm inline) entre filet et corps ; meta `petitmo-htmlbook=title-gap-spacer-v1`.
 
-**PDF CSS :** `quote-variant-*` est sur `.page`, `quote-tier-*` sur `.inner` / mid — sélecteur descendant (`.quote-variant-titled .text-tier-lg`), jamais composé sur le même nœud.
+**PDF CSS :** `quote-variant-*` sur `.page`, tier sur mid / `text-tier-*` — sélecteur descendant, jamais composé même nœud.
 
 Dropcap : lettrine **52 / 46 pt** Manrope 300 (md/sm), espace entre paragraphes **5,5 mm**.
 
