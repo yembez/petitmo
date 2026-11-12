@@ -1267,6 +1267,16 @@ export async function signOutRealAccount(): Promise<void> {
   } catch (e) {
     console.warn('[auth] logOutRevenueCat', e);
   }
+  /**
+   * Pousser les livres (photoCrops fit original, etc.) **avant** purge locale —
+   * sinon un logout rapide perd le debounce 2,5 s et le restore revient sans crops.
+   */
+  try {
+    const { backupBooksToSupabaseIfPremium } = await import('@/services/books');
+    await backupBooksToSupabaseIfPremium();
+  } catch (e) {
+    console.warn('[auth] backupBooks before logout', e);
+  }
   // Purge locale garantie (y compris hors-ligne) — voir clearLocalAuthSessionGuaranteed.
   await clearLocalAuthSessionGuaranteed();
   rememberRealAuthUser(null);

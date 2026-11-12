@@ -1424,8 +1424,16 @@ export default function BookPreviewScreen() {
   }, [bookId, loading, rotations, photoCrops, chapterTitleLine, backCoverTaglineLine]);
 
   const upsertPhotoCrop = useCallback(
-    (key: string, next: { xPct: number; yPct: number; scale: number }) => {
-      setPhotoCrops(prev => ({ ...prev, [key]: next }));
+    (key: string, next: { xPct: number; yPct: number; scale: number; fit?: 'cover' | 'contain' }) => {
+      setPhotoCrops(prev => ({
+        ...prev,
+        [key]: {
+          xPct: next.xPct,
+          yPct: next.yPct,
+          scale: next.scale,
+          ...(next.fit === 'contain' ? { fit: 'contain' as const } : {}),
+        },
+      }));
     },
     []
   );
@@ -2664,6 +2672,8 @@ export default function BookPreviewScreen() {
                     onPress={() => {
                       const nextFit = fit === 'contain' ? 'cover' : 'contain';
                       upsertPhotoCrop(fitKey!, defaultPhotoCrop(nextFit));
+                      // Flush cloud immédiat : le fit « original » doit survivre un restore.
+                      flushBooksCloudBackupNow();
                     }}
                     accessibilityLabel={fitA11y}
                   >
