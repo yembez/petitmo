@@ -106,8 +106,6 @@ function buildEmail(params: {
     'Adresse de livraison',
     ...addressLines,
     '',
-    'Délai indicatif : compte environ 1 à 2 semaines pour l’impression et la livraison.',
-    '',
     'Une erreur dans l’adresse ou l’e-mail ?',
     `Réponds à cet e-mail au plus vite (idéalement dans les 2 heures, avant le départ en impression) ou écris à ${supportEmail} en rappelant le numéro ${orderRef} : on corrige directement avec l’imprimeur.`,
     '',
@@ -133,8 +131,6 @@ function buildEmail(params: {
 
 <p style="margin:0 0 8px;font-size:13px;line-height:18px;letter-spacing:.4px;text-transform:uppercase;color:#8a8a8e;">Adresse de livraison</p>
 <p style="margin:0 0 20px;font-size:15px;line-height:22px;">${addressLines.map(escapeHtml).join('<br/>')}</p>
-
-<p style="margin:0 0 20px;font-size:14px;line-height:21px;color:#5c5c61;">Délai indicatif : compte environ <strong>1 à 2 semaines</strong> pour l’impression et la livraison.</p>
 
 <div style="background:#fff4ee;border-radius:12px;padding:14px 16px;margin:0 0 24px;">
 <p style="margin:0 0 6px;font-size:15px;line-height:22px;"><strong>Une erreur dans l’adresse ou l’e-mail ?</strong></p>
