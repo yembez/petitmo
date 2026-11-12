@@ -237,11 +237,18 @@ async function uploadLocalUriToMediaBucket(params: {
     throw signErr ?? new Error('SIGNED_UPLOAD_URL_FAILED');
   }
 
+  /** Chemin canonique renvoyé par Supabase (peut différer du param d’entrée). */
+  const storagePath = ((data as { path?: string }).path ?? params.filePath)
+    .replace(/^\/+/, '')
+    .replace(/^media\//, '')
+    .trim() || params.filePath;
+
   const res = await uploadAsyncLegacy(data.signedUrl, params.localUri, {
     httpMethod: 'PUT',
     uploadType: 0 as unknown as number, // BINARY_CONTENT
     headers: {
       'Content-Type': params.contentType,
+      ...(params.upsert ? { 'x-upsert': 'true' } : {}),
     },
   });
 
@@ -250,24 +257,24 @@ async function uploadLocalUriToMediaBucket(params: {
     if (/already exists|Duplicate|409/i.test(body) || res.status === 409) {
       try {
         const { assertMediaObjectExists } = await import('@/lib/mediaStorageIntegrity');
-        await assertMediaObjectExists(params.filePath, { minBytes });
+        await assertMediaObjectExists(storagePath, { minBytes });
       } catch (verifyErr) {
         throw verifyErr;
       }
-      void triggerMirrorMediaPathToR2(params.filePath);
-      return getSignedUrlAfterMediaUpload(params.filePath);
+      void triggerMirrorMediaPathToR2(storagePath);
+      return getSignedUrlAfterMediaUpload(storagePath);
     }
     throw new Error(`STORAGE_STREAM_UPLOAD_FAILED (${res.status}) ${body}`.trim());
   }
 
   try {
     const { assertMediaObjectExists } = await import('@/lib/mediaStorageIntegrity');
-    await assertMediaObjectExists(params.filePath, { minBytes });
+    await assertMediaObjectExists(storagePath, { minBytes });
   } catch (verifyErr) {
     try {
       const { captureMediaCloudIntegrityGap } = await import('@/lib/sentry');
       captureMediaCloudIntegrityGap({
-        path: params.filePath,
+        path: storagePath,
         stage: 'post_upload_verify',
         detail: verifyErr instanceof Error ? verifyErr.message : String(verifyErr),
       });
@@ -277,8 +284,8 @@ async function uploadLocalUriToMediaBucket(params: {
     throw verifyErr;
   }
 
-  void triggerMirrorMediaPathToR2(params.filePath);
-  return getSignedUrlAfterMediaUpload(params.filePath);
+  void triggerMirrorMediaPathToR2(storagePath);
+  return getSignedUrlAfterMediaUpload(storagePath);
 }
 
 async function createVideoThumbnailJpeg(uri: string): Promise<string | null> {

@@ -281,7 +281,8 @@ export function captureMediaCloudIntegrityGap(params: {
     `media.cloud.integrity: ${stage}${memoryId ? ` ${memoryId}` : ''} — ${path}${detail ? ` — ${detail}` : ''}`,
   );
   return Sentry.captureException(err, {
-    level: 'fatal',
+    // post_upload_verify : souvent lag `list` juste après PUT — error, pas fatal mail storm.
+    level: stage === 'post_upload_verify' ? 'error' : 'fatal',
     tags: {
       'app.errorScope': 'media.cloud.integrity',
       'app.mediaIntegrityStage': stage,
