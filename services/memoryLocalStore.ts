@@ -203,11 +203,15 @@ export async function ensureLocalPhotoDisplayPrintDerivatives(params: {
   };
 }
 
-const heavyDerivativesInFlight = new Set<string>();
 /** File globale : un seul decode ImageManipulator lourds à la fois (évite OOM sur import lot). */
 const HEAVY_DERIVATIVES_GLOBAL_CONCURRENCY = 1;
 let heavyDerivativesActive = 0;
 const heavyDerivativesWaitQueue: Array<() => void> = [];
+/** Une promesse par memoryId — sync cloud peut await le même travail. */
+const heavyDerivativesPromises = new Map<
+  string,
+  Promise<LocalPhotoHeavyDerivativesResult | null>
+>();
 
 function acquireHeavyDerivativesSlot(): Promise<void> {
   if (heavyDerivativesActive < HEAVY_DERIVATIVES_GLOBAL_CONCURRENCY) {
@@ -229,39 +233,62 @@ function releaseHeavyDerivativesSlot(): void {
 }
 
 /**
- * Génère display + print sans bloquer la navigation fil / favoris après capture.
- * Met à jour SQLite puis notifie le fil quand c’est prêt.
- * Concurrence globale = 1 pour éviter jetsam OOM sur import multi-photos.
+ * Génère display + print (file globale = 1). Réutilisable par le sync cloud
+ * pour ne pas re-décoder l’original une 2ᵉ fois.
  */
-export function scheduleLocalPhotoHeavyDerivatives(memoryId: string, localOriginalUri: string): void {
+export function awaitLocalPhotoHeavyDerivatives(
+  memoryId: string,
+  localOriginalUri: string,
+): Promise<LocalPhotoHeavyDerivativesResult | null> {
   const id = memoryId.trim();
   const src = localOriginalUri.trim();
-  if (!id || !src || Platform.OS === 'web') return;
-  if (heavyDerivativesInFlight.has(id)) return;
-  heavyDerivativesInFlight.add(id);
+  if (!id || !src || Platform.OS === 'web') return Promise.resolve(null);
 
-  void (async () => {
+  const existing = heavyDerivativesPromises.get(id);
+  if (existing) return existing;
+
+  const p = (async (): Promise<LocalPhotoHeavyDerivativesResult | null> => {
     await acquireHeavyDerivativesSlot();
     try {
       await new Promise<void>(resolve => {
         InteractionManager.runAfterInteractions(() => resolve());
       });
+
+      const cur0 = getLocalMemoryById(id);
+      const existingDisplay = (cur0?.local_display_path ?? '').trim();
+      const existingPrint = (cur0?.local_print_path ?? '').trim();
+      const { isLocalMediaUriReadable } = await import('@/utils/localMediaReadable');
+      if (
+        existingDisplay &&
+        existingPrint &&
+        (await isLocalMediaUriReadable(existingDisplay)) &&
+        (await isLocalMediaUriReadable(existingPrint))
+      ) {
+        return {
+          localDisplayUri: existingDisplay,
+          localPrintUri: existingPrint,
+          printPx:
+            typeof cur0?.print_px_w === 'number' && typeof cur0?.print_px_h === 'number'
+              ? { w: cur0.print_px_w, h: cur0.print_px_h }
+              : null,
+        };
+      }
+
       const heavy = await ensureLocalPhotoDisplayPrintDerivatives({
         memoryId: id,
         localOriginalUri: src,
       });
       const cur = getLocalMemoryById(id);
-      if (!cur || cur.type !== 'photo') return;
+      if (!cur || cur.type !== 'photo') return heavy;
 
       const display = heavy.localDisplayUri?.trim() || null;
       const print = heavy.localPrintUri?.trim() || null;
-      if (!display && !print) return;
+      if (!display && !print) return heavy;
 
       const next = {
         ...cur,
         local_display_path: display ?? cur.local_display_path,
         local_print_path: print ?? cur.local_print_path,
-        // Ne pas écraser print_url / display_url cloud par des chemins sandbox.
         print_px_w: heavy.printPx?.w ?? cur.print_px_w,
         print_px_h: heavy.printPx?.h ?? cur.print_px_h,
         updated_at: new Date().toISOString(),
@@ -280,13 +307,27 @@ export function scheduleLocalPhotoHeavyDerivatives(memoryId: string, localOrigin
       }
 
       DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId: id });
+      return heavy;
     } catch (e) {
       console.warn('[memoryLocalStore] heavy derivatives', id, e);
+      return null;
     } finally {
-      heavyDerivativesInFlight.delete(id);
       releaseHeavyDerivativesSlot();
+      heavyDerivativesPromises.delete(id);
     }
   })();
+
+  heavyDerivativesPromises.set(id, p);
+  return p;
+}
+
+/**
+ * Génère display + print sans bloquer la navigation fil / favoris après capture.
+ * Met à jour SQLite puis notifie le fil quand c’est prêt.
+ * Concurrence globale = 1 pour éviter jetsam OOM sur import multi-photos.
+ */
+export function scheduleLocalPhotoHeavyDerivatives(memoryId: string, localOriginalUri: string): void {
+  void awaitLocalPhotoHeavyDerivatives(memoryId, localOriginalUri);
 }
 
 /**

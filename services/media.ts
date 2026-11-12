@@ -20,6 +20,7 @@ import {
   ensureLocalVoiceCoverPrintDerivative,
   persistOriginalToSandbox,
   scheduleLocalPhotoHeavyDerivatives,
+  awaitLocalPhotoHeavyDerivatives,
   scheduleLocalVoiceCoverPrintDerivative,
   awaitVideoPosterForBookMemory,
 } from '@/services/memoryLocalStore';
@@ -471,6 +472,9 @@ async function stratifiedUpload(params: {
   durationSec?: number;
   mimeType?: string | null;
   fileName?: string | null;
+  /** Réutilise les JPEG sandbox déjà générés (évite 2e decode ImageManipulator). */
+  preferLocalThumbUri?: string | null;
+  preferLocalPrintUri?: string | null;
 }): Promise<{
   upload_status: UploadStatus;
   file_size: number;
@@ -482,7 +486,18 @@ async function stratifiedUpload(params: {
   poster_url: string | null;
   thumbnail_url: string | null;
 }> {
-  const { userId, childId, type, uri, isPaid, durationSec, mimeType, fileName } = params;
+  const {
+    userId,
+    childId,
+    type,
+    uri,
+    isPaid,
+    durationSec,
+    mimeType,
+    fileName,
+    preferLocalThumbUri,
+    preferLocalPrintUri,
+  } = params;
 
   if (type === 'voice') {
     // Toujours uploader l’audio intégralement (stream natif — pas de bytes() en RAM).
@@ -549,8 +564,16 @@ async function stratifiedUpload(params: {
   // PHOTO
   // Toujours uploader print + thumb. En payant : uploader aussi l’original.
   const ts = Date.now();
-  const thumbLocal = await createPhotoVariant(uri, 480, 0.7);
-  const printLocal = await createPhotoVariant(uri, MEDIA_BOOK_PRINT_MAX_WIDTH, 0.82);
+  let thumbLocal = (preferLocalThumbUri ?? '').trim();
+  let printLocal = (preferLocalPrintUri ?? '').trim();
+  if (thumbLocal && !(await isLocalMediaUriReadable(thumbLocal))) thumbLocal = '';
+  if (printLocal && !(await isLocalMediaUriReadable(printLocal))) printLocal = '';
+  if (!thumbLocal) {
+    thumbLocal = await createPhotoVariant(uri, 480, 0.7);
+  }
+  if (!printLocal) {
+    printLocal = await createPhotoVariant(uri, MEDIA_BOOK_PRINT_MAX_WIDTH, 0.82);
+  }
 
   const thumbPath = `${userId}/${childId}/photo/thumb_${ts}.jpg`;
   const printPath = `${userId}/${childId}/photo/print_${ts}.jpg`;
@@ -1436,6 +1459,30 @@ export async function pushPhotoAlbumMemoryToCloud(
 /**
  * Petitmo+ photo native : upload Storage + insert Supabase en arrière-plan après affichage local.
  */
+/** Un seul upload photo cloud à la fois — sinon import×N = N× ImageManipulator + readBytes. */
+const CLOUD_PHOTO_SYNC_CONCURRENCY = 1;
+let cloudPhotoSyncActive = 0;
+const cloudPhotoSyncWaitQueue: Array<() => void> = [];
+
+function acquireCloudPhotoSyncSlot(): Promise<void> {
+  if (cloudPhotoSyncActive < CLOUD_PHOTO_SYNC_CONCURRENCY) {
+    cloudPhotoSyncActive += 1;
+    return Promise.resolve();
+  }
+  return new Promise(resolve => {
+    cloudPhotoSyncWaitQueue.push(() => {
+      cloudPhotoSyncActive += 1;
+      resolve();
+    });
+  });
+}
+
+function releaseCloudPhotoSyncSlot(): void {
+  cloudPhotoSyncActive = Math.max(0, cloudPhotoSyncActive - 1);
+  const next = cloudPhotoSyncWaitQueue.shift();
+  if (next) next();
+}
+
 async function syncCloudPhotoMemoryInBackground(params: {
   memoryId: string;
   childId: string;
@@ -1446,13 +1493,31 @@ async function syncCloudPhotoMemoryInBackground(params: {
   locationLabel: string | null;
 }): Promise<void> {
   const { memoryId, childId, userId, localOriginalUri, isPaid, capturedAtIso, locationLabel } = params;
+  await acquireCloudPhotoSyncSlot();
   try {
+    await new Promise<void>(resolve => {
+      InteractionManager.runAfterInteractions(() => resolve());
+    });
+
+    /**
+     * Attendre / produire display+print sandbox une seule fois, puis uploader
+     * ces fichiers — pas un 2e decode parallèle de l’original (freeze import×10).
+     */
+    const heavy = await awaitLocalPhotoHeavyDerivatives(memoryId, localOriginalUri);
+    const localBeforeUpload = getLocalMemoryById(memoryId);
+    const preferThumb =
+      (localBeforeUpload?.local_thumb_path ?? '').trim() || null;
+    const preferPrint =
+      (heavy?.localPrintUri ?? localBeforeUpload?.local_print_path ?? '').trim() || null;
+
     const uploaded = await stratifiedUpload({
       userId,
       childId,
       type: 'photo',
       uri: localOriginalUri,
       isPaid,
+      preferLocalThumbUri: preferThumb,
+      preferLocalPrintUri: preferPrint,
     });
 
     const insertedAt = new Date().toISOString();
@@ -1512,6 +1577,8 @@ async function syncCloudPhotoMemoryInBackground(params: {
     emitMemoriesUpdatedIfVisualChanged(insertedRow.id, prev);
   } catch (e) {
     console.warn('[media] syncCloudPhotoMemoryInBackground', params.memoryId, e);
+  } finally {
+    releaseCloudPhotoSyncSlot();
   }
 }
 

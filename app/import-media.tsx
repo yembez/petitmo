@@ -55,8 +55,11 @@ type ImportStickerPreview = {
 };
 
 const MAX_PHOTOS_AT_ONCE = 10;
-/** Copie sandbox + miniatures en parallèle (le cloud n’est pas attendu ici). */
-const SEPARATE_PHOTOS_IMPORT_CONCURRENCY = 3;
+/**
+ * Un seul worker local : ImageManipulator + copie HEIC en parallèle (×3)
+ * saturait le JS/natives et laissait l’app figée jusqu’à plusieurs kills.
+ */
+const SEPARATE_PHOTOS_IMPORT_CONCURRENCY = 1;
 
 async function importSeparatePhotosWithConcurrency(
   assets: ImagePicker.ImagePickerAsset[],
@@ -137,6 +140,8 @@ async function importSeparatePhotosWithConcurrency(
         markUriDone(asset.uri);
         doneCount += 1;
         opts?.onProgress?.(doneCount, total);
+        // Laisse le fil / InteractionManager respirer entre deux photos.
+        await new Promise<void>(r => setTimeout(r, 48));
       }
     }
   };
