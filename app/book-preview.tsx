@@ -2671,9 +2671,18 @@ export default function BookPreviewScreen() {
                     style={styles.photoFitBelowPageBtn}
                     onPress={() => {
                       const nextFit = fit === 'contain' ? 'cover' : 'contain';
-                      upsertPhotoCrop(fitKey!, defaultPhotoCrop(nextFit));
-                      // Flush cloud immédiat : le fit « original » doit survivre un restore.
-                      flushBooksCloudBackupNow();
+                      const key = fitKey!;
+                      const nextCrop = defaultPhotoCrop(nextFit);
+                      const nextCrops = { ...photoCrops, [key]: nextCrop };
+                      // SQLite d’abord (pas seulement setState) — sinon flush lit l’ancien fit.
+                      setPhotoCrops(nextCrops);
+                      if (!bookId) return;
+                      void (async () => {
+                        const b = await getBook(bookId);
+                        if (!b) return;
+                        await upsertBook({ ...b, photoCrops: nextCrops });
+                        flushBooksCloudBackupNow();
+                      })();
                     }}
                     accessibilityLabel={fitA11y}
                   >
@@ -2688,6 +2697,7 @@ export default function BookPreviewScreen() {
     },
     [
       availHPortrait,
+      bookId,
       bookSnapshot?.memoryPhotoRefs,
       coverPhotoEditorRenderUri,
       cropDpiMetaByKey,
@@ -2698,7 +2708,6 @@ export default function BookPreviewScreen() {
       renderMaquettePage,
       screenWidth,
       t,
-      upsertPhotoCrop,
     ],
   );
 

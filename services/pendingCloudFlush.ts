@@ -45,6 +45,13 @@ export function flushPendingCloudUploadsOnce(): Promise<void> {
     const pending = getLocalMemoriesPendingCloudSync();
     const paid = (await resolveEffectiveUserTier()) === 'paid';
 
+    try {
+      const { flushPendingVideoPosterPrints } = await import('@/services/pendingVideoPosterPrint');
+      await flushPendingVideoPosterPrints();
+    } catch (e) {
+      console.warn('[pendingCloudFlush] videoPosterPrint', e);
+    }
+
     for (const m of pending) {
       if (isMediaImportBusy()) return;
       if ((m.user_id ?? '').trim() && m.user_id !== user.id) continue;

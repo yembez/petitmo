@@ -1273,7 +1273,15 @@ export async function signOutRealAccount(): Promise<void> {
    */
   try {
     const { backupBooksToSupabaseIfPremium } = await import('@/services/books');
-    await backupBooksToSupabaseIfPremium();
+    const { flushPendingVideoPosterPrints } = await import('@/services/pendingVideoPosterPrint');
+    // Timeout : ne pas bloquer le logout Low Friction si le réseau rame.
+    await Promise.race([
+      (async () => {
+        await flushPendingVideoPosterPrints();
+        await backupBooksToSupabaseIfPremium();
+      })(),
+      new Promise<void>(r => setTimeout(r, 2500)),
+    ]);
   } catch (e) {
     console.warn('[auth] backupBooks before logout', e);
   }

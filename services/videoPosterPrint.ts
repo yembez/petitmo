@@ -68,19 +68,27 @@ export async function persistVideoPosterPrintAtTimeMs(
     DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId: id });
 
     /**
-     * Sync cloud silencieuse : sans `poster_print_url` HTTPS en base, un restore
-     * de compte retombe sur la frame t≈0 (la sandbox est purgée).
+     * Sync cloud en fond (local-first) : sans `poster_print_url` HTTPS, un restore
+     * retombe sur t≈0. Hors-ligne / 0 row update → file pending.
      */
     void (async () => {
       try {
         const { persistVideoPosterToCloudForPdfExport } = await import('@/services/media');
-        await persistVideoPosterToCloudForPdfExport(id, next.child_id, printPath, {
+        const { markPendingVideoPosterPrintCloud } = await import('@/services/pendingVideoPosterPrint');
+        const url = await persistVideoPosterToCloudForPdfExport(id, next.child_id, printPath, {
           forceUpload: true,
           asPrintPoster: true,
           retriggerProcessMemory: false,
         });
+        if (!url) markPendingVideoPosterPrintCloud(id);
       } catch (e) {
         console.warn('[videoPosterPrint] cloud poster_print', id, e);
+        try {
+          const { markPendingVideoPosterPrintCloud } = await import('@/services/pendingVideoPosterPrint');
+          markPendingVideoPosterPrintCloud(id);
+        } catch {
+          /* */
+        }
       }
     })();
 

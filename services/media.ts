@@ -3397,29 +3397,28 @@ export async function persistVideoPosterToCloudForPdfExport(
       ? { poster_print_url: publicUrl }
       : { poster_url: publicUrl, thumbnail_url: publicUrl };
 
-    // PDF htmlBook lit poster_print puis poster : pour un print custom, pousser aussi poster/thumb
-    // dans l’override guest ; en cloud on conserve poster_url fil (t≈0) sauf s’il manquait.
-    if (asPrint) {
-      const feedPoster = (row?.poster_url ?? '').trim();
-      if (!/^https:\/\//i.test(feedPoster)) {
-        updatePayload.poster_url = publicUrl;
-        updatePayload.thumbnail_url = publicUrl;
-      }
-    }
+    // asPrint = illustration livre seulement — ne pas écraser le poster fil (t≈0).
 
-    const { error } = await supabase.from('memories').update(updatePayload).eq('id', memoryId);
+    const { data: updatedRows, error } = await supabase
+      .from('memories')
+      .update(updatePayload)
+      .eq('id', memoryId)
+      .select('id');
 
     if (error) {
       console.error('persistVideoPosterToCloudForPdfExport:', error);
       return null;
     }
+    if (!Array.isArray(updatedRows) || updatedRows.length === 0) {
+      // Souvenir pas encore en cloud : retry via pending flush.
+      return null;
+    }
     const existing = getLocalMemoryById(memoryId);
-    if (existing) {
+    if (existing && !asPrint) {
       upsertLocalMemory({
         ...existing,
         ...(updatePayload.poster_url ? { poster_url: updatePayload.poster_url } : {}),
         ...(updatePayload.thumbnail_url ? { thumbnail_url: updatePayload.thumbnail_url } : {}),
-        // Ne pas écraser le chemin sandbox local par l’HTTPS : l’UI livre reste local-first.
         updated_at: new Date().toISOString(),
       });
     }
