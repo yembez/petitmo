@@ -1127,8 +1127,8 @@ body.print-bleed .bleed-x {
   display:block;
   height:.3pt;
   background:rgba(0,0,0,.12);
-  /* PDF_TEXT_MEMORY_TITLE_RULE_MARGIN_TOP_PDF_MM — remonte vs maquette (Chromium). */
-  margin:1.5mm auto 0;
+  /* PDF_TEXT_MEMORY_TITLE_RULE_MARGIN_TOP_PDF_MM = 0 — remonte vs maquette 3 mm. */
+  margin:0 auto;
 }
 .text-tier-lg.text-memory-title-rule { width:24mm; }
 .text-tier-md.text-memory-title-rule { width:30mm; }
@@ -1146,12 +1146,12 @@ body.print-bleed .bleed-x {
 .quote-variant-dropcap.quote-tier-md .text-memory-column { max-width:136mm; }
 .quote-variant-dropcap.quote-tier-sm .text-memory-column { max-width:130mm; }
 /*
- * Filet → corps : un peu plus d’air que la maquette pour compenser le margin-top PDF
- * réduit (filet au milieu titre/texte).
+ * Filet → corps : +3 mm vs maquette pour compenser margin-top PDF à 0
+ * (filet au milieu optique titre/texte).
  */
-.quote-variant-titled.quote-tier-lg .text-memory-title-block { padding-bottom:6.5mm; }
-.quote-variant-titled.quote-tier-md .text-memory-title-block { padding-bottom:6mm; }
-.quote-variant-titled.quote-tier-sm .text-memory-title-block { padding-bottom:5.5mm; }
+.quote-variant-titled.quote-tier-lg .text-memory-title-block { padding-bottom:8mm; }
+.quote-variant-titled.quote-tier-md .text-memory-title-block { padding-bottom:7.5mm; }
+.quote-variant-titled.quote-tier-sm .text-memory-title-block { padding-bottom:7mm; }
 .quote-footer-block {
   flex-shrink:0;
   margin-top:auto;

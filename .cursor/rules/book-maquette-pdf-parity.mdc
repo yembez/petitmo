@@ -82,7 +82,7 @@ Règle spread : si page N est [FP] et que N+1 serait aussi [FP] (après calcul d
 
 ## Page « Petits mots » (souvenir texte seul)
 
-Police : **Manrope 300**, `letter-spacing: 0.04em`. Petits mots : **12 pt / 17 pt**. Légendes photo/A/V : **10 pt / 14 pt**. Pas sur couvertures. Retours à la ligne saisis conservés. Filet titre Petits mots : maquette `3 mm` au-dessus ; PDF Chromium `1.5 mm` + padding-bottom un peu plus généreux. Méta : **DM Sans** 7 pt.
+Police : **Manrope 300**, `letter-spacing: 0.04em`. Petits mots : **12 pt / 17 pt**. Légendes photo/A/V : **10 pt / 14 pt**. Pas sur couvertures. Retours à la ligne saisis conservés. Filet titre Petits mots : maquette `3 mm` au-dessus ; PDF Chromium `0` + padding-bottom `8 / 7,5 / 7 mm` (filet trop bas sinon). Méta : **DM Sans** 7 pt.
 
 Champ optionnel `text_title` → variante **titled** (toute longueur). Sans titre : **guillemet** (≤ 8 lignes) ou **dropcap** (9+ lignes).
 
@@ -107,7 +107,7 @@ Logique : `src/book/quoteFitLevel.ts` ↔ `server/src/pdf/maquetteAlign.ts` (`re
 
 Guillemet : `"` **52 pt** italique Manrope, couleur **#6B8F7E**, filet **28 mm** sous le bloc.
 
-Titled : titre **28 / 26 / 24 pt** Manrope 300 (lg/md/sm), filet **24 / 30 / 30 mm**, espace titre→filet **3 mm**, marge filet→corps **5 / 4,5 / 4 mm** (`padding-bottom` PDF, pas `margin`).
+Titled : titre **28 / 26 / 24 pt** Manrope 300 (lg/md/sm), filet **24 / 30 / 30 mm**, espace titre→filet **3 mm** maquette / **0** PDF, marge filet→corps **5 / 4,5 / 4 mm** maquette / **8 / 7,5 / 7 mm** PDF (`padding-bottom`, pas `margin`).
 
 Dropcap : lettrine **52 / 46 pt** Manrope 300 (md/sm), espace entre paragraphes **5,5 mm**.
 

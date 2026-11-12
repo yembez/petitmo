@@ -260,11 +260,12 @@ export const PDF_TEXT_MEMORY_TITLE_BLOCK_MARGIN_MM: Record<TextMemorySizeTier, n
 
 /**
  * Espace titre → filet (maquette).
- * PDF Chromium : utiliser `PDF_TEXT_MEMORY_TITLE_RULE_MARGIN_TOP_PDF_MM` (filet sinon trop bas).
+ * PDF Chromium : utiliser `PDF_TEXT_MEMORY_TITLE_RULE_MARGIN_TOP_PDF_MM`
+ * (metrics titre Manrope → filet trop bas si on garde 3 mm).
  */
 export const PDF_TEXT_MEMORY_TITLE_RULE_MARGIN_TOP_MM = 3;
-/** Correction print Chromium — remonte le filet vers le milieu titre/corps. */
-export const PDF_TEXT_MEMORY_TITLE_RULE_MARGIN_TOP_PDF_MM = 1.5;
+/** Correction print Chromium — remonte nettement le filet (0 = collé sous la ligne titre). */
+export const PDF_TEXT_MEMORY_TITLE_RULE_MARGIN_TOP_PDF_MM = 0;
 
 /** Largeur filet sous le titre souvenir. */
 export const PDF_TEXT_MEMORY_TITLE_RULE_MM: Record<TextMemorySizeTier, number> = {
