@@ -14,7 +14,7 @@ import {
 import { awaitPhotoPrintDerivativesForMemory } from '@/services/memoryLocalStore';
 import { getFamilyMemories, hydrateMemoriesByIds, toggleFavorite, uploadMedia } from '@/services/media';
 import { materializeCloudMediaToSandboxForMemory } from '@/services/memoryCloudMaterialize';
-import { getUserTier } from '@/lib/userTier';
+import { resolveEffectiveUserTier } from '@/lib/userTier';
 import { supabase } from '@/lib/supabase';
 import {
   FREE_TIER_BOOK_VOICE_MAX_DURATION,
@@ -191,7 +191,8 @@ export type FreeTierBookMemoryRow = {
 export async function validateFreeTierBookMemoryLimits(
   memories: readonly FreeTierBookMemoryRow[],
 ): Promise<void> {
-  const tier = await getUserTier();
+  /** Cache AsyncStorage seul = faux « gratuit » si RC / app_metadata déjà paid. */
+  const tier = await resolveEffectiveUserTier();
   const maxVideo =
     tier === 'paid' ? PAID_TIER_VIDEO_MAX_DURATION : FREE_TIER_VIDEO_MAX_DURATION;
   const maxAudio =
@@ -1434,7 +1435,9 @@ export async function createBookWithMemories(
   if (pageEntries.length === 0) {
     throw new Error('Sélectionne au moins un souvenir pour créer le livre.');
   }
-  const derived = deriveBookIdsAndRefsFromEntries(pageEntries);
+  /** Favoris est newest-first : on fige dès la création l’ordre chronologique (texte inclus). */
+  const chronologicalEntries = sortBookPageEntriesChronologically(pageEntries);
+  const derived = deriveBookIdsAndRefsFromEntries(chronologicalEntries);
   await assertBookMemoriesAllowedForTier(derived.memoryIds);
 
   const books = await readAll();
@@ -1443,8 +1446,9 @@ export async function createBookWithMemories(
     title: (title ?? '').trim() || `Livre ${books.length + 1}`,
     createdAt: new Date().toISOString(),
     memoryIds: derived.memoryIds,
-    pageEntries,
+    pageEntries: chronologicalEntries,
     memoryPhotoRefs: derived.memoryPhotoRefs,
+    pageOrderMode: null,
   };
   await upsertBook(book);
   return book;
@@ -1575,6 +1579,37 @@ export function isBookPageOrderManual(book: Book): boolean {
   return book.pageOrderMode === 'manual';
 }
 
+function memoryCreatedAtMsForBookPage(memoryId: string): number | null {
+  const m = getLocalMemoryById(memoryId.trim());
+  if (!m) return null;
+  const t = new Date(m.created_at).getTime();
+  return Number.isFinite(t) ? t : null;
+}
+
+/**
+ * Tri chronologique (`created_at` asc) d’une liste de pages — texte / photo / A/V
+ * traités pareil. Dates invalides ou souvenir absent → fin de liste (non perdues).
+ */
+export function sortBookPageEntriesChronologically(
+  entries: readonly BookPageEntry[],
+): BookPageEntry[] {
+  if (entries.length <= 1) return [...entries];
+
+  const dated: { entry: BookPageEntry; at: number }[] = [];
+  const undated: BookPageEntry[] = [];
+  for (const entry of entries) {
+    const at = memoryCreatedAtMsForBookPage(entry.memoryId);
+    if (at == null) {
+      undated.push(entry);
+      continue;
+    }
+    dated.push({ entry, at });
+  }
+  // `sort` est stable : deux souvenirs de même date gardent l’ordre d’entrée.
+  dated.sort((a, b) => a.at - b.at);
+  return [...dated.map(d => d.entry), ...undated];
+}
+
 /**
  * Pages contenu **dans l’ordre affiché** — miroir exact de `buildBookPages` :
  * séquence de `pageEntries` en manuel, tri `created_at` sinon. Les entrées dont le
@@ -1582,21 +1617,8 @@ export function isBookPageOrderManual(book: Book): boolean {
  */
 export function bookDisplayPageEntries(book: Book): BookPageEntry[] {
   const entries = bookPageEntries(book);
-  if (isBookPageOrderManual(book) || entries.length <= 1) return entries;
-
-  const dated: { entry: BookPageEntry; at: number }[] = [];
-  const undated: BookPageEntry[] = [];
-  for (const entry of entries) {
-    const memory = getLocalMemoryById(entry.memoryId.trim());
-    if (!memory) {
-      undated.push(entry);
-      continue;
-    }
-    dated.push({ entry, at: new Date(memory.created_at).getTime() });
-  }
-  // `sort` est stable : deux souvenirs de même date gardent l’ordre de `pageEntries`.
-  dated.sort((a, b) => a.at - b.at);
-  return [...dated.map(d => d.entry), ...undated];
+  if (isBookPageOrderManual(book)) return entries;
+  return sortBookPageEntriesChronologically(entries);
 }
 
 /**
@@ -1642,7 +1664,8 @@ export async function applyBookPageOrder(
   }
 
   const unchanged = next.every((e, i) => bookPageEntryKey(e) === bookPageEntryKey(current[i]!));
-  if (unchanged && isBookPageOrderManual(book)) return null;
+  /** No-op : ne pas basculer un livre chrono en `manual` sans vrai déplacement. */
+  if (unchanged) return null;
 
   const updated: Book = { ...book, pageEntries: next, pageOrderMode: 'manual' };
   await upsertBook(updated);
@@ -1721,7 +1744,7 @@ export function bookHasPageEntry(
 
 export type AddMemoriesToBookOptions = {
   memoryPhotoRefs?: Record<string, string>;
-  /** Pages à ajouter (APPEND). Même memoryId + autre photoRef = nouvelle page. */
+  /** Pages à ajouter (puis reclassement chrono). Même memoryId + autre photoRef = nouvelle page. */
   pageEntries?: BookPageEntry[];
 };
 
@@ -1734,7 +1757,11 @@ export function dedupeMemoryIds(ids: string[]): string[] {
 }
 
 /**
- * Ajoute des pages au livre — **toujours APPEND**.
+ * Ajoute des pages au livre.
+ * Après chaque ajout (Favoris, modal, texte, photo, A/V) : **reclassement chronologique
+ * complet** par `created_at`, et retour en mode chrono (`pageOrderMode=null`).
+ * Un ordre manuel ne survit pas à un ajout de contenu — la timeline prime
+ * (sinon un texte « à l’instant » finit au milieu d’une séquence figée).
  * Ne remplace jamais une page existante. Doublon exact (même memoryId + même photoRef) ignoré.
  */
 export async function addMemoriesToBook(
@@ -1778,12 +1805,13 @@ export async function addMemoriesToBook(
     return normalized;
   }
 
-  const entries = [...current, ...toAppend];
-  if (entries.length > MAX_BOOK_PAGE_ENTRIES) {
+  if (current.length + toAppend.length > MAX_BOOK_PAGE_ENTRIES) {
     throw new Error(
       `Un livre peut contenir au maximum ${MAX_BOOK_PAGE_ENTRIES} pages (actuellement ${current.length}).`,
     );
   }
+
+  const entries = sortBookPageEntriesChronologically([...current, ...toAppend]);
 
   const derived = deriveBookIdsAndRefsFromEntries(entries);
   await assertBookMemoriesAllowedForTier(derived.memoryIds);
@@ -1793,6 +1821,8 @@ export async function addMemoriesToBook(
     memoryIds: derived.memoryIds,
     pageEntries: entries,
     memoryPhotoRefs: derived.memoryPhotoRefs,
+    /** Ajout = timeline ; une réorga manuelle ultérieure pourra figer à nouveau. */
+    pageOrderMode: null,
   };
   await upsertBook(next);
   return next;

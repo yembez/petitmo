@@ -1,4 +1,3 @@
-import * as FileSystem from 'expo-file-system';
 import { copyAsync, documentDirectory, makeDirectoryAsync } from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 import type { Memory } from '@/types/local';
@@ -27,14 +26,27 @@ export function newLocalMemoryId(): string {
 }
 
 async function readBytesSize(uri: string): Promise<number> {
+  const trimmed = uri.trim();
+  if (!trimmed) return 0;
   if (Platform.OS === 'web') {
-    const response = await fetch(uri);
-    const blob = await response.blob();
-    return blob.size;
+    try {
+      const response = await fetch(trimmed);
+      const blob = await response.blob();
+      return blob.size;
+    } catch {
+      return 0;
+    }
   }
-  const file = new FileSystem.File(uri);
-  const b = await file.bytes();
-  return b.length;
+  try {
+    const { getInfoAsync } = await import('expo-file-system/legacy');
+    const info = await getInfoAsync(trimmed);
+    if (info.exists && typeof info.size === 'number' && Number.isFinite(info.size)) {
+      return info.size;
+    }
+  } catch {
+    /* ignore */
+  }
+  return 0;
 }
 
 function emptyMemoryShell(params: {

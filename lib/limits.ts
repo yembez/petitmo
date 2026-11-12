@@ -1,4 +1,4 @@
-import { getUserTier } from '@/lib/userTier'
+import { resolveEffectiveUserTier } from '@/lib/userTier'
 import { getCachedUserMode } from '@/lib/userMode'
 import { getAllLocalMemories } from '@/lib/localDb'
 import { pullFamilyMemoriesFromRemoteToLocal } from '@/services/memoriesLocalSync'
@@ -126,7 +126,7 @@ export async function checkMemoryLimit(
     return memoryLimitCache.result
   }
 
-  const tier = await getUserTier()
+  const tier = await resolveEffectiveUserTier()
 
   if (!opts?.skipRemotePull) {
     try {

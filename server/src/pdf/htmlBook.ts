@@ -1091,8 +1091,11 @@ body.print-bleed .bleed-x {
 }
 .quote-mid-dropcap { justify-content:center; }
 .quote-mid-titled { justify-content:center; }
-.text-memory-editorial {
-  font-family:'DM Sans',sans-serif;
+/* Petits mots + légendes livre : EB Garamond (parité maquette / pdfPreviewTypo). */
+.text-memory-editorial,
+.quote-body.text-memory-editorial,
+.body.text-memory-editorial {
+  font-family:'EB Garamond',serif;
   font-style:normal;
   font-weight:400;
   color:#1C1C1E;
@@ -1100,9 +1103,11 @@ body.print-bleed .bleed-x {
 .text-memory-title-block {
   text-align:center;
   flex-shrink:0;
+  /* padding-bottom = filet → corps (pas margin : Chromium print collapsait et collait le filet). */
+  margin-bottom:0;
 }
 .text-memory-title {
-  font-family:'DM Sans',sans-serif;
+  font-family:'EB Garamond',serif;
   font-style:normal;
   font-weight:400;
   color:#1C1C1E;
@@ -1111,9 +1116,11 @@ body.print-bleed .bleed-x {
 .text-tier-md.text-memory-title { font-size:26pt; line-height:1.2; }
 .text-tier-sm.text-memory-title { font-size:24pt; line-height:1.2; }
 .text-memory-title-rule {
+  display:block;
   height:.3pt;
   background:rgba(0,0,0,.12);
-  margin:4mm auto 0;
+  /* PDF_TEXT_MEMORY_TITLE_RULE_MARGIN_TOP_MM */
+  margin:3mm auto 0;
 }
 .text-tier-lg.text-memory-title-rule { width:24mm; }
 .text-tier-md.text-memory-title-rule { width:30mm; }
@@ -1131,9 +1138,9 @@ body.print-bleed .bleed-x {
 .quote-variant-dropcap.quote-tier-md .text-memory-column { max-width:136mm; }
 .quote-variant-dropcap.quote-tier-sm .text-memory-column { max-width:130mm; }
 /* Espacements Petits mots — valeurs = pdfPreviewTypo.ts (PDF_TEXT_MEMORY_*_MM, PDF_GUILLEMET_*) */
-.quote-variant-titled.quote-tier-lg .text-memory-title-block { margin-bottom:5mm; }
-.quote-variant-titled.quote-tier-md .text-memory-title-block { margin-bottom:4.5mm; }
-.quote-variant-titled.quote-tier-sm .text-memory-title-block { margin-bottom:4mm; }
+.quote-variant-titled.quote-tier-lg .text-memory-title-block { padding-bottom:5mm; }
+.quote-variant-titled.quote-tier-md .text-memory-title-block { padding-bottom:4.5mm; }
+.quote-variant-titled.quote-tier-sm .text-memory-title-block { padding-bottom:4mm; }
 .quote-footer-block {
   flex-shrink:0;
   margin-top:auto;
@@ -1148,7 +1155,7 @@ body.print-bleed .bleed-x {
   text-align:right; flex:1; min-width:0;
 }
 .quote-mark {
-  font-family:'DM Sans',sans-serif; font-style:italic; font-weight:400;
+  font-family:'EB Garamond',serif; font-style:italic; font-weight:400;
   font-size:52pt; color:#6B8F7E; line-height:1; margin-bottom:4mm;
   text-align:center; align-self:center;
 }
@@ -1165,12 +1172,15 @@ body.print-bleed .bleed-x {
   display:flex; align-items:center; gap:4pt; margin:4mm auto 0; width:42%;
 }
 .quote-body { overflow:hidden; }
+/* PDF_TEXT_MEMORY_BODY_PT / LH */
 .quote-tier-lg .quote-body { font-size:20pt; line-height:1.52; }
-.quote-tier-lg .quote-body p { margin:0 0 5pt; }
 .quote-tier-md .quote-body { font-size:16pt; line-height:1.5; }
-.quote-tier-md .quote-body p { margin:0 0 4pt; }
-.quote-tier-sm .quote-body { font-size:11.25pt; line-height:1.4; }
-.quote-tier-sm .quote-body p { margin:0 0 3pt; }
+.quote-tier-sm .quote-body { font-size:14pt; line-height:1.52; }
+/* PDF_TEXT_MEMORY_PARA_GAP_MM — même rythme que maquette (\n\n) / dropcap / titled-sm */
+.quote-tier-lg .quote-body p,
+.quote-tier-md .quote-body p,
+.quote-tier-sm .quote-body p { margin:0 0 5.5mm; }
+.quote-body p:last-child { margin-bottom:0; }
 .quote-variant-guillemet .quote-mark { display:block; }
 .quote-dropcap-body { text-align:left; }
 .quote-variant-dropcap.quote-tier-md .quote-dropcap-body {
@@ -1191,7 +1201,7 @@ body.print-bleed .bleed-x {
 .quote-dropcap-body .dropcap-p:last-child { margin-bottom:0; }
 .text-dropcap {
   float:left;
-  font-family:'DM Sans',sans-serif;
+  font-family:'EB Garamond',serif;
   font-weight:400;
   line-height:.82;
   margin-right:3pt;

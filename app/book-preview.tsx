@@ -129,6 +129,7 @@ import {
   resolveBookCoverEditorUri,
   resolveBookCoverPrintUri,
   bookPageEntries,
+  bookDisplayPageEntries,
   bookPageEntryKey,
   applyBookPageOrder,
   resetBookPageOrderToChronological,
@@ -557,12 +558,15 @@ export default function BookPreviewScreen() {
 
   const pages = useMemo(() => {
     if (!child) return [];
-    // Source de vérité : pageEntries (APPEND multi-photos même souvenir).
+    /**
+     * Ordre affiché = `bookDisplayPageEntries` (chrono par created_at, ou manuel).
+     * Après un ajout Favoris, `addMemoriesToBook` reclasse déjà en chrono.
+     */
     const byId = new Map(bookMemories.map(m => [m.id, m]));
     const preserveOrder = bookSnapshot?.pageOrderMode === 'manual';
     if (bookSnapshot) {
       const specs = [];
-      for (const e of bookPageEntries(bookSnapshot)) {
+      for (const e of bookDisplayPageEntries(bookSnapshot)) {
         const m = byId.get(e.memoryId.trim());
         if (!m) continue;
         const photoRef = e.photoRef?.trim();
@@ -1115,7 +1119,7 @@ export default function BookPreviewScreen() {
 
       const pageSpecs =
         bookForHeal != null
-          ? bookPageEntries(bookForHeal)
+          ? bookDisplayPageEntries(bookForHeal)
               .map(e => {
                 const m = picked.find(x => x.id === e.memoryId.trim());
                 if (!m) return null;

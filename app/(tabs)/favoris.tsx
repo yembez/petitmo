@@ -1857,7 +1857,7 @@ export const FavorisScreen = memo(function FavorisScreen({
 
     if (targetId) {
       const book = getBookForFavorisAddTarget(targetId);
-      // APPEND : chaque tuile (y compris 2 photos du même album) = une page.
+      // Chaque tuile (y compris 2 photos du même album) = une page ; ordre chrono côté books.
       const changingItems = selectedItems.filter(it => favorisItemWouldChangeBook(it, book));
       if (changingItems.length === 0) {
         Alert.alert('Petit Cœur', 'Ces souvenirs sont déjà dans le livre.');

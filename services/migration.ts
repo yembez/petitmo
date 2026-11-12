@@ -13,7 +13,7 @@ import {
   uploadVoiceCoverToSupabaseFromLocal,
 } from '@/services/media';
 import { getUserMode } from '@/lib/userMode';
-import { getUserTier } from '@/lib/userTier';
+import { resolveEffectiveUserTier } from '@/lib/userTier';
 import { ensureSupabaseSession } from '@/lib/ensureSupabaseSession';
 import { supabase } from '@/lib/supabase';
 import type { Database } from '@/types/database';
@@ -441,7 +441,7 @@ export async function ensureMemoryUploadedForCloud(
     memory.type === 'photo' &&
     (memory.sync_status === 'local' || memory.sync_status === 'pending')
   ) {
-    const paid = (await getUserTier()) === 'paid';
+    const paid = (await resolveEffectiveUserTier()) === 'paid';
     if (memoryHasAlbumExtras(memory)) {
       await pushPhotoAlbumMemoryToCloud(memory, user.id, paid);
     } else if (memory.sync_status === 'local') {

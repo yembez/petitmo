@@ -69,6 +69,7 @@ import {
   PDF_GUILLEMET_MARK_MARGIN_BOTTOM_MM,
   PDF_GUILLEMET_RULE_MARGIN_TOP_MM,
   PDF_TEXT_MEMORY_TITLE_BLOCK_MARGIN_MM,
+  PDF_TEXT_MEMORY_TITLE_RULE_MARGIN_TOP_MM,
   PDF_TEXT_MEMORY_TITLE_RULE_MM,
   pdfTextMemoryColumnMaxWidthPx,
   pdfTextMemoryBodyStyle,
@@ -1588,7 +1589,13 @@ function MaquetteQuote({
                     <View
                       style={[
                         styles.textMemoryTitleRule,
-                        { width: titleRuleW, marginTop: pdfMmToPreviewPxH(3, height) },
+                        {
+                          width: titleRuleW,
+                          marginTop: pdfMmToPreviewPxH(
+                            PDF_TEXT_MEMORY_TITLE_RULE_MARGIN_TOP_MM,
+                            height,
+                          ),
+                        },
                       ]}
                     />
                   </View>

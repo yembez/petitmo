@@ -13,6 +13,10 @@ export async function setUserTier(tier: UserTier): Promise<void> {
   invalidateUserModeCache()
 }
 
+/**
+ * Cache AsyncStorage uniquement — **ne pas** s’en servir pour un garde-fou produit
+ * (livre, trim, quotas). Utiliser `resolveEffectiveUserTier`.
+ */
 export async function getUserTier(): Promise<UserTier> {
   try {
     const raw = await AsyncStorage.getItem(USER_TIER_KEY)
@@ -25,14 +29,15 @@ export async function getUserTier(): Promise<UserTier> {
   }
 }
 
-/** Lecture sync pour UI (après warm getUserTier / setUserTier). */
+/** Lecture sync pour UI (après warm getUserTier / setUserTier / resolveEffective). */
 export function peekUserTier(): UserTier {
   return tierMemory ?? 'free'
 }
 
 /**
- * Tier effectif pour quotas / trim : paid si **n’importe quelle** source dit paid
- * (cache, `app_metadata`, RevenueCat) — évite le plafond 20 s alors que l’abo est actif.
+ * Tier effectif pour **tous** les garde-fous (livre, import, capture, quotas) :
+ * paid si cache **ou** `app_metadata` **ou** entitlement RevenueCat.
+ * Évite le plafond gratuit 20 s / 50 souvenirs alors que l’abo est actif.
  */
 export async function resolveEffectiveUserTier(): Promise<UserTier> {
   let paid = peekUserTier() === 'paid'

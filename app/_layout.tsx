@@ -23,8 +23,7 @@ import CloudRestoreOverlay from '@/components/CloudRestoreOverlay';
 import AccountClosingOverlay from '@/components/AccountClosingOverlay';
 import PetitmoPlusWelcomeModal from '@/components/PetitmoPlusWelcomeModal';
 import { initLocalDb } from '@/lib/localDb';
-import { resetUserTierForTesting } from '@/lib/userTier';
-import { getUserTier } from '@/lib/userTier';
+import { resetUserTierForTesting, resolveEffectiveUserTier } from '@/lib/userTier';
 import { getUserMode } from '@/lib/userMode';
 import { cleanOrphanedLocalFiles } from '@/lib/localCleanup';
 import { getOrSelectFirstChild } from '@/services/children';
@@ -306,7 +305,7 @@ function RootLayoutNav() {
   useEffect(() => {
     if (!isAuthReady) return;
     void (async () => {
-      const [tier, userMode] = await Promise.all([getUserTier(), getUserMode()]);
+      const [tier, userMode] = await Promise.all([resolveEffectiveUserTier(), getUserMode()]);
       await enrichSentryUserContext({ tier, userMode });
     })();
   }, [isAuthReady]);

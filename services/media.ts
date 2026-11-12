@@ -7,6 +7,7 @@ import {
   downloadAsync,
   getInfoAsync,
   makeDirectoryAsync,
+  uploadAsync as uploadAsyncLegacy,
 } from 'expo-file-system/legacy';
 import { DeviceEventEmitter, InteractionManager, Platform } from 'react-native';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -48,7 +49,7 @@ import {
   VIDEO_POSTER_PRINT_JPEG_QUALITY,
 } from '@/lib/limits';
 import { persistDefaultVideoPostersAtImport, extractVideoFrameJpeg, persistVideoPosterFiles } from '@/services/videoPosterLocal';
-import { getUserTier } from '@/lib/userTier';
+import { resolveEffectiveUserTier } from '@/lib/userTier';
 import { deleteLocalMediaFiles } from '@/lib/localCleanup';
 import {
   clearFeedLocalThumbnails,
@@ -164,6 +165,119 @@ async function readBytes(uri: string): Promise<{ bytes: Blob | Uint8Array; size:
   const file = new FileSystem.File(uri);
   const b = await file.bytes();
   return { bytes: b, size: b.length };
+}
+
+/** Taille seule — ne charge jamais le fichier en RAM (critique pour vidéo / audio). */
+async function readLocalFileSize(uri: string): Promise<number> {
+  const trimmed = uri.trim();
+  if (!trimmed) return 0;
+  if (Platform.OS === 'web') {
+    try {
+      const response = await fetch(trimmed);
+      const blob = await response.blob();
+      return blob.size;
+    } catch {
+      return 0;
+    }
+  }
+  try {
+    const info = await getInfoAsync(trimmed);
+    if (info.exists && typeof info.size === 'number' && Number.isFinite(info.size) && info.size >= 0) {
+      return info.size;
+    }
+  } catch {
+    /* ignore */
+  }
+  return 0;
+}
+
+/**
+ * Upload natif en streaming (expo-file-system) via URL signée Supabase.
+ * Évite `file.bytes()` / base64 JS → freeze / OOM / « String length exceeds limit » sur vidéo.
+ */
+async function uploadLocalUriToMediaBucket(params: {
+  filePath: string;
+  localUri: string;
+  contentType: string;
+  upsert?: boolean;
+  expectedSize?: number;
+}): Promise<string> {
+  const expectedBytes =
+    typeof params.expectedSize === 'number' && Number.isFinite(params.expectedSize) && params.expectedSize > 0
+      ? params.expectedSize
+      : await readLocalFileSize(params.localUri);
+  const minBytes = Math.max(1, Math.min(expectedBytes || 1, Math.floor((expectedBytes || 1) * 0.9)));
+
+  if (Platform.OS === 'web') {
+    const { bytes } = await readBytes(params.localUri);
+    return uploadToMediaBucket({
+      filePath: params.filePath,
+      bytes,
+      contentType: params.contentType,
+      upsert: params.upsert,
+    });
+  }
+
+  const { data, error: signErr } = await supabase.storage
+    .from('media')
+    .createSignedUploadUrl(params.filePath, { upsert: params.upsert ?? false });
+
+  if (signErr || !data?.signedUrl) {
+    /** Repli : petits fichiers seulement — une vidéo entière en RAM plante l’app. */
+    if (expectedBytes > 0 && expectedBytes <= 6 * 1024 * 1024) {
+      const { bytes } = await readBytes(params.localUri);
+      return uploadToMediaBucket({
+        filePath: params.filePath,
+        bytes,
+        contentType: params.contentType,
+        upsert: params.upsert,
+      });
+    }
+    throw signErr ?? new Error('SIGNED_UPLOAD_URL_FAILED');
+  }
+
+  const res = await uploadAsyncLegacy(data.signedUrl, params.localUri, {
+    httpMethod: 'PUT',
+    uploadType: 0 as unknown as number, // BINARY_CONTENT
+    headers: {
+      'Content-Type': params.contentType,
+    },
+  });
+
+  if (res.status < 200 || res.status >= 300) {
+    const body = typeof res.body === 'string' ? res.body : '';
+    if (/already exists|Duplicate|409/i.test(body) || res.status === 409) {
+      try {
+        const { assertMediaObjectExists } = await import('@/lib/mediaStorageIntegrity');
+        await assertMediaObjectExists(params.filePath, { minBytes });
+      } catch (verifyErr) {
+        throw verifyErr;
+      }
+      void triggerMirrorMediaPathToR2(params.filePath);
+      return getSignedUrlAfterMediaUpload(params.filePath);
+    }
+    throw new Error(`STORAGE_STREAM_UPLOAD_FAILED (${res.status}) ${body}`.trim());
+  }
+
+  try {
+    const { assertMediaObjectExists } = await import('@/lib/mediaStorageIntegrity');
+    await assertMediaObjectExists(params.filePath, { minBytes });
+  } catch (verifyErr) {
+    try {
+      const { captureMediaCloudIntegrityGap } = await import('@/lib/sentry');
+      captureMediaCloudIntegrityGap({
+        path: params.filePath,
+        stage: 'post_upload_verify',
+        detail: verifyErr instanceof Error ? verifyErr.message : String(verifyErr),
+      });
+    } catch {
+      /* */
+    }
+    throw verifyErr;
+  }
+
+  void triggerMirrorMediaPathToR2(params.filePath);
+  return getSignedUrlAfterMediaUpload(params.filePath);
 }
 
 async function createVideoThumbnailJpeg(uri: string): Promise<string | null> {
@@ -292,7 +406,6 @@ export async function uploadFileToSupabase(
   opts?: { upsert?: boolean },
 ): Promise<string> {
   const cleanPath = storagePath.replace(/^\/?media\//, '')
-  const { bytes } = await readBytes(localUri)
   const ext = extensionFromUri(cleanPath, 'bin')
   const contentType = ext === 'jpg' || ext === 'jpeg'
     ? 'image/jpeg'
@@ -300,10 +413,29 @@ export async function uploadFileToSupabase(
       ? 'image/png'
       : ext === 'webp'
         ? 'image/webp'
-        : ext === 'mp4'
-          ? 'video/mp4'
-          : 'application/octet-stream'
+        : ext === 'mp4' || ext === 'mov' || ext === 'm4v'
+          ? getVideoContentType(ext)
+          : ext === 'm4a' || ext === 'aac' || ext === 'mp3'
+            ? getContentType('voice', ext)
+            : 'application/octet-stream'
 
+  /** Vidéo / audio : stream. Images : bytes OK (petits). */
+  if (
+    contentType.startsWith('video/') ||
+    contentType.startsWith('audio/') ||
+    ext === 'mp4' ||
+    ext === 'mov' ||
+    ext === 'm4a'
+  ) {
+    return uploadLocalUriToMediaBucket({
+      filePath: cleanPath,
+      localUri,
+      contentType,
+      upsert: opts?.upsert,
+    });
+  }
+
+  const { bytes } = await readBytes(localUri)
   return await uploadToMediaBucket({
     filePath: cleanPath,
     bytes,
@@ -353,15 +485,16 @@ async function stratifiedUpload(params: {
   const { userId, childId, type, uri, isPaid, durationSec, mimeType, fileName } = params;
 
   if (type === 'voice') {
-    // Toujours uploader l’audio intégralement
+    // Toujours uploader l’audio intégralement (stream natif — pas de bytes() en RAM).
     const fileExt = extensionFromUri(uri, 'm4a');
     const storageFileName = `${Date.now()}.${fileExt}`;
     const filePath = `${userId}/${childId}/voice/${storageFileName}`;
-    const { bytes, size } = await readBytes(uri);
-    const publicUrl = await uploadToMediaBucket({
+    const size = await readLocalFileSize(uri);
+    const publicUrl = await uploadLocalUriToMediaBucket({
       filePath,
-      bytes,
+      localUri: uri,
       contentType: getContentType('voice', fileExt),
+      expectedSize: size,
     });
     return {
       upload_status: 'full',
@@ -380,14 +513,16 @@ async function stratifiedUpload(params: {
     const ts = Date.now();
 
     // Gratuit ET payant : uploader la vidéo (qualité originale, pas de compression).
+    // Stream fichier → Storage : jamais `readBytes` sur une vidéo (OOM / freeze UI).
     const fileExt = inferVideoExtension(uri, mimeType, fileName);
     const storageFileName = `${ts}.${fileExt}`;
     const filePath = `${userId}/${childId}/video/${storageFileName}`;
-    const { bytes: videoBytes, size: videoSize } = await readBytes(uri);
-    const mediaUrl = await uploadToMediaBucket({
+    const videoSize = await readLocalFileSize(uri);
+    const mediaUrl = await uploadLocalUriToMediaBucket({
       filePath,
-      bytes: videoBytes,
+      localUri: uri,
       contentType: getVideoContentType(fileExt),
+      expectedSize: videoSize,
     });
 
     // Thumbnail toujours généré + uploadé (dérivé).
@@ -1783,7 +1918,7 @@ export async function uploadMedia({
     const user = sess.session?.user;
     if (!user) throw new Error('User not authenticated');
 
-    const paid = isPaid ?? (await getUserTier()) === 'paid';
+    const paid = isPaid ?? (await resolveEffectiveUserTier()) === 'paid';
 
     /** Import photothèque : lieu EXIF (peut être null). Sinon position actuelle approximative. */
     const locationLabel =
@@ -1805,12 +1940,7 @@ export async function uploadMedia({
       await persistFeedLocalThumbnail(memoryId, d.localThumbUri ?? src, 0);
       scheduleLocalPhotoHeavyDerivatives(memoryId, src);
 
-      let fileSize = 0;
-      try {
-        fileSize = (await readBytes(src)).size;
-      } catch {
-        fileSize = 0;
-      }
+      const fileSize = await readLocalFileSize(src);
 
       const localThumb = d.localThumbUri ?? src;
       const mem: Memory = {
@@ -1894,15 +2024,10 @@ export async function uploadMedia({
       });
       const src = (localOriginalUri ?? rushUri).trim();
 
-      let fileSize = 0;
-      try {
-        fileSize = (await readBytes(playbackUri)).size;
-      } catch {
-        try {
-          fileSize = (await readBytes(src)).size;
-        } catch {
-          fileSize = 0;
-        }
+      /** Jamais `readBytes` ici : charge toute la vidéo en JS et bloque / plante l’app. */
+      let fileSize = await readLocalFileSize(playbackUri);
+      if (fileSize <= 0) {
+        fileSize = await readLocalFileSize(src);
       }
 
       const feedPath = await persistFeedLocalVideo(memoryId, playbackUri);
@@ -2023,18 +2148,25 @@ export async function uploadMedia({
         })();
       });
 
-      /** Cloud = coupe de lecture (`mediaPathLocal`), pas le rush (`src`). */
-      void syncCloudVideoMemoryInBackground({
-        memoryId,
-        childId,
-        userId: user.id,
-        localOriginalUri: mediaPathLocal,
-        isPaid: paid,
-        durationSec: duration,
-        mimeType,
-        fileName,
-        capturedAtIso,
-        locationLabel,
+      /**
+       * Cloud en vrai fond : après interactions + léger defer,
+       * pour laisser le fil / les onglets respirer (copie sandbox déjà faite).
+       */
+      InteractionManager.runAfterInteractions(() => {
+        setTimeout(() => {
+          void syncCloudVideoMemoryInBackground({
+            memoryId,
+            childId,
+            userId: user.id,
+            localOriginalUri: mediaPathLocal,
+            isPaid: paid,
+            durationSec: duration,
+            mimeType,
+            fileName,
+            capturedAtIso,
+            locationLabel,
+          });
+        }, 450);
       });
       return mem;
     }
@@ -2055,12 +2187,7 @@ export async function uploadMedia({
       }
       const src = localOriginalUri;
 
-      let fileSize = 0;
-      try {
-        fileSize = (await readBytes(src)).size;
-      } catch {
-        fileSize = 0;
-      }
+      const fileSize = await readLocalFileSize(src);
 
       let voiceCoverLocal: string | null = null;
       if (voiceCoverUri?.trim() && documentDirectory) {
@@ -2402,7 +2529,7 @@ export async function uploadPhotoAlbum({
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('User not authenticated');
 
-    const paid = (await getUserTier()) === 'paid';
+    const paid = (await resolveEffectiveUserTier()) === 'paid';
     const memoryId = newCloudSyncMemoryId();
     const localMem = await capturePhotoAlbumLocalOnly({
       uris,
@@ -2998,7 +3125,7 @@ export async function repairMissingCloudOriginalFromLocal(memoryId: string): Pro
   if (!localUri || /^https?:\/\//i.test(localUri)) return false;
 
   try {
-    const isPaid = (await getUserTier()) === 'paid';
+    const isPaid = (await resolveEffectiveUserTier()) === 'paid';
     const uploaded = await stratifiedUpload({
       userId: user.id,
       childId: row.child_id,

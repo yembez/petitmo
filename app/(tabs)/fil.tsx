@@ -80,6 +80,7 @@ import TabSceneTransition from '@/components/TabSceneTransition';
 import TabScreenErrorBoundary from '@/components/TabScreenErrorBoundary';
 import { useTabBlankWatchdog } from '@/hooks/useTabBlankWatchdog';
 import { recordAction, recordWarn } from '@/lib/diagnosticTrail';
+import { feedFlashLog } from '@/lib/feedFlashDebug';
 import { FeedLoadingDots } from '@/components/FeedLoadingDots';
 
 function logImmersiveSnap(phase: string, detail: Record<string, unknown>): void {
@@ -105,6 +106,9 @@ function FilScreen() {
   const pendingPinOffsetRef = useRef<number | null>(null);
   const pendingScrollIntentRef = useRef<FeedScrollIntent | null>(null);
   const [feedListOpacity, setFeedListOpacity] = useState(1);
+  useEffect(() => {
+    feedFlashLog('fil.opacity', { to: feedListOpacity });
+  }, [feedListOpacity]);
   /**
    * MVC pendant le scroll uniquement (logs TF : y 9545→9450 au mount/unmount vidéo).
    * Au repos : off — sinon delete / re-mesure → saut en bas (bug Fabric).
@@ -117,6 +121,14 @@ function FilScreen() {
     },
     [],
   );
+  useEffect(() => {
+    const mvcOn = pendingUploads.length > 0 || mvcWhileScrolling;
+    feedFlashLog('fil.mvc', {
+      scrolling: mvcWhileScrolling,
+      pending: pendingUploads.length,
+      active: mvcOn,
+    });
+  }, [mvcWhileScrolling, pendingUploads.length]);
   /** Hauteur réelle header glass (overlay) — padding liste + viewOffset snap. */
   const [feedHeaderHeight, setFeedHeaderHeight] = useState(0);
   const feedHeaderHeightRef = useRef(0);
@@ -828,8 +840,24 @@ function FilScreen() {
   useTabBlankWatchdog('fil', {
     blank: filPaintBlank && filPaintReason !== 'ok',
     reason: filPaintBlank ? filPaintReason : 'ok',
-    detail: `op=${feedListOpacity}`,
+    detail: `op=${feedListOpacity};mem=${memories.length};pending=${pendingUploads.length}`,
   });
+  useEffect(() => {
+    const blank = filPaintBlank && filPaintReason !== 'ok';
+    if (!blank) return;
+    feedFlashLog('fil.blankWatch', {
+      reason: filPaintReason,
+      op: feedListOpacity,
+      mem: memories.length,
+      pending: pendingUploads.length,
+    });
+  }, [
+    filPaintBlank,
+    filPaintReason,
+    feedListOpacity,
+    memories.length,
+    pendingUploads.length,
+  ]);
 
   /** Import / replace vers le fil déjà actif : le focus ne repasse pas, on consomme l’intent au changement de données. */
   useEffect(() => {

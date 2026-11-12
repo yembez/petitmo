@@ -2,7 +2,7 @@ import { getLocalMemoriesPendingCloudSync } from '@/lib/localDb';
 import { ensureSupabaseSession } from '@/lib/ensureSupabaseSession';
 import { supabase } from '@/lib/supabase';
 import { getCachedUserMode } from '@/lib/userMode';
-import { getUserTier } from '@/lib/userTier';
+import { resolveEffectiveUserTier } from '@/lib/userTier';
 import { recordCaughtError, recordWarn } from '@/lib/diagnosticTrail';
 import { ensureLocalChildrenSyncedToSupabase } from '@/services/children';
 import { remapLegacyEntityIdsForCloudSync } from '@/services/cloudIdRemap';
@@ -35,7 +35,7 @@ export function flushPendingCloudUploadsOnce(): Promise<void> {
     await ensureLocalChildrenSyncedToSupabase();
 
     const pending = getLocalMemoriesPendingCloudSync();
-    const paid = (await getUserTier()) === 'paid';
+    const paid = (await resolveEffectiveUserTier()) === 'paid';
 
     for (const m of pending) {
       if ((m.user_id ?? '').trim() && m.user_id !== user.id) continue;

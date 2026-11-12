@@ -93,9 +93,26 @@ export type UseFeedDataResult = {
 };
 
 export function useFeedData(pendingUploads: PendingUpload[]): UseFeedDataResult {
-  const [memories, setMemories] = useState<Memory[]>(() => [...feedMemoriesHydrationSnapshot]);
+  const [memories, setMemoriesRaw] = useState<Memory[]>(() => [...feedMemoriesHydrationSnapshot]);
   const memoriesRef = useRef<Memory[]>([]);
   memoriesRef.current = memories;
+
+  /** Debug fil : toute variation de longueur (surtout len→0 = blanc liste). */
+  const setMemories = useCallback((action: SetStateAction<Memory[]>) => {
+    setMemoriesRaw(prev => {
+      const next = typeof action === 'function' ? action(prev) : action;
+      if (next.length !== prev.length) {
+        void import('@/lib/feedFlashDebug').then(({ feedFlashLog }) => {
+          feedFlashLog('fil.data', {
+            from: prev.length,
+            to: next.length,
+            reset: prev.length > 0 && next.length === 0,
+          });
+        });
+      }
+      return next;
+    });
+  }, []);
 
   const [child, setChild] = useState<Child | null>(() => feedChildHydrationSnapshot);
   const [familyChildren, setFamilyChildren] = useState<Child[]>(() => readFamilyChildrenFromLocal());

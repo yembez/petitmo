@@ -16,7 +16,7 @@ import {
   peekRealAuthEmail,
   signOutRealAccount,
 } from '@/lib/authAccount';
-import { getUserTier, peekUserTier } from '@/lib/userTier';
+import { peekUserTier, resolveEffectiveUserTier } from '@/lib/userTier';
 import { resetNavigationToOnboarding } from '@/utils/resetNavigationToOnboarding';
 import { beginAccountClosingUi, endAccountClosingUi } from '@/lib/accountClosingUi';
 
@@ -112,7 +112,7 @@ export default function ParentAccountScreen() {
     }
     void (async () => {
       /** Paid = carte résiliation in-app ; free = confirm simple. */
-      const tier = peekUserTier() === 'paid' ? 'paid' : await getUserTier();
+      const tier = peekUserTier() === 'paid' ? 'paid' : await resolveEffectiveUserTier();
       if (tier === 'paid') {
         setPaidDeleteWarningVisible(true);
         return;

@@ -100,6 +100,15 @@ export function PendingMediaUploadsProvider({ children }: { children: React.Reac
         const tempId = `pending_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
         /** Scroll vers la carte où qu’elle soit chronologiquement (pas forcément le haut). */
         armFeedSnapToKeyOnFocus(tempId);
+        void import('@/lib/feedFlashDebug').then(({ feedFlashLog }) => {
+          feedFlashLog('fil.import', {
+            phase: 'start',
+            kind,
+            temp: tempId.slice(0, 18),
+            previews: previewUris.filter(u => u?.trim()).length,
+            batchTotal: typeof batchTotal === 'number' ? batchTotal : 0,
+          });
+        });
         if (kind === 'video') {
           setFeedAutoplayActiveMemoryId(null, 'pending-video');
         }
@@ -177,6 +186,14 @@ export function PendingMediaUploadsProvider({ children }: { children: React.Reac
         let dismissedByHelper = false;
         const helpers: PendingUploadHelpers = {
           reportProgress: (done, total) => {
+            void import('@/lib/feedFlashDebug').then(({ feedFlashLog }) => {
+              feedFlashLog('fil.import', {
+                phase: 'progress',
+                temp: tempId.slice(0, 18),
+                done: Math.max(0, Math.floor(done)),
+                total: Math.max(1, Math.floor(total)),
+              });
+            });
             setPending(p =>
               p.map(x =>
                 x.tempId === tempId
@@ -191,6 +208,13 @@ export function PendingMediaUploadsProvider({ children }: { children: React.Reac
           },
           notifyInserted: rows => {
             if (!rows.length) return;
+            void import('@/lib/feedFlashDebug').then(({ feedFlashLog }) => {
+              feedFlashLog('fil.import', {
+                phase: 'notifyInserted',
+                temp: tempId.slice(0, 18),
+                n: rows.length,
+              });
+            });
             DeviceEventEmitter.emit('petitmo:memories-inserted', { memories: rows });
           },
           setPreviewUris: uris => {
@@ -212,8 +236,23 @@ export function PendingMediaUploadsProvider({ children }: { children: React.Reac
 
         try {
           const inserted = await upload(helpers);
-          if (dismissedByHelper) return;
+          if (dismissedByHelper) {
+            void import('@/lib/feedFlashDebug').then(({ feedFlashLog }) => {
+              feedFlashLog('fil.import', {
+                phase: 'dismissed',
+                temp: tempId.slice(0, 18),
+              });
+            });
+            return;
+          }
           if (!inserted || inserted.length === 0) {
+            void import('@/lib/feedFlashDebug').then(({ feedFlashLog }) => {
+              feedFlashLog('fil.import', {
+                phase: 'errorEmpty',
+                temp: tempId.slice(0, 18),
+                kind,
+              });
+            });
             setPending(p => {
               const rest = p.filter(x => x.tempId !== tempId);
               return [
@@ -229,6 +268,14 @@ export function PendingMediaUploadsProvider({ children }: { children: React.Reac
             });
             return;
           }
+          void import('@/lib/feedFlashDebug').then(({ feedFlashLog }) => {
+            feedFlashLog('fil.import', {
+              phase: 'done',
+              temp: tempId.slice(0, 18),
+              kind,
+              n: inserted.length,
+            });
+          });
           const first = inserted[0];
           if (first?.id && previewUris.length > 0) {
             if (kind === 'video') {
@@ -266,6 +313,14 @@ export function PendingMediaUploadsProvider({ children }: { children: React.Reac
             setPending(p => p.filter(x => x.tempId !== tempId));
           }
         } catch (err) {
+          void import('@/lib/feedFlashDebug').then(({ feedFlashLog }) => {
+            feedFlashLog('fil.import', {
+              phase: 'catch',
+              temp: tempId.slice(0, 18),
+              kind,
+              code: err instanceof Error ? err.message.slice(0, 64) : 'unknown',
+            });
+          });
           if (err instanceof Error) {
             if (err.message === IMPORT_DUPLICATE_ASSET) {
               setPending(p => p.filter(x => x.tempId !== tempId));

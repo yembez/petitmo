@@ -6,7 +6,7 @@ import {
   FREE_TIER_VOICE_MAX_DURATION,
   PAID_TIER_VOICE_MAX_DURATION,
 } from '@/lib/limits';
-import { getUserTier } from '@/lib/userTier';
+import { resolveEffectiveUserTier } from '@/lib/userTier';
 import { getCachedUserMode } from '@/lib/userMode';
 import { supabase } from '@/lib/supabase';
 import { isDeviceStorageFullError } from '@/utils/deviceStorageFull';
@@ -118,7 +118,7 @@ export async function preflightVoiceCapture(opts?: {
 
     let reserve = opts?.reserveBytes;
     if (reserve == null) {
-      const tier = await getUserTier().catch(() => 'free' as const);
+      const tier = await resolveEffectiveUserTier().catch(() => 'free' as const);
       reserve = voiceCaptureReserveBytes(
         tier === 'paid' ? PAID_TIER_VOICE_MAX_DURATION : FREE_TIER_VOICE_MAX_DURATION,
       );
@@ -132,7 +132,7 @@ export async function preflightVoiceCapture(opts?: {
     try {
       if (!Paths.document) return { ok: false, reason: 'write', detail: 'no_document_dir' };
       if (opts?.allocateSlot) {
-        const tier = await getUserTier().catch(() => 'free' as const);
+        const tier = await resolveEffectiveUserTier().catch(() => 'free' as const);
         const slotBytes = estimatedVoiceFileBytes(
           tier === 'paid' ? PAID_TIER_VOICE_MAX_DURATION : FREE_TIER_VOICE_MAX_DURATION,
         );

@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { getUserTier } from '@/lib/userTier'
+import { resolveEffectiveUserTier } from '@/lib/userTier'
 
 const INSTALL_KEY = 'petitmo_installed_at'
 const LAST_NUDGE_KEY = 'petitmo_last_nudge'
@@ -12,7 +12,7 @@ export async function recordInstallDate(): Promise<void> {
 }
 
 export async function getTimingNudge(): Promise<'DAY_30' | 'DAY_60' | 'DAY_90' | null> {
-  const tier = await getUserTier()
+  const tier = await resolveEffectiveUserTier()
   if (tier === 'paid') return null
 
   const installStr = await AsyncStorage.getItem(INSTALL_KEY)

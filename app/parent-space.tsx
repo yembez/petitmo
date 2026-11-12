@@ -26,7 +26,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import type { Child } from '@/types/local';
 import { scale, verticalScale } from '@/utils/responsive';
 import { calculateAge } from '@/utils/date';
-import { getUserTier, peekUserTier, type UserTier } from '@/lib/userTier';
+import { peekUserTier, resolveEffectiveUserTier, type UserTier } from '@/lib/userTier';
 import {
   getRealAuthUser,
   peekHasRealAuthAccount,
@@ -71,7 +71,7 @@ export default function ParentSpaceScreen() {
 
   const load = useCallback(() => {
     setChildrenState(readLocalChildrenForSettings());
-    void getUserTier().then(setTierState);
+    void resolveEffectiveUserTier().then(setTierState);
     void getBillingIssueCached().then(setBillingIssue);
     void getCaptureLockedCached().then(setCaptureLocked);
 

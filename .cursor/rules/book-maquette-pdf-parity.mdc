@@ -107,7 +107,7 @@ Logique : `src/book/quoteFitLevel.ts` ↔ `server/src/pdf/maquetteAlign.ts` (`re
 
 Guillemet : `"` **52 pt** italique, couleur **#6B8F7E**, filet **28 mm** sous le bloc.
 
-Titled : titre **28 / 26 / 24 pt** (lg/md/sm), filet **24 / 30 / 30 mm**, marge sous bloc titre **5 / 4,5 / 4 mm**.
+Titled : titre **28 / 26 / 24 pt** (lg/md/sm), filet **24 / 30 / 30 mm**, espace titre→filet **3 mm**, marge filet→corps **5 / 4,5 / 4 mm** (`padding-bottom` PDF, pas `margin`). Police titre + corps : **EB Garamond**.
 
 Dropcap : lettrine **52 / 46 pt** (md/sm), espace entre paragraphes **5,5 mm**.
 
@@ -118,7 +118,7 @@ Marges page citation : **18 mm** latérales ; padding vertical palier **13 / 12 
 Toutes dans `src/book/pdfPreviewTypo.ts` — **reporter les mêmes valeurs** dans le CSS de `server/src/pdf/htmlBook.ts` :
 
 - `PDF_TEXT_MEMORY_BODY_PT`, `PDF_TEXT_MEMORY_BODY_LH`
-- `PDF_TEXT_MEMORY_TITLE_PT`, `PDF_TEXT_MEMORY_TITLE_BLOCK_MARGIN_MM`, `PDF_TEXT_MEMORY_TITLE_RULE_MM`
+- `PDF_TEXT_MEMORY_TITLE_PT`, `PDF_TEXT_MEMORY_TITLE_BLOCK_MARGIN_MM`, `PDF_TEXT_MEMORY_TITLE_RULE_MARGIN_TOP_MM`, `PDF_TEXT_MEMORY_TITLE_RULE_MM`
 - `PDF_TEXT_MEMORY_COLUMN_*`, `PDF_GUILLEMET_*`, `PDF_TEXT_MEMORY_PARA_GAP_MM`
 
 ---

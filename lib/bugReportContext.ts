@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
-import { getUserTier } from '@/lib/userTier';
+import { resolveEffectiveUserTier } from '@/lib/userTier';
 import { getUserMode } from '@/lib/userMode';
 import { formatTrailForSupport } from '@/lib/diagnosticTrail';
 
@@ -68,7 +68,7 @@ export async function collectBugReportContext(opts?: {
   pathname?: string;
   sentryEnabled?: boolean;
 }): Promise<BugReportContext> {
-  const tier = await getUserTier();
+  const tier = await resolveEffectiveUserTier();
   const userMode = await getUserMode();
 
   return {

@@ -236,12 +236,19 @@ export const PDF_TEXT_MEMORY_PARA_GAP_MM = 5.5;
 /** @deprecated Préférer `PDF_TEXT_MEMORY_PARA_GAP_MM` */
 export const PDF_DROPCAP_PARA_GAP_MM = PDF_TEXT_MEMORY_PARA_GAP_MM;
 
-/** Marge sous le bloc titre (souvenir texte avec `text_title`). */
+/**
+ * Marge sous le bloc titre (filet → corps) — souvenir texte avec `text_title`.
+ * En PDF : `padding-bottom` sur `.text-memory-title-block` (évite le collapse Chromium
+ * qui collait le filet au corps).
+ */
 export const PDF_TEXT_MEMORY_TITLE_BLOCK_MARGIN_MM: Record<TextMemorySizeTier, number> = {
   lg: 5,
   md: 4.5,
   sm: 4,
 };
+
+/** Espace titre → filet (maquette + PDF). */
+export const PDF_TEXT_MEMORY_TITLE_RULE_MARGIN_TOP_MM = 3;
 
 /** Largeur filet sous le titre souvenir. */
 export const PDF_TEXT_MEMORY_TITLE_RULE_MM: Record<TextMemorySizeTier, number> = {

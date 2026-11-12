@@ -50,7 +50,7 @@ import {
   resolveCurrentPlaceLabelSilent,
   shouldShowLocationSoftPrompt,
 } from '@/lib/memoryLocation';
-import { getUserTier } from '@/lib/userTier';
+import { resolveEffectiveUserTier } from '@/lib/userTier';
 import {
   FREE_TIER_LIMIT,
   FREE_TIER_VOICE_MAX_DURATION,
@@ -178,7 +178,7 @@ export default function RecordVoiceScreen() {
   useEffect(() => {
     void (async () => {
       try {
-        const t = await getUserTier();
+        const t = await resolveEffectiveUserTier();
         setTier(t);
       } catch {
         setTier('free');

@@ -1,15 +1,25 @@
 /**
- * Debug flash / restore vidéo (TF / OTA) — ring buffer + marqueur utilisateur.
- * Activé : appui long (~1,2 s) sur le titre du header Fil.
- * Exporter : barre « Exporter » → Share → coller dans le chat Cursor.
+ * Debug flash / blancs fil (Metro vs régression) — ring buffer + Share.
  *
- * Tags enquête écran noir 1ʳᵉ session : restore.row | restore.uri | restore.mat | favoris.thumb
+ * Parcours QA :
+ * 1. Appui long (~1,2 s) sur le titre du header Fil → active la barre debug
+ * 2. Repro (import multi-photos, scroll rapide, blancs)
+ * 3. À chaque blanc : « J’ai vu le flash »
+ * 4. « Exporter » → Share → coller le dump dans Cursor
+ *
+ * Tags utiles : fil.data | fil.opacity | fil.import | fil.mvc | fil.blankWatch |
+ * fil.jsStall | row.mount | row.unmount | USER_SAW_FLASH | restore.* | autoplay.*
  */
 import { Share } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const STORAGE_KEY = 'petitmo:feedFlashDebug';
-const MAX_EVENTS = 400;
+/** Enquête import ×N : buffer un peu plus large. */
+const MAX_EVENTS = 800;
+
+/** Heartbeat JS : gap au-delà = thread JS bloqué (souvent Metro / sync lourd). */
+const JS_STALL_TICK_MS = 1000;
+const JS_STALL_GAP_MS = 800;
 
 export type FeedFlashDebugEvent = {
   t: number;
@@ -20,9 +30,33 @@ export type FeedFlashDebugEvent = {
 let enabled = false;
 const events: FeedFlashDebugEvent[] = [];
 const listeners = new Set<() => void>();
+let jsStallTimer: ReturnType<typeof setInterval> | null = null;
+let jsStallLastTick = 0;
 
 function emit(): void {
   for (const l of listeners) l();
+}
+
+function stopJsStallMonitor(): void {
+  if (jsStallTimer) {
+    clearInterval(jsStallTimer);
+    jsStallTimer = null;
+  }
+  jsStallLastTick = 0;
+}
+
+function startJsStallMonitor(): void {
+  stopJsStallMonitor();
+  jsStallLastTick = Date.now();
+  jsStallTimer = setInterval(() => {
+    if (!enabled) return;
+    const now = Date.now();
+    const gap = now - jsStallLastTick;
+    jsStallLastTick = now;
+    if (gap > JS_STALL_TICK_MS + JS_STALL_GAP_MS) {
+      feedFlashLog('fil.jsStall', { gapMs: gap, tickMs: JS_STALL_TICK_MS });
+    }
+  }, JS_STALL_TICK_MS);
 }
 
 export function isFeedFlashDebugEnabled(): boolean {
@@ -41,6 +75,8 @@ export async function hydrateFeedFlashDebug(): Promise<void> {
   } catch {
     enabled = false;
   }
+  if (enabled) startJsStallMonitor();
+  else stopJsStallMonitor();
   emit();
 }
 
@@ -53,7 +89,13 @@ export async function setFeedFlashDebugEnabled(next: boolean): Promise<void> {
     /* ignore */
   }
   if (next) {
-    feedFlashLog('debug.on', { probe: 'restore-black-screen' });
+    startJsStallMonitor();
+    feedFlashLog('debug.on', {
+      probe: 'fil-blank-import-scroll',
+      maxEvents: MAX_EVENTS,
+    });
+  } else {
+    stopJsStallMonitor();
   }
   emit();
 }

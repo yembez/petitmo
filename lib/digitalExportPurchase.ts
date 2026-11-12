@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getUserTier } from '@/lib/userTier';
+import { resolveEffectiveUserTier } from '@/lib/userTier';
 import type { SubscriptionTier } from '@/types/shared';
 
 const KEY = 'petitmo_digital_pdf_export_ok';
@@ -16,7 +16,7 @@ export async function resolveServerPdfEntitlements(): Promise<{
   if (__DEV__) {
     return { subscriptionTier: 'premium', digitalExportPaid: true };
   }
-  const tier = await getUserTier();
+  const tier = await resolveEffectiveUserTier();
   if (tier === 'paid') {
     return { subscriptionTier: 'premium', digitalExportPaid: true };
   }

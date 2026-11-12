@@ -4,7 +4,7 @@
  *
  * Règle d’or V2 + Low Friction : UI confirme dès paid ; PDF/Gelato en fond.
  */
-import { getUserTier } from '@/lib/userTier';
+import { resolveEffectiveUserTier } from '@/lib/userTier';
 import {
   clearPendingBookOrderPdfPayload,
   getPendingBookOrderPdfPayload,
@@ -74,7 +74,7 @@ async function stashPendingForTicket(
     exportRequestId,
     pages: pendingPayload.pages?.length ?? 0,
   });
-  const tier = await getUserTier();
+  const tier = await resolveEffectiveUserTier();
   await stashPrintBookPayloadWithExportTicket({
     ...pendingPayload,
     exportMode: 'print',

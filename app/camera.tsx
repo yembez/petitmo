@@ -12,7 +12,7 @@ import PermissionModal from '@/components/PermissionModal';
 import { uploadMedia } from '@/services/media';
 import { usePendingMediaUploads } from '@/contexts/PendingMediaUploadsContext';
 import { getOrSelectFirstChild } from '@/services/children';
-import { getUserTier } from '@/lib/userTier';
+import { resolveEffectiveUserTier } from '@/lib/userTier';
 import { checkMemoryLimit, checkVideoLimit, FREE_TIER_VIDEO_MAX_DURATION } from '@/lib/limits';
 import { promptFreeTierLimitThenPaywall, freeTierLimitKindFromCheck, freeTierLimitKindFromVideoCheck } from '@/utils/freeTierLimitGate';
 
@@ -220,7 +220,7 @@ export default function CameraScreen() {
           });
         }, 1000);
 
-        const tier = await getUserTier();
+        const tier = await resolveEffectiveUserTier();
         const isFree = tier === 'free';
         const maxDuration = isFree ? FREE_TIER_VIDEO_MAX_DURATION : MAX_RECORDING_TIME;
         const video = await cameraRef.current.recordAsync({

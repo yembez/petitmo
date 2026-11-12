@@ -73,6 +73,18 @@ function scheduleStuckCheck(tab: MainTabWatchName): void {
         .join(' ');
       recordWarn('tab.blank.stuck', detail);
 
+      void import('@/lib/feedFlashDebug')
+        .then(({ feedFlashLog }) => {
+          feedFlashLog('fil.blankWatch', {
+            stuck: true,
+            tab,
+            reason: paint.reason,
+            detail: paint.detail ?? '',
+            focusedMs: elapsed,
+          });
+        })
+        .catch(() => {});
+
       void import('@/lib/sentry')
         .then(({ captureTabBlankStuck }) => {
           captureTabBlankStuck({

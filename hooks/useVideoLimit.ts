@@ -5,7 +5,7 @@ import {
   FREE_TIER_VIDEO_MAX_DURATION,
   PAID_TIER_VIDEO_MAX_DURATION,
 } from '@/lib/limits'
-import { getUserTier } from '@/lib/userTier'
+import { resolveEffectiveUserTier } from '@/lib/userTier'
 
 export function useVideoLimit(childId: string | null) {
   const [videoLimit, setVideoLimit] = useState({
@@ -20,7 +20,7 @@ export function useVideoLimit(childId: string | null) {
     if (!childId) return
     const [result, tier] = await Promise.all([
       checkVideoLimit(childId),
-      getUserTier(),
+      resolveEffectiveUserTier(),
     ])
     setVideoLimit(result)
     setMaxDuration(

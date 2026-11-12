@@ -26,7 +26,7 @@ import { getOrSelectFirstChild } from '@/services/children';
 import { IMPORT_PHOTO_PICKER_OPTS } from '@/constants/importPicker';
 import { IMPORT_MULTI_PHOTO_ALBUM_ENABLED } from '@/constants/featureFlags';
 import { buildImportMetadataFromPickerAsset } from '@/utils/mediaExif';
-import { getUserTier, resolveEffectiveUserTier } from '@/lib/userTier';
+import { resolveEffectiveUserTier } from '@/lib/userTier';
 import {
   checkMemoryLimit,
   checkVideoLimit,
@@ -298,7 +298,7 @@ export default function ImportMediaScreen() {
           force: true,
           skipRemotePull: true,
         });
-        const tier = await getUserTier();
+        const tier = await resolveEffectiveUserTier();
         const dedupedForSeparate =
           kind === 'photo' && photoBatchLayout === 'separate' && assets.length > 1
             ? dedupePickerAssetsByLibraryId(assets)

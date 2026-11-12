@@ -28,7 +28,7 @@ import {
 } from '@/constants/bookCoverThumbnail';
 import { scale } from '@/utils/responsive';
 import { formatAppCurrency } from '@/utils/appLocale';
-import { getUserTier, peekUserTier } from '@/lib/userTier';
+import { peekUserTier, resolveEffectiveUserTier } from '@/lib/userTier';
 import { getLastGuestExportEmail, setLastGuestExportEmail } from '@/lib/guestExportPrefs';
 import {
   getLastPrintOrderForm,
@@ -523,7 +523,7 @@ export default function BookOrderScreen() {
 
         const [book, t, tLast, localForm, authUser, storedAuthEmail] = await Promise.all([
           getBook(bookId),
-          getUserTier(),
+          resolveEffectiveUserTier(),
           getLastGuestExportEmail(),
           getLastPrintOrderForm(),
           getRealAuthUser(),
@@ -708,7 +708,7 @@ export default function BookOrderScreen() {
       setTier(peekUserTier());
       void (async () => {
         try {
-          const t = await getUserTier();
+          const t = await resolveEffectiveUserTier();
           if (alive) setTier(t);
         } catch {
           /* ignore */
