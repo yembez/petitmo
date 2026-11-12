@@ -21,6 +21,7 @@ import Reanimated, {
   Easing,
   SlideInDown,
   SlideOutDown,
+  useAnimatedScrollHandler,
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
@@ -130,6 +131,9 @@ import {
 } from '@/services/favorisBookAddFlow';
 
 type FavListItem = FavorisGridItem;
+
+/** FlatList Reanimated : offset héros sur UI thread (évite le bridge JS à chaque frame). */
+const FavorisGalleryList = Reanimated.createAnimatedComponent(FlatList<FavListItem>);
 
 function feedVideoPosterRaw(memory: Memory): string {
   return getVideoPosterUriForFeedAndViewer(memory);
@@ -1317,6 +1321,12 @@ export const FavorisScreen = memo(function FavorisScreen({
   const galleryListRef = useRef<FlatList<FavListItem> | null>(null);
   /** Offset de scroll (UI thread) : zoom léger au pull sur le héros */
   const galleryScrollY = useSharedValue(0);
+  /**
+   * Pause le diaporama pendant / après le scroll grille :
+   * sinon zoom Reanimated + setInterval + remount header = scroll saccadé.
+   */
+  const [heroSlideshowPlaying, setHeroSlideshowPlaying] = useState(true);
+  const heroResumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [bookModalVisible, setBookModalVisible] = useState(false);
   const [createBookFlowTitle, setCreateBookFlowTitle] = useState<string | null>(null);
   const [addToBookTargetId, setAddToBookTargetId] = useState<string | null>(null);
@@ -1905,10 +1915,17 @@ export const FavorisScreen = memo(function FavorisScreen({
         scrollY={galleryScrollY}
         slideshowItems={slideshowItems}
         heroHeight={heroHeight}
-        isTabFocused={isTabFocused}
+        isTabFocused={isTabFocused && heroSlideshowPlaying}
       />
     );
-  }, [isBookAddFromSpreadFlow, slideshowItems, heroHeight, isTabFocused, galleryScrollY]);
+  }, [
+    galleryScrollY,
+    heroHeight,
+    heroSlideshowPlaying,
+    isBookAddFromSpreadFlow,
+    isTabFocused,
+    slideshowItems,
+  ]);
 
   const galleryExtraData = useMemo(
     () => ({
@@ -1927,11 +1944,53 @@ export const FavorisScreen = memo(function FavorisScreen({
     ],
   );
 
-  const onGalleryScroll = useCallback(
-    (e: { nativeEvent: { contentOffset: { y: number } } }) => {
-      galleryScrollY.value = e.nativeEvent.contentOffset.y;
+  const pauseHeroSlideshow = useCallback(() => {
+    if (heroResumeTimerRef.current) {
+      clearTimeout(heroResumeTimerRef.current);
+      heroResumeTimerRef.current = null;
+    }
+    setHeroSlideshowPlaying(false);
+  }, []);
+
+  const scheduleHeroSlideshowResume = useCallback(
+    (offsetY: number) => {
+      if (heroResumeTimerRef.current) clearTimeout(heroResumeTimerRef.current);
+      heroResumeTimerRef.current = setTimeout(() => {
+        heroResumeTimerRef.current = null;
+        /** Reprend seulement près du haut — sinon le diapo tourne pour rien sous la grille. */
+        setHeroSlideshowPlaying(offsetY < Math.max(48, heroHeight * 0.28));
+      }, 220);
     },
-    [galleryScrollY],
+    [heroHeight],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (heroResumeTimerRef.current) clearTimeout(heroResumeTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isTabFocused) {
+      pauseHeroSlideshow();
+      return;
+    }
+    scheduleHeroSlideshowResume(galleryScrollY.value);
+  }, [galleryScrollY, isTabFocused, pauseHeroSlideshow, scheduleHeroSlideshowResume]);
+
+  const onGalleryScroll = useAnimatedScrollHandler({
+    onScroll: e => {
+      galleryScrollY.value = e.contentOffset.y;
+    },
+  });
+
+  const galleryGetItemLayout = useCallback(
+    (_: ArrayLike<FavListItem> | null | undefined, index: number) => {
+      const row = Math.floor(index / columns);
+      const rowStride = tileSize + gridGap;
+      return { length: tileSize, offset: row * rowStride, index };
+    },
+    [columns, gridGap, tileSize],
   );
 
   useTabBlankWatchdog('favoris', {
@@ -1994,7 +2053,7 @@ export const FavorisScreen = memo(function FavorisScreen({
             </View>
           ) : (
             <View style={styles.galleryShell}>
-              <FlatList
+              <FavorisGalleryList
                 ref={galleryListRef}
                 data={galleryItems}
                 keyExtractor={(it) => it.key}
@@ -2010,14 +2069,36 @@ export const FavorisScreen = memo(function FavorisScreen({
                 style={styles.gallery}
                 showsVerticalScrollIndicator={false}
                 scrollEventThrottle={isBookAddFromSpreadFlow ? 64 : 16}
-                windowSize={isBookAddFromSpreadFlow ? 5 : 7}
-                maxToRenderPerBatch={isBookAddFromSpreadFlow ? 4 : 6}
-                updateCellsBatchingPeriod={50}
-                initialNumToRender={isBookAddFromSpreadFlow ? 15 : 12}
+                windowSize={5}
+                maxToRenderPerBatch={4}
+                updateCellsBatchingPeriod={isBookAddFromSpreadFlow ? 50 : 64}
+                initialNumToRender={isBookAddFromSpreadFlow ? 15 : 9}
                 removeClippedSubviews={Platform.OS === 'android'}
+                getItemLayout={galleryGetItemLayout}
                 ListHeaderComponent={favoritesListHeader}
                 extraData={galleryExtraData}
                 onScroll={isBookAddFromSpreadFlow ? undefined : onGalleryScroll}
+                onScrollBeginDrag={
+                  isBookAddFromSpreadFlow
+                    ? undefined
+                    : () => {
+                        pauseHeroSlideshow();
+                      }
+                }
+                onScrollEndDrag={
+                  isBookAddFromSpreadFlow
+                    ? undefined
+                    : e => {
+                        scheduleHeroSlideshowResume(e.nativeEvent.contentOffset.y);
+                      }
+                }
+                onMomentumScrollEnd={
+                  isBookAddFromSpreadFlow
+                    ? undefined
+                    : e => {
+                        scheduleHeroSlideshowResume(e.nativeEvent.contentOffset.y);
+                      }
+                }
                 {...Platform.select({
                   android: { overScrollMode: 'always' as const },
                 })}
