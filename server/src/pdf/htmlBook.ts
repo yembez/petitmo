@@ -405,7 +405,7 @@ function pageQuote(
 
   const titleBlock =
     variant === 'titled' && title
-      ? `<div class="text-memory-title-block">
+      ? `<div class="text-memory-title-block text-tier-${tier}">
       <div class="text-memory-title text-tier-${tier}">${esc(sanitizeText(title))}</div>
       <div class="text-memory-title-rule text-tier-${tier}"></div>
     </div>`
@@ -1139,16 +1139,20 @@ body.print-bleed .bleed-x {
   margin-left:auto;
   margin-right:auto;
 }
-.quote-variant-titled.quote-tier-lg .text-memory-column { max-width:128mm; }
-.quote-variant-titled.quote-tier-md .text-memory-column { max-width:140mm; }
-.quote-variant-titled.quote-tier-sm .text-memory-column { max-width:132mm; }
-.quote-variant-guillemet.quote-tier-lg .text-memory-column { max-width:112mm; }
-.quote-variant-dropcap.quote-tier-md .text-memory-column { max-width:136mm; }
-.quote-variant-dropcap.quote-tier-sm .text-memory-column { max-width:130mm; }
+/*
+ * variant est sur `.page.quote`, tier sur `.inner` / `.quote-mid` / `.text-memory-*`.
+ * Ne jamais écrire `.quote-variant-*.quote-tier-*` (même nœud) — ça ne matche jamais.
+ */
+.quote-variant-titled .text-memory-column.text-tier-lg { max-width:128mm; }
+.quote-variant-titled .text-memory-column.text-tier-md { max-width:140mm; }
+.quote-variant-titled .text-memory-column.text-tier-sm { max-width:132mm; }
+.quote-variant-guillemet .text-memory-column.text-tier-lg { max-width:112mm; }
+.quote-variant-dropcap .text-memory-column.text-tier-md { max-width:136mm; }
+.quote-variant-dropcap .text-memory-column.text-tier-sm { max-width:130mm; }
 /* PDF_TEXT_MEMORY_TITLE_BLOCK_MARGIN_MM — air filet → corps (même que spread). */
-.quote-variant-titled.quote-tier-lg .text-memory-title-block { padding-bottom:9mm; }
-.quote-variant-titled.quote-tier-md .text-memory-title-block { padding-bottom:8.5mm; }
-.quote-variant-titled.quote-tier-sm .text-memory-title-block { padding-bottom:8mm; }
+.text-memory-title-block.text-tier-lg { padding-bottom:9mm; }
+.text-memory-title-block.text-tier-md { padding-bottom:8.5mm; }
+.text-memory-title-block.text-tier-sm { padding-bottom:8mm; }
 .quote-footer-block {
   flex-shrink:0;
   margin-top:auto;
@@ -1185,7 +1189,7 @@ body.print-bleed .bleed-x {
 .quote-tier-md .quote-body,
 .quote-tier-sm .quote-body,
 .quote-variant-dropcap .quote-dropcap-body,
-.quote-variant-titled.quote-tier-sm .quote-titled-sm-body {
+.quote-variant-titled .quote-titled-sm-body {
   font-size:12pt;
   line-height:17pt;
   letter-spacing:0.04em;

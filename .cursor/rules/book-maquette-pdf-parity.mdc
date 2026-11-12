@@ -107,7 +107,9 @@ Logique : `src/book/quoteFitLevel.ts` ↔ `server/src/pdf/maquetteAlign.ts` (`re
 
 Guillemet : `"` **52 pt** italique Manrope, couleur **#6B8F7E**, filet **28 mm** sous le bloc.
 
-Titled : titre **28 / 26 / 24 pt** Manrope 300 (lg/md/sm), filet **24 / 30 / 30 mm**, espace titre→filet **5 mm** maquette / **2,5 mm** PDF, marge filet→corps **9 / 8,5 / 8 mm** (`padding-bottom` PDF, pas `margin`).
+Titled : titre **28 / 26 / 24 pt** Manrope 300 (lg/md/sm), filet **24 / 30 / 30 mm**, espace titre→filet **5 mm** maquette / **2,5 mm** PDF, marge filet→corps **9 / 8,5 / 8 mm** (`padding-bottom` PDF sur `.text-memory-title-block.text-tier-*`, pas `margin`).
+
+**PDF CSS :** `quote-variant-*` est sur `.page`, `quote-tier-*` sur `.inner` / mid — sélecteur descendant (`.quote-variant-titled .text-tier-lg`), jamais composé sur le même nœud.
 
 Dropcap : lettrine **52 / 46 pt** Manrope 300 (md/sm), espace entre paragraphes **5,5 mm**.
 
