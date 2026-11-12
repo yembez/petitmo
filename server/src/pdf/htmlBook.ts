@@ -1139,10 +1139,7 @@ body.print-bleed .bleed-x {
   margin-left:auto;
   margin-right:auto;
 }
-/*
- * variant est sur `.page.quote`, tier sur `.inner` / `.quote-mid` / `.text-memory-*`.
- * Ne jamais écrire `.quote-variant-*.quote-tier-*` (même nœud) — ça ne matche jamais.
- */
+/* variant sur page.quote, tier sur inner/mid/text-memory — pas de selecteur compose meme noeud */
 .quote-variant-titled .text-memory-column.text-tier-lg { max-width:128mm; }
 .quote-variant-titled .text-memory-column.text-tier-md { max-width:140mm; }
 .quote-variant-titled .text-memory-column.text-tier-sm { max-width:132mm; }
