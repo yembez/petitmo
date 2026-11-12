@@ -251,21 +251,21 @@ export const PDF_DROPCAP_PARA_GAP_MM = PDF_TEXT_MEMORY_PARA_GAP_MM;
  * Marge sous le bloc titre (filet → corps) — souvenir texte avec `text_title`.
  * En PDF : `padding-bottom` sur `.text-memory-title-block` (évite le collapse Chromium
  * qui collait le filet au corps).
+ * Air généreux titre ↔ corps (spread + PDF) pour recentrer le filet.
  */
 export const PDF_TEXT_MEMORY_TITLE_BLOCK_MARGIN_MM: Record<TextMemorySizeTier, number> = {
-  lg: 5,
-  md: 4.5,
-  sm: 4,
+  lg: 9,
+  md: 8.5,
+  sm: 8,
 };
 
 /**
  * Espace titre → filet (maquette).
- * PDF Chromium : utiliser `PDF_TEXT_MEMORY_TITLE_RULE_MARGIN_TOP_PDF_MM`
- * (metrics titre Manrope → filet trop bas si on garde 3 mm).
+ * PDF Chromium : `PDF_TEXT_MEMORY_TITLE_RULE_MARGIN_TOP_PDF_MM` (metrics Manrope plus larges).
  */
-export const PDF_TEXT_MEMORY_TITLE_RULE_MARGIN_TOP_MM = 3;
-/** Correction print Chromium — remonte nettement le filet (0 = collé sous la ligne titre). */
-export const PDF_TEXT_MEMORY_TITLE_RULE_MARGIN_TOP_PDF_MM = 0;
+export const PDF_TEXT_MEMORY_TITLE_RULE_MARGIN_TOP_MM = 5;
+/** Correction print Chromium — un peu moins que la maquette pour le milieu optique. */
+export const PDF_TEXT_MEMORY_TITLE_RULE_MARGIN_TOP_PDF_MM = 2.5;
 
 /** Largeur filet sous le titre souvenir. */
 export const PDF_TEXT_MEMORY_TITLE_RULE_MM: Record<TextMemorySizeTier, number> = {
