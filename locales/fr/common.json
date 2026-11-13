@@ -37,7 +37,7 @@
     "birthLabel": "Date de naissance",
     "birthPlaceholder": "JJ/MM/AAAA",
     "eveningReminderLabel": "Activer le rappel du soir",
-    "eveningReminderHint": "Optionnel — un petit rappel pour capturer un souvenir.",
+    "eveningReminderHint": "Pour penser à garder vos précieux souvenirs.",
     "eveningReminderTimeA11y": "Heure du rappel, actuellement {{time}}",
     "continue": "Continuer",
     "missingPhoto": "la photo",

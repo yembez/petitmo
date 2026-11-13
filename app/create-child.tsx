@@ -564,9 +564,9 @@ const styles = StyleSheet.create({
     marginBottom: verticalScale(4),
   },
   reminderHint: {
-    fontSize: FONT_SIZES.sm,
+    fontSize: FONT_SIZES.base,
     color: THEME.textMuted,
-    lineHeight: scale(20),
+    lineHeight: scale(22),
   },
   reminderTimeRow: {
     marginTop: verticalScale(14),
