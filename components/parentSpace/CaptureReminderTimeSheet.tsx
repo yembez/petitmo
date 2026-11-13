@@ -27,6 +27,11 @@ type Props = {
   selectedTime: string;
   onSelect: (time: string) => void;
   onClose: () => void;
+  /**
+   * `overlay` = pas de 2ᵉ Modal RN (à monter dans un Modal parent — ex. rappel soir fil).
+   * Défaut `modal` pour l’espace parent.
+   */
+  presentation?: 'modal' | 'overlay';
 };
 
 export default function CaptureReminderTimeSheet({
@@ -34,6 +39,7 @@ export default function CaptureReminderTimeSheet({
   selectedTime,
   onSelect,
   onClose,
+  presentation = 'modal',
 }: Props) {
   const insets = useSafeAreaInsets();
   const { t } = useAppTranslation('common');
@@ -96,57 +102,66 @@ export default function CaptureReminderTimeSheet({
     );
   };
 
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.root}>
-        <Pressable
-          style={styles.backdrop}
+  const body = (
+    <View style={styles.root} pointerEvents="box-none">
+      <Pressable
+        style={styles.backdrop}
+        onPress={onClose}
+        accessibilityRole="button"
+        accessibilityLabel={t('cancel')}
+      />
+      <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, verticalScale(12)) }]}>
+        <View style={styles.handle} />
+        <Text style={[styles.title, dm600 ? { fontFamily: dm600 } : null]}>
+          {t('parent.application.captureReminderTimeTitle')}
+        </Text>
+        <Text style={[styles.subtitle, dm500 ? { fontFamily: dm500 } : null]}>
+          {t('parent.application.captureReminderTimeSheetHint')}
+        </Text>
+        <FlatList
+          ref={listRef}
+          data={CAPTURE_REMINDER_TIME_SLOTS as string[]}
+          keyExtractor={(item) => item}
+          renderItem={renderItem}
+          style={styles.list}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          ItemSeparatorComponent={() => <View style={styles.separator} />}
+          getItemLayout={(_, index) => ({
+            length: ROW_HEIGHT,
+            offset: ROW_HEIGHT * index,
+            index,
+          })}
+          onScrollToIndexFailed={({ index }) => {
+            listRef.current?.scrollToOffset({
+              offset: Math.max(0, index * ROW_HEIGHT - verticalScale(80)),
+              animated: false,
+            });
+          }}
+        />
+        <TouchableOpacity
+          style={styles.cancelBtn}
           onPress={onClose}
+          activeOpacity={0.75}
           accessibilityRole="button"
           accessibilityLabel={t('cancel')}
-        />
-        <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, verticalScale(12)) }]}>
-          <View style={styles.handle} />
-          <Text style={[styles.title, dm600 ? { fontFamily: dm600 } : null]}>
-            {t('parent.application.captureReminderTimeTitle')}
+        >
+          <Text style={[styles.cancelText, dm600 ? { fontFamily: dm600 } : null]}>
+            {t('cancel')}
           </Text>
-          <Text style={[styles.subtitle, dm500 ? { fontFamily: dm500 } : null]}>
-            {t('parent.application.captureReminderTimeSheetHint')}
-          </Text>
-          <FlatList
-            ref={listRef}
-            data={CAPTURE_REMINDER_TIME_SLOTS as string[]}
-            keyExtractor={(item) => item}
-            renderItem={renderItem}
-            style={styles.list}
-            contentContainerStyle={styles.listContent}
-            showsVerticalScrollIndicator={false}
-            ItemSeparatorComponent={() => <View style={styles.separator} />}
-            getItemLayout={(_, index) => ({
-              length: ROW_HEIGHT,
-              offset: ROW_HEIGHT * index,
-              index,
-            })}
-            onScrollToIndexFailed={({ index }) => {
-              listRef.current?.scrollToOffset({
-                offset: Math.max(0, index * ROW_HEIGHT - verticalScale(80)),
-                animated: false,
-              });
-            }}
-          />
-          <TouchableOpacity
-            style={styles.cancelBtn}
-            onPress={onClose}
-            activeOpacity={0.75}
-            accessibilityRole="button"
-            accessibilityLabel={t('cancel')}
-          >
-            <Text style={[styles.cancelText, dm600 ? { fontFamily: dm600 } : null]}>
-              {t('cancel')}
-            </Text>
-          </TouchableOpacity>
-        </View>
+        </TouchableOpacity>
       </View>
+    </View>
+  );
+
+  if (presentation === 'overlay') {
+    if (!visible) return null;
+    return <View style={styles.overlayHost}>{body}</View>;
+  }
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      {body}
     </Modal>
   );
 }
@@ -154,6 +169,11 @@ export default function CaptureReminderTimeSheet({
 const ROW_HEIGHT = verticalScale(52);
 
 const styles = StyleSheet.create({
+  overlayHost: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 20,
+    elevation: 20,
+  },
   root: {
     flex: 1,
     justifyContent: 'flex-end',

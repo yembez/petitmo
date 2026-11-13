@@ -45,76 +45,89 @@ export default function EveningReminderCard({
   const cardWidth = Math.min(width - scale(40), scale(380));
 
   return (
-    <>
-      <Modal
-        visible={visible}
-        transparent
-        animationType="fade"
-        statusBarTranslucent
-        onRequestClose={onDismiss}
-      >
-        <View style={styles.root} accessibilityViewIsModal>
-          <BlurView intensity={48} tint="dark" style={StyleSheet.absoluteFillObject} />
-          <View style={[styles.scrim, StyleSheet.absoluteFillObject]} />
-          <View style={[styles.card, { width: cardWidth }]} accessibilityRole="summary">
-            <Text style={[styles.title, dm700 ? { fontFamily: dm700 } : null]}>
-              {t('fil.eveningReminder.title')}
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      statusBarTranslucent
+      onRequestClose={() => {
+        if (timeSheetOpen) {
+          setTimeSheetOpen(false);
+          return;
+        }
+        onDismiss();
+      }}
+    >
+      <View style={styles.root} accessibilityViewIsModal>
+        <BlurView
+          intensity={48}
+          tint="dark"
+          style={StyleSheet.absoluteFillObject}
+          pointerEvents="none"
+        />
+        <View
+          style={[styles.scrim, StyleSheet.absoluteFillObject]}
+          pointerEvents="none"
+        />
+        <View style={[styles.card, { width: cardWidth }]} accessibilityRole="summary">
+          <Text style={[styles.title, dm700 ? { fontFamily: dm700 } : null]}>
+            {t('fil.eveningReminder.title')}
+          </Text>
+
+          <View style={styles.bodyBlock}>
+            <Text style={[styles.body, dm500 ? { fontFamily: dm500 } : null]}>
+              {t('fil.eveningReminder.bodyBefore')}
             </Text>
-
-            <View style={styles.bodyBlock}>
-              <Text style={[styles.body, dm500 ? { fontFamily: dm500 } : null]}>
-                {t('fil.eveningReminder.bodyBefore')}
-              </Text>
-              <Pressable
-                onPress={() => setTimeSheetOpen(true)}
-                hitSlop={8}
-                accessibilityRole="button"
-                accessibilityLabel={t('fil.eveningReminder.timeA11y', { time: timeLabel })}
-                style={({ pressed }) => [styles.timeChip, pressed && styles.timeChipPressed]}
-              >
-                <Text style={[styles.timeChipText, dm700 ? { fontFamily: dm700 } : null]}>
-                  {timeLabel}
-                </Text>
-              </Pressable>
-              <Text style={[styles.body, dm500 ? { fontFamily: dm500 } : null]}>
-                {t('fil.eveningReminder.bodyAfter')}
-              </Text>
-            </View>
-
-            <PetitmoPrimaryPressable
-              onPress={onActivate}
-              style={styles.cta}
-              accessibilityLabel={t('fil.eveningReminder.activate')}
-            >
-              <Text style={[petitmoCtaStyles.primaryText, styles.ctaText]}>
-                {t('fil.eveningReminder.activate')}
-              </Text>
-            </PetitmoPrimaryPressable>
             <Pressable
-              onPress={onDismiss}
+              onPress={() => setTimeSheetOpen(true)}
               hitSlop={12}
               accessibilityRole="button"
-              accessibilityLabel={t('fil.eveningReminder.notNow')}
-              style={styles.secondary}
+              accessibilityLabel={t('fil.eveningReminder.timeA11y', { time: timeLabel })}
+              style={({ pressed }) => [styles.timeChip, pressed && styles.timeChipPressed]}
             >
-              <Text style={[styles.secondaryText, dm600 ? { fontFamily: dm600 } : null]}>
-                {t('fil.eveningReminder.notNow')}
+              <Text style={[styles.timeChipText, dm700 ? { fontFamily: dm700 } : null]}>
+                {timeLabel}
               </Text>
             </Pressable>
+            <Text style={[styles.body, dm500 ? { fontFamily: dm500 } : null]}>
+              {t('fil.eveningReminder.bodyAfter')}
+            </Text>
           </View>
-        </View>
-      </Modal>
 
-      {/* Sheet dans ce stack modal — sinon l’heure n’est pas cliquable / sheet masqué. */}
-      <CaptureReminderTimeSheet
-        visible={timeSheetOpen}
-        selectedTime={timeLabel}
-        onSelect={time => {
-          onTimeChange(snapCaptureReminderTimeToSlot(time));
-        }}
-        onClose={() => setTimeSheetOpen(false)}
-      />
-    </>
+          <PetitmoPrimaryPressable
+            onPress={onActivate}
+            style={styles.cta}
+            accessibilityLabel={t('fil.eveningReminder.activate')}
+          >
+            <Text style={[petitmoCtaStyles.primaryText, styles.ctaText]}>
+              {t('fil.eveningReminder.activate')}
+            </Text>
+          </PetitmoPrimaryPressable>
+          <Pressable
+            onPress={onDismiss}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel={t('fil.eveningReminder.notNow')}
+            style={styles.secondary}
+          >
+            <Text style={[styles.secondaryText, dm600 ? { fontFamily: dm600 } : null]}>
+              {t('fil.eveningReminder.notNow')}
+            </Text>
+          </Pressable>
+        </View>
+
+        {/* Même Modal RN — pas de 2ᵉ Modal (sinon sheet invisible / tap mort sur iOS). */}
+        <CaptureReminderTimeSheet
+          presentation="overlay"
+          visible={timeSheetOpen}
+          selectedTime={timeLabel}
+          onSelect={time => {
+            onTimeChange(snapCaptureReminderTimeToSlot(time));
+          }}
+          onClose={() => setTimeSheetOpen(false)}
+        />
+      </View>
+    </Modal>
   );
 }
 
@@ -136,6 +149,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(81,84,94,0.12)',
+    zIndex: 1,
   },
   title: {
     fontSize: scale(22),
