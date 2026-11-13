@@ -69,7 +69,11 @@ function isIosProvisionalStatus(
   return iosStatus === Notifications.IosAuthorizationStatus.PROVISIONAL;
 }
 
-/** `granted` = autorisé classique **ou** provisoire iOS (Distribuer en silence). */
+/**
+ * `granted` = alertes iOS classiques (bannière / son).
+ * Le provisoire (« Distribuer en silence ») reste `undetermined` pour qu’un opt-in
+ * puisse encore afficher la boîte Apple.
+ */
 export async function getNotificationsPermissionStatus(): Promise<
   'granted' | 'denied' | 'undetermined'
 > {
@@ -77,12 +81,7 @@ export async function getNotificationsPermissionStatus(): Promise<
   if (!Notifications) return 'denied';
   try {
     const settings = await Notifications.getPermissionsAsync();
-    if (
-      settings.granted ||
-      isIosProvisionalStatus(Notifications, settings.ios?.status)
-    ) {
-      return 'granted';
-    }
+    if (settings.granted) return 'granted';
     if (settings.status === 'denied' && settings.canAskAgain === false) return 'denied';
     return 'undetermined';
   } catch {
@@ -145,7 +144,10 @@ export async function ensureProvisionalNotificationsAuthorization(): Promise<boo
   }
 }
 
-/** Permission classique (boîte iOS) — espaces parent / cas où l’utilisatrice veut des alertes. */
+/**
+ * Permission classique (boîte iOS Autoriser / Refuser).
+ * Succès = alertes autorisées — le provisoire seul ne compte pas.
+ */
 export async function requestNotificationsAccess(): Promise<boolean> {
   const Notifications = await loadNotifications();
   if (!Notifications) return false;
@@ -157,10 +159,7 @@ export async function requestNotificationsAccess(): Promise<boolean> {
         allowSound: true,
       },
     });
-    return (
-      !!settings.granted ||
-      isIosProvisionalStatus(Notifications, settings.ios?.status)
-    );
+    return !!settings.granted;
   } catch (e) {
     console.warn('[onboardingPermissions] requestPermissionsAsync', e);
     return false;

@@ -60,12 +60,10 @@ export async function markCaptureReminderNudgeSeen(): Promise<void> {
  */
 export async function activateCaptureReminderFromNudge(): Promise<ActivateCaptureReminderResult> {
   if (!(await isNotificationsModuleAvailable())) return 'unavailable';
-  const { ensureProvisionalNotificationsAuthorization } = await import(
-    '@/lib/onboardingPermissions'
-  );
+  const { requestNotificationsAccess } = await import('@/lib/onboardingPermissions');
   let granted = await getNotificationsGranted();
   if (!granted) {
-    granted = await ensureProvisionalNotificationsAuthorization();
+    granted = await requestNotificationsAccess();
   }
   if (!granted) return 'needs_settings';
   void registerPushTokenInBackground();

@@ -127,12 +127,9 @@ export default function ParentNotificationSettingsBlock({
       void (async () => {
         if (enabled) {
           if (!(await isNotificationsModuleAvailable())) return;
-          const { ensureProvisionalNotificationsAuthorization } = await import(
-            '@/lib/onboardingPermissions'
-          );
           let granted = await getNotificationsGranted();
           if (!granted) {
-            granted = await ensureProvisionalNotificationsAuthorization();
+            granted = await requestNotificationsAccess();
           }
           if (!granted) {
             void Linking.openSettings();

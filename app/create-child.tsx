@@ -34,7 +34,10 @@ import {
   saveNotificationPrefs,
   snapCaptureReminderTimeToSlot,
 } from '@/lib/notificationPrefs';
-import { ensureProvisionalNotificationsAuthorization } from '@/lib/onboardingPermissions';
+import {
+  isNotificationsModuleAvailable,
+  requestNotificationsAccess,
+} from '@/lib/onboardingPermissions';
 import { registerPushTokenInBackground } from '@/services/registerPushToken';
 import DatePicker from '@/components/DatePicker';
 import { CropModal } from '@/components/CropModal';
@@ -159,6 +162,27 @@ export default function CreateChildScreen() {
     void openImagePickerForCrop();
   };
 
+  /** Opt-in → boîte Apple classique ; refus = toggle reste off. */
+  const handleEveningReminderToggle = useCallback((enabled: boolean) => {
+    if (!enabled) {
+      setEveningReminderEnabled(false);
+      return;
+    }
+    void (async () => {
+      if (!(await isNotificationsModuleAvailable())) {
+        setEveningReminderEnabled(false);
+        return;
+      }
+      const granted = await requestNotificationsAccess();
+      if (!granted) {
+        setEveningReminderEnabled(false);
+        return;
+      }
+      setEveningReminderEnabled(true);
+      void registerPushTokenInBackground();
+    })();
+  }, []);
+
   const handleContinue = async () => {
     if (isCreating) return;
     if (!formComplete) {
@@ -176,12 +200,18 @@ export default function CreateChildScreen() {
 
       if (child) {
         const snapped = snapCaptureReminderTimeToSlot(eveningReminderTime);
-        if (eveningReminderEnabled) {
-          await ensureProvisionalNotificationsAuthorization();
-          void registerPushTokenInBackground();
+        let reminderOn = eveningReminderEnabled;
+        if (reminderOn) {
+          const granted = await requestNotificationsAccess();
+          if (!granted) {
+            reminderOn = false;
+            setEveningReminderEnabled(false);
+          } else {
+            void registerPushTokenInBackground();
+          }
         }
         await saveNotificationPrefs({
-          captureReminderEnabled: eveningReminderEnabled,
+          captureReminderEnabled: reminderOn,
           captureReminderLocalTime: snapped,
         });
 
@@ -334,7 +364,7 @@ export default function CreateChildScreen() {
               </View>
               <Switch
                 value={eveningReminderEnabled}
-                onValueChange={setEveningReminderEnabled}
+                onValueChange={handleEveningReminderToggle}
                 trackColor={{ false: 'rgba(81,84,94,0.22)', true: THEME.brandPrimary }}
                 thumbColor="#FFFFFF"
                 accessibilityLabel={t('createChild.eveningReminderLabel')}
