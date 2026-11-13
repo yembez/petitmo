@@ -45,7 +45,7 @@ import {
   TEXT_TRUNCATION_SAVE_LABEL,
 } from '@/utils/textLimits';
 import { applySentenceAndParagraphCapitals } from '@/utils/frenchTextInput';
-import { applyTextAlineasForInput, reconcileTextAlineasOnChange, stripTextAlineas } from '@/utils/textAlineas';
+import { stripTextAlineas } from '@/utils/textAlineas';
 
 const TEXT_INPUT_WEB_LANG =
   Platform.OS === 'web' ? ({ lang: 'fr-FR' } as Record<string, string>) : {};
@@ -91,13 +91,13 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
   const charsPerLine = props.bookCharsPerLine ?? BOOK_CHARS_PER_LINE;
 
   const [text, setText] = React.useState(
-    props.variant === 'title-body' ? '' : applyTextAlineasForInput(props.initialText)
+    props.variant === 'title-body' ? '' : stripTextAlineas(props.initialText)
   );
   const [fieldTitle, setFieldTitle] = React.useState(
     props.variant === 'title-body' ? props.initialTitle : ''
   );
   const [fieldBody, setFieldBody] = React.useState(
-    props.variant === 'title-body' ? applyTextAlineasForInput(props.initialBody) : ''
+    props.variant === 'title-body' ? stripTextAlineas(props.initialBody) : ''
   );
   const [ctaPhase, setCtaPhase] = useState<PetitmoMorphPhase>('idle');
   const pendingCommitRef = React.useRef<(() => void) | null>(null);
@@ -122,17 +122,16 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
     });
   };
 
+  /** Saisie plate (sans cadratin) — l’alinéa n’apparaît qu’à l’affichage fil / livre. */
   const applyBodyInput = (prev: string, next: string) => {
-    const reconciled = reconcileTextAlineasOnChange(prev, next);
     const prevCanon = stripTextAlineas(prev);
-    const nextCanon = stripTextAlineas(reconciled);
-    const capped = enforceTextBookLineBudgetOnInput(
+    const nextCanon = stripTextAlineas(next);
+    return enforceTextBookLineBudgetOnInput(
       prevCanon,
       applySentenceAndParagraphCapitals(nextCanon),
       lineBudget,
       charsPerLine,
     );
-    return applyTextAlineasForInput(capped);
   };
 
   const handleSave = () => {
@@ -281,9 +280,6 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
                 />
               </View>
               <View style={styles.footerMeta}>
-                <Text style={styles.paragraphHint}>
-                  Double saut de ligne = nouveau paragraphe (alinéa)
-                </Text>
                 <Text style={styles.charHint}>
                   {estimateBookLines(stripTextAlineas(fieldBody), charsPerLine)}/{lineBudget} lignes
                 </Text>
@@ -371,11 +367,6 @@ function EditTextModalBody(props: EditTextModalProps & { visible: true }) {
               />
             </View>
             <View style={styles.footerMeta}>
-              {useMemoryPreview ? (
-                <Text style={styles.paragraphHint}>
-                  Double saut de ligne = nouveau paragraphe (alinéa)
-                </Text>
-              ) : null}
               <Text style={styles.charHint}>
                 {estimateBookLines(stripTextAlineas(text), charsPerLine)}/{lineBudget} lignes
               </Text>
@@ -595,17 +586,11 @@ const styles = StyleSheet.create({
   footerMeta: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
     gap: scale(8),
     paddingHorizontal: SPACING.lg,
     paddingTop: SPACING.xs,
     flexShrink: 0,
-  },
-  paragraphHint: {
-    flex: 1,
-    fontSize: 11,
-    color: '#AEAEB2',
-    lineHeight: scale(15),
   },
   charHint: {
     fontSize: 11,

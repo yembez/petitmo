@@ -1,9 +1,10 @@
 /**
- * Alinéas à la saisie — même cadratin que le fil / le livre (`FilMemoryRow`, maquette).
- * Stockage SQLite / cloud : **sans** cadratin (ajout uniquement à l’affichage et dans le champ).
+ * Alinéas typographiques (cadratin) — **affichage seulement** (fil / viewer / livre).
+ * Saisie : champ plat, sans cadratin (évite le ressenti « bug » à la frappe).
+ * Stockage SQLite / cloud : **sans** cadratin ; strip à l’entrée / sortie des champs.
  */
 
-/** Cadratin (em quad) — alinéa en tête de chaque ligne non vide. */
+/** Cadratin (em quad) — alinéa en tête de chaque ligne non vide à l’affichage. */
 export const TEXT_ALINEA_EM_QUAD = '\u2003';
 
 export function stripTextAlineas(text: string): string {
@@ -11,8 +12,9 @@ export function stripTextAlineas(text: string): string {
 }
 
 /**
- * Préfixe chaque ligne non vide d’un cadratin (parité rendu fil / livre).
+ * Préfixe chaque ligne non vide d’un cadratin (rendu fil / livre).
  * Les lignes vides (séparateurs de paragraphe) restent vides.
+ * @deprecated Plus utilisé à la saisie — conserver pour tests / éventuel rendu texte.
  */
 export function applyTextAlineasForInput(text: string): string {
   if (!text) return '';

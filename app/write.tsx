@@ -54,7 +54,7 @@ import { buildLocalTextMemory } from '@/services/localOnlyMemoryCapture';
 import { ensureMemoryUploadedForCloud } from '@/services/migration';
 import { updateMemoryText } from '@/services/media';
 import { MEMORY_EDITORIAL_FONT_FAMILY } from '@/constants/memoryTextFont';
-import { applyTextAlineasForInput, reconcileTextAlineasOnChange, stripTextAlineas } from '@/utils/textAlineas';
+import { stripTextAlineas } from '@/utils/textAlineas';
 import PermissionModal from '@/components/PermissionModal';
 import {
   enrichMemoryLocationInBackground,
@@ -136,7 +136,7 @@ export default function WriteScreen() {
 
     hydratedEditIdRef.current = editMemoryId;
     setTitle(mem.text_title?.trim() ?? '');
-    setContent(applyTextAlineasForInput(mem.content?.trim() ?? ''));
+    setContent(stripTextAlineas(mem.content?.trim() ?? ''));
   }, [editMemoryId, isEditing, router]);
 
   useEffect(() => {
@@ -171,12 +171,11 @@ export default function WriteScreen() {
               const prevCanon = stripTextAlineas(prev);
               const merged = prevCanon + finalTranscript;
               const normalized = applySentenceAndParagraphCapitals(merged);
-              const capped = enforceTextBookLineBudgetOnInput(
+              return enforceTextBookLineBudgetOnInput(
                 prevCanon,
                 normalized,
                 MAX_BOOK_LINES,
               );
-              return applyTextAlineasForInput(capped);
             });
           }
         };
@@ -460,15 +459,13 @@ export default function WriteScreen() {
           value={content}
           onChangeText={t =>
             setContent(prev => {
-              const reconciled = reconcileTextAlineasOnChange(prev, t);
               const prevCanon = stripTextAlineas(prev);
-              const nextCanon = stripTextAlineas(reconciled);
-              const capped = enforceTextBookLineBudgetOnInput(
+              const nextCanon = stripTextAlineas(t);
+              return enforceTextBookLineBudgetOnInput(
                 prevCanon,
                 applySentenceAndParagraphCapitals(nextCanon),
                 MAX_BOOK_LINES,
               );
-              return applyTextAlineasForInput(capped);
             })
           }
           autoFocus
