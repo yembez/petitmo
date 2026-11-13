@@ -84,7 +84,6 @@ import {
   shouldShowEveningReminderCard,
 } from '@/lib/eveningReminderCard';
 import {
-  peekCachedNotificationPrefs,
   saveNotificationPrefs,
   snapCaptureReminderTimeToSlot,
   DEFAULT_NOTIFICATION_PREFS,
@@ -359,14 +358,16 @@ function FilScreen() {
           {row}
           <EveningReminderCard
             timeLabel={eveningReminderTime}
+            onPressTime={() => setReminderTimeSheetOpen(true)}
             onActivate={() => {
               void (async () => {
+                // Figé l’heure choisie avant d’activer (défaut 21:00).
+                void saveNotificationPrefs({
+                  captureReminderLocalTime: snapCaptureReminderTimeToSlot(eveningReminderTime),
+                });
                 const result = await activateEveningReminderFromCard();
                 setShowEveningReminderCard(false);
                 if (result === 'enabled') {
-                  const prefs = await peekCachedNotificationPrefs();
-                  setEveningReminderTime(prefs.captureReminderLocalTime);
-                  setReminderTimeSheetOpen(true);
                   return;
                 }
                 if (result === 'needs_settings') {

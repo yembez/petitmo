@@ -1,5 +1,6 @@
 /**
  * Carte soft sous le 1er souvenir — rappel du soir (non bloquante).
+ * Blanc + CTA corail charte ; heure 21:00 par défaut, tappable → sheet.
  */
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { THEME } from '@/constants/theme';
@@ -14,9 +15,16 @@ type Props = {
   timeLabel: string;
   onActivate: () => void;
   onDismiss: () => void;
+  /** Ouvre le sheet d’heure (créneaux existants). */
+  onPressTime: () => void;
 };
 
-export default function EveningReminderCard({ timeLabel, onActivate, onDismiss }: Props) {
+export default function EveningReminderCard({
+  timeLabel,
+  onActivate,
+  onDismiss,
+  onPressTime,
+}: Props) {
   const { t } = useAppTranslation('common');
   const { dm500, dm600, dm700 } = useDmSansFamilyFlowFonts();
 
@@ -26,7 +34,16 @@ export default function EveningReminderCard({ timeLabel, onActivate, onDismiss }
         {t('fil.eveningReminder.title')}
       </Text>
       <Text style={[styles.body, { fontFamily: dm500 }]}>
-        {t('fil.eveningReminder.body', { time: timeLabel })}
+        {t('fil.eveningReminder.bodyBefore')}
+        <Text
+          onPress={onPressTime}
+          style={[styles.timeInline, { fontFamily: dm700 }]}
+          accessibilityRole="button"
+          accessibilityLabel={t('fil.eveningReminder.timeA11y', { time: timeLabel })}
+        >
+          {timeLabel}
+        </Text>
+        {t('fil.eveningReminder.bodyAfter')}
       </Text>
       <PetitmoPrimaryPressable onPress={onActivate} style={styles.cta}>
         <Text style={petitmoCtaStyles.primaryText}>{t('fil.eveningReminder.activate')}</Text>
@@ -53,7 +70,7 @@ const styles = StyleSheet.create({
     marginBottom: verticalScale(4),
     padding: SPACING.md,
     borderRadius: scale(16),
-    backgroundColor: '#F4F2EF',
+    backgroundColor: '#FFFFFF',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(81,84,94,0.12)',
   },
@@ -67,6 +84,10 @@ const styles = StyleSheet.create({
     color: THEME.textMuted,
     lineHeight: scale(20),
     marginBottom: SPACING.md,
+  },
+  timeInline: {
+    color: THEME.captureScreenCtaBackground,
+    textDecorationLine: 'underline',
   },
   cta: {
     alignSelf: 'stretch',

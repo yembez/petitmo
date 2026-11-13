@@ -370,7 +370,9 @@
     },
     "eveningReminder": {
       "title": "Un petit rappel le soir ?",
-      "body": "Chaque soir à {{time}}, Petit Cœur peut te rappeler de garder un souvenir de la journée.",
+      "bodyBefore": "On sait que vos journées sont bien remplies. Chaque soir à ",
+      "bodyAfter": ", un petit rappel peut vous aider à garder un souvenir de la journée avec votre enfant.",
+      "timeA11y": "Changer l’heure du rappel, actuellement {{time}}",
       "activate": "Activer le rappel",
       "notNow": "Pas maintenant"
     }
