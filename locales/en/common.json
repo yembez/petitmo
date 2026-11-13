@@ -225,6 +225,8 @@
       "notificationsStatusOnHint": "You can change access in iOS Settings",
       "notificationsStatusOff": "Off",
       "notificationsStatusOffHint": "Open iOS Settings to allow Petit Cœur",
+      "notificationsStatusQuiet": "Quiet",
+      "notificationsStatusQuietHint": "Open Settings → Notifications → turn off “Deliver Quietly”",
       "enablePhotos": "Enable photo library",
       "enablePhotosHint": "To import photos and videos (profile, Capture, books)",
       "photosLabel": "Photo library",
