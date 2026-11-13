@@ -1,9 +1,9 @@
 /**
  * Rappel du soir + Notifications — Espace parent (avant Mes commandes).
- * Low Friction : coupe le rappel en silence si les notifs iOS sont off.
+ * Low Friction : coupe le rappel si pas d’alertes iOS ; provisoire → Réglages (pas de 2ᵉ boîte Apple).
  */
 import { useCallback, useRef, useState } from 'react';
-import { Alert, AppState, type AppStateStatus, Linking, Switch } from 'react-native';
+import { Alert, AppState, type AppStateStatus, Switch } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Bell, Moon } from 'lucide-react-native';
 import CaptureReminderTimeSheet from '@/components/parentSpace/CaptureReminderTimeSheet';
@@ -12,10 +12,13 @@ import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { THEME } from '@/constants/theme';
 import {
   getNotificationsGranted,
+  getNotificationsIosKind,
   getNotificationsPermissionStatus,
   isNotificationsModuleAvailable,
   requestNotificationsAccess,
+  type NotificationsIosKind,
 } from '@/lib/onboardingPermissions';
+import { openAppSettings } from '@/lib/openAppSettings';
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
 import { peekHasRealAuthAccount } from '@/lib/authAccount';
 import {
@@ -42,14 +45,13 @@ export default function ParentNotificationSettingsBlock({
   const [hasRealAccount, setHasRealAccount] = useState(() => peekHasRealAuthAccount());
   const [notifPrefs, setNotifPrefs] = useState<NotificationPrefs>(DEFAULT_NOTIFICATION_PREFS);
   const [timeSheetOpen, setTimeSheetOpen] = useState(false);
-  const [notifsStatus, setNotifsStatus] = useState<'granted' | 'denied' | 'undetermined'>(
-    'undetermined',
-  );
+  const [notifsKind, setNotifsKind] = useState<NotificationsIosKind>('undetermined');
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
 
   const refreshNotifs = useCallback(async () => {
+    const kind = await getNotificationsIosKind();
+    setNotifsKind(kind);
     const notifs = await getNotificationsPermissionStatus();
-    setNotifsStatus(notifs);
     if (notifs !== 'granted') {
       const prefs = await peekCachedNotificationPrefs();
       if (prefs.captureReminderEnabled) {
@@ -67,7 +69,7 @@ export default function ParentNotificationSettingsBlock({
       void loadNotificationPrefs().then(setNotifPrefs);
       void refreshNotifs();
 
-      const sub = AppState.addEventListener('change', (next) => {
+      const sub = AppState.addEventListener('change', next => {
         const prev = appStateRef.current;
         appStateRef.current = next;
         if (next === 'active' && prev !== 'active') {
@@ -87,9 +89,10 @@ export default function ParentNotificationSettingsBlock({
         );
         return;
       }
-      const status = await getNotificationsPermissionStatus();
-      if (status === 'granted' || status === 'denied') {
-        void Linking.openSettings();
+      const kind = await getNotificationsIosKind();
+      // Déjà alertes / refus / provisoire : seule la page Réglages iOS peut changer.
+      if (kind === 'authorized' || kind === 'denied' || kind === 'provisional') {
+        openAppSettings();
         return;
       }
       if (await getNotificationsGranted()) {
@@ -105,20 +108,8 @@ export default function ParentNotificationSettingsBlock({
         void registerPushTokenInBackground();
         const { markOnboardingPermissionsSeen } = await import('@/lib/onboardingPermissionsSeen');
         await markOnboardingPermissionsSeen(peekLastRealAuthUserId());
-        Alert.alert(
-          t('parent.application.notificationsGrantedTitle'),
-          t('parent.application.notificationsGrantedBody'),
-        );
         return;
       }
-      Alert.alert(
-        t('parent.application.notificationsDeniedTitle'),
-        t('parent.application.notificationsDeniedBody'),
-        [
-          { text: t('cancel'), style: 'cancel' },
-          { text: t('parent.application.openSettings'), onPress: () => void Linking.openSettings() },
-        ],
-      );
     })();
   }, [refreshNotifs, t]);
 
@@ -132,7 +123,8 @@ export default function ParentNotificationSettingsBlock({
             granted = await requestNotificationsAccess();
           }
           if (!granted) {
-            void Linking.openSettings();
+            // requestNotificationsAccess a déjà ouvert Réglages si provisoire/refus.
+            await refreshNotifs();
             return;
           }
           await refreshNotifs();
@@ -145,15 +137,38 @@ export default function ParentNotificationSettingsBlock({
     [refreshNotifs],
   );
 
-  const reminderOn = notifPrefs.captureReminderEnabled && notifsStatus === 'granted';
+  const reminderOn = notifPrefs.captureReminderEnabled && notifsKind === 'authorized';
   const showReminder = hasRealAccount;
+
+  const notifsValue =
+    notifsKind === 'authorized'
+      ? t('parent.application.notificationsStatusOn')
+      : notifsKind === 'denied'
+        ? t('parent.application.notificationsStatusOff')
+        : notifsKind === 'provisional'
+          ? t('parent.application.notificationsStatusQuiet')
+          : undefined;
+
+  const notifsDetail =
+    notifsKind === 'authorized'
+      ? t('parent.application.notificationsStatusOnHint')
+      : notifsKind === 'denied'
+        ? t('parent.application.notificationsStatusOffHint')
+        : notifsKind === 'provisional'
+          ? t('parent.application.notificationsStatusQuietHint')
+          : t('parent.application.enableNotificationsHint');
+
+  const notifsLabel =
+    notifsKind === 'undetermined'
+      ? t('parent.application.enableNotifications')
+      : t('parent.application.notificationsLabel');
 
   return (
     <>
       <CaptureReminderTimeSheet
         visible={timeSheetOpen}
         selectedTime={notifPrefs.captureReminderLocalTime}
-        onSelect={(time) => {
+        onSelect={time => {
           const snapped = snapCaptureReminderTimeToSlot(time);
           void saveNotificationPrefs({ captureReminderLocalTime: snapped }).then(setNotifPrefs);
         }}
@@ -200,32 +215,12 @@ export default function ParentNotificationSettingsBlock({
       <MenuRow
         bordered={showReminder || firstRowBordered}
         icon={menuIcon(Bell)}
-        label={
-          notifsStatus === 'undetermined'
-            ? t('parent.application.enableNotifications')
-            : t('parent.application.notificationsLabel')
-        }
-        detail={
-          notifsStatus === 'granted'
-            ? t('parent.application.notificationsStatusOnHint')
-            : notifsStatus === 'denied'
-              ? t('parent.application.notificationsStatusOffHint')
-              : t('parent.application.enableNotificationsHint')
-        }
-        value={
-          notifsStatus === 'granted'
-            ? t('parent.application.notificationsStatusOn')
-            : notifsStatus === 'denied'
-              ? t('parent.application.notificationsStatusOff')
-              : undefined
-        }
+        label={notifsLabel}
+        detail={notifsDetail}
+        value={notifsValue}
         labelFontFamily={labelFontFamily}
         onPress={handleNotificationsRowPress}
-        accessibilityLabel={
-          notifsStatus === 'undetermined'
-            ? t('parent.application.enableNotifications')
-            : t('parent.application.notificationsLabel')
-        }
+        accessibilityLabel={notifsLabel}
       />
     </>
   );

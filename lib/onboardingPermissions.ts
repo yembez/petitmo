@@ -69,24 +69,38 @@ function isIosProvisionalStatus(
   return iosStatus === Notifications.IosAuthorizationStatus.PROVISIONAL;
 }
 
-/**
- * `granted` = alertes iOS classiques (bannière / son).
- * Le provisoire (« Distribuer en silence ») reste `undetermined` pour qu’un opt-in
- * puisse encore afficher la boîte Apple.
- */
-export async function getNotificationsPermissionStatus(): Promise<
-  'granted' | 'denied' | 'undetermined'
-> {
+/** Détail iOS pour brancher l’UX (provisoire ≠ alertes). */
+export type NotificationsIosKind =
+  | 'authorized'
+  | 'provisional'
+  | 'denied'
+  | 'undetermined';
+
+export async function getNotificationsIosKind(): Promise<NotificationsIosKind> {
   const Notifications = await loadNotifications();
   if (!Notifications) return 'denied';
   try {
     const settings = await Notifications.getPermissionsAsync();
-    if (settings.granted) return 'granted';
+    if (settings.granted) return 'authorized';
+    if (isIosProvisionalStatus(Notifications, settings.ios?.status)) return 'provisional';
     if (settings.status === 'denied' && settings.canAskAgain === false) return 'denied';
     return 'undetermined';
   } catch {
     return 'undetermined';
   }
+}
+
+/**
+ * `granted` = alertes iOS classiques (bannière / son) uniquement.
+ * Provisoire (« Distribuer en silence ») ≠ granted.
+ */
+export async function getNotificationsPermissionStatus(): Promise<
+  'granted' | 'denied' | 'undetermined'
+> {
+  const kind = await getNotificationsIosKind();
+  if (kind === 'authorized') return 'granted';
+  if (kind === 'denied') return 'denied';
+  return 'undetermined';
 }
 
 function hasNotificationsNative(): boolean {
@@ -145,13 +159,24 @@ export async function ensureProvisionalNotificationsAuthorization(): Promise<boo
 }
 
 /**
- * Permission classique (boîte iOS Autoriser / Refuser).
- * Succès = alertes autorisées — le provisoire seul ne compte pas.
+ * Permission classique (boîte iOS Autoriser / Refuser) si encore possible.
+ * Si déjà **provisoire** ou **refusé** : iOS ne montre plus la boîte → Réglages.
+ * Succès = alertes autorisées uniquement.
  */
 export async function requestNotificationsAccess(): Promise<boolean> {
   const Notifications = await loadNotifications();
   if (!Notifications) return false;
   try {
+    const kind = await getNotificationsIosKind();
+    if (kind === 'authorized') return true;
+
+    // Déjà « Distribuer en silence » ou refus : pas de 2ᵉ boîte Apple possible.
+    if (kind === 'provisional' || kind === 'denied') {
+      const { openAppSettings } = await import('@/lib/openAppSettings');
+      openAppSettings();
+      return false;
+    }
+
     const settings = await Notifications.requestPermissionsAsync({
       ios: {
         allowAlert: true,
@@ -159,7 +184,15 @@ export async function requestNotificationsAccess(): Promise<boolean> {
         allowSound: true,
       },
     });
-    return !!settings.granted;
+    if (settings.granted) return true;
+
+    // Toujours pas d’alertes (souvent reste provisoire) → Réglages.
+    const after = await getNotificationsIosKind();
+    if (after !== 'authorized') {
+      const { openAppSettings } = await import('@/lib/openAppSettings');
+      openAppSettings();
+    }
+    return false;
   } catch (e) {
     console.warn('[onboardingPermissions] requestPermissionsAsync', e);
     return false;

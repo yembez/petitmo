@@ -225,6 +225,8 @@
       "notificationsStatusOnHint": "Tu peux modifier l’accès dans les Réglages iOS",
       "notificationsStatusOff": "Désactivées",
       "notificationsStatusOffHint": "Ouvre les Réglages iOS pour autoriser Petit Cœur",
+      "notificationsStatusQuiet": "En silence",
+      "notificationsStatusQuietHint": "Ouvre Réglages → Notifications → désactive « Distribuer en silence »",
       "enablePhotos": "Activer la photothèque",
       "enablePhotosHint": "Pour importer photos et vidéos (profil, Capturer, livres)",
       "photosLabel": "Photothèque",
