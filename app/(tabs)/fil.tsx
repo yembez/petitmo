@@ -74,7 +74,6 @@ import { useFocusEffect } from '@react-navigation/native';
 import { getTimingNudge, markNudgeSeen, recordInstallDate } from '@/lib/paywallTiming';
 import SoftNudgeBanner from '@/components/SoftNudgeBanner';
 import EveningReminderCard from '@/components/feed/EveningReminderCard';
-import CaptureReminderTimeSheet from '@/components/parentSpace/CaptureReminderTimeSheet';
 import {
   EVENING_REMINDER_CARD_EVENT,
   activateEveningReminderFromCard,
@@ -1140,7 +1139,11 @@ function FilScreen() {
       <EveningReminderCard
         visible={showEveningReminderCard}
         timeLabel={eveningReminderTime}
-        onPressTime={() => setReminderTimeSheetOpen(true)}
+        onTimeChange={time => {
+          const snapped = snapCaptureReminderTimeToSlot(time);
+          setEveningReminderTime(snapped);
+          void saveNotificationPrefs({ captureReminderLocalTime: snapped });
+        }}
         onActivate={() => {
           void (async () => {
             // Figé l’heure choisie avant d’activer (défaut 21:00).
@@ -1161,16 +1164,6 @@ function FilScreen() {
           void dismissEveningReminderCard();
           setShowEveningReminderCard(false);
         }}
-      />
-      <CaptureReminderTimeSheet
-        visible={reminderTimeSheetOpen}
-        selectedTime={eveningReminderTime}
-        onSelect={time => {
-          const snapped = snapCaptureReminderTimeToSlot(time);
-          setEveningReminderTime(snapped);
-          void saveNotificationPrefs({ captureReminderLocalTime: snapped });
-        }}
-        onClose={() => setReminderTimeSheetOpen(false)}
       />
       {videoTrimExporting ? (
         <FeedMediaPrepOverlay label={t('videoTrim.exporting')} />

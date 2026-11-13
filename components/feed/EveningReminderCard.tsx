@@ -2,6 +2,7 @@
  * Modal centrée — rappel du soir après le 1er import (1 ou N souvenirs).
  * Low Friction : pas d’Alert native ; notifs seulement si « Activer » ; Pas maintenant = dismiss.
  */
+import { useState } from 'react';
 import {
   View,
   Text,
@@ -12,20 +13,22 @@ import {
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { THEME } from '@/constants/theme';
-import { FONT_SIZES, SPACING } from '@/constants/sizes';
+import { SPACING } from '@/constants/sizes';
 import { scale, verticalScale } from '@/utils/responsive';
 import { useAppTranslation } from '@/hooks/useAppTranslation';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
 import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
 import { petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
+import CaptureReminderTimeSheet from '@/components/parentSpace/CaptureReminderTimeSheet';
+import { snapCaptureReminderTimeToSlot } from '@/lib/notificationPrefs';
 
 type Props = {
   visible: boolean;
   timeLabel: string;
   onActivate: () => void;
   onDismiss: () => void;
-  /** Ouvre le sheet d’heure (créneaux existants). */
-  onPressTime: () => void;
+  /** Persiste l’heure choisie (sheet ouvert depuis ce modal). */
+  onTimeChange: (time: string) => void;
 };
 
 export default function EveningReminderCard({
@@ -33,57 +36,85 @@ export default function EveningReminderCard({
   timeLabel,
   onActivate,
   onDismiss,
-  onPressTime,
+  onTimeChange,
 }: Props) {
   const { t } = useAppTranslation('common');
   const { width } = useWindowDimensions();
   const { dm500, dm600, dm700 } = useDmSansFamilyFlowFonts();
-  const cardWidth = Math.min(width - scale(48), scale(360));
+  const [timeSheetOpen, setTimeSheetOpen] = useState(false);
+  const cardWidth = Math.min(width - scale(40), scale(380));
 
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      statusBarTranslucent
-      onRequestClose={onDismiss}
-    >
-      <View style={styles.root} accessibilityViewIsModal>
-        <BlurView intensity={48} tint="dark" style={StyleSheet.absoluteFillObject} />
-        <View style={[styles.scrim, StyleSheet.absoluteFillObject]} />
-        <View style={[styles.card, { width: cardWidth }]} accessibilityRole="summary">
-          <Text style={[styles.title, { fontFamily: dm700 }]}>
-            {t('fil.eveningReminder.title')}
-          </Text>
-          <Text style={[styles.body, { fontFamily: dm500 }]}>
-            {t('fil.eveningReminder.bodyBefore')}
-            <Text
-              onPress={onPressTime}
-              style={[styles.timeInline, { fontFamily: dm700 }]}
-              accessibilityRole="button"
-              accessibilityLabel={t('fil.eveningReminder.timeA11y', { time: timeLabel })}
+    <>
+      <Modal
+        visible={visible}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={onDismiss}
+      >
+        <View style={styles.root} accessibilityViewIsModal>
+          <BlurView intensity={48} tint="dark" style={StyleSheet.absoluteFillObject} />
+          <View style={[styles.scrim, StyleSheet.absoluteFillObject]} />
+          <View style={[styles.card, { width: cardWidth }]} accessibilityRole="summary">
+            <Text style={[styles.title, dm700 ? { fontFamily: dm700 } : null]}>
+              {t('fil.eveningReminder.title')}
+            </Text>
+
+            <View style={styles.bodyBlock}>
+              <Text style={[styles.body, dm500 ? { fontFamily: dm500 } : null]}>
+                {t('fil.eveningReminder.bodyBefore')}
+              </Text>
+              <Pressable
+                onPress={() => setTimeSheetOpen(true)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={t('fil.eveningReminder.timeA11y', { time: timeLabel })}
+                style={({ pressed }) => [styles.timeChip, pressed && styles.timeChipPressed]}
+              >
+                <Text style={[styles.timeChipText, dm700 ? { fontFamily: dm700 } : null]}>
+                  {timeLabel}
+                </Text>
+              </Pressable>
+              <Text style={[styles.body, dm500 ? { fontFamily: dm500 } : null]}>
+                {t('fil.eveningReminder.bodyAfter')}
+              </Text>
+            </View>
+
+            <PetitmoPrimaryPressable
+              onPress={onActivate}
+              style={styles.cta}
+              accessibilityLabel={t('fil.eveningReminder.activate')}
             >
-              {timeLabel}
-            </Text>
-            {t('fil.eveningReminder.bodyAfter')}
-          </Text>
-          <PetitmoPrimaryPressable onPress={onActivate} style={styles.cta}>
-            <Text style={petitmoCtaStyles.primaryText}>{t('fil.eveningReminder.activate')}</Text>
-          </PetitmoPrimaryPressable>
-          <Pressable
-            onPress={onDismiss}
-            hitSlop={10}
-            accessibilityRole="button"
-            accessibilityLabel={t('fil.eveningReminder.notNow')}
-            style={styles.secondary}
-          >
-            <Text style={[styles.secondaryText, { fontFamily: dm600 }]}>
-              {t('fil.eveningReminder.notNow')}
-            </Text>
-          </Pressable>
+              <Text style={[petitmoCtaStyles.primaryText, styles.ctaText]}>
+                {t('fil.eveningReminder.activate')}
+              </Text>
+            </PetitmoPrimaryPressable>
+            <Pressable
+              onPress={onDismiss}
+              hitSlop={12}
+              accessibilityRole="button"
+              accessibilityLabel={t('fil.eveningReminder.notNow')}
+              style={styles.secondary}
+            >
+              <Text style={[styles.secondaryText, dm600 ? { fontFamily: dm600 } : null]}>
+                {t('fil.eveningReminder.notNow')}
+              </Text>
+            </Pressable>
+          </View>
         </View>
-      </View>
-    </Modal>
+      </Modal>
+
+      {/* Sheet dans ce stack modal — sinon l’heure n’est pas cliquable / sheet masqué. */}
+      <CaptureReminderTimeSheet
+        visible={timeSheetOpen}
+        selectedTime={timeLabel}
+        onSelect={time => {
+          onTimeChange(snapCaptureReminderTimeToSlot(time));
+        }}
+        onClose={() => setTimeSheetOpen(false)}
+      />
+    </>
   );
 }
 
@@ -92,45 +123,72 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: scale(24),
+    paddingHorizontal: scale(20),
   },
   scrim: {
     backgroundColor: 'rgba(20, 22, 28, 0.45)',
   },
   card: {
-    padding: SPACING.lg,
-    borderRadius: scale(20),
+    paddingHorizontal: SPACING.lg,
+    paddingTop: verticalScale(28),
+    paddingBottom: verticalScale(22),
+    borderRadius: scale(22),
     backgroundColor: '#FFFFFF',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(81,84,94,0.12)',
   },
   title: {
-    fontSize: FONT_SIZES.lg,
+    fontSize: scale(22),
     color: THEME.textPrimary,
-    marginBottom: verticalScale(8),
+    marginBottom: verticalScale(14),
     textAlign: 'center',
+    lineHeight: scale(28),
+  },
+  bodyBlock: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: verticalScale(22),
+    columnGap: scale(4),
+    rowGap: verticalScale(4),
   },
   body: {
-    fontSize: FONT_SIZES.sm,
+    fontSize: scale(16),
     color: THEME.textMuted,
-    lineHeight: scale(21),
-    marginBottom: SPACING.md,
+    lineHeight: scale(24),
     textAlign: 'center',
   },
-  timeInline: {
+  timeChip: {
+    paddingHorizontal: scale(10),
+    paddingVertical: verticalScale(4),
+    borderRadius: scale(10),
+    backgroundColor: 'rgba(252, 87, 87, 0.12)',
+  },
+  timeChipPressed: {
+    opacity: 0.75,
+  },
+  timeChipText: {
+    fontSize: scale(16),
     color: THEME.captureScreenCtaBackground,
     textDecorationLine: 'underline',
   },
   cta: {
     alignSelf: 'stretch',
+    minHeight: verticalScale(56),
+    paddingVertical: verticalScale(16),
+    borderRadius: scale(28),
+  },
+  ctaText: {
+    fontSize: scale(17),
   },
   secondary: {
     alignSelf: 'center',
-    marginTop: SPACING.sm,
-    paddingVertical: verticalScale(6),
+    marginTop: verticalScale(14),
+    paddingVertical: verticalScale(8),
   },
   secondaryText: {
-    fontSize: FONT_SIZES.sm,
+    fontSize: scale(16),
     color: THEME.textMuted,
   },
 });
