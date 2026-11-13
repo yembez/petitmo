@@ -1,5 +1,5 @@
 /**
- * Carte soft « rappel du soir » sous le 1er souvenir (fil).
+ * Modal soft « rappel du soir » après le 1er import (1 ou N souvenirs).
  * Low Friction : pas d’Alert ; notifs seulement si « Activer » ; Pas maintenant = dismiss définitif.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -50,6 +50,11 @@ async function writeFlag(base: string, userId: string, on: boolean): Promise<voi
   }
 }
 
+function isFreshInsertedAt(iso: string | null | undefined): boolean {
+  const inserted = Date.parse(iso || '');
+  return Number.isFinite(inserted) && Date.now() - inserted <= FRESH_FIRST_MEMORY_MS;
+}
+
 /** Purge flags (suppression / changement de compte). */
 export async function clearEveningReminderCardState(userId?: string | null): Promise<void> {
   const uid = (userId ?? '').trim();
@@ -61,8 +66,8 @@ export async function clearEveningReminderCardState(userId?: string | null): Pro
 }
 
 /**
- * Comptes déjà peuplés : ne pas coller la carte sous d’anciens souvenirs.
- * Ne skippe PAS un 1er souvenir tout frais (course avec l’arm à l’import).
+ * Comptes déjà peuplés : ne pas coller le modal sur d’anciens souvenirs.
+ * Ne skippe PAS un 1er lot tout frais (1 ou N photos — course avec l’arm à l’import).
  */
 export async function ensureEveningReminderBaselineForAccount(
   userId?: string | null,
@@ -75,19 +80,17 @@ export async function ensureEveningReminderBaselineForAccount(
 
   const memories = listMemoriesVisibleForAccount(uid);
   if (memories.length === 0) return;
-  if (memories.length > 1) {
-    await writeFlag(SKIP_EXISTING_KEY, uid, true);
-    return;
-  }
 
-  const m = memories[0];
-  const inserted = Date.parse(m.inserted_at || m.created_at || '');
-  if (!Number.isFinite(inserted) || Date.now() - inserted > FRESH_FIRST_MEMORY_MS) {
-    await writeFlag(SKIP_EXISTING_KEY, uid, true);
-  }
+  const allFresh = memories.every(m => isFreshInsertedAt(m.inserted_at || m.created_at));
+  if (allFresh) return;
+
+  await writeFlag(SKIP_EXISTING_KEY, uid, true);
 }
 
-/** Après insert local réussi : armer si c’est le tout premier souvenir du compte. */
+/**
+ * Après insert local réussi : armer dès qu’il y a ≥1 souvenir (1 photo ou lot de N).
+ * Idempotent si déjà armé / dismissé / compte déjà peuplé (skip).
+ */
 export async function maybeArmEveningReminderCardAfterFirstMemory(
   userId?: string | null,
 ): Promise<void> {
@@ -96,15 +99,21 @@ export async function maybeArmEveningReminderCardAfterFirstMemory(
   if (await readFlag(DISMISSED_KEY, uid)) return;
   if (await readFlag(ARMED_KEY, uid)) return;
 
-  const n = listMemoriesVisibleForAccount(uid).length;
-  // Strictement le 1er souvenir. Si n===0 (course rare upsert → lecture), 1 retry court.
-  if (n > 1) return;
-  if (n < 1) {
+  let memories = listMemoriesVisibleForAccount(uid);
+  // Course rare upsert → lecture : 1 retry court.
+  if (memories.length < 1) {
     await new Promise(r => setTimeout(r, 50));
-    if (listMemoriesVisibleForAccount(uid).length !== 1) return;
+    memories = listMemoriesVisibleForAccount(uid);
+  }
+  if (memories.length < 1) return;
+
+  // Compte déjà peuplé (skip) : n’armer que si le lot est encore tout frais (1er import N photos).
+  if (await readFlag(SKIP_EXISTING_KEY, uid)) {
+    const allFresh = memories.every(m => isFreshInsertedAt(m.inserted_at || m.created_at));
+    if (!allFresh) return;
   }
 
-  // Import vient de gagner la course contre un skip trop agressif.
+  // Import (1 ou N) gagne la course contre un skip trop agressif.
   await writeFlag(SKIP_EXISTING_KEY, uid, false);
   await writeFlag(ARMED_KEY, uid, true);
   DeviceEventEmitter.emit(EVENING_REMINDER_CARD_EVENT);

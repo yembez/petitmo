@@ -349,43 +349,6 @@ function FilScreen() {
     return () => sub.remove();
   }, [refreshEveningReminderCard, memories.length]);
 
-  const renderItemWithEveningCard = useCallback(
-    (info: { item: FeedListItem; index: number }) => {
-      const row = renderItem(info);
-      if (!showEveningReminderCard || info.index !== 0) return row;
-      return (
-        <View>
-          {row}
-          <EveningReminderCard
-            timeLabel={eveningReminderTime}
-            onPressTime={() => setReminderTimeSheetOpen(true)}
-            onActivate={() => {
-              void (async () => {
-                // Figé l’heure choisie avant d’activer (défaut 21:00).
-                void saveNotificationPrefs({
-                  captureReminderLocalTime: snapCaptureReminderTimeToSlot(eveningReminderTime),
-                });
-                const result = await activateEveningReminderFromCard();
-                setShowEveningReminderCard(false);
-                if (result === 'enabled') {
-                  return;
-                }
-                if (result === 'needs_settings') {
-                  void Linking.openSettings();
-                }
-              })();
-            }}
-            onDismiss={() => {
-              void dismissEveningReminderCard();
-              setShowEveningReminderCard(false);
-            }}
-          />
-        </View>
-      );
-    },
-    [renderItem, showEveningReminderCard, eveningReminderTime],
-  );
-
   const listBottomPad = useMemo(
     () => verticalScale(28) + tabBarFloatingOverlapPad(insets.bottom),
     [insets.bottom],
@@ -1018,7 +981,7 @@ function FilScreen() {
           ref={listRef}
           data={feedData}
           keyExtractor={keyExtractor}
-          renderItem={renderItemWithEveningCard}
+          renderItem={renderItem}
           getItemLayout={getItemLayout}
           CellRendererComponentStyle={renderFilListCellStyle}
           /** Pas de `itemLayoutAnimation` : anime les sauts de hauteur (aspect) pendant le scroll. */
@@ -1173,6 +1136,31 @@ function FilScreen() {
         initialIso={editingDateMemory?.created_at ?? new Date().toISOString()}
         onClose={closeEditDateModal}
         onSave={handleSaveDate}
+      />
+      <EveningReminderCard
+        visible={showEveningReminderCard}
+        timeLabel={eveningReminderTime}
+        onPressTime={() => setReminderTimeSheetOpen(true)}
+        onActivate={() => {
+          void (async () => {
+            // Figé l’heure choisie avant d’activer (défaut 21:00).
+            void saveNotificationPrefs({
+              captureReminderLocalTime: snapCaptureReminderTimeToSlot(eveningReminderTime),
+            });
+            const result = await activateEveningReminderFromCard();
+            setShowEveningReminderCard(false);
+            if (result === 'enabled') {
+              return;
+            }
+            if (result === 'needs_settings') {
+              void Linking.openSettings();
+            }
+          })();
+        }}
+        onDismiss={() => {
+          void dismissEveningReminderCard();
+          setShowEveningReminderCard(false);
+        }}
       />
       <CaptureReminderTimeSheet
         visible={reminderTimeSheetOpen}
