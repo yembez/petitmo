@@ -1945,6 +1945,15 @@ async function resolveCaptureUserId(childId: string): Promise<string> {
   return user.id;
 }
 
+/** 1er souvenir → carte rappel soir (chemin cloud aussi — pas seulement `captureMemoryLocalOnly`). */
+function armEveningReminderAfterLocalCreate(userId: string | null | undefined): void {
+  const uid = (userId ?? '').trim();
+  if (!uid) return;
+  void import('@/lib/eveningReminderCard')
+    .then(m => m.maybeArmEveningReminderCardAfterFirstMemory(uid))
+    .catch(() => {});
+}
+
 export async function uploadMedia({
   uri,
   type,
@@ -2095,6 +2104,7 @@ export async function uploadMedia({
       };
 
       upsertLocalMemory(mem);
+      armEveningReminderAfterLocalCreate(user.id);
       if (!suppressFeedEmit) {
         DeviceEventEmitter.emit('petitmo:memories-inserted', { memories: [mem] });
       }
@@ -2200,6 +2210,7 @@ export async function uploadMedia({
       };
 
       upsertLocalMemory(mem);
+      armEveningReminderAfterLocalCreate(user.id);
       if (!suppressFeedEmit) {
         DeviceEventEmitter.emit('petitmo:memories-inserted', { memories: [mem] });
       }
@@ -2361,6 +2372,7 @@ export async function uploadMedia({
       };
 
       upsertLocalMemory(mem);
+      armEveningReminderAfterLocalCreate(user.id);
       if (voiceCoverLocal) {
         scheduleLocalVoiceCoverPrintDerivative(memoryId, voiceCoverLocal);
       }
@@ -2645,6 +2657,7 @@ export async function uploadPhotoAlbum({
     if (!localMem) return null;
 
     upsertLocalMemory(localMem);
+    armEveningReminderAfterLocalCreate(user.id);
     invalidateMemoryLimitCache(childId);
     DeviceEventEmitter.emit('petitmo:memories-inserted', { memories: [localMem] });
 

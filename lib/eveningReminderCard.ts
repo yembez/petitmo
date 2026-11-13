@@ -97,7 +97,12 @@ export async function maybeArmEveningReminderCardAfterFirstMemory(
   if (await readFlag(ARMED_KEY, uid)) return;
 
   const n = listMemoriesVisibleForAccount(uid).length;
-  if (n !== 1) return;
+  // Strictement le 1er souvenir. Si n===0 (course rare upsert → lecture), 1 retry court.
+  if (n > 1) return;
+  if (n < 1) {
+    await new Promise(r => setTimeout(r, 50));
+    if (listMemoriesVisibleForAccount(uid).length !== 1) return;
+  }
 
   // Import vient de gagner la course contre un skip trop agressif.
   await writeFlag(SKIP_EXISTING_KEY, uid, false);
