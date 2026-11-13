@@ -17,7 +17,7 @@ export type NotificationPrefs = {
 
 export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
   captureReminderEnabled: false,
-  captureReminderLocalTime: '20:45',
+  captureReminderLocalTime: '21:00',
   timezone: 'Europe/Paris',
 };
 

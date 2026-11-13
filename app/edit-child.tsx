@@ -166,11 +166,8 @@ export default function EditChildScreen() {
     }
   };
 
-  /** Opt-in compte + demande iOS si besoin (PHPicker ne suffit pas seul). */
+  /** Avatar : PHPicker iOS sans accès photothèque général (pas besoin date/lieu). */
   const openImagePickerForCrop = async () => {
-    const { ensureMediaLibraryPickerAllowed } = await import('@/lib/mediaLibraryOptIn');
-    if (!(await ensureMediaLibraryPickerAllowed())) return;
-
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: false,

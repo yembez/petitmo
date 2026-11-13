@@ -7,6 +7,7 @@ import {
   RefreshControl,
   InteractionManager,
   DeviceEventEmitter,
+  Linking,
   useWindowDimensions,
 } from 'react-native';
 import Animated from 'react-native-reanimated';
@@ -20,6 +21,7 @@ import { estimateFeedRowHeight } from '@/utils/estimateFeedRowHeight';
 import { getFeedRowMeasuredHeight, syncFeedRowHeightCacheAspect } from '@/lib/feedRowHeightCache';
 import { FEED_MEDIA_ASPECT_DEFAULT } from '@/utils/feedMediaAspect';
 import EditTextModal from '@/components/EditTextModal';
+import EditMemoryDateModal from '@/components/EditMemoryDateModal';
 import { FeedMediaPrepOverlay } from '@/components/FeedMediaPrepOverlay';
 import { feedMemoryTextEditPreviewVariant } from '@/utils/memoryTextEditStyles';
 import { bookLineBudgetForMemoryType, bookCharsPerLineForMemoryType } from '@/utils/textLimits';
@@ -71,6 +73,22 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import { getTimingNudge, markNudgeSeen, recordInstallDate } from '@/lib/paywallTiming';
 import SoftNudgeBanner from '@/components/SoftNudgeBanner';
+import EveningReminderCard from '@/components/feed/EveningReminderCard';
+import CaptureReminderTimeSheet from '@/components/parentSpace/CaptureReminderTimeSheet';
+import {
+  EVENING_REMINDER_CARD_EVENT,
+  activateEveningReminderFromCard,
+  dismissEveningReminderCard,
+  ensureEveningReminderBaselineForAccount,
+  getEveningReminderDisplayTime,
+  shouldShowEveningReminderCard,
+} from '@/lib/eveningReminderCard';
+import {
+  peekCachedNotificationPrefs,
+  saveNotificationPrefs,
+  snapCaptureReminderTimeToSlot,
+  DEFAULT_NOTIFICATION_PREFS,
+} from '@/lib/notificationPrefs';
 import type { Child, Memory } from '@/types/local';
 import {
   buildOptimisticMemoryForPending,
@@ -160,17 +178,22 @@ function FilScreen() {
     editingMemory,
     editLocationModalVisible,
     editingLocationMemory,
+    editDateModalVisible,
+    editingDateMemory,
     uploadingVoiceCoverId,
     videoTrimExporting,
     handleEditMemory,
     handleSaveEdit,
     handleEditLocation,
     handleSaveLocation,
+    handleEditDate,
+    handleSaveDate,
     handleEditVideoTrim,
     handlePickVoiceCover,
     handleDeleteMemory,
     closeEditModal,
     closeEditLocationModal,
+    closeEditDateModal,
   } = useFilRowActions(setMemories, {
     getScrollOffset: getFeedScrollOffset,
     pinScrollOffset: pinFeedScrollOffset,
@@ -295,10 +318,71 @@ function FilScreen() {
     handleEditMemory,
     handleEditVideoTrim,
     handleEditLocation,
+    handleEditDate,
     handlePickVoiceCover,
     handleDeleteMemory,
     swipeRefs,
     immersiveLaunchRef,
+  );
+
+  const [showEveningReminderCard, setShowEveningReminderCard] = useState(false);
+  const [eveningReminderTime, setEveningReminderTime] = useState(
+    DEFAULT_NOTIFICATION_PREFS.captureReminderLocalTime,
+  );
+  const [reminderTimeSheetOpen, setReminderTimeSheetOpen] = useState(false);
+
+  const refreshEveningReminderCard = useCallback(() => {
+    void (async () => {
+      await ensureEveningReminderBaselineForAccount();
+      const show = await shouldShowEveningReminderCard();
+      setShowEveningReminderCard(show);
+      if (show) {
+        setEveningReminderTime(await getEveningReminderDisplayTime());
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    refreshEveningReminderCard();
+    const sub = DeviceEventEmitter.addListener(EVENING_REMINDER_CARD_EVENT, () => {
+      refreshEveningReminderCard();
+    });
+    return () => sub.remove();
+  }, [refreshEveningReminderCard, memories.length]);
+
+  const renderItemWithEveningCard = useCallback(
+    (info: { item: FeedListItem; index: number }) => {
+      const row = renderItem(info);
+      if (!showEveningReminderCard || info.index !== 0) return row;
+      return (
+        <View>
+          {row}
+          <EveningReminderCard
+            timeLabel={eveningReminderTime}
+            onActivate={() => {
+              void (async () => {
+                const result = await activateEveningReminderFromCard();
+                setShowEveningReminderCard(false);
+                if (result === 'enabled') {
+                  const prefs = await peekCachedNotificationPrefs();
+                  setEveningReminderTime(prefs.captureReminderLocalTime);
+                  setReminderTimeSheetOpen(true);
+                  return;
+                }
+                if (result === 'needs_settings') {
+                  void Linking.openSettings();
+                }
+              })();
+            }}
+            onDismiss={() => {
+              void dismissEveningReminderCard();
+              setShowEveningReminderCard(false);
+            }}
+          />
+        </View>
+      );
+    },
+    [renderItem, showEveningReminderCard, eveningReminderTime],
   );
 
   const listBottomPad = useMemo(
@@ -933,7 +1017,7 @@ function FilScreen() {
           ref={listRef}
           data={feedData}
           keyExtractor={keyExtractor}
-          renderItem={renderItem}
+          renderItem={renderItemWithEveningCard}
           getItemLayout={getItemLayout}
           CellRendererComponentStyle={renderFilListCellStyle}
           /** Pas de `itemLayoutAnimation` : anime les sauts de hauteur (aspect) pendant le scroll. */
@@ -1081,6 +1165,23 @@ function FilScreen() {
         title="Modifier le lieu"
         onClose={closeEditLocationModal}
         onSave={handleSaveLocation}
+      />
+      <EditMemoryDateModal
+        key={editingDateMemory?.id ?? 'edit-date-modal-closed'}
+        visible={editDateModalVisible}
+        initialIso={editingDateMemory?.created_at ?? new Date().toISOString()}
+        onClose={closeEditDateModal}
+        onSave={handleSaveDate}
+      />
+      <CaptureReminderTimeSheet
+        visible={reminderTimeSheetOpen}
+        selectedTime={eveningReminderTime}
+        onSelect={time => {
+          const snapped = snapCaptureReminderTimeToSlot(time);
+          setEveningReminderTime(snapped);
+          void saveNotificationPrefs({ captureReminderLocalTime: snapped });
+        }}
+        onClose={() => setReminderTimeSheetOpen(false)}
       />
       {videoTrimExporting ? (
         <FeedMediaPrepOverlay label={t('videoTrim.exporting')} />

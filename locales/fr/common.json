@@ -363,6 +363,16 @@
       "mediaMissingBody": "Ce souvenir n’est pas encore disponible hors ligne sur cet appareil.",
       "failedTitle": "Partage impossible",
       "failedBody": "Impossible d’ouvrir le partage. Réessaie dans un instant."
+    },
+    "editDate": {
+      "title": "Date du souvenir",
+      "save": "Enregistrer"
+    },
+    "eveningReminder": {
+      "title": "Un petit rappel le soir ?",
+      "body": "Chaque soir à {{time}}, Petit Cœur peut te rappeler de garder un souvenir de la journée.",
+      "activate": "Activer le rappel",
+      "notNow": "Pas maintenant"
     }
   },
   "tabs": {

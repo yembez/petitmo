@@ -26,7 +26,6 @@ import { createChild, setSelectedChild } from '@/services/children';
 import { hydrateTabScreensFromSqliteSync } from '@/services/tabScreensHydrate';
 import { listLocalChildrenForUser } from '@/lib/localDb';
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
-import { clearOnboardingPermissionsSeen } from '@/lib/onboardingPermissionsSeen';
 import DatePicker from '@/components/DatePicker';
 import { CropModal } from '@/components/CropModal';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
@@ -92,15 +91,11 @@ export default function CreateChildScreen() {
     try {
       const uid = peekLastRealAuthUserId();
       const localCount = uid ? listLocalChildrenForUser(uid).length : 0;
-      // Premier profil (post accès) : page précédente = permissions, sans déconnexion.
+      // Premier profil (post-auth) : back si pile OK ; sinon rester (profil obligatoire).
       if (localCount === 0) {
         if (router.canGoBack()) {
           router.back();
-          return;
         }
-        // Repli si la pile a été aplatie (replace) : réouvrir les accès.
-        await clearOnboardingPermissionsSeen(uid);
-        router.replace('/onboarding-permissions');
         return;
       }
       // Ajout d’un enfant depuis l’app : retour normal.
@@ -113,19 +108,14 @@ export default function CreateChildScreen() {
       console.warn('[create-child] handleBack', e);
       if (router.canGoBack()) {
         router.back();
-      } else {
-        router.replace('/onboarding-permissions');
       }
     } finally {
       setBackBusy(false);
     }
   }, [backBusy, router]);
 
-  /** PHPicker iOS peut s’ouvrir sans permission OS — on exige l’opt-in compte. */
+  /** Avatar : PHPicker iOS sans accès photothèque général (pas besoin date/lieu). */
   const openImagePickerForCrop = useCallback(async () => {
-    const { ensureMediaLibraryPickerAllowed } = await import('@/lib/mediaLibraryOptIn');
-    if (!(await ensureMediaLibraryPickerAllowed())) return;
-
     // Pas d’`allowsEditing` natif (souvent sans zoom fiable) → CropModal pinch/pan.
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],

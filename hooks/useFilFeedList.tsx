@@ -71,6 +71,7 @@ export function useFilFeedList(
   handleEditMemory: (m: Memory) => void,
   handleEditVideoTrim: (m: Memory) => void | Promise<void>,
   handleEditLocation: (m: Memory) => void,
+  handleEditDate: (m: Memory) => void,
   handlePickVoiceCover: (m: Memory) => void | Promise<void>,
   handleDeleteMemory: (m: Memory) => void,
   swipeRefs: MutableRefObject<Map<string, Swipeable | null>>,
@@ -159,6 +160,7 @@ export function useFilFeedList(
         handleEditMemory={handleEditMemory}
         handleEditVideoTrim={handleEditVideoTrim}
         handleEditLocation={handleEditLocation}
+        handleEditDate={handleEditDate}
         handlePickVoiceCover={handlePickVoiceCover}
         handleDeleteMemory={handleDeleteMemory}
         swipeRefs={swipeRefs}
@@ -180,6 +182,7 @@ export function useFilFeedList(
       handleEditMemory,
       handleEditVideoTrim,
       handleEditLocation,
+      handleEditDate,
       handlePickVoiceCover,
       handleDeleteMemory,
       swipeRefs,

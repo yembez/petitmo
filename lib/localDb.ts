@@ -642,6 +642,16 @@ export function updateLocalMemoryLocation(id: string, location: string | null): 
   )
 }
 
+/** Date d’événement / prise — distincte de `inserted_at` (ajout dans l’app). */
+export function updateLocalMemoryCreatedAt(id: string, createdAtIso: string): void {
+  const next = createdAtIso.trim()
+  if (!next) return
+  db.runSync(
+    `UPDATE memories SET created_at = ?, updated_at = ? WHERE id = ?`,
+    [next, new Date().toISOString(), id]
+  )
+}
+
 export function updateLocalMemoryFavoritePhotoUrls(id: string, urls: string[]): void {
   const now = new Date().toISOString()
   db.runSync(

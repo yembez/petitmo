@@ -363,6 +363,16 @@
       "mediaMissingBody": "This memory isn’t available offline on this device yet.",
       "failedTitle": "Couldn’t share",
       "failedBody": "Couldn’t open the share sheet. Please try again."
+    },
+    "editDate": {
+      "title": "Memory date",
+      "save": "Save"
+    },
+    "eveningReminder": {
+      "title": "A gentle evening reminder?",
+      "body": "Every evening at {{time}}, Petit Cœur can remind you to keep a memory of the day.",
+      "activate": "Turn on reminder",
+      "notNow": "Not now"
     }
   },
   "tabs": {

@@ -5,13 +5,17 @@
  * 1. Picker : `IMPORT_PHOTO_PICKER_OPTS.exif` doit rester `true` tant que le binaire n’embarque pas
  *    `expo-media-library` (rebuild `npx expo run:ios` après ajout du plugin dans `app.json`).
  * 2. Module natif : import **dynamique** uniquement (`getMediaLibraryModule`) — jamais `import … from 'expo-media-library'` en tête de fichier.
- * 3. Fil : `created_at` ≠ `inserted_at` (≥ 90 s) pour afficher la pastille (`utils/feedCaptureOverlay.ts`).
- * 4. Lieu : EXIF GPS / MediaLibrary `location` → reverse geocode (ville) ; sinon saisie manuelle fil.
+ * 3. Ordre : fiche Photos (`assetId`) → EXIF fichier → (éviter date fichier ≈ maintenant).
+ * 4. Lieu : EXIF GPS / MediaLibrary `location` → reverse geocode ; sinon vide (saisie manuelle fil).
+ * 5. Accès lecture : demandé au premier Importer (`mediaLibraryOptIn`), pas à l’avatar / inscription.
  */
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { Platform } from 'react-native';
 import { reverseGeocodeToPlaceLabel } from '@/lib/memoryLocation';
+
+/** Copie tmp / sandbox souvent datée « maintenant » — inutile comme date de prise. */
+const FILE_DATE_TOO_RECENT_MS = 120_000;
 
 /** Convertit une valeur EXIF DMS (tableau ou nombre) + ref N/S/E/W en degrés décimaux */
 function dmsToDecimal(value: unknown, ref: unknown): number | undefined {
@@ -52,8 +56,21 @@ export function parseExifGps(exif: Record<string, unknown> | null | undefined): 
   return { latitude: lat, longitude: lng };
 }
 
+/** Offset EXIF `+01:00` / `-05:00` / `+0100` → minutes depuis UTC. */
+function parseExifOffsetMinutes(raw: unknown): number | undefined {
+  if (typeof raw !== 'string' || !raw.trim()) return undefined;
+  const m = raw.trim().match(/^([+-])(\d{2}):?(\d{2})$/);
+  if (!m) return undefined;
+  const sign = m[1] === '-' ? -1 : 1;
+  const hh = parseInt(m[2], 10);
+  const mm = parseInt(m[3], 10);
+  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return undefined;
+  return sign * (hh * 60 + mm);
+}
+
 /**
  * Date/heure de prise depuis EXIF (souvent `DateTimeOriginal` format `YYYY:MM:DD HH:mm:ss`).
+ * Respecte `OffsetTimeOriginal` / `OffsetTime` quand présents.
  */
 export function parseExifCaptureDateIso(
   exif: Record<string, unknown> | null | undefined
@@ -70,6 +87,21 @@ export function parseExifCaptureDateIso(
   const m = raw.trim().match(/^(\d{4}):(\d{2}):(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/);
   if (m) {
     const [, y, mo, d, h, mi, s] = m;
+    const offsetMin =
+      parseExifOffsetMinutes(exif.OffsetTimeOriginal) ??
+      parseExifOffsetMinutes(exif.OffsetTimeDigitized) ??
+      parseExifOffsetMinutes(exif.OffsetTime);
+    if (offsetMin !== undefined) {
+      const sign = offsetMin >= 0 ? '+' : '-';
+      const abs = Math.abs(offsetMin);
+      const oh = String(Math.floor(abs / 60)).padStart(2, '0');
+      const om = String(abs % 60).padStart(2, '0');
+      const date = new Date(
+        `${y}-${mo}-${d}T${h}:${mi}:${s}${sign}${oh}:${om}`
+      );
+      if (!Number.isNaN(date.getTime())) return date.toISOString();
+    }
+    // Sans offset : interpréter comme heure locale de l’appareil (comportement historique).
     const date = new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}`);
     if (!Number.isNaN(date.getTime())) return date.toISOString();
   }
@@ -132,10 +164,7 @@ async function getMediaLibraryModule(): Promise<MediaLibraryModule | null> {
   }
 }
 
-/**
- * Statut photothèque en lecture seule : l’accès se demande uniquement à l’onboarding
- * (`lib/onboardingPermissions.ts`), jamais depuis un chemin d’import.
- */
+/** Accès déjà accordé (Importer a pu le demander juste avant). */
 async function hasPhotoLibraryAccessAlready(): Promise<boolean> {
   try {
     const res = await ImagePicker.getMediaLibraryPermissionsAsync();
@@ -146,7 +175,7 @@ async function hasPhotoLibraryAccessAlready(): Promise<boolean> {
 }
 
 /**
- * Date + GPS via `assetId` + MediaLibrary — utile quand l’EXIF picker est incomplet.
+ * Date + GPS via `assetId` + MediaLibrary — source privilégiée (corrections dans Photos).
  */
 async function resolveMetaFromLibraryAssetId(
   assetId: string | null | undefined
@@ -176,12 +205,21 @@ async function resolveMetaFromLibraryAssetId(
   }
 }
 
+/**
+ * Date fichier locale — ignore si trop proche de « maintenant » (copie PHPicker / tmp).
+ */
 async function resolveCapturedAtFromLocalFileUri(uri: string): Promise<string | undefined> {
   try {
     const file = new FileSystem.File(uri);
     if (file.exists) {
       const ms = file.creationTime ?? file.modificationTime;
-      if (ms != null) return captureTimestampToIso(ms);
+      if (ms == null) return undefined;
+      const iso = captureTimestampToIso(ms);
+      if (!iso) return undefined;
+      const t = Date.parse(iso);
+      if (!Number.isFinite(t)) return undefined;
+      if (Math.abs(Date.now() - t) < FILE_DATE_TOO_RECENT_MS) return undefined;
+      return iso;
     }
   } catch {
     // URI photothèque (ph://) ou copie temporaire sans métadonnées
@@ -191,21 +229,23 @@ async function resolveCapturedAtFromLocalFileUri(uri: string): Promise<string | 
 
 /**
  * Métadonnées à l’import depuis un asset picker (photo ou vidéo).
- * Ordre : EXIF picker → photothèque (`assetId`) → dates fichier local.
+ * Ordre : fiche Photos (`assetId`) → EXIF picker → date fichier (si pas ≈ maintenant).
  */
 export async function buildImportMetadataFromPickerAsset(
   asset: ImagePicker.ImagePickerAsset,
   options?: { isVideo?: boolean }
 ): Promise<ImportMetadata> {
   void options;
-  const meta = await buildImportMetadataFromExif(asset.exif ?? undefined);
-  if (meta.capturedAtIso && meta.locationLabel) {
-    return meta;
-  }
+
   const fromLibrary = await resolveMetaFromLibraryAssetId(asset.assetId ?? null);
+  if (fromLibrary.capturedAtIso && fromLibrary.locationLabel) {
+    return fromLibrary;
+  }
+
+  const fromExif = await buildImportMetadataFromExif(asset.exif ?? undefined);
   const merged: ImportMetadata = {
-    capturedAtIso: meta.capturedAtIso ?? fromLibrary.capturedAtIso,
-    locationLabel: meta.locationLabel ?? fromLibrary.locationLabel ?? null,
+    capturedAtIso: fromLibrary.capturedAtIso ?? fromExif.capturedAtIso,
+    locationLabel: fromLibrary.locationLabel ?? fromExif.locationLabel ?? null,
   };
   if (merged.capturedAtIso) {
     return merged;

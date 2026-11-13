@@ -73,6 +73,7 @@ import {
   updateLocalMemoryFavorite,
   updateLocalMemoryFavoritePhotoUrls,
   updateLocalMemoryLocation,
+  updateLocalMemoryCreatedAt,
   updateLocalMemoryUrls,
   upsertLocalMemories,
   upsertLocalMemory,
@@ -3093,6 +3094,49 @@ export async function updateMemoryLocation(memoryId: string, location: string | 
   }
 
   pushMemoryLocationToCloudSilent(memoryId);
+  return true;
+}
+
+function pushMemoryCreatedAtToCloudSilent(memoryId: string): void {
+  void (async () => {
+    const attempt = async (): Promise<boolean> => {
+      const row = getLocalMemoryById(memoryId);
+      if (!row?.created_at?.trim()) return true;
+      const { error } = await supabase
+        .from('memories')
+        .update({ created_at: row.created_at })
+        .eq('id', memoryId);
+      if (!error) return true;
+      console.warn('[media] pushMemoryCreatedAtToCloudSilent', memoryId, error.message);
+      return false;
+    };
+    try {
+      if (await attempt()) return;
+      await new Promise<void>(r => setTimeout(r, 2800));
+      await attempt();
+    } catch (e) {
+      console.warn('[media] pushMemoryCreatedAtToCloudSilent', memoryId, e);
+    }
+  })();
+}
+
+/** Local-first : corrige la date d’événement (`created_at`), sync cloud en fond. */
+export async function updateMemoryCreatedAt(memoryId: string, createdAtIso: string) {
+  const next = createdAtIso.trim();
+  if (!next || Number.isNaN(Date.parse(next))) return false;
+  try {
+    updateLocalMemoryCreatedAt(memoryId, next);
+    DeviceEventEmitter.emit('petitmo:memories-updated', { memoryId });
+  } catch (error) {
+    console.error('Update memory created_at local error:', error);
+    return false;
+  }
+
+  if ((await getCachedUserMode()) === 'local') {
+    return true;
+  }
+
+  pushMemoryCreatedAtToCloudSilent(memoryId);
   return true;
 }
 

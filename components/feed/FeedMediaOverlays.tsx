@@ -139,7 +139,9 @@ export function FeedVideoDurationSoundBar({
 export function FeedPostMetaOverlay({
   dateLabel,
   locationLabel,
+  onEditDate,
   onEditLocation,
+  showDateEdit = true,
   showLocationEdit = true,
   feedDateFontFamily,
   feedLocationFilledFontFamily,
@@ -148,7 +150,9 @@ export function FeedPostMetaOverlay({
 }: {
   dateLabel: string;
   locationLabel?: string;
+  onEditDate?: () => void;
   onEditLocation?: () => void;
+  showDateEdit?: boolean;
   showLocationEdit?: boolean;
   feedDateFontFamily?: string;
   feedLocationFilledFontFamily?: string;
@@ -163,7 +167,11 @@ export function FeedPostMetaOverlay({
 
   return (
     <View style={barStyle} pointerEvents="box-none">
-      <FeedMetaGlassPill align="left">
+      <FeedMetaGlassPill
+        align="left"
+        onPress={showDateEdit && onEditDate ? onEditDate : undefined}
+        accessibilityLabel={showDateEdit ? 'Modifier la date' : undefined}
+      >
         <Text
           style={[styles.feedMetaPillDate, loadedFontStyle(feedDateFontFamily)]}
           numberOfLines={1}

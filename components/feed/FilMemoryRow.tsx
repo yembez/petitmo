@@ -156,6 +156,7 @@ type FilMemoryRowProps = {
   handleEditMemory: (m: Memory) => void;
   handleEditVideoTrim?: (m: Memory) => void | Promise<void>;
   handleEditLocation: (m: Memory) => void;
+  handleEditDate?: (m: Memory) => void;
   handlePickVoiceCover: (m: Memory) => void | Promise<void>;
   handleDeleteMemory: (m: Memory) => void;
   swipeRefs: MutableRefObject<Map<string, Swipeable | null>>;
@@ -204,6 +205,7 @@ const PendingFeedUploadCard = memo(function PendingFeedUploadCard({
             <FeedPostMetaOverlay
               dateLabel={dateLabel}
               locationLabel={locationLabel || undefined}
+              showDateEdit={false}
               showLocationEdit={false}
               feedLocationFilledFontFamily={feedLocationFilledFontFamily}
             />
@@ -304,6 +306,7 @@ function FilMemoryRow({
   handleEditMemory,
   handleEditVideoTrim,
   handleEditLocation,
+  handleEditDate,
   handlePickVoiceCover,
   handleDeleteMemory,
   swipeRefs,
@@ -883,7 +886,9 @@ function FilMemoryRow({
   const mediaMetaOverlayProps = {
     dateLabel: addedAtLabel,
     locationLabel: locationLabel || undefined,
+    onEditDate: handleEditDate ? () => handleEditDate(memory) : undefined,
     onEditLocation: () => handleEditLocation(memory),
+    showDateEdit: !isOptimisticFeedPending && !!handleEditDate,
     showLocationEdit: !isOptimisticFeedPending,
     feedDateFontFamily,
     feedLocationFilledFontFamily,
@@ -912,12 +917,23 @@ function FilMemoryRow({
       <View style={styles.daySeparatorBlock}>
         <View style={styles.dayHeaderRow}>
           <View style={styles.dayHeaderLeft}>
-            <Text
-              style={[styles.daySepDate, loadedFontStyle(feedDateFontFamily)]}
-              numberOfLines={1}
+            <Pressable
+              onPress={
+                !isOptimisticFeedPending && handleEditDate
+                  ? () => handleEditDate(memory)
+                  : undefined
+              }
+              disabled={isOptimisticFeedPending || !handleEditDate}
+              accessibilityRole={handleEditDate ? 'button' : undefined}
+              accessibilityLabel={handleEditDate ? 'Modifier la date' : undefined}
             >
-              {addedAtLabel}
-            </Text>
+              <Text
+                style={[styles.daySepDate, loadedFontStyle(feedDateFontFamily)]}
+                numberOfLines={1}
+              >
+                {addedAtLabel}
+              </Text>
+            </Pressable>
             {!!ageAtMemory && (
               <Text
                 style={[styles.daySepAge, loadedFontStyle(feedAgeFontFamily)]}

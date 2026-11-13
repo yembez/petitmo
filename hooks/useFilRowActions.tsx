@@ -6,6 +6,7 @@ import { getLocalMemoryById } from '@/lib/localDb';
 import {
   updateMemoryContent,
   updateMemoryLocation,
+  updateMemoryCreatedAt,
   deleteMemory,
   updateVoiceMemoryCover,
 } from '@/services/media';
@@ -55,6 +56,8 @@ export function useFilRowActions(
   const [editingMemory, setEditingMemory] = useState<Memory | null>(null);
   const [editLocationModalVisible, setEditLocationModalVisible] = useState(false);
   const [editingLocationMemory, setEditingLocationMemory] = useState<Memory | null>(null);
+  const [editDateModalVisible, setEditDateModalVisible] = useState(false);
+  const [editingDateMemory, setEditingDateMemory] = useState<Memory | null>(null);
   const [uploadingVoiceCoverId, setUploadingVoiceCoverId] = useState<string | null>(null);
   const [videoTrimExporting, setVideoTrimExporting] = useState(false);
   const scrollBridgeRef = useRef(scrollBridge);
@@ -88,6 +91,27 @@ export function useFilRowActions(
     setEditingLocationMemory(memory);
     setEditLocationModalVisible(true);
   }, []);
+
+  const handleEditDate = useCallback((memory: Memory) => {
+    if (memory.id.startsWith('pending_')) return;
+    setEditingDateMemory(memory);
+    setEditDateModalVisible(true);
+  }, []);
+
+  const handleSaveDate = useCallback(
+    async (iso: string) => {
+      const target = editingDateMemory;
+      if (!target) return;
+      setMemories(prev =>
+        prev.map(m => (m.id === target.id ? { ...m, created_at: iso } : m))
+      );
+      const ok = await updateMemoryCreatedAt(target.id, iso);
+      if (!ok) {
+        Alert.alert('Erreur', "Impossible d’enregistrer la date sur l’appareil.");
+      }
+    },
+    [editingDateMemory, setMemories]
+  );
 
   const handleEditVideoTrim = useCallback(
     async (memory: Memory) => {
@@ -267,22 +291,32 @@ export function useFilRowActions(
     setEditingLocationMemory(null);
   }, []);
 
+  const closeEditDateModal = useCallback(() => {
+    setEditDateModalVisible(false);
+    setEditingDateMemory(null);
+  }, []);
+
   return {
     swipeRefs,
     editModalVisible,
     editingMemory,
     editLocationModalVisible,
     editingLocationMemory,
+    editDateModalVisible,
+    editingDateMemory,
     uploadingVoiceCoverId,
     videoTrimExporting,
     handleEditMemory,
     handleSaveEdit,
     handleEditLocation,
     handleSaveLocation,
+    handleEditDate,
+    handleSaveDate,
     handleEditVideoTrim,
     handlePickVoiceCover,
     handleDeleteMemory,
     closeEditModal,
     closeEditLocationModal,
+    closeEditDateModal,
   };
 }
