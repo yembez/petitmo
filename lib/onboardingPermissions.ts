@@ -52,21 +52,6 @@ export async function getPhotoLibraryAccessKind(): Promise<PhotoLibraryAccessKin
   return 'undetermined';
 }
 
-export async function getNotificationsPermissionStatus(): Promise<
-  'granted' | 'denied' | 'undetermined'
-> {
-  const Notifications = await loadNotifications();
-  if (!Notifications) return 'denied';
-  try {
-    const { status, canAskAgain } = await Notifications.getPermissionsAsync();
-    if (status === 'granted') return 'granted';
-    if (status === 'denied' && canAskAgain === false) return 'denied';
-    return 'undetermined';
-  } catch {
-    return 'undetermined';
-  }
-}
-
 export async function requestPhotoLibraryAccess(): Promise<boolean> {
   const res = await ImagePicker.requestMediaLibraryPermissionsAsync();
   if (res.granted) return true;
@@ -76,6 +61,34 @@ export async function requestPhotoLibraryAccess(): Promise<boolean> {
 }
 
 type NotificationsModule = typeof import('expo-notifications');
+
+function isIosProvisionalStatus(
+  Notifications: NotificationsModule,
+  iosStatus: number | undefined,
+): boolean {
+  return iosStatus === Notifications.IosAuthorizationStatus.PROVISIONAL;
+}
+
+/** `granted` = autorisé classique **ou** provisoire iOS (Distribuer en silence). */
+export async function getNotificationsPermissionStatus(): Promise<
+  'granted' | 'denied' | 'undetermined'
+> {
+  const Notifications = await loadNotifications();
+  if (!Notifications) return 'denied';
+  try {
+    const settings = await Notifications.getPermissionsAsync();
+    if (
+      settings.granted ||
+      isIosProvisionalStatus(Notifications, settings.ios?.status)
+    ) {
+      return 'granted';
+    }
+    if (settings.status === 'denied' && settings.canAskAgain === false) return 'denied';
+    return 'undetermined';
+  } catch {
+    return 'undetermined';
+  }
+}
 
 function hasNotificationsNative(): boolean {
   return !!(
@@ -102,23 +115,52 @@ export async function isNotificationsModuleAvailable(): Promise<boolean> {
 }
 
 export async function getNotificationsGranted(): Promise<boolean> {
+  return (await getNotificationsPermissionStatus()) === 'granted';
+}
+
+/**
+ * Auth provisoire iOS (pas de boîte « Autoriser ») — Distribuer en silence.
+ * Idempotent si déjà authorized / provisional. Ne demande **pas** la permission classique.
+ */
+export async function ensureProvisionalNotificationsAuthorization(): Promise<boolean> {
   const Notifications = await loadNotifications();
   if (!Notifications) return false;
   try {
-    const { status } = await Notifications.getPermissionsAsync();
-    return status === 'granted';
+    if (await getNotificationsGranted()) return true;
+    const settings = await Notifications.requestPermissionsAsync({
+      ios: {
+        allowAlert: true,
+        allowBadge: true,
+        allowSound: true,
+        allowProvisional: true,
+      },
+    });
+    return (
+      !!settings.granted ||
+      isIosProvisionalStatus(Notifications, settings.ios?.status)
+    );
   } catch (e) {
-    console.warn('[onboardingPermissions] getPermissionsAsync', e);
+    console.warn('[onboardingPermissions] ensureProvisional', e);
     return false;
   }
 }
 
+/** Permission classique (boîte iOS) — espaces parent / cas où l’utilisatrice veut des alertes. */
 export async function requestNotificationsAccess(): Promise<boolean> {
   const Notifications = await loadNotifications();
   if (!Notifications) return false;
   try {
-    const { status } = await Notifications.requestPermissionsAsync();
-    return status === 'granted';
+    const settings = await Notifications.requestPermissionsAsync({
+      ios: {
+        allowAlert: true,
+        allowBadge: true,
+        allowSound: true,
+      },
+    });
+    return (
+      !!settings.granted ||
+      isIosProvisionalStatus(Notifications, settings.ios?.status)
+    );
   } catch (e) {
     console.warn('[onboardingPermissions] requestPermissionsAsync', e);
     return false;

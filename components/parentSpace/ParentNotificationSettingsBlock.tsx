@@ -126,31 +126,26 @@ export default function ParentNotificationSettingsBlock({
     (enabled: boolean) => {
       void (async () => {
         if (enabled) {
-          if (!(await isNotificationsModuleAvailable()) || !(await getNotificationsGranted())) {
-            const granted = await requestNotificationsAccess();
-            if (!granted) {
-              Alert.alert(
-                t('parent.application.captureReminderNeedNotifTitle'),
-                t('parent.application.captureReminderNeedNotifBody'),
-                [
-                  { text: t('cancel'), style: 'cancel' },
-                  {
-                    text: t('parent.application.openSettings'),
-                    onPress: () => void Linking.openSettings(),
-                  },
-                ],
-              );
-              return;
-            }
-            await refreshNotifs();
+          if (!(await isNotificationsModuleAvailable())) return;
+          const { ensureProvisionalNotificationsAuthorization } = await import(
+            '@/lib/onboardingPermissions'
+          );
+          let granted = await getNotificationsGranted();
+          if (!granted) {
+            granted = await ensureProvisionalNotificationsAuthorization();
           }
+          if (!granted) {
+            void Linking.openSettings();
+            return;
+          }
+          await refreshNotifs();
           void registerPushTokenInBackground();
         }
         const next = await saveNotificationPrefs({ captureReminderEnabled: enabled });
         setNotifPrefs(next);
       })();
     },
-    [refreshNotifs, t],
+    [refreshNotifs],
   );
 
   const reminderOn = notifPrefs.captureReminderEnabled && notifsStatus === 'granted';

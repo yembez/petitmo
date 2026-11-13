@@ -301,9 +301,6 @@ export default function WriteScreen() {
       upsertLocalMemory(mem);
       invalidateMemoryLimitCache(childId);
       DeviceEventEmitter.emit('petitmo:memories-inserted', { memories: [mem] });
-      void import('@/lib/eveningReminderCard')
-        .then(m => m.maybeArmEveningReminderCardAfterFirstMemory(user.id))
-        .catch(() => {});
       if (!locationLabel) {
         void enrichMemoryLocationInBackground(mem.id);
       }

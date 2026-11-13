@@ -36,6 +36,9 @@
     "namePlaceholder": "First name or compound names",
     "birthLabel": "Date of birth",
     "birthPlaceholder": "DD/MM/YYYY",
+    "eveningReminderLabel": "Turn on evening reminder",
+    "eveningReminderHint": "Optional — a gentle nudge to capture a memory.",
+    "eveningReminderTimeA11y": "Reminder time, currently {{time}}",
     "continue": "Continue",
     "missingPhoto": "the photo",
     "missingName": "the first name",
@@ -367,14 +370,6 @@
     "editDate": {
       "title": "Memory date",
       "save": "Save"
-    },
-    "eveningReminder": {
-      "title": "A gentle evening reminder?",
-      "bodyBefore": "We know your days are full. Every evening at ",
-      "bodyAfter": ", a small reminder can help you keep a memory of the day with your child.",
-      "timeA11y": "Change reminder time, currently {{time}}",
-      "activate": "Turn on reminder",
-      "notNow": "Not now"
     }
   },
   "tabs": {

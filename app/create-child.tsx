@@ -10,6 +10,7 @@ import {
   Platform,
   Alert,
   ActivityIndicator,
+  Switch,
   useWindowDimensions,
 } from 'react-native';
 import { useState, useCallback, useEffect, useMemo } from 'react';
@@ -22,10 +23,19 @@ import { SPACING, FONT_SIZES, ICON_SIZES } from '@/constants/sizes';
 import { THEME } from '@/constants/theme';
 import { PETITMO_CTA_SPINNER_COLOR, petitmoCtaStyles } from '@/constants/petitmoCtaStyles';
 import PetitmoPrimaryPressable from '@/components/PetitmoPrimaryPressable';
+import CaptureReminderTimeSheet from '@/components/parentSpace/CaptureReminderTimeSheet';
 import { createChild, setSelectedChild } from '@/services/children';
 import { hydrateTabScreensFromSqliteSync } from '@/services/tabScreensHydrate';
 import { listLocalChildrenForUser } from '@/lib/localDb';
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
+import {
+  DEFAULT_NOTIFICATION_PREFS,
+  peekCachedNotificationPrefs,
+  saveNotificationPrefs,
+  snapCaptureReminderTimeToSlot,
+} from '@/lib/notificationPrefs';
+import { ensureProvisionalNotificationsAuthorization } from '@/lib/onboardingPermissions';
+import { registerPushTokenInBackground } from '@/services/registerPushToken';
 import DatePicker from '@/components/DatePicker';
 import { CropModal } from '@/components/CropModal';
 import { useDmSansFamilyFlowFonts } from '@/hooks/useDmSansFamilyFlowFonts';
@@ -53,6 +63,22 @@ export default function CreateChildScreen() {
   const [missingHint, setMissingHint] = useState<string | null>(null);
   /** Après un tap Continuer incomplet : liserés rouges sur les champs encore vides. */
   const [showFieldErrors, setShowFieldErrors] = useState(false);
+  /** Opt-in rappel soir — enregistré avec le profil (défaut 21:00). */
+  const [eveningReminderEnabled, setEveningReminderEnabled] = useState(false);
+  const [eveningReminderTime, setEveningReminderTime] = useState(
+    DEFAULT_NOTIFICATION_PREFS.captureReminderLocalTime,
+  );
+  const [timeSheetOpen, setTimeSheetOpen] = useState(false);
+
+  useEffect(() => {
+    void peekCachedNotificationPrefs().then(prefs => {
+      setEveningReminderEnabled(!!prefs.captureReminderEnabled);
+      setEveningReminderTime(
+        prefs.captureReminderLocalTime?.trim() ||
+          DEFAULT_NOTIFICATION_PREFS.captureReminderLocalTime,
+      );
+    });
+  }, []);
 
   const hasName = !!childName.trim();
   const hasBirth = !!birthDate.trim();
@@ -149,6 +175,16 @@ export default function CreateChildScreen() {
       const child = await createChild(childName.trim(), birthDate, photoUri || undefined);
 
       if (child) {
+        const snapped = snapCaptureReminderTimeToSlot(eveningReminderTime);
+        if (eveningReminderEnabled) {
+          await ensureProvisionalNotificationsAuthorization();
+          void registerPushTokenInBackground();
+        }
+        await saveNotificationPrefs({
+          captureReminderEnabled: eveningReminderEnabled,
+          captureReminderLocalTime: snapped,
+        });
+
         await setSelectedChild(child.id);
         // Peindre Capturer immédiatement depuis SQLite (sync cloud déjà en fond).
         hydrateTabScreensFromSqliteSync();
@@ -285,6 +321,43 @@ export default function CreateChildScreen() {
               hasError={showFieldErrors && !hasBirth}
             />
           </View>
+
+          <View style={styles.reminderBlock}>
+            <View style={styles.reminderRow}>
+              <View style={styles.reminderCopy}>
+                <Text style={[styles.reminderLabel, dm600 ? { fontFamily: dm600 } : null]}>
+                  {t('createChild.eveningReminderLabel')}
+                </Text>
+                <Text style={[styles.reminderHint, dm500 ? { fontFamily: dm500 } : null]}>
+                  {t('createChild.eveningReminderHint')}
+                </Text>
+              </View>
+              <Switch
+                value={eveningReminderEnabled}
+                onValueChange={setEveningReminderEnabled}
+                trackColor={{ false: 'rgba(81,84,94,0.22)', true: THEME.brandPrimary }}
+                thumbColor="#FFFFFF"
+                accessibilityLabel={t('createChild.eveningReminderLabel')}
+              />
+            </View>
+            {eveningReminderEnabled ? (
+              <TouchableOpacity
+                onPress={() => setTimeSheetOpen(true)}
+                style={styles.reminderTimeRow}
+                accessibilityRole="button"
+                accessibilityLabel={t('createChild.eveningReminderTimeA11y', {
+                  time: eveningReminderTime,
+                })}
+              >
+                <Text style={[styles.reminderTimeLabel, dm500 ? { fontFamily: dm500 } : null]}>
+                  {t('parent.application.captureReminderTimeTitle')}
+                </Text>
+                <Text style={[styles.reminderTimeValue, dm700 ? { fontFamily: dm700 } : null]}>
+                  {eveningReminderTime}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
         </View>
 
         {/*
@@ -326,6 +399,14 @@ export default function CreateChildScreen() {
         onChangePhoto={() => {
           void openImagePickerForCrop();
         }}
+      />
+      <CaptureReminderTimeSheet
+        visible={timeSheetOpen}
+        selectedTime={eveningReminderTime}
+        onSelect={time => {
+          setEveningReminderTime(snapCaptureReminderTimeToSlot(time));
+        }}
+        onClose={() => setTimeSheetOpen(false)}
       />
     </KeyboardAvoidingView>
   );
@@ -432,5 +513,47 @@ const styles = StyleSheet.create({
   inputError: {
     borderColor: '#E5484D',
     borderWidth: 1.5,
+  },
+  reminderBlock: {
+    marginTop: verticalScale(8),
+    paddingTop: verticalScale(18),
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: THEME.familyFlowLine,
+  },
+  reminderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.md,
+  },
+  reminderCopy: {
+    flex: 1,
+  },
+  reminderLabel: {
+    fontSize: FONT_SIZES.base,
+    color: THEME.textPrimary,
+    marginBottom: verticalScale(4),
+  },
+  reminderHint: {
+    fontSize: FONT_SIZES.sm,
+    color: THEME.textMuted,
+    lineHeight: scale(20),
+  },
+  reminderTimeRow: {
+    marginTop: verticalScale(14),
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: verticalScale(12),
+    paddingHorizontal: SPACING.md,
+    borderRadius: scale(14),
+    backgroundColor: 'rgba(81,84,94,0.06)',
+  },
+  reminderTimeLabel: {
+    fontSize: FONT_SIZES.sm,
+    color: THEME.textMuted,
+  },
+  reminderTimeValue: {
+    fontSize: FONT_SIZES.base,
+    color: THEME.captureScreenCtaBackground,
   },
 });

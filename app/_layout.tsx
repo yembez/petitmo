@@ -206,10 +206,23 @@ function RootLayoutNav() {
     })();
   }, [isAuthReady]);
 
-  /** Token push : fond uniquement, après session (permission déjà accordée ou non). */
+  /**
+   * Auth notifs provisoire iOS au boot (Distribuer en silence, sans boîte).
+   * Puis token push en fond si déjà authorized / provisional.
+   */
   useEffect(() => {
     if (!isAuthReady) return;
-    void import('@/services/registerPushToken').then(m => m.registerPushTokenInBackground());
+    void (async () => {
+      try {
+        const { ensureProvisionalNotificationsAuthorization } = await import(
+          '@/lib/onboardingPermissions'
+        );
+        await ensureProvisionalNotificationsAuthorization();
+      } catch (e) {
+        console.warn('[boot] provisional notifications', e);
+      }
+      void import('@/services/registerPushToken').then(m => m.registerPushTokenInBackground());
+    })();
   }, [isAuthReady]);
 
   /** Tap sur une notif → ouvrir Capturer (écran d’accueil). */

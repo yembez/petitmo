@@ -1387,13 +1387,11 @@ export async function deleteRealAccount(): Promise<{ ok: true } | { ok: false; e
     const { clearOnboardingPermissionsSeen } = await import('@/lib/onboardingPermissionsSeen');
     const { clearMediaLibraryOptIn } = await import('@/lib/mediaLibraryOptIn');
     const { clearLocationSoftPromptSeen } = await import('@/lib/memoryLocation');
-    const { clearEveningReminderCardState } = await import('@/lib/eveningReminderCard');
     const { clearNotificationPrefsLocalCache } = await import('@/lib/notificationPrefs');
     await clearLocalAccountWorkspace('delete-account');
     await clearOnboardingPermissionsSeen(user.id);
     await clearMediaLibraryOptIn(user.id);
     await clearLocationSoftPromptSeen(user.id);
-    await clearEveningReminderCardState(user.id);
     await clearNotificationPrefsLocalCache();
     await setLastRealAuthUserId(null);
     const { setLastRealAuthEmail } = await import('@/services/accountLocalReset');

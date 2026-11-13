@@ -162,9 +162,6 @@ export async function captureMemoryLocalOnly(params: {
     const out = await captureMemoryLocalOnlyInner(params);
     if (out) {
       recordAction(`capture.${type}.ok`);
-      void import('@/lib/eveningReminderCard')
-        .then(m => m.maybeArmEveningReminderCardAfterFirstMemory(params.userId))
-        .catch(() => {});
     }
     return out;
   } catch (e) {
@@ -419,9 +416,6 @@ export async function capturePhotoAlbumLocalOnly(params: {
     const out = await capturePhotoAlbumLocalOnlyInner(params);
     if (out) {
       recordAction('capture.album.ok');
-      void import('@/lib/eveningReminderCard')
-        .then(m => m.maybeArmEveningReminderCardAfterFirstMemory(params.userId))
-        .catch(() => {});
     }
     return out;
   } catch (e) {

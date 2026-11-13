@@ -7,7 +7,6 @@ import {
   RefreshControl,
   InteractionManager,
   DeviceEventEmitter,
-  Linking,
   useWindowDimensions,
 } from 'react-native';
 import Animated from 'react-native-reanimated';
@@ -73,20 +72,6 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import { getTimingNudge, markNudgeSeen, recordInstallDate } from '@/lib/paywallTiming';
 import SoftNudgeBanner from '@/components/SoftNudgeBanner';
-import EveningReminderCard from '@/components/feed/EveningReminderCard';
-import {
-  EVENING_REMINDER_CARD_EVENT,
-  activateEveningReminderFromCard,
-  dismissEveningReminderCard,
-  ensureEveningReminderBaselineForAccount,
-  getEveningReminderDisplayTime,
-  shouldShowEveningReminderCard,
-} from '@/lib/eveningReminderCard';
-import {
-  saveNotificationPrefs,
-  snapCaptureReminderTimeToSlot,
-  DEFAULT_NOTIFICATION_PREFS,
-} from '@/lib/notificationPrefs';
 import type { Child, Memory } from '@/types/local';
 import {
   buildOptimisticMemoryForPending,
@@ -322,31 +307,6 @@ function FilScreen() {
     swipeRefs,
     immersiveLaunchRef,
   );
-
-  const [showEveningReminderCard, setShowEveningReminderCard] = useState(false);
-  const [eveningReminderTime, setEveningReminderTime] = useState(
-    DEFAULT_NOTIFICATION_PREFS.captureReminderLocalTime,
-  );
-  const [reminderTimeSheetOpen, setReminderTimeSheetOpen] = useState(false);
-
-  const refreshEveningReminderCard = useCallback(() => {
-    void (async () => {
-      await ensureEveningReminderBaselineForAccount();
-      const show = await shouldShowEveningReminderCard();
-      setShowEveningReminderCard(show);
-      if (show) {
-        setEveningReminderTime(await getEveningReminderDisplayTime());
-      }
-    })();
-  }, []);
-
-  useEffect(() => {
-    refreshEveningReminderCard();
-    const sub = DeviceEventEmitter.addListener(EVENING_REMINDER_CARD_EVENT, () => {
-      refreshEveningReminderCard();
-    });
-    return () => sub.remove();
-  }, [refreshEveningReminderCard, memories.length]);
 
   const listBottomPad = useMemo(
     () => verticalScale(28) + tabBarFloatingOverlapPad(insets.bottom),
@@ -1135,35 +1095,6 @@ function FilScreen() {
         initialIso={editingDateMemory?.created_at ?? new Date().toISOString()}
         onClose={closeEditDateModal}
         onSave={handleSaveDate}
-      />
-      <EveningReminderCard
-        visible={showEveningReminderCard}
-        timeLabel={eveningReminderTime}
-        onTimeChange={time => {
-          const snapped = snapCaptureReminderTimeToSlot(time);
-          setEveningReminderTime(snapped);
-          void saveNotificationPrefs({ captureReminderLocalTime: snapped });
-        }}
-        onActivate={() => {
-          void (async () => {
-            // Figé l’heure choisie avant d’activer (défaut 21:00).
-            void saveNotificationPrefs({
-              captureReminderLocalTime: snapCaptureReminderTimeToSlot(eveningReminderTime),
-            });
-            const result = await activateEveningReminderFromCard();
-            setShowEveningReminderCard(false);
-            if (result === 'enabled') {
-              return;
-            }
-            if (result === 'needs_settings') {
-              void Linking.openSettings();
-            }
-          })();
-        }}
-        onDismiss={() => {
-          void dismissEveningReminderCard();
-          setShowEveningReminderCard(false);
-        }}
       />
       {videoTrimExporting ? (
         <FeedMediaPrepOverlay label={t('videoTrim.exporting')} />

@@ -36,6 +36,9 @@
     "namePlaceholder": "Prénom ou prénoms composés",
     "birthLabel": "Date de naissance",
     "birthPlaceholder": "JJ/MM/AAAA",
+    "eveningReminderLabel": "Activer le rappel du soir",
+    "eveningReminderHint": "Optionnel — un petit rappel pour capturer un souvenir.",
+    "eveningReminderTimeA11y": "Heure du rappel, actuellement {{time}}",
     "continue": "Continuer",
     "missingPhoto": "la photo",
     "missingName": "le prénom",
@@ -367,14 +370,6 @@
     "editDate": {
       "title": "Date du souvenir",
       "save": "Enregistrer"
-    },
-    "eveningReminder": {
-      "title": "Un petit rappel le soir ?",
-      "bodyBefore": "On sait que vos journées sont bien remplies. Chaque soir à ",
-      "bodyAfter": ", un petit rappel peut vous aider à garder un souvenir de la journée avec votre enfant.",
-      "timeA11y": "Changer l’heure du rappel, actuellement {{time}}",
-      "activate": "Activer le rappel",
-      "notNow": "Pas maintenant"
     }
   },
   "tabs": {
