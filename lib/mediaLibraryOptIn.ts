@@ -9,8 +9,7 @@
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  getPhotoLibraryGranted,
-  getPhotoLibraryPermissionStatus,
+  getPhotoLibraryAccessKind,
   requestPhotoLibraryAccess,
 } from '@/lib/onboardingPermissions';
 import { peekLastRealAuthUserId } from '@/services/accountLocalReset';
@@ -108,23 +107,7 @@ export async function clearMediaLibraryOptIn(userId?: string | null): Promise<vo
   }
 }
 
-/** Permission OS déjà OK → aligne opt-in + flag onboarding (sans dialog). */
-async function softHealOptInFromOsGrant(userId?: string | null): Promise<boolean> {
-  if (!(await getPhotoLibraryGranted())) return false;
-  const uid = (userId ?? peekLastRealAuthUserId() ?? '').trim() || null;
-  await setMediaLibraryOptIn(true, uid);
-  try {
-    const { markOnboardingPermissionsSeen } = await import('@/lib/onboardingPermissionsSeen');
-    await markOnboardingPermissionsSeen(uid);
-  } catch {
-    /* */
-  }
-  return true;
-}
-
-async function activateMediaLibraryNow(userId: string | null): Promise<boolean> {
-  const granted = await requestPhotoLibraryAccess();
-  if (!granted) return false;
+async function markOptInAndSeen(userId: string | null): Promise<void> {
   await setMediaLibraryOptIn(true, userId);
   try {
     const { markOnboardingPermissionsSeen } = await import('@/lib/onboardingPermissionsSeen');
@@ -132,28 +115,29 @@ async function activateMediaLibraryNow(userId: string | null): Promise<boolean> 
   } catch {
     /* */
   }
-  return true;
 }
 
 /**
  * Avant picker journal (Importer, couverture audio, etc.).
- * Low Friction : boîte Apple seule si `undetermined` ; PHPicker toujours autorisé ensuite.
+ * Low Friction :
+ * - `undetermined` → **une** boîte Apple classique ;
+ * - `limited` / `full` → **ne pas** re-demander (évite « Sélectionner plus de photos ») ;
+ * - PHPicker toujours autorisé ensuite.
  */
 export async function ensureMediaLibraryPickerAllowed(): Promise<boolean> {
   const uid = peekLastRealAuthUserId();
+  const kind = await getPhotoLibraryAccessKind();
 
-  if (await softHealOptInFromOsGrant(uid)) return true;
-
-  const osStatus = await getPhotoLibraryPermissionStatus();
-  if (osStatus === 'granted' || (await getPhotoLibraryGranted())) {
-    await setMediaLibraryOptIn(true, uid);
+  if (kind === 'full' || kind === 'limited') {
+    await markOptInAndSeen(uid);
     return true;
   }
 
-  if (osStatus === 'undetermined') {
-    await activateMediaLibraryNow(uid);
+  if (kind === 'undetermined') {
+    const granted = await requestPhotoLibraryAccess();
+    if (granted) await markOptInAndSeen(uid);
   }
 
-  // Refus / déjà denied : on n’empêche pas le PHPicker (import OK, méta plus faible).
+  // denied / refus : PHPicker OK (méta plus faible).
   return true;
 }

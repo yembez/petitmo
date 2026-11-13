@@ -113,6 +113,15 @@ async function writeCache(prefs: NotificationPrefs): Promise<void> {
   }
 }
 
+/** Après delete / changement de compte : ne pas hériter du rappel ON du compte précédent. */
+export async function clearNotificationPrefsLocalCache(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(CACHE_KEY);
+  } catch {
+    /* */
+  }
+}
+
 function rowToPrefs(row: {
   capture_reminder_enabled?: boolean | null;
   capture_reminder_local_time?: string | null;
