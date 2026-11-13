@@ -1,19 +1,13 @@
 /**
  * Opt-in photothèque **produit** (par compte) — distinct de la permission iOS.
  *
- * Sur iOS 14+, `launchImageLibraryAsync` utilise PHPicker et peut s’ouvrir
- * **sans** `requestMediaLibraryPermissionsAsync`. Sans ce flag, « Plus tard »
- * sur l’écran permissions laissait quand même accéder à la galerie.
+ * Low Friction : à l’Importer, **une seule** boîte = système Apple
+ * (`NSPhotoLibraryUsageDescription`). Pas d’Alert app « Activer » avant.
+ * PHPicker s’ouvre même si la parent refuse (dates/lieux moins fiables).
  *
- * Soft-heal : si iOS a déjà `granted` sur ce téléphone, on pose l’opt-in en
- * silence (même compte / reconnexion / flag AsyncStorage manquant) — pas d’alerte.
- *
- * Message alerte : « Plus tard » **seulement** si report explicite sur cet appareil ;
- * sinon (réinstall / nouvel appareil) → texte « réactiver l’accès ».
+ * Soft-heal : si iOS a déjà `granted`, on pose l’opt-in en silence.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Alert, Linking } from 'react-native';
-import i18n from '@/lib/i18n';
 import {
   getPhotoLibraryGranted,
   getPhotoLibraryPermissionStatus,
@@ -128,19 +122,6 @@ async function softHealOptInFromOsGrant(userId?: string | null): Promise<boolean
   return true;
 }
 
-function alertOpenSettingsOnly(resolve: (ok: boolean) => void): void {
-  Alert.alert(i18n.t('permissions.deniedTitle'), i18n.t('permissions.photosDeniedBody'), [
-    { text: i18n.t('cancel'), style: 'cancel', onPress: () => resolve(false) },
-    {
-      text: i18n.t('permissions.openSettings'),
-      onPress: () => {
-        void Linking.openSettings();
-        resolve(false);
-      },
-    },
-  ]);
-}
-
 async function activateMediaLibraryNow(userId: string | null): Promise<boolean> {
   const granted = await requestPhotoLibraryAccess();
   if (!granted) return false;
@@ -155,61 +136,24 @@ async function activateMediaLibraryNow(userId: string | null): Promise<boolean> 
 }
 
 /**
- * Avant tout picker : exige l’opt-in compte + (si besoin) la demande iOS.
- * Retourne false → ne pas ouvrir la galerie.
- *
- * Low Friction : après « Plus tard », on propose **Activer** (boîte système).
- * « Ouvrir Réglages » seulement si iOS a déjà refusé (plus de re-prompt possible).
+ * Avant picker journal (Importer, couverture audio, etc.).
+ * Low Friction : boîte Apple seule si `undetermined` ; PHPicker toujours autorisé ensuite.
  */
 export async function ensureMediaLibraryPickerAllowed(): Promise<boolean> {
   const uid = peekLastRealAuthUserId();
-  const osStatus = await getPhotoLibraryPermissionStatus();
 
-  if (await getMediaLibraryOptIn(uid)) {
-    if (osStatus === 'granted' || (await getPhotoLibraryGranted())) return true;
-    if (osStatus === 'undetermined') {
-      const ok = await activateMediaLibraryNow(uid);
-      if (ok) return true;
-    }
-    // Opt-in produit mais iOS refuse → seul chemin = Réglages.
-    return await new Promise<boolean>(resolve => alertOpenSettingsOnly(resolve));
-  }
-
-  // Même tel, permission déjà accordée, flag produit manquant → pas d’alerte.
   if (await softHealOptInFromOsGrant(uid)) return true;
 
-  // iOS a déjà dit non : inutile de proposer « Activer » (pas de 2ᵉ boîte système).
-  if (osStatus === 'denied') {
-    return await new Promise<boolean>(resolve => alertOpenSettingsOnly(resolve));
+  const osStatus = await getPhotoLibraryPermissionStatus();
+  if (osStatus === 'granted' || (await getPhotoLibraryGranted())) {
+    await setMediaLibraryOptIn(true, uid);
+    return true;
   }
 
-  const deferred = await getMediaLibraryDeferred(uid);
-  const bodyKey = deferred
-    ? 'permissions.photosNeedEnableBodyDeferred'
-    : 'permissions.photosNeedEnableBody';
+  if (osStatus === 'undetermined') {
+    await activateMediaLibraryNow(uid);
+  }
 
-  // Pas d’opt-in, statut encore undetermined : Activer → boîte iOS (pas Réglages).
-  return await new Promise<boolean>(resolve => {
-    Alert.alert(i18n.t('permissions.photosTitle'), i18n.t(bodyKey), [
-      {
-        text: i18n.t('cancel'),
-        style: 'cancel',
-        onPress: () => resolve(false),
-      },
-      {
-        text: i18n.t('permissions.enableNow'),
-        onPress: () => {
-          void (async () => {
-            const ok = await activateMediaLibraryNow(uid);
-            if (ok) {
-              resolve(true);
-              return;
-            }
-            // Refus dans la boîte système → là seulement Réglages.
-            alertOpenSettingsOnly(resolve);
-          })();
-        },
-      },
-    ]);
-  });
+  // Refus / déjà denied : on n’empêche pas le PHPicker (import OK, méta plus faible).
+  return true;
 }

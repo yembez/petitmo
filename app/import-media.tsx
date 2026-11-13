@@ -740,8 +740,8 @@ export default function ImportMediaScreen() {
 
   /**
    * Ouvre la galerie dès le montage — ou consomme un partage iOS (Share Extension).
-   * Opt-in compte requis (`ensureMediaLibraryPickerAllowed`) : PHPicker ne demande
-   * pas iOS tout seul, d’où le bug « Plus tard » puis accès quand même.
+   * Low Friction : `ensureMediaLibraryPickerAllowed` → boîte Apple seule si besoin ;
+   * PHPicker s’ouvre même en cas de refus (méta date/lieu moins fiables).
    */
   useEffect(() => {
     if (autoGalleryLaunchedRef.current) return;

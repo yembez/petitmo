@@ -72,7 +72,7 @@
     <key>NSPhotoLibraryAddUsageDescription</key>
     <string>Allow $(PRODUCT_NAME) to save photos</string>
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>Petit Cœur a besoin d’accéder à vos photos pour importer des souvenirs existants.</string>
+    <string>Autoriser l’accès à vos photos et vidéos. 100 % privé.</string>
     <key>NSUserActivityTypes</key>
     <array>
       <string>$(PRODUCT_BUNDLE_IDENTIFIER).expo.index_route</string>

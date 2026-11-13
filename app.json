@@ -41,7 +41,7 @@
         ],
         "NSCameraUsageDescription": "Petit Cœur a besoin d'accéder à ta caméra pour capturer des photos et vidéos de vos moments précieux.",
         "NSMicrophoneUsageDescription": "Petit Cœur a besoin d'accéder à ton microphone pour enregistrer la voix de ton enfant.",
-        "NSPhotoLibraryUsageDescription": "Petit Cœur a besoin d'accéder à vos photos pour importer des souvenirs existants.",
+        "NSPhotoLibraryUsageDescription": "Autoriser l’accès à vos photos et vidéos. 100 % privé.",
         "NSLocationWhenInUseUsageDescription": "Petit Cœur utilise ta position pour indiquer le lieu de vos souvenirs audio et textes — uniquement quand tu en crées, et pour afficher une ville sur le fil.",
         "ITSAppUsesNonExemptEncryption": false,
         "EXDefaultScreenOrientationMask": "UIInterfaceOrientationMaskAllButUpsideDown"
