@@ -195,6 +195,21 @@ export async function reverseGeocodeToPlaceLabel(
 }
 
 /**
+ * Libellé lieu pour l’import photo/vidéo.
+ * Reverse geocode d’abord ; si KO (offline / module) → coords arrondies plutôt que null.
+ */
+export async function placeLabelFromCoordinates(
+  latitude: number,
+  longitude: number,
+): Promise<string | null> {
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return null;
+  const label = await reverseGeocodeToPlaceLabel(latitude, longitude);
+  if (label) return label;
+  return `${latitude.toFixed(2)}, ${longitude.toFixed(2)}`;
+}
+
+/**
  * Position iPhone → libellé lieu.
  * Ne demande jamais la permission (silent). Null si refus / indispo.
  */

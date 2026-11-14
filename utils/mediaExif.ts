@@ -1,29 +1,47 @@
 /**
- * Métadonnées à l’import photothèque.
+ * Métadonnées à l’import photothèque (photo + vidéo).
  *
  * Garde-fous (ne pas régresser) :
  * 1. Picker : `IMPORT_PHOTO_PICKER_OPTS.exif` doit rester `true` tant que le binaire n’embarque pas
  *    `expo-media-library` (rebuild `npx expo run:ios` après ajout du plugin dans `app.json`).
  * 2. Module natif : import **dynamique** uniquement (`getMediaLibraryModule`) — jamais `import … from 'expo-media-library'` en tête de fichier.
- * 3. Ordre : fiche Photos (`assetId`) → EXIF fichier → (éviter date fichier ≈ maintenant).
- * 4. Lieu : EXIF GPS / MediaLibrary `location` → reverse geocode ; sinon vide (saisie manuelle fil).
+ * 3. Ordre lieu : fiche Photos (`assetId` → location + EXIF asset) → EXIF picker → geocode (+ repli coords).
+ * 4. Pas de GPS « maintenant » sur une vieille photo (Low Friction / vérité du souvenir).
  * 5. Accès lecture : demandé au premier Importer (`mediaLibraryOptIn`), pas à l’avatar / inscription.
  */
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import { Platform } from 'react-native';
-import { reverseGeocodeToPlaceLabel } from '@/lib/memoryLocation';
+import { placeLabelFromCoordinates } from '@/lib/memoryLocation';
 
 /** Copie tmp / sandbox souvent datée « maintenant » — inutile comme date de prise. */
 const FILE_DATE_TOO_RECENT_MS = 120_000;
 
-/** Convertit une valeur EXIF DMS (tableau ou nombre) + ref N/S/E/W en degrés décimaux */
+type LatLng = { latitude: number; longitude: number };
+
+/** Nombre EXIF (number | string | rationnel {numerator,denominator}). */
+function exifNumber(raw: unknown): number | undefined {
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  if (typeof raw === 'string' && raw.trim()) {
+    const n = parseFloat(raw.trim().replace(',', '.'));
+    return Number.isFinite(n) ? n : undefined;
+  }
+  if (raw && typeof raw === 'object') {
+    const o = raw as { numerator?: unknown; denominator?: unknown };
+    const num = exifNumber(o.numerator);
+    const den = exifNumber(o.denominator);
+    if (num !== undefined && den !== undefined && den !== 0) return num / den;
+  }
+  return undefined;
+}
+
+/** Convertit une valeur EXIF DMS (tableau, rationnels ou nombre) + ref N/S/E/W en degrés décimaux */
 function dmsToDecimal(value: unknown, ref: unknown): number | undefined {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const asSingle = exifNumber(value);
+  if (asSingle !== undefined && !Array.isArray(value)) return applyGpsRef(asSingle, ref);
+
   if (!Array.isArray(value) || value.length < 1) return undefined;
-  const nums = value
-    .map(v => (typeof v === 'number' ? v : parseFloat(String(v))))
-    .filter(n => !Number.isNaN(n));
+  const nums = value.map(v => exifNumber(v)).filter((n): n is number => n !== undefined);
   if (nums.length === 0) return undefined;
   let d = nums[0];
   if (nums.length >= 3) {
@@ -31,29 +49,74 @@ function dmsToDecimal(value: unknown, ref: unknown): number | undefined {
   } else if (nums.length === 2) {
     d += nums[1] / 60;
   }
+  return applyGpsRef(d, ref);
+}
+
+function applyGpsRef(degrees: number, ref: unknown): number {
+  let d = degrees;
   const r = typeof ref === 'string' ? ref.toUpperCase() : '';
   if (r === 'S' || r === 'W') d = -d;
   return d;
 }
 
+function normalizeLatLng(lat: number, lng: number): LatLng | undefined {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return undefined;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return undefined;
+  if (lat === 0 && lng === 0) return undefined;
+  return { latitude: lat, longitude: lng };
+}
+
 /**
- * Extrait lat/lng depuis l’objet EXIF renvoyé par expo-image-picker (Android / iOS).
+ * Extrait lat/lng depuis EXIF picker / MediaLibrary (plusieurs formes iOS/Android).
  */
-export function parseExifGps(exif: Record<string, unknown> | null | undefined): {
-  latitude: number;
-  longitude: number;
-} | undefined {
+export function parseExifGps(exif: Record<string, unknown> | null | undefined): LatLng | undefined {
   if (!exif || typeof exif !== 'object') return undefined;
 
-  const lat = dmsToDecimal(exif.GPSLatitude, exif.GPSLatitudeRef);
-  const lng = dmsToDecimal(exif.GPSLongitude, exif.GPSLongitudeRef);
+  // Forme classique EXIF GPS*
+  const fromClassic = normalizeLatLng(
+    dmsToDecimal(exif.GPSLatitude, exif.GPSLatitudeRef) ?? NaN,
+    dmsToDecimal(exif.GPSLongitude, exif.GPSLongitudeRef) ?? NaN,
+  );
+  if (fromClassic) return fromClassic;
 
-  if (lat === undefined || lng === undefined || !Number.isFinite(lat) || !Number.isFinite(lng)) {
-    return undefined;
+  // Plat (certains pickers / Android) : latitude / longitude
+  const flatLat =
+    exifNumber(exif.latitude) ??
+    exifNumber(exif.Latitude) ??
+    exifNumber(exif.lat);
+  const flatLng =
+    exifNumber(exif.longitude) ??
+    exifNumber(exif.Longitude) ??
+    exifNumber(exif.lng) ??
+    exifNumber(exif.lon);
+  if (flatLat !== undefined && flatLng !== undefined) {
+    const n = normalizeLatLng(flatLat, flatLng);
+    if (n) return n;
   }
-  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return undefined;
 
-  return { latitude: lat, longitude: lng };
+  // Imbriqué `{ gps: { latitude, longitude } }` ou `{ GPS: … }`
+  for (const key of ['gps', 'GPS', 'location', 'Location'] as const) {
+    const nested = exif[key];
+    if (!nested || typeof nested !== 'object') continue;
+    const o = nested as Record<string, unknown>;
+    const nLat =
+      dmsToDecimal(o.GPSLatitude, o.GPSLatitudeRef) ??
+      exifNumber(o.latitude) ??
+      exifNumber(o.Latitude) ??
+      exifNumber(o.lat);
+    const nLng =
+      dmsToDecimal(o.GPSLongitude, o.GPSLongitudeRef) ??
+      exifNumber(o.longitude) ??
+      exifNumber(o.Longitude) ??
+      exifNumber(o.lng) ??
+      exifNumber(o.lon);
+    if (nLat !== undefined && nLng !== undefined) {
+      const n = normalizeLatLng(nLat, nLng);
+      if (n) return n;
+    }
+  }
+
+  return undefined;
 }
 
 /** Offset EXIF `+01:00` / `-05:00` / `+0100` → minutes depuis UTC. */
@@ -119,6 +182,11 @@ export type ImportMetadata = {
   locationLabel?: string | null;
 };
 
+async function labelFromGps(gps: LatLng | undefined): Promise<string | null> {
+  if (!gps) return null;
+  return placeLabelFromCoordinates(gps.latitude, gps.longitude);
+}
+
 /**
  * À partir du résultat `exif` de expo-image-picker (`exif: true`).
  */
@@ -126,11 +194,7 @@ export async function buildImportMetadataFromExif(
   exif: Record<string, unknown> | null | undefined
 ): Promise<ImportMetadata> {
   const capturedAtIso = parseExifCaptureDateIso(exif ?? null);
-  const gps = parseExifGps(exif ?? null);
-  let locationLabel: string | null = null;
-  if (gps) {
-    locationLabel = await reverseGeocodeToPlaceLabel(gps.latitude, gps.longitude);
-  }
+  const locationLabel = await labelFromGps(parseExifGps(exif ?? null));
   return { capturedAtIso, locationLabel };
 }
 
@@ -164,18 +228,42 @@ async function getMediaLibraryModule(): Promise<MediaLibraryModule | null> {
   }
 }
 
-/** Accès déjà accordé (Importer a pu le demander juste avant). */
+/** Accès photothèque déjà accordé (full **ou** limited — requis pour `getAssetInfoAsync`). */
 async function hasPhotoLibraryAccessAlready(): Promise<boolean> {
   try {
     const res = await ImagePicker.getMediaLibraryPermissionsAsync();
-    return res.granted;
+    if (res.granted) return true;
+    if (res.status === 'limited' || res.accessPrivileges === 'limited') return true;
+    if (res.accessPrivileges === 'all' || res.status === 'granted') return true;
   } catch {
-    return false;
+    /* */
   }
+  try {
+    const MediaLibrary = await getMediaLibraryModule();
+    if (!MediaLibrary) return false;
+    const res = await MediaLibrary.getPermissionsAsync();
+    if (res.granted) return true;
+    if (res.accessPrivileges === 'limited' || (res as { status?: string }).status === 'limited') {
+      return true;
+    }
+  } catch {
+    /* */
+  }
+  return false;
+}
+
+function coordsFromMediaLibraryLocation(loc: unknown): LatLng | undefined {
+  if (!loc || typeof loc !== 'object') return undefined;
+  const o = loc as { latitude?: unknown; longitude?: unknown };
+  const lat = exifNumber(o.latitude);
+  const lng = exifNumber(o.longitude);
+  if (lat === undefined || lng === undefined) return undefined;
+  return normalizeLatLng(lat, lng);
 }
 
 /**
  * Date + GPS via `assetId` + MediaLibrary — source privilégiée (corrections dans Photos).
+ * Retry court si 1ʳᵉ lecture vide (timing Limited / iCloud).
  */
 async function resolveMetaFromLibraryAssetId(
   assetId: string | null | undefined
@@ -185,24 +273,39 @@ async function resolveMetaFromLibraryAssetId(
   if (!(await hasPhotoLibraryAccessAlready())) return {};
   const MediaLibrary = await getMediaLibraryModule();
   if (!MediaLibrary) return {};
-  try {
-    const info = await MediaLibrary.getAssetInfoAsync(id);
-    const capturedAtIso = captureTimestampToIso(info.creationTime);
-    let locationLabel: string | null = null;
-    const loc = info.location;
-    if (
-      loc &&
-      typeof loc.latitude === 'number' &&
-      typeof loc.longitude === 'number' &&
-      Number.isFinite(loc.latitude) &&
-      Number.isFinite(loc.longitude)
-    ) {
-      locationLabel = await reverseGeocodeToPlaceLabel(loc.latitude, loc.longitude);
+
+  const readOnce = async (): Promise<{
+    capturedAtIso?: string;
+    locationLabel?: string | null;
+  }> => {
+    try {
+      const info = await MediaLibrary.getAssetInfoAsync(id, {
+        shouldDownloadFromNetwork: true,
+      });
+      const capturedAtIso = captureTimestampToIso(info.creationTime);
+
+      let gps = coordsFromMediaLibraryLocation(info.location);
+      if (!gps && info.exif && typeof info.exif === 'object') {
+        gps = parseExifGps(info.exif as Record<string, unknown>);
+      }
+      const locationLabel = await labelFromGps(gps);
+      return { capturedAtIso, locationLabel };
+    } catch {
+      return {};
     }
-    return { capturedAtIso, locationLabel };
-  } catch {
-    return {};
+  };
+
+  let out = await readOnce();
+  if (out.locationLabel && out.capturedAtIso) return out;
+  if (!out.locationLabel) {
+    await new Promise<void>(r => setTimeout(r, 120));
+    const retry = await readOnce();
+    out = {
+      capturedAtIso: out.capturedAtIso ?? retry.capturedAtIso,
+      locationLabel: out.locationLabel ?? retry.locationLabel ?? null,
+    };
   }
+  return out;
 }
 
 /**
@@ -247,6 +350,9 @@ export async function buildImportMetadataFromPickerAsset(
     capturedAtIso: fromLibrary.capturedAtIso ?? fromExif.capturedAtIso,
     locationLabel: fromLibrary.locationLabel ?? fromExif.locationLabel ?? null,
   };
+  if (merged.capturedAtIso && merged.locationLabel) {
+    return merged;
+  }
   if (merged.capturedAtIso) {
     return merged;
   }
