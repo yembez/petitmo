@@ -130,14 +130,31 @@ export async function ensureMediaLibraryPickerAllowed(): Promise<boolean> {
 
   if (kind === 'full' || kind === 'limited') {
     await markOptInAndSeen(uid);
+    // Aligne aussi ExpoMediaLibrary (fiche Photos → lieu GPS à l’import).
+    void ensureExpoMediaLibraryPermissionAligned();
     return true;
   }
 
   if (kind === 'undetermined') {
     const granted = await requestPhotoLibraryAccess();
-    if (granted) await markOptInAndSeen(uid);
+    if (granted) {
+      await markOptInAndSeen(uid);
+      void ensureExpoMediaLibraryPermissionAligned();
+    }
   }
 
   // denied / refus : PHPicker OK (méta plus faible).
   return true;
+}
+
+/** Même entitlement Photos — nécessaire pour `getAssetInfoAsync` (lieu). */
+async function ensureExpoMediaLibraryPermissionAligned(): Promise<void> {
+  try {
+    const MediaLibrary = await import('expo-media-library');
+    const cur = await MediaLibrary.getPermissionsAsync();
+    if (cur.granted || cur.accessPrivileges === 'limited') return;
+    await MediaLibrary.requestPermissionsAsync();
+  } catch {
+    /* module absent / rebuild */
+  }
 }

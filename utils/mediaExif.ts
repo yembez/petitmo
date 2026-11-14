@@ -5,9 +5,9 @@
  * 1. Picker : `IMPORT_PHOTO_PICKER_OPTS.exif` doit rester `true` tant que le binaire n’embarque pas
  *    `expo-media-library` (rebuild `npx expo run:ios` après ajout du plugin dans `app.json`).
  * 2. Module natif : import **dynamique** uniquement (`getMediaLibraryModule`) — jamais `import … from 'expo-media-library'` en tête de fichier.
- * 3. Ordre lieu : fiche Photos (`assetId` → location + EXIF asset) → EXIF picker → geocode (+ repli coords).
- * 4. Pas de GPS « maintenant » sur une vieille photo (Low Friction / vérité du souvenir).
- * 5. Accès lecture : demandé au premier Importer (`mediaLibraryOptIn`), pas à l’avatar / inscription.
+ * 3. Ordre lieu : fiche Photos (`assetId` → location + EXIF `{GPS}`) → EXIF picker → geocode ville/région.
+ * 4. Pas de GPS « maintenant » / pas de coords brutes affichées (pastille Lieu si KO).
+ * 5. Accès lecture : demandé au premier Importer (`mediaLibraryOptIn`).
  */
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
@@ -66,54 +66,49 @@ function normalizeLatLng(lat: number, lng: number): LatLng | undefined {
   return { latitude: lat, longitude: lng };
 }
 
+/** Lit lat/lng depuis un objet GPS (aplati GPS* ou ImageIO Latitude/Longitude). */
+function latLngFromGpsObject(o: Record<string, unknown>): LatLng | undefined {
+  const nLat =
+    dmsToDecimal(o.GPSLatitude, o.GPSLatitudeRef) ??
+    dmsToDecimal(o.Latitude, o.LatitudeRef) ??
+    exifNumber(o.latitude) ??
+    exifNumber(o.Latitude) ??
+    exifNumber(o.lat);
+  const nLng =
+    dmsToDecimal(o.GPSLongitude, o.GPSLongitudeRef) ??
+    dmsToDecimal(o.Longitude, o.LongitudeRef) ??
+    exifNumber(o.longitude) ??
+    exifNumber(o.Longitude) ??
+    exifNumber(o.lng) ??
+    exifNumber(o.lon);
+  if (nLat === undefined || nLng === undefined) return undefined;
+  return normalizeLatLng(nLat, nLng);
+}
+
 /**
  * Extrait lat/lng depuis EXIF picker / MediaLibrary (plusieurs formes iOS/Android).
+ * MediaLibrary renvoie souvent `ciImage.properties` avec la clé ImageIO `"{GPS}"`.
  */
 export function parseExifGps(exif: Record<string, unknown> | null | undefined): LatLng | undefined {
   if (!exif || typeof exif !== 'object') return undefined;
 
-  // Forme classique EXIF GPS*
-  const fromClassic = normalizeLatLng(
-    dmsToDecimal(exif.GPSLatitude, exif.GPSLatitudeRef) ?? NaN,
-    dmsToDecimal(exif.GPSLongitude, exif.GPSLongitudeRef) ?? NaN,
-  );
-  if (fromClassic) return fromClassic;
+  const fromRoot = latLngFromGpsObject(exif);
+  if (fromRoot) return fromRoot;
 
-  // Plat (certains pickers / Android) : latitude / longitude
-  const flatLat =
-    exifNumber(exif.latitude) ??
-    exifNumber(exif.Latitude) ??
-    exifNumber(exif.lat);
-  const flatLng =
-    exifNumber(exif.longitude) ??
-    exifNumber(exif.Longitude) ??
-    exifNumber(exif.lng) ??
-    exifNumber(exif.lon);
-  if (flatLat !== undefined && flatLng !== undefined) {
-    const n = normalizeLatLng(flatLat, flatLng);
-    if (n) return n;
-  }
-
-  // Imbriqué `{ gps: { latitude, longitude } }` ou `{ GPS: … }`
-  for (const key of ['gps', 'GPS', 'location', 'Location'] as const) {
+  // Imbriqué : `{GPS}` (ImageIO / MediaLibrary), gps, GPS, location…
+  for (const key of Object.keys(exif)) {
     const nested = exif[key];
-    if (!nested || typeof nested !== 'object') continue;
-    const o = nested as Record<string, unknown>;
-    const nLat =
-      dmsToDecimal(o.GPSLatitude, o.GPSLatitudeRef) ??
-      exifNumber(o.latitude) ??
-      exifNumber(o.Latitude) ??
-      exifNumber(o.lat);
-    const nLng =
-      dmsToDecimal(o.GPSLongitude, o.GPSLongitudeRef) ??
-      exifNumber(o.longitude) ??
-      exifNumber(o.Longitude) ??
-      exifNumber(o.lng) ??
-      exifNumber(o.lon);
-    if (nLat !== undefined && nLng !== undefined) {
-      const n = normalizeLatLng(nLat, nLng);
-      if (n) return n;
+    if (!nested || typeof nested !== 'object' || Array.isArray(nested)) continue;
+    const keyNorm = key.replace(/[{}]/g, '').toLowerCase();
+    if (
+      keyNorm !== 'gps' &&
+      keyNorm !== 'location' &&
+      !keyNorm.includes('gps')
+    ) {
+      continue;
     }
+    const n = latLngFromGpsObject(nested as Record<string, unknown>);
+    if (n) return n;
   }
 
   return undefined;
@@ -213,7 +208,6 @@ let mediaLibraryModule: MediaLibraryModule | null = null;
 
 /**
  * Chargement paresseux : évite le crash si le binaire n’a pas été rebuild après `expo-media-library`.
- * (import statique → `Cannot find native module 'ExpoMediaLibrary'` et route `import-media` absente.)
  */
 async function getMediaLibraryModule(): Promise<MediaLibraryModule | null> {
   if (mediaLibraryLoadAttempted) return mediaLibraryModule;
@@ -228,7 +222,7 @@ async function getMediaLibraryModule(): Promise<MediaLibraryModule | null> {
   }
 }
 
-/** Accès photothèque déjà accordé (full **ou** limited — requis pour `getAssetInfoAsync`). */
+/** Accès photothèque déjà accordé (full **ou** limited). */
 async function hasPhotoLibraryAccessAlready(): Promise<boolean> {
   try {
     const res = await ImagePicker.getMediaLibraryPermissionsAsync();
@@ -252,6 +246,19 @@ async function hasPhotoLibraryAccessAlready(): Promise<boolean> {
   return false;
 }
 
+/** Aligne la permission MediaLibrary (même entitlement Photos qu’ImagePicker). */
+async function ensureMediaLibraryPermission(): Promise<boolean> {
+  if (await hasPhotoLibraryAccessAlready()) return true;
+  const MediaLibrary = await getMediaLibraryModule();
+  if (!MediaLibrary) return false;
+  try {
+    const res = await MediaLibrary.requestPermissionsAsync();
+    return !!res.granted || res.accessPrivileges === 'limited';
+  } catch {
+    return false;
+  }
+}
+
 function coordsFromMediaLibraryLocation(loc: unknown): LatLng | undefined {
   if (!loc || typeof loc !== 'object') return undefined;
   const o = loc as { latitude?: unknown; longitude?: unknown };
@@ -261,22 +268,52 @@ function coordsFromMediaLibraryLocation(loc: unknown): LatLng | undefined {
   return normalizeLatLng(lat, lng);
 }
 
+/** `ph://UUID/L0/001` → localIdentifier Photos. */
+export function assetIdFromMediaUri(uri: string | null | undefined): string | null {
+  const u = (uri ?? '').trim();
+  if (!u) return null;
+  if (u.startsWith('ph://')) {
+    const id = u.slice('ph://'.length).split('?')[0]?.trim();
+    return id || null;
+  }
+  // assets-library legacy — rare
+  const m = u.match(/id=([^&]+)/);
+  if (m?.[1]) return decodeURIComponent(m[1]);
+  return null;
+}
+
+function resolveAssetId(
+  assetId: string | null | undefined,
+  uri?: string | null,
+): string | null {
+  const fromField = assetId?.trim() || null;
+  if (fromField) return fromField;
+  return assetIdFromMediaUri(uri);
+}
+
 /**
  * Date + GPS via `assetId` + MediaLibrary — source privilégiée (corrections dans Photos).
- * Retry court si 1ʳᵉ lecture vide (timing Limited / iCloud).
  */
 async function resolveMetaFromLibraryAssetId(
-  assetId: string | null | undefined
+  assetId: string | null | undefined,
+  opts?: { uriHint?: string | null },
 ): Promise<{ capturedAtIso?: string; locationLabel?: string | null }> {
-  const id = assetId?.trim();
+  const id = resolveAssetId(assetId, opts?.uriHint);
   if (!id || Platform.OS === 'web') return {};
-  if (!(await hasPhotoLibraryAccessAlready())) return {};
+  if (!(await ensureMediaLibraryPermission())) {
+    console.warn('[importLocation] pas d’accès photothèque pour getAssetInfoAsync');
+    return {};
+  }
   const MediaLibrary = await getMediaLibraryModule();
-  if (!MediaLibrary) return {};
+  if (!MediaLibrary) {
+    console.warn('[importLocation] ExpoMediaLibrary absent — rebuild natif requis');
+    return {};
+  }
 
   const readOnce = async (): Promise<{
     capturedAtIso?: string;
     locationLabel?: string | null;
+    hadGps?: boolean;
   }> => {
     try {
       const info = await MediaLibrary.getAssetInfoAsync(id, {
@@ -289,8 +326,9 @@ async function resolveMetaFromLibraryAssetId(
         gps = parseExifGps(info.exif as Record<string, unknown>);
       }
       const locationLabel = await labelFromGps(gps);
-      return { capturedAtIso, locationLabel };
-    } catch {
+      return { capturedAtIso, locationLabel, hadGps: !!gps };
+    } catch (e) {
+      console.warn('[importLocation] getAssetInfoAsync', id.slice(0, 24), e);
       return {};
     }
   };
@@ -298,14 +336,18 @@ async function resolveMetaFromLibraryAssetId(
   let out = await readOnce();
   if (out.locationLabel && out.capturedAtIso) return out;
   if (!out.locationLabel) {
-    await new Promise<void>(r => setTimeout(r, 120));
+    await new Promise<void>(r => setTimeout(r, 180));
     const retry = await readOnce();
     out = {
       capturedAtIso: out.capturedAtIso ?? retry.capturedAtIso,
       locationLabel: out.locationLabel ?? retry.locationLabel ?? null,
+      hadGps: out.hadGps || retry.hadGps,
     };
   }
-  return out;
+  if (out.hadGps && !out.locationLabel) {
+    console.warn('[importLocation] GPS présent mais geocode sans libellé');
+  }
+  return { capturedAtIso: out.capturedAtIso, locationLabel: out.locationLabel };
 }
 
 /**
@@ -340,7 +382,9 @@ export async function buildImportMetadataFromPickerAsset(
 ): Promise<ImportMetadata> {
   void options;
 
-  const fromLibrary = await resolveMetaFromLibraryAssetId(asset.assetId ?? null);
+  const fromLibrary = await resolveMetaFromLibraryAssetId(asset.assetId ?? null, {
+    uriHint: asset.uri,
+  });
   if (fromLibrary.capturedAtIso && fromLibrary.locationLabel) {
     return fromLibrary;
   }
@@ -366,7 +410,38 @@ export async function buildImportMetadataFromPickerAsset(
   return merged;
 }
 
-/** `true` après rebuild natif si `getAssetInfoAsync` est utilisable (tests / futur `exif: false`). */
+/**
+ * Après insert local : si lieu vide mais `import_asset_id` connu, retente la fiche Photos.
+ * Local-first — n’écrase jamais un lieu déjà saisi.
+ */
+export function enrichImportLocationInBackground(memoryId: string): void {
+  const id = memoryId.trim();
+  if (!id) return;
+  void (async () => {
+    try {
+      const { getLocalMemoryById } = await import('@/lib/localDb');
+      const row = getLocalMemoryById(id);
+      if (!row) return;
+      if (row.location?.trim()) return;
+      const assetId = row.import_asset_id?.trim();
+      if (!assetId) return;
+
+      await new Promise<void>(r => setTimeout(r, 400));
+      const meta = await resolveMetaFromLibraryAssetId(assetId);
+      const label = meta.locationLabel?.trim();
+      if (!label) return;
+
+      const again = getLocalMemoryById(id);
+      if (!again || again.location?.trim()) return;
+      const { updateMemoryLocation } = await import('@/services/media');
+      await updateMemoryLocation(id, label);
+    } catch (e) {
+      console.warn('[importLocation] enrichImportLocationInBackground', e);
+    }
+  })();
+}
+
+/** `true` après rebuild natif si `getAssetInfoAsync` est utilisable. */
 export async function isMediaLibraryNativeLinked(): Promise<boolean> {
   return (await getMediaLibraryModule()) != null;
 }

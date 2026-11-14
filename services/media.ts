@@ -2010,6 +2010,11 @@ export async function uploadMedia({
         if (!suppressFeedEmit) {
           DeviceEventEmitter.emit('petitmo:memories-inserted', { memories: [localMem] });
         }
+        if (!localMem.location?.trim() && (type === 'photo' || type === 'video')) {
+          void import('@/utils/mediaExif').then(m =>
+            m.enrichImportLocationInBackground(localMem.id),
+          );
+        }
         return localMem;
       }
       return null;
@@ -2021,7 +2026,7 @@ export async function uploadMedia({
 
     const paid = isPaid ?? (await resolveEffectiveUserTier()) === 'paid';
 
-    /** Import photothèque : lieu EXIF (peut être null). Sinon position actuelle approximative. */
+    /** Import photothèque : lieu fiche Photos / EXIF (peut être null → pastille Lieu). */
     const locationLabel =
       locationOverride !== undefined ? locationOverride : null;
 
@@ -2097,6 +2102,9 @@ export async function uploadMedia({
       upsertLocalMemory(mem);
       if (!suppressFeedEmit) {
         DeviceEventEmitter.emit('petitmo:memories-inserted', { memories: [mem] });
+      }
+      if (!mem.location?.trim()) {
+        void import('@/utils/mediaExif').then(m => m.enrichImportLocationInBackground(mem.id));
       }
       void syncCloudPhotoMemoryInBackground({
         memoryId,
@@ -2202,6 +2210,9 @@ export async function uploadMedia({
       upsertLocalMemory(mem);
       if (!suppressFeedEmit) {
         DeviceEventEmitter.emit('petitmo:memories-inserted', { memories: [mem] });
+      }
+      if (!mem.location?.trim()) {
+        void import('@/utils/mediaExif').then(m => m.enrichImportLocationInBackground(mem.id));
       }
 
       /** Poster fil + print livre en fond (ne bloque pas le fil). */
