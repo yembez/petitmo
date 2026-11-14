@@ -196,7 +196,8 @@ export async function reverseGeocodeToPlaceLabel(
 
 /**
  * Libellé lieu pour l’import photo/vidéo.
- * Reverse geocode d’abord ; si KO (offline / module) → coords arrondies plutôt que null.
+ * Ville / district / région / pays via Apple — jamais de coords brutes.
+ * Si KO → null (pastille « Lieu » cliquable au fil pour saisie manuelle).
  */
 export async function placeLabelFromCoordinates(
   latitude: number,
@@ -204,9 +205,7 @@ export async function placeLabelFromCoordinates(
 ): Promise<string | null> {
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
   if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return null;
-  const label = await reverseGeocodeToPlaceLabel(latitude, longitude);
-  if (label) return label;
-  return `${latitude.toFixed(2)}, ${longitude.toFixed(2)}`;
+  return reverseGeocodeToPlaceLabel(latitude, longitude);
 }
 
 /**
